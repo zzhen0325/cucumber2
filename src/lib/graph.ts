@@ -228,8 +228,22 @@ export function toolPartFromMessagePart(part: unknown): CanvasToolPart | null {
     return null;
   }
 
-  const candidate = part as Partial<CanvasToolPart> & { type?: string };
-  if (candidate.type !== "tool-generate_image") {
+  const candidate = part as {
+    type?: string;
+    toolName?: string;
+    state?: CanvasToolPart["state"];
+    input?: unknown;
+    output?: unknown;
+    errorText?: string;
+  };
+  const toolName =
+    candidate.type === "dynamic-tool"
+      ? candidate.toolName
+      : candidate.type?.startsWith("tool-")
+        ? candidate.type.slice("tool-".length)
+        : null;
+
+  if (toolName !== "generate_image") {
     return null;
   }
 

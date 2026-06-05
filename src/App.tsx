@@ -496,6 +496,7 @@ function RunNode({
   data,
   selected,
 }: NodeProps<FlowNode<RunNodeData, "runNode">>) {
+  const [expanded, setExpanded] = useState(true);
   const toolPart = data.toolPart ?? {
     type: "tool-generate_image",
     state: "input-streaming",
@@ -513,6 +514,8 @@ function RunNode({
 
   const hasToolDetail =
     data.status !== "queued" || toolPart.state !== "input-streaming";
+  const title = getRunTitle(data.status, toolPart.state);
+  const toggleLabel = expanded ? "收起工具调用" : "展开工具调用";
 
   return (
     <Node
@@ -522,28 +525,158 @@ function RunNode({
       <NodeContent className="run-content">
         <div className="run-heading">
           <span className={`run-status-dot ${data.status}`}>{statusIcon}</span>
-          <span>Thinking...</span>
-          <ChevronDown size={12} />
+          <span className="run-title">{title}</span>
+          <button
+            aria-expanded={expanded}
+            aria-label={toggleLabel}
+            className="run-toggle nodrag nopan"
+            data-expanded={expanded}
+            disabled={!hasToolDetail}
+            onClick={(event) => {
+              event.stopPropagation();
+              setExpanded((current) => !current);
+            }}
+            title={toggleLabel}
+            type="button"
+          >
+            <ChevronDown size={12} />
+          </button>
         </div>
-        {hasToolDetail && (
+        {hasToolDetail && expanded && (
           <div className="tool-stream">
-            <div className="tool-call-row">
-              <span>调用</span>
-              <strong>Prompt 优化 Skill</strong>
-              <Check size={12} />
-            </div>
-            <div className="tool-call-row expanded">
-              <div>
-                <span>调用</span>
-                <strong>Generateimage</strong>
-              </div>
-              <small>{data.error ?? toolPart.state}</small>
-            </div>
+            <ToolCallRow error={data.error} toolPart={toolPart} />
           </div>
         )}
       </NodeContent>
     </Node>
   );
+}
+
+function ToolCallRow({
+  error,
+  toolPart,
+}: {
+  error?: string;
+  toolPart: CanvasToolPart;
+}) {
+  const toolName = getToolName(toolPart);
+  const stateLabel = getToolStateLabel(toolPart.state);
+  const detailLines = getToolDetailLines(toolPart, error);
+  const isError = toolPart.state === "output-error";
+
+  return (
+    <div className={isError ? "tool-call-row error" : "tool-call-row"}>
+      <div className="tool-call-main">
+        <span className="tool-call-action">
+          {toolPart.state === "output-available" ? "完成" : "调用"}
+        </span>
+        <strong title={toolName}>{toolName}</strong>
+        <span className={`tool-state ${toolPart.state}`}>
+          {getToolStateIcon(toolPart.state)}
+          {stateLabel}
+        </span>
+      </div>
+      <div className="tool-call-detail">
+        {detailLines.map((line) => (
+          <small className="tool-detail-line" key={line} title={line}>
+            {line}
+          </small>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function getRunTitle(status: RunNodeData["status"], state: CanvasToolPart["state"]) {
+  if (status === "error" || state === "output-error") {
+    return "生成失败";
+  }
+
+  if (status === "success" || state === "output-available") {
+    return "生成完成";
+  }
+
+  if (state === "input-available") {
+    return "调用工具";
+  }
+
+  if (state === "approval-requested") {
+    return "等待确认";
+  }
+
+  return "Thinking...";
+}
+
+function getToolName(toolPart: CanvasToolPart) {
+  return toolPart.type.slice("tool-".length);
+}
+
+function getToolStateIcon(state: CanvasToolPart["state"]) {
+  if (state === "output-available" || state === "approval-responded") {
+    return <Check size={11} />;
+  }
+
+  if (state === "output-error" || state === "output-denied") {
+    return <CircleAlert size={11} />;
+  }
+
+  return <Sparkles size={11} />;
+}
+
+function getToolStateLabel(state: CanvasToolPart["state"]) {
+  const labels: Record<CanvasToolPart["state"], string> = {
+    "approval-requested": "等待确认",
+    "approval-responded": "已确认",
+    "input-available": "运行中",
+    "input-streaming": "准备参数",
+    "output-available": "输出完成",
+    "output-denied": "已拒绝",
+    "output-error": "失败",
+  };
+
+  return labels[state];
+}
+
+function getToolDetailLines(toolPart: CanvasToolPart, error?: string) {
+  if (toolPart.state === "output-error") {
+    return [error ?? toolPart.errorText ?? "工具调用失败"];
+  }
+
+  if (toolPart.state === "output-available") {
+    const images = extractImagesFromToolOutput(toolPart.output);
+    return [
+      images.length ? `输出 ${images.length} 张图片` : "输出已返回",
+      ...getToolInputLines(toolPart.input),
+    ].slice(0, 3);
+  }
+
+  if (toolPart.state === "output-denied") {
+    return ["工具调用被拒绝"];
+  }
+
+  return getToolInputLines(toolPart.input);
+}
+
+function getToolInputLines(input: unknown) {
+  if (!input || typeof input !== "object") {
+    return ["等待工具参数"];
+  }
+
+  const candidate = input as {
+    prompt?: unknown;
+    upstreamContext?: unknown;
+  };
+  const lines: string[] = [];
+
+  if (typeof candidate.prompt === "string" && candidate.prompt.trim()) {
+    lines.push(`输入: ${candidate.prompt.trim()}`);
+  }
+
+  if (Array.isArray(candidate.upstreamContext)) {
+    lines.push(`上游上下文: ${candidate.upstreamContext.length} 项`);
+  }
+
+  return lines.length ? lines : ["工具参数已就绪"];
 }
 
 function ImageResultNode({

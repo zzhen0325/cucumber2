@@ -163,6 +163,23 @@ describe("agent canvas graph", () => {
     ]);
   });
 
+  it("extracts AI SDK dynamic tool parts for generate_image", () => {
+    const part = toolPartFromMessagePart({
+      type: "dynamic-tool",
+      toolName: "generate_image",
+      state: "input-available",
+      input: { prompt: "hello", upstreamContext: [] },
+    });
+
+    expect(part).toEqual({
+      type: "tool-generate_image",
+      state: "input-available",
+      input: { prompt: "hello", upstreamContext: [] },
+      output: undefined,
+      errorText: undefined,
+    });
+  });
+
   it("keeps tool errors as errors without extracting images", () => {
     const part = toolPartFromMessagePart({
       type: "tool-generate_image",
