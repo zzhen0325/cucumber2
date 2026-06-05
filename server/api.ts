@@ -1,8 +1,11 @@
 import { serve } from "@hono/node-server";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { convertToModelMessages, streamText, tool, type UIMessage } from "ai";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
+
+import { generateSeedreamImage, isSeedreamConfigured } from "../seedream.ts";
 
 const app = new Hono();
 
@@ -20,29 +23,14 @@ const canvasContextSchema = z.object({
   upstreamContext: z.array(upstreamContextSchema).default([]),
 });
 
-const generatedImageSchema = z.object({
-  id: z.string().optional(),
-  url: z.string(),
-  title: z.string().optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-});
-
-const imageApiResponseSchema = z
-  .object({
-    images: z.array(generatedImageSchema).optional(),
-    url: z.string().optional(),
-  })
-  .passthrough();
-
-type CanvasContext = z.infer<typeof canvasContextSchema>;
-
 app.use("*", cors());
 
 app.get("/api/health", (c) =>
   c.json({
     ok: true,
-    imageApiConfigured: Boolean(process.env.IMAGE_API_URL),
-    model: process.env.AI_MODEL ?? "openai/gpt-5.4",
+    deepseekConfigured: Boolean(process.env.DEEPSEEK_API_KEY),
+    seedreamConfigured: isSeedreamConfigured(),
+    model: process.env.DEEPSEEK_MODEL ?? "deepseek-v4-flash",
   })
 );
 
@@ -52,7 +40,7 @@ app.post("/api/agent-run", async (c) => {
   const canvasContext = canvasContextSchema.parse(body.canvasContext ?? {});
 
   const result = streamText({
-    model: process.env.AI_MODEL ?? "openai/gpt-5.4",
+    model: createDeepSeekModel(),
     messages: await convertToModelMessages(messages),
     system: [
       "You are Cucumber Agent Canvas.",
@@ -63,7 +51,7 @@ app.post("/api/agent-run", async (c) => {
     tools: {
       generate_image: tool({
         description:
-          "Generate or modify an image by calling the configured custom image API.",
+          "Generate or modify an image with Seedream using the current canvas context.",
         inputSchema: z.object({
           prompt: z
             .string()
@@ -79,7 +67,7 @@ app.post("/api/agent-run", async (c) => {
             .describe("The selected canvas node that anchors this follow-up."),
         }),
         execute: async (input) =>
-          callImageApi({
+          generateSeedreamImage({
             prompt: input.prompt || canvasContext.prompt,
             selectedNodeId: input.selectedNodeId ?? canvasContext.selectedNodeId,
             upstreamContext: input.upstreamContext.length
@@ -100,52 +88,20 @@ app.post("/api/agent-run", async (c) => {
   return result.toUIMessageStreamResponse();
 });
 
-async function callImageApi(input: CanvasContext) {
-  const endpoint = process.env.IMAGE_API_URL;
-  if (!endpoint) {
-    throw new Error("IMAGE_API_URL is not configured.");
+function createDeepSeekModel() {
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  if (!apiKey) {
+    throw new Error("DEEPSEEK_API_KEY is not configured.");
   }
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(process.env.IMAGE_API_KEY
-        ? { authorization: `Bearer ${process.env.IMAGE_API_KEY}` }
-        : {}),
-    },
-    body: JSON.stringify(input),
+  const deepseek = createOpenAICompatible({
+    name: "deepseek",
+    baseURL: process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com",
+    apiKey,
+    includeUsage: true,
   });
 
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(
-      `Image API failed with ${response.status}: ${detail || response.statusText}`
-    );
-  }
-
-  const parsed = imageApiResponseSchema.parse(await response.json());
-  const images =
-    parsed.images?.map((image, index) => ({
-      id: image.id ?? `img-${Date.now()}-${index}`,
-      url: image.url,
-      title: image.title,
-      metadata: image.metadata,
-    })) ??
-    (parsed.url
-      ? [
-          {
-            id: `img-${Date.now()}-0`,
-            url: parsed.url,
-          },
-        ]
-      : []);
-
-  if (!images.length) {
-    throw new Error("Image API response did not include any images.");
-  }
-
-  return { images };
+  return deepseek.chatModel(process.env.DEEPSEEK_MODEL ?? "deepseek-v4-flash");
 }
 
 const port = Number(process.env.API_PORT ?? 8787);
