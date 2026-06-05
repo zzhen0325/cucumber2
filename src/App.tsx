@@ -1,6 +1,7 @@
 import {
   Controls,
   MiniMap,
+  useReactFlow,
   useEdgesState,
   useNodesState,
   type Node as FlowNode,
@@ -13,6 +14,7 @@ import {
   ArrowUpRight,
   Box,
   Check,
+  ChevronDown,
   CircleAlert,
   CircleDot,
   Frame,
@@ -32,14 +34,7 @@ import type { FormEvent } from "react";
 
 import { Canvas } from "@/components/ai-elements/canvas";
 import { Edge } from "@/components/ai-elements/edge";
-import {
-  Node,
-  NodeAction,
-  NodeContent,
-  NodeDescription,
-  NodeHeader,
-  NodeTitle,
-} from "@/components/ai-elements/node";
+import { Node, NodeContent } from "@/components/ai-elements/node";
 import {
   PromptInput,
   PromptInputBody,
@@ -47,13 +42,6 @@ import {
   PromptInputSubmit,
   PromptInputTextarea,
 } from "@/components/ai-elements/prompt-input";
-import {
-  Tool,
-  ToolContent,
-  ToolHeader,
-  ToolInput,
-  ToolOutput,
-} from "@/components/ai-elements/tool";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   createImageResultNodes,
@@ -288,7 +276,7 @@ function App() {
           className="agent-canvas"
           colorMode="light"
           edgeTypes={edgeTypes}
-          fitViewOptions={{ maxZoom: 1, padding: 0.28 }}
+          fitViewOptions={{ maxZoom: 1, padding: 0.32 }}
           maxZoom={1.5}
           minZoom={0.28}
           nodeTypes={nodeTypes}
@@ -303,6 +291,7 @@ function App() {
           panOnDrag
           proOptions={{ hideAttribution: true }}
         >
+          <CanvasAutoFit nodeCount={nodes.length} />
           <Controls position="bottom-right" showInteractive={false} />
           <MiniMap
             pannable
@@ -330,6 +319,24 @@ function App() {
       </main>
     </TooltipProvider>
   );
+}
+
+function CanvasAutoFit({ nodeCount }: { nodeCount: number }) {
+  const { fitView } = useReactFlow<AgentCanvasNode, AgentCanvasEdge>();
+
+  useEffect(() => {
+    if (!nodeCount) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      fitView({ duration: 180, maxZoom: 1, padding: 0.32 });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [fitView, nodeCount]);
+
+  return null;
 }
 
 function TopBar() {
@@ -451,7 +458,11 @@ function Composer({
           />
         </PromptInputBody>
         <PromptInputFooter className="composer-footer">
-          <span>{selectedIsResult ? "上游上下文会随请求发送" : `${contextCount} upstream items`}</span>
+          <span>
+            {selectedIsResult
+              ? "继续基于选中结果生成分支"
+              : `${contextCount} upstream items`}
+          </span>
           <PromptInputSubmit
             disabled={!prompt.trim()}
             onStop={stop}
@@ -468,13 +479,14 @@ function PromptNode({
   selected,
 }: NodeProps<FlowNode<PromptNodeData, "promptNode">>) {
   return (
-    <Node className={selected ? "canvas-node selected prompt-card" : "canvas-node prompt-card"} handles={{ source: true, target: true }}>
-      <NodeHeader>
-        <NodeTitle>需求</NodeTitle>
-        <NodeDescription>{data.contextLabel}</NodeDescription>
-      </NodeHeader>
-      <NodeContent>
-        <p>{data.prompt}</p>
+    <Node
+      className={
+        selected ? "canvas-node selected prompt-card" : "canvas-node prompt-card"
+      }
+      handles={{ source: true, target: true }}
+    >
+      <NodeContent className="prompt-content">
+        <p title={data.contextLabel}>{data.prompt}</p>
       </NodeContent>
     </Node>
   );
@@ -499,36 +511,36 @@ function RunNode({
       <Sparkles size={14} />
     );
 
+  const hasToolDetail =
+    data.status !== "queued" || toolPart.state !== "input-streaming";
+
   return (
-    <Node className={selected ? "canvas-node selected run-card" : "canvas-node run-card"} handles={{ source: true, target: true }}>
-      <NodeHeader>
-        <NodeTitle>Agent Run</NodeTitle>
-        <NodeAction>
-          <span className={`run-status ${data.status}`}>
-            {statusIcon}
-            {data.status}
-          </span>
-        </NodeAction>
-      </NodeHeader>
+    <Node
+      className={selected ? "canvas-node selected run-card" : "canvas-node run-card"}
+      handles={{ source: true, target: true }}
+    >
       <NodeContent className="run-content">
-        <div className="run-summary">
+        <div className="run-heading">
+          <span className={`run-status-dot ${data.status}`}>{statusIcon}</span>
           <span>Thinking...</span>
-          <small>{data.error ?? "generate_image"}</small>
+          <ChevronDown size={12} />
         </div>
-        <Tool className="run-tool" defaultOpen={data.status === "error"}>
-          <ToolHeader
-            title="generate_image"
-            type={toolPart.type}
-            state={toolPart.state}
-          />
-          <ToolContent>
-            <ToolInput input={toolPart.input} />
-            <ToolOutput
-              output={toolPart.output}
-              errorText={toolPart.errorText}
-            />
-          </ToolContent>
-        </Tool>
+        {hasToolDetail && (
+          <div className="tool-stream">
+            <div className="tool-call-row">
+              <span>调用</span>
+              <strong>Prompt 优化 Skill</strong>
+              <Check size={12} />
+            </div>
+            <div className="tool-call-row expanded">
+              <div>
+                <span>调用</span>
+                <strong>Generateimage</strong>
+              </div>
+              <small>{data.error ?? toolPart.state}</small>
+            </div>
+          </div>
+        )}
       </NodeContent>
     </Node>
   );
@@ -539,11 +551,16 @@ function ImageResultNode({
   selected,
 }: NodeProps<FlowNode<ImageResultNodeData, "imageResultNode">>) {
   return (
-    <Node className={selected ? "canvas-node selected result-card" : "canvas-node result-card"} handles={{ source: true, target: true }}>
+    <Node
+      className={
+        selected ? "canvas-node selected result-card" : "canvas-node result-card"
+      }
+      handles={{ source: true, target: true }}
+    >
       <div className="result-image-frame">
         <img src={data.image.url} alt={data.image.title ?? "Generated result"} />
       </div>
-      <NodeFooterLike image={data.image} />
+      {selected && <NodeFooterLike image={data.image} />}
     </Node>
   );
 }

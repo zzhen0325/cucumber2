@@ -8,7 +8,15 @@ import type {
 } from "@/types/canvas";
 
 const NODE_WIDTH = 240;
-const RESULT_GAP = 18;
+const RESULT_GAP = 17;
+const ROOT_START_X = 260;
+const ROOT_START_Y = 210;
+const ROOT_CHAIN_GAP = 320;
+const FOLLOW_UP_GAP_X = 262;
+const FOLLOW_UP_GAP_Y = 310;
+const RUN_OFFSET_Y = 124;
+const RESULT_OFFSET_FROM_PROMPT_Y = 200;
+const EXPANDED_RESULT_OFFSET_FROM_PROMPT_Y = 317;
 
 const id = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -91,8 +99,12 @@ export function createRunDraft(
     : nodes.filter((node) => node.data.kind === "prompt").length;
 
   const upstreamContext = collectUpstreamContext(selectedNodeId, nodes, edges);
-  const baseX = selectedNode ? selectedNode.position.x + siblings * 310 : 220 + siblings * 320;
-  const baseY = selectedNode ? selectedNode.position.y + 360 : 120;
+  const baseX = selectedNode
+    ? selectedNode.position.x + siblings * FOLLOW_UP_GAP_X
+    : ROOT_START_X + siblings * ROOT_CHAIN_GAP;
+  const baseY = selectedNode
+    ? selectedNode.position.y + FOLLOW_UP_GAP_Y
+    : ROOT_START_Y;
   const promptId = id("prompt");
   const runId = id("run");
   const createdAt = new Date().toISOString();
@@ -114,7 +126,7 @@ export function createRunDraft(
   const runNode: AgentCanvasNode = {
     id: runId,
     type: "runNode",
-    position: { x: baseX, y: baseY + 124 },
+    position: { x: baseX, y: baseY + RUN_OFFSET_Y },
     data: {
       kind: "run",
       prompt,
@@ -161,9 +173,16 @@ export function createImageResultNodes(
   );
   const visibleImages = images.filter((image) => !alreadyRendered.has(image.id));
 
+  const resultOffset =
+    runNode.data.kind === "run" &&
+    (runNode.data.status !== "queued" ||
+      runNode.data.toolPart?.state !== "input-streaming")
+      ? EXPANDED_RESULT_OFFSET_FROM_PROMPT_Y
+      : RESULT_OFFSET_FROM_PROMPT_Y;
   const startX =
-    runNode.position.x - ((visibleImages.length - 1) * (NODE_WIDTH + RESULT_GAP)) / 2;
-  const y = runNode.position.y + 118;
+    runNode.position.x -
+    ((visibleImages.length - 1) * (NODE_WIDTH + RESULT_GAP)) / 2;
+  const y = runNode.position.y + resultOffset - RUN_OFFSET_Y;
 
   const resultNodes: AgentCanvasNode[] = visibleImages.map((image, index) => ({
     id: `image-${image.id}`,
