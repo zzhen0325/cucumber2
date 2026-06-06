@@ -17,6 +17,14 @@
 
 ## 2026-06-05
 
+### 修复 Run 节点真实工具流展示
+
+- 变更：Run 节点不再写死 Prompt 优化和 Generateimage 文案，改为渲染 AI SDK assistant message parts 中的 `generate_image` 工具状态、输入摘要、输出图片数量和错误信息。
+- 变更：Run 节点右上角箭头恢复为可点击折叠按钮，展开态和收起态分别提供可访问名称。
+- 文件：`src/App.tsx`、`src/App.css`、`src/lib/graph.ts`、`src/lib/graph.test.ts`。
+- 验证：`pnpm test -- src/lib/graph.test.ts`、`pnpm build`；使用本地 mock AI SDK UI message stream 在桌面和移动 viewport 验证展开/收起交互、真实 tool part 文案和无 console 错误。
+- 备注：验证时未调用真实 Seedream，避免产生外部图像生成请求。
+
 ### 补充 AI SDK 官方文档优先规则
 
 - 变更：更新 `agent.md`，要求后续 Agent 新增功能或调整 AI SDK UI 相关链路时，优先查看官方文档是否已有案例或推荐写法。
