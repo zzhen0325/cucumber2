@@ -15,6 +15,16 @@
 - 备注：风险、后续项或未完成事项。
 ```
 
+## 2026-06-06
+
+### 接入 Supabase 画布持久化
+
+- 变更：通过 Supabase 插件在 `cucumber2` 项目创建 `agent_canvases` 和 `agent_run_events`，分别存储画布快照与 Agent Run 事件；两张表启用 RLS，仅允许 server-side `service_role` policy 管理。
+- 变更：新增 `/api/canvas` 读取/保存接口，前端启动时恢复画布，节点/边/选中状态变化后自动保存；`/api/agent-run` 记录 run 输入、成功输出或错误。
+- 文件：`server/api.ts`、`server/supabase.ts`、`src/lib/canvas-storage.ts`、`src/App.tsx`、`src/App.css`、`README.md`、`.env.example`、`package.json`、`pnpm-lock.yaml`。
+- 验证：Supabase 插件确认 public schema 中表结构、RLS 与外键已创建；security/performance advisors 均无 lint；测试插入/删除 canvas 记录成功；`pnpm test -- src/lib/graph.test.ts`、`pnpm build`、`pnpm lint` 通过；`API_PORT=8788 pnpm dev` 下 `/api/health` 返回 `supabaseConfigured:false`，`/api/canvas` 返回明确配置错误。
+- 备注：前端不使用 Supabase publishable key 直连写库，避免引入与现有画布状态并行的客户端数据模型；数据库错误会阻止提交而不是降级到内存。本机缺少 Supabase CLI 和 `SUPABASE_SECRET_KEY`，因此迁移文件生成与真实本地画布保存需补齐环境后继续验证。
+
 ## 2026-06-05
 
 ### 修复 Run 节点真实工具流展示

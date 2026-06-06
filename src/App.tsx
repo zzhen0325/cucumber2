@@ -17,6 +17,7 @@ import {
   ChevronDown,
   CircleAlert,
   CircleDot,
+  Database,
   Frame,
   Image,
   Layers,
@@ -43,6 +44,7 @@ import {
   PromptInputTextarea,
 } from "@/components/ai-elements/prompt-input";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { loadCanvas, saveCanvas } from "@/lib/canvas-storage";
 import {
   createImageResultNodes,
   createRunDraft,
@@ -75,14 +77,21 @@ const edgeTypes = {
 
 const initialNodes: AgentCanvasNode[] = [];
 const initialEdges: AgentCanvasEdge[] = [];
+type StorageStatus = "loading" | "saving" | "saved" | "error";
 
 function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState<AgentCanvasNode>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<AgentCanvasEdge>(initialEdges);
+  const [canvasId, setCanvasId] = useState<string | null>(null);
+  const [canvasTitle, setCanvasTitle] = useState("Untitled");
   const [prompt, setPrompt] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [contextCount, setContextCount] = useState(0);
+  const [storageStatus, setStorageStatus] = useState<StorageStatus>("loading");
+  const [storageError, setStorageError] = useState<string | null>(null);
   const activeRunId = useRef<string | null>(null);
+  const hasLoadedCanvas = useRef(false);
+  const saveTimer = useRef<ReturnType<typeof window.setTimeout> | null>(null);
 
   const markRunError = useCallback(
     (runId: string | null, message: string) => {
@@ -179,6 +188,77 @@ function App() {
   );
   const selectedIsResult = isImageResultNode(selectedNode);
   const isBusy = status === "submitted" || status === "streaming";
+  const canSubmit = Boolean(canvasId) && storageStatus !== "loading" && !storageError;
+
+  useEffect(() => {
+    let ignore = false;
+
+    loadCanvas()
+      .then((canvas) => {
+        if (ignore) {
+          return;
+        }
+
+        setCanvasId(canvas.id);
+        setCanvasTitle(canvas.title);
+        setNodes(canvas.nodes);
+        setEdges(canvas.edges);
+        setSelectedNodeId(canvas.selectedNodeId);
+        activeRunId.current = canvas.lastRunId;
+        hasLoadedCanvas.current = true;
+        setStorageStatus("saved");
+        setStorageError(null);
+      })
+      .catch((nextError: unknown) => {
+        if (ignore) {
+          return;
+        }
+
+        setStorageStatus("error");
+        setStorageError(getClientError(nextError));
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [setEdges, setNodes]);
+
+  useEffect(() => {
+    if (!hasLoadedCanvas.current || !canvasId) {
+      return;
+    }
+
+    if (saveTimer.current) {
+      window.clearTimeout(saveTimer.current);
+    }
+
+    setStorageStatus("saving");
+    saveTimer.current = window.setTimeout(() => {
+      saveCanvas({
+        canvasId,
+        title: canvasTitle,
+        nodes,
+        edges,
+        selectedNodeId,
+        lastRunId: activeRunId.current,
+      })
+        .then((canvas) => {
+          setCanvasId(canvas.id);
+          setStorageStatus("saved");
+          setStorageError(null);
+        })
+        .catch((nextError: unknown) => {
+          setStorageStatus("error");
+          setStorageError(getClientError(nextError));
+        });
+    }, 420);
+
+    return () => {
+      if (saveTimer.current) {
+        window.clearTimeout(saveTimer.current);
+      }
+    };
+  }, [canvasId, canvasTitle, edges, nodes, selectedNodeId]);
 
   useEffect(() => {
     if (error) {
@@ -232,6 +312,14 @@ function App() {
       if (!value || isBusy) {
         return;
       }
+      if (!canvasId) {
+        setStorageStatus("error");
+        setStorageError("数据库画布尚未加载完成");
+        return;
+      }
+      if (storageError) {
+        return;
+      }
 
       const anchorId = selectedIsResult ? selectedNodeId : null;
       const draft = createRunDraft(value, anchorId, nodes, edges);
@@ -247,6 +335,8 @@ function App() {
         { text: value },
         {
           body: {
+            canvasId,
+            runNodeId: draft.runNode.id,
             canvasContext: {
               prompt: value,
               selectedNodeId: anchorId,
@@ -257,6 +347,7 @@ function App() {
       );
     },
     [
+      canvasId,
       edges,
       isBusy,
       nodes,
@@ -266,6 +357,7 @@ function App() {
       sendMessage,
       setEdges,
       setNodes,
+      storageError,
     ]
   );
 
@@ -301,13 +393,18 @@ function App() {
           />
         </Canvas>
 
-        <TopBar />
+        <TopBar
+          storageError={storageError}
+          storageStatus={storageStatus}
+          title={canvasTitle}
+        />
         <ToolRail />
         <ViewportControls />
         <EmptyState visible={!nodes.length} />
 
         <Composer
           busy={isBusy}
+          canSubmit={canSubmit}
           contextCount={contextCount}
           prompt={prompt}
           selectedIsResult={selectedIsResult}
@@ -339,13 +436,28 @@ function CanvasAutoFit({ nodeCount }: { nodeCount: number }) {
   return null;
 }
 
-function TopBar() {
+function TopBar({
+  storageError,
+  storageStatus,
+  title,
+}: {
+  storageError: string | null;
+  storageStatus: StorageStatus;
+  title: string;
+}) {
   return (
     <div className="top-bar">
       <div className="brand-mark">
         <Sparkles size={17} />
       </div>
-      <span>Untitled</span>
+      <span>{title}</span>
+      <span
+        className={`storage-chip ${storageStatus}`}
+        title={storageError ?? getStorageStatusLabel(storageStatus)}
+      >
+        <Database size={13} />
+        {getStorageStatusLabel(storageStatus)}
+      </span>
     </div>
   );
 }
@@ -418,6 +530,7 @@ function EmptyState({ visible }: { visible: boolean }) {
 
 function Composer({
   busy,
+  canSubmit,
   contextCount,
   prompt,
   selectedIsResult,
@@ -427,6 +540,7 @@ function Composer({
   onSubmit,
 }: {
   busy: boolean;
+  canSubmit: boolean;
   contextCount: number;
   prompt: string;
   selectedIsResult: boolean;
@@ -448,10 +562,13 @@ function Composer({
       >
         <PromptInputBody>
           <PromptInputTextarea
+            disabled={!canSubmit && !busy}
             placeholder={
-              selectedIsResult
-                ? "基于选中结果继续修改..."
-                : "输入需求，让 Agent 生成图片..."
+              !canSubmit
+                ? "数据库连接失败，无法提交..."
+                : selectedIsResult
+                  ? "基于选中结果继续修改..."
+                  : "输入需求，让 Agent 生成图片..."
             }
             value={prompt}
             onChange={(event) => setPrompt(event.currentTarget.value)}
@@ -464,7 +581,7 @@ function Composer({
               : `${contextCount} upstream items`}
           </span>
           <PromptInputSubmit
-            disabled={!prompt.trim()}
+            disabled={!prompt.trim() || !canSubmit}
             onStop={stop}
             status={busy ? "streaming" : "ready"}
           />
@@ -472,6 +589,21 @@ function Composer({
       </PromptInput>
     </div>
   );
+}
+
+function getStorageStatusLabel(status: StorageStatus) {
+  const labels: Record<StorageStatus, string> = {
+    error: "数据库错误",
+    loading: "连接中",
+    saved: "已存储",
+    saving: "保存中",
+  };
+
+  return labels[status];
+}
+
+function getClientError(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function PromptNode({

@@ -66,6 +66,36 @@
   box-shadow: 0 4px 16px rgba(41, 191, 78, 0.18);
 }
 
+.storage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  margin-left: 4px;
+  padding: 0 8px;
+  border: 1px solid #ebebeb;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #737373;
+  font-size: 11px;
+  line-height: 1;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
+}
+
+.storage-chip.saved {
+  color: #174222;
+}
+
+.storage-chip.saving,
+.storage-chip.loading {
+  color: #555555;
+}
+
+.storage-chip.error {
+  border-color: rgba(229, 72, 77, 0.24);
+  color: #cc2e33;
+}
+
 .tool-rail {
   position: absolute;
   top: 50%;

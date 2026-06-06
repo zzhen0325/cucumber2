@@ -11,6 +11,12 @@ import { cors } from "hono/cors";
 import { z } from "zod";
 
 import { generateSeedreamImage, isSeedreamConfigured } from "../seedream.ts";
+import {
+  getDefaultCanvas,
+  isSupabaseConfigured,
+  recordRunEvent,
+  saveCanvasSnapshot,
+} from "./supabase.ts";
 
 loadServerEnv();
 
@@ -30,21 +36,49 @@ const canvasContextSchema = z.object({
   upstreamContext: z.array(upstreamContextSchema).default([]),
 });
 
+const canvasSnapshotSchema = z.object({
+  canvasId: z.string().uuid().optional(),
+  title: z.string().trim().min(1).max(120).default("Untitled"),
+  nodes: z.array(z.unknown()),
+  edges: z.array(z.unknown()),
+  selectedNodeId: z.string().nullable().optional(),
+  lastRunId: z.string().nullable().optional(),
+});
+
 app.use("*", cors());
+
+app.onError((error, c) => {
+  console.error("[api]", error);
+  return c.text(getErrorMessage(error), 500);
+});
 
 app.get("/api/health", (c) =>
   c.json({
     ok: true,
     deepseekConfigured: Boolean(process.env.DEEPSEEK_API_KEY),
     seedreamConfigured: isSeedreamConfigured(),
+    supabaseConfigured: isSupabaseConfigured(),
     model: process.env.DEEPSEEK_MODEL ?? "deepseek-v4-flash",
   })
 );
+
+app.get("/api/canvas", async (c) => {
+  const canvas = await getDefaultCanvas();
+  return c.json(canvas);
+});
+
+app.post("/api/canvas", async (c) => {
+  const snapshot = canvasSnapshotSchema.parse(await c.req.json());
+  const canvas = await saveCanvasSnapshot(snapshot);
+  return c.json(canvas);
+});
 
 app.post("/api/agent-run", async (c) => {
   const body = await c.req.json();
   const messages = (body.messages ?? []) as UIMessage[];
   const canvasContext = canvasContextSchema.parse(body.canvasContext ?? {});
+  const canvasId = z.string().uuid().parse(body.canvasId);
+  const runNodeId = z.string().min(1).parse(body.runNodeId);
 
   const toolInput = {
     prompt: canvasContext.prompt,
@@ -57,6 +91,16 @@ app.post("/api/agent-run", async (c) => {
     execute: async ({ writer }) => {
       const toolCallId = `generate_image-${crypto.randomUUID()}`;
 
+      await recordRunEvent({
+        canvasId,
+        runNodeId,
+        prompt: canvasContext.prompt,
+        selectedNodeId: canvasContext.selectedNodeId ?? null,
+        upstreamContext: canvasContext.upstreamContext,
+        status: "running",
+        toolInput,
+      });
+
       writer.write({
         type: "tool-input-available",
         toolCallId,
@@ -67,6 +111,17 @@ app.post("/api/agent-run", async (c) => {
       try {
         const output = await generateSeedreamImage(toolInput);
 
+        await recordRunEvent({
+          canvasId,
+          runNodeId,
+          prompt: canvasContext.prompt,
+          selectedNodeId: canvasContext.selectedNodeId ?? null,
+          upstreamContext: canvasContext.upstreamContext,
+          status: "success",
+          toolInput,
+          toolOutput: output,
+        });
+
         writer.write({
           type: "tool-output-available",
           toolCallId,
@@ -75,6 +130,17 @@ app.post("/api/agent-run", async (c) => {
       } catch (error) {
         const errorText = getErrorMessage(error);
         console.error("[agent-run]", error);
+
+        await recordRunEvent({
+          canvasId,
+          runNodeId,
+          prompt: canvasContext.prompt,
+          selectedNodeId: canvasContext.selectedNodeId ?? null,
+          upstreamContext: canvasContext.upstreamContext,
+          status: "error",
+          toolInput,
+          errorText,
+        });
 
         writer.write({
           type: "tool-output-error",

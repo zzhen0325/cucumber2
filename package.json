@@ -23,6 +23,7 @@
     "@streamdown/code": "^1.1.1",
     "@streamdown/math": "^1.0.2",
     "@streamdown/mermaid": "^1.0.2",
+    "@supabase/supabase-js": "^2.107.0",
     "@xyflow/react": "^12.11.0",
     "ai": "^6.0.197",
     "class-variance-authority": "^0.7.1",
