@@ -828,12 +828,20 @@ function getToolInputLines(input: unknown) {
 
   const candidate = input as {
     prompt?: unknown;
+    resultCount?: unknown;
     upstreamContext?: unknown;
   };
   const lines: string[] = [];
 
   if (typeof candidate.prompt === "string" && candidate.prompt.trim()) {
     lines.push(`输入: ${candidate.prompt.trim()}`);
+  }
+
+  if (
+    typeof candidate.resultCount === "number" &&
+    Number.isInteger(candidate.resultCount)
+  ) {
+    lines.push(`目标: ${candidate.resultCount} 张图片`);
   }
 
   if (Array.isArray(candidate.upstreamContext)) {

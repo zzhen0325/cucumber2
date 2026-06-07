@@ -11,7 +11,12 @@ import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { cors } from "hono/cors";
 import { z } from "zod";
 
-import { generateSeedreamImage, isSeedreamConfigured } from "../seedream.ts";
+import {
+  generateSeedreamImage,
+  inferSeedreamResultCount,
+  isSeedreamConfigured,
+  readSeedreamMaxOutputImagesFromEnv,
+} from "../seedream.ts";
 import {
   createSessionToken,
   hashPassword,
@@ -248,6 +253,10 @@ app.post("/api/agent-run", async (c) => {
     prompt: canvasContext.prompt,
     selectedNodeId: canvasContext.selectedNodeId ?? null,
     upstreamContext: canvasContext.upstreamContext,
+    resultCount: inferSeedreamResultCount(
+      canvasContext.prompt,
+      readSeedreamMaxOutputImagesFromEnv()
+    ),
   };
 
   const stream = createUIMessageStream({

@@ -17,6 +17,14 @@
 
 ## 2026-06-07
 
+### 支持一次生成多张图片结果
+
+- 变更：`generate_image` 会从 prompt 中解析显式图片数量，例如 `一次生成4张图片`，并在多图请求时关闭 Seedream `force_single`，将返回的多个 image URL 渲染成同一 Run 下的多个图片结果节点。
+- 变更：Run 节点工具详情展示目标图片数量；4 张结果按 Figma 参考保持 240px 卡片、17px 间距并以 Run 节点居中展开。
+- 文件：`seedream.ts`、`server/api.ts`、`src/components/CanvasWorkspace.tsx`、`src/lib/graph.test.ts`、`seedream.test.ts`、`README.md`。
+- 验证：`pnpm test -- seedream.test.ts src/lib/graph.test.ts`、`pnpm build`、`API_PORT=8788 pnpm dev:api` 后检查 `http://127.0.0.1:8788/api/health`。
+- 备注：`SEEDREAM_MAX_OUTPUT_IMAGES` 默认 4；超过上限直接报错并显示在 Run 节点，不返回假图或降级结果。
+
 ### 调整底部输入器引用分支规则
 
 - 变更：底部输入器未引用节点时创建新的根 `prompt -> run`；选中 Prompt 或 Image Result 节点时创建 `selected node -> prompt -> run` 分支；Agent Run 节点仅展示状态，不作为引用锚点。

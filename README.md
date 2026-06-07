@@ -37,6 +37,7 @@ SEEDREAM_SECRET_ACCESS_KEY=...
 SEEDREAM_REQ_KEY=jimeng_seedream46_cvtob
 SEEDREAM_WIDTH=1024
 SEEDREAM_HEIGHT=1024
+SEEDREAM_MAX_OUTPUT_IMAGES=4
 
 SUPABASE_URL=https://wbjqqywnwmghtcwpoatb.supabase.co
 SUPABASE_SECRET_KEY=...
@@ -49,6 +50,8 @@ SEEDREAM_CA_CERT=/absolute/path/to/corp-root-ca.pem
 ```
 
 `DEEPSEEK_API_KEY` is required for the AI SDK model call. `SEEDREAM_ACCESS_KEY_ID` and `SEEDREAM_SECRET_ACCESS_KEY` are required by the `generate_image` tool. The Seedream client also accepts `VOLCENGINE_ACCESS_KEY_ID` and `VOLCENGINE_SECRET_ACCESS_KEY` as aliases. Missing credentials are shown directly in the Run node; the app does not create placeholder images.
+
+When the prompt explicitly asks for multiple results, such as `一次生成4张图片`, the tool requests that many Seedream output URLs and renders them as sibling image result nodes. `SEEDREAM_MAX_OUTPUT_IMAGES` caps explicit requests; prompts above the cap fail visibly in the Run node instead of silently returning fewer images.
 
 `SUPABASE_URL` and `SUPABASE_SECRET_KEY` are required by the Hono API for database storage. Keep `SUPABASE_SECRET_KEY` server-only; do not expose it with a `VITE_` prefix. The current Supabase project is `cucumber2` (`wbjqqywnwmghtcwpoatb`).
 
@@ -87,6 +90,7 @@ Submitting from the bottom composer with no referenced node creates a new root `
 {
   "prompt": "current user prompt",
   "selectedNodeId": "prompt-or-image-node-id-or-null",
+  "resultCount": 4,
   "upstreamContext": [
     {
       "nodeId": "prompt-1",
@@ -105,7 +109,7 @@ Submitting from the bottom composer with no referenced node creates a new root `
 }
 ```
 
-The server passes image node URLs from `upstreamContext` to Seedream as reference images, then returns:
+The server passes image node URLs from `upstreamContext` to Seedream as reference images, disables Seedream `force_single` for multi-result requests, then returns:
 
 ```json
 {

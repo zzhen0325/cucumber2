@@ -209,6 +209,27 @@ describe("agent canvas graph", () => {
     ]);
   });
 
+  it("centers four image results under the run node", () => {
+    const run = runNode("run-1", "生成四张图片");
+    const { resultNodes } = createImageResultNodes(
+      run,
+      [
+        { id: "a", url: "https://cdn.example/a.png" },
+        { id: "b", url: "https://cdn.example/b.png" },
+        { id: "c", url: "https://cdn.example/c.png" },
+        { id: "d", url: "https://cdn.example/d.png" },
+      ],
+      [run]
+    );
+
+    expect(resultNodes.map((node) => node.position)).toEqual([
+      { x: -385.5, y: 317 },
+      { x: -128.5, y: 317 },
+      { x: 128.5, y: 317 },
+      { x: 385.5, y: 317 },
+    ]);
+  });
+
   it("extracts AI SDK tool parts and image outputs", () => {
     const part = toolPartFromMessagePart({
       type: "tool-generate_image",

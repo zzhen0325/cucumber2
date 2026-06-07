@@ -15,6 +15,7 @@ export type SeedreamGenerateInput = {
   prompt: string;
   selectedNodeId?: string | null;
   upstreamContext?: SeedreamUpstreamContext[];
+  resultCount?: number;
 };
 
 export type SeedreamGeneratedImage = {
@@ -36,6 +37,7 @@ type SeedreamConfig = {
   height: number;
   forceSingle: boolean;
   maxInputImages: number;
+  maxOutputImages: number;
 };
 
 type SignedPostResult = {
@@ -216,6 +218,7 @@ export async function generateSeedreamImage(
     throw new Error("Seedream image prompt is empty.");
   }
 
+  const resultCount = resolveSeedreamResultCount(input, config.maxOutputImages);
   const imageUrls = collectInputImageUrls(
     input.upstreamContext ?? [],
     config.maxInputImages
@@ -224,7 +227,7 @@ export async function generateSeedreamImage(
     prompt,
     width: config.width,
     height: config.height,
-    force_single: config.forceSingle,
+    force_single: resultCount === 1 ? config.forceSingle : false,
   };
 
   if (imageUrls.length) {
@@ -232,30 +235,108 @@ export async function generateSeedreamImage(
   }
 
   const result = await new SeedreamClient(config).submitAndPoll(body);
-  const url = getNestedArray(result, ["data", "image_urls"]).find(
+  const urls = getNestedArray(result, ["data", "image_urls"]).filter(
     (item): item is string => typeof item === "string" && item.length > 0
   );
 
-  if (!url) {
+  if (!urls.length) {
     throw new Error("Seedream returned no image URL.");
+  }
+  if (urls.length < resultCount) {
+    throw new Error(
+      `Seedream returned ${urls.length} image URL${
+        urls.length === 1 ? "" : "s"
+      }, but ${resultCount} were requested.`
+    );
   }
 
   return {
-    images: [
-      {
-        id: `seedream-${Date.now()}`,
-        url,
-        title: "Seedream image",
-        metadata: {
-          provider: "seedream",
-          reqKey: config.reqKey,
-          width: config.width,
-          height: config.height,
-          inputImageCount: imageUrls.length,
-        },
+    images: urls.slice(0, resultCount).map((url, index) => ({
+      id: `seedream-${Date.now()}-${index + 1}`,
+      url,
+      title:
+        resultCount === 1
+          ? "Seedream image"
+          : `Seedream image ${index + 1}`,
+      metadata: {
+        provider: "seedream",
+        reqKey: config.reqKey,
+        width: config.width,
+        height: config.height,
+        inputImageCount: imageUrls.length,
+        requestedImageCount: resultCount,
       },
-    ],
+    })),
   };
+}
+
+export function inferSeedreamResultCount(prompt: string, maxOutputImages = 4) {
+  const normalized = normalizeSeedreamPrompt(prompt);
+  const explicitCount = findExplicitImageCount(normalized);
+
+  if (!explicitCount) {
+    return 1;
+  }
+  if (explicitCount > maxOutputImages) {
+    throw new Error(`一次最多生成 ${maxOutputImages} 张图片。`);
+  }
+
+  return explicitCount;
+}
+
+function resolveSeedreamResultCount(
+  input: SeedreamGenerateInput,
+  maxOutputImages: number
+) {
+  const explicit = input.resultCount;
+  if (explicit !== undefined) {
+    if (!Number.isInteger(explicit) || explicit < 1) {
+      throw new Error("Seedream resultCount must be a positive integer.");
+    }
+    if (explicit > maxOutputImages) {
+      throw new Error(`一次最多生成 ${maxOutputImages} 张图片。`);
+    }
+
+    return explicit;
+  }
+
+  return inferSeedreamResultCount(input.prompt, maxOutputImages);
+}
+
+function findExplicitImageCount(prompt: string) {
+  const arabicMatch = prompt.match(
+    /(?:生成|出|要|做|给我|create|generate|make)?\s*(\d{1,2})\s*(?:张|幅|个|款|版|组|images?|imgs?|pictures?|results?)/i
+  );
+  if (arabicMatch) {
+    return Number(arabicMatch[1]);
+  }
+
+  const chineseMatch = prompt.match(
+    /(?:生成|出|要|做|给我)?\s*([一二两三四五六七八九十])\s*(?:张|幅|个|款|版|组|图片|图|结果)/
+  );
+  if (chineseMatch) {
+    return chineseImageCountToNumber(chineseMatch[1]);
+  }
+
+  return null;
+}
+
+function chineseImageCountToNumber(value: string) {
+  const numbers: Record<string, number> = {
+    一: 1,
+    二: 2,
+    两: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+    十: 10,
+  };
+
+  return numbers[value] ?? null;
 }
 
 export function isSeedreamConfigured() {
@@ -263,6 +344,10 @@ export function isSeedreamConfigured() {
     readOptionalEnv("SEEDREAM_ACCESS_KEY_ID", "VOLCENGINE_ACCESS_KEY_ID") &&
       readOptionalEnv("SEEDREAM_SECRET_ACCESS_KEY", "VOLCENGINE_SECRET_ACCESS_KEY")
   );
+}
+
+export function readSeedreamMaxOutputImagesFromEnv() {
+  return readNumberEnv("SEEDREAM_MAX_OUTPUT_IMAGES", 4);
 }
 
 function readSeedreamConfigFromEnv(): SeedreamConfig {
@@ -287,6 +372,7 @@ function readSeedreamConfigFromEnv(): SeedreamConfig {
     height: readNumberEnv("SEEDREAM_HEIGHT", 1024),
     forceSingle: process.env.SEEDREAM_FORCE_SINGLE !== "false",
     maxInputImages: readNumberEnv("SEEDREAM_MAX_INPUT_IMAGES", 14),
+    maxOutputImages: readSeedreamMaxOutputImagesFromEnv(),
   };
 }
 
