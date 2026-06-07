@@ -2,6 +2,8 @@
 
 Infinite-canvas Agent Run MVP: type a requirement, stream an Agent Run node, call a real `generate_image` tool, render image result nodes, then select a non-Run canvas node to create a contextual follow-up branch.
 
+Agent Run nodes display both the assistant's streamed text output and the `generate_image` tool state. Tool errors remain visible in the Run node and do not create placeholder image results.
+
 ## Stack
 
 - Vite + React + TypeScript
@@ -80,7 +82,7 @@ The migration files live in `supabase/migrations`. Existing `agent_canvases` dat
 
 ## Canvas Branching
 
-Submitting from the bottom composer with no referenced node creates a new root `prompt -> run` chain. Selecting a Prompt or Image Result node makes it the reference for the next submission and creates `selected node -> prompt -> run`. Agent Run nodes are status views only; selecting one does not create a branch anchor.
+Submitting from the bottom composer with no referenced node creates a new root `prompt -> run` chain. Selecting a single Prompt or Image Result node makes it the reference for the next submission and creates `selected node -> prompt -> run`. Dragging on the empty canvas marquee-selects multiple nodes for group movement or deletion; multi-selection does not create a branch anchor. Agent Run nodes are status views only; selecting one does not create a branch anchor.
 
 ## Seedream Tool Contract
 

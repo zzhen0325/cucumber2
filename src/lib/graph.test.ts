@@ -6,6 +6,7 @@ import {
   createRunDraft,
   extractImagesFromToolOutput,
   getRunReferenceNodeId,
+  textFromMessageParts,
   toolPartFromMessagePart,
 } from "./graph";
 import type { AgentCanvasEdge, AgentCanvasNode } from "@/types/canvas";
@@ -203,9 +204,9 @@ describe("agent canvas graph", () => {
     );
 
     expect(resultNodes.map((node) => node.position)).toEqual([
-      { x: -257, y: 317 },
-      { x: 0, y: 317 },
-      { x: 257, y: 317 },
+      { x: -257, y: 480 },
+      { x: 0, y: 480 },
+      { x: 257, y: 480 },
     ]);
   });
 
@@ -223,11 +224,57 @@ describe("agent canvas graph", () => {
     );
 
     expect(resultNodes.map((node) => node.position)).toEqual([
-      { x: -385.5, y: 317 },
-      { x: -128.5, y: 317 },
-      { x: 128.5, y: 317 },
-      { x: 385.5, y: 317 },
+      { x: -385.5, y: 480 },
+      { x: -128.5, y: 480 },
+      { x: 128.5, y: 480 },
+      { x: 385.5, y: 480 },
     ]);
+  });
+
+  it("shifts new image results away from existing nodes on the same row", () => {
+    const run = {
+      ...runNode("run-2", "再生成四张图片"),
+      position: { x: 520, y: 124 },
+    };
+    const existingImages = [
+      imageNode("existing-a", "https://cdn.example/existing-a.png", "初始需求"),
+      {
+        ...imageNode("existing-b", "https://cdn.example/existing-b.png", "初始需求"),
+        position: { x: 257, y: 317 },
+      },
+    ];
+    const { resultNodes } = createImageResultNodes(
+      run,
+      [
+        { id: "a", url: "https://cdn.example/a.png" },
+        { id: "b", url: "https://cdn.example/b.png" },
+        { id: "c", url: "https://cdn.example/c.png" },
+        { id: "d", url: "https://cdn.example/d.png" },
+      ],
+      [run, ...existingImages]
+    );
+
+    expect(resultNodes.map((node) => node.position)).toEqual([
+      { x: 521, y: 480 },
+      { x: 778, y: 480 },
+      { x: 1035, y: 480 },
+      { x: 1292, y: 480 },
+    ]);
+  });
+
+  it("shifts new follow-up chains away from existing nodes", () => {
+    const nodes: AgentCanvasNode[] = [
+      imageNode("image-1", "https://cdn.example/1.png", "初始需求"),
+      {
+        ...promptNode("blocking-prompt", "挡住默认位置的节点"),
+        position: { x: 0, y: 510 },
+      },
+    ];
+
+    const draft = createRunDraft("再加一点光影", "image-1", nodes, []);
+
+    expect(draft.promptNode.position).toEqual({ x: 264, y: 510 });
+    expect(draft.runNode.position).toEqual({ x: 264, y: 634 });
   });
 
   it("extracts AI SDK tool parts and image outputs", () => {
@@ -242,6 +289,16 @@ describe("agent canvas graph", () => {
     expect(extractImagesFromToolOutput(part?.output)).toEqual([
       { id: "x", url: "https://cdn.example/x.png" },
     ]);
+  });
+
+  it("extracts streamed assistant text parts", () => {
+    expect(
+      textFromMessageParts([
+        { type: "text", text: "我会先理解画面方向。" },
+        { type: "tool-generate_image", state: "input-available" },
+        { type: "text", text: "然后调用图像工具。" },
+      ])
+    ).toBe("我会先理解画面方向。\n\n然后调用图像工具。");
   });
 
   it("extracts AI SDK dynamic tool parts for generate_image", () => {

@@ -8,7 +8,12 @@ import type {
 } from "@/types/canvas";
 
 const NODE_WIDTH = 240;
+const PROMPT_NODE_HEIGHT = 84;
+const COMPACT_RUN_NODE_HEIGHT = 36;
+const RUN_NODE_HEIGHT = 300;
+const RESULT_NODE_HEIGHT = 240;
 const RESULT_GAP = 17;
+const NODE_CLEARANCE = 24;
 const ROOT_START_X = 260;
 const ROOT_START_Y = 210;
 const ROOT_CHAIN_GAP = 320;
@@ -16,10 +21,17 @@ const FOLLOW_UP_GAP_X = 262;
 const FOLLOW_UP_GAP_Y = 310;
 const RUN_OFFSET_Y = 124;
 const RESULT_OFFSET_FROM_PROMPT_Y = 200;
-const EXPANDED_RESULT_OFFSET_FROM_PROMPT_Y = 317;
+const EXPANDED_RESULT_OFFSET_FROM_PROMPT_Y = 480;
 
 const id = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+type CanvasRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 
 export const isImageResultNode = (node?: AgentCanvasNode) =>
   node?.data.kind === "imageResult";
@@ -109,12 +121,21 @@ export function createRunDraft(
     : nodes.filter((node) => node.data.kind === "prompt").length;
 
   const upstreamContext = collectUpstreamContext(referenceNodeId, nodes, edges);
-  const baseX = referenceNode
+  const preferredBaseX = referenceNode
     ? referenceNode.position.x + siblings * FOLLOW_UP_GAP_X
     : ROOT_START_X + siblings * ROOT_CHAIN_GAP;
   const baseY = referenceNode
     ? referenceNode.position.y + FOLLOW_UP_GAP_Y
     : ROOT_START_Y;
+  const baseX = resolveNonOverlappingX(
+    {
+      x: preferredBaseX,
+      y: baseY,
+      width: NODE_WIDTH,
+      height: RUN_OFFSET_Y + RUN_NODE_HEIGHT,
+    },
+    nodes
+  );
   const promptId = id("prompt");
   const runId = id("run");
   const createdAt = new Date().toISOString();
@@ -189,10 +210,21 @@ export function createImageResultNodes(
       runNode.data.toolPart?.state !== "input-streaming")
       ? EXPANDED_RESULT_OFFSET_FROM_PROMPT_Y
       : RESULT_OFFSET_FROM_PROMPT_Y;
-  const startX =
+  const preferredStartX =
     runNode.position.x -
     ((visibleImages.length - 1) * (NODE_WIDTH + RESULT_GAP)) / 2;
   const y = runNode.position.y + resultOffset - RUN_OFFSET_Y;
+  const startX = resolveNonOverlappingX(
+    {
+      x: preferredStartX,
+      y,
+      width:
+        visibleImages.length * NODE_WIDTH +
+        Math.max(visibleImages.length - 1, 0) * RESULT_GAP,
+      height: RESULT_NODE_HEIGHT,
+    },
+    existingNodes
+  );
 
   const resultNodes: AgentCanvasNode[] = visibleImages.map((image, index) => ({
     id: `image-${image.id}`,
@@ -214,6 +246,120 @@ export function createImageResultNodes(
   }));
 
   return { resultNodes, resultEdges };
+}
+
+function resolveNonOverlappingX(
+  preferredRect: CanvasRect,
+  existingNodes: AgentCanvasNode[]
+) {
+  if (!preferredRect.width || !preferredRect.height) {
+    return preferredRect.x;
+  }
+
+  const existingRects = existingNodes.map(getNodeRect);
+  if (!hasCollision(preferredRect, existingRects)) {
+    return preferredRect.x;
+  }
+
+  const candidates = new Set<number>([preferredRect.x]);
+  for (const rect of existingRects) {
+    if (!overlapsVertically(preferredRect, expandRect(rect, NODE_CLEARANCE))) {
+      continue;
+    }
+
+    candidates.add(rect.x + rect.width + NODE_CLEARANCE);
+    candidates.add(rect.x - preferredRect.width - NODE_CLEARANCE);
+  }
+
+  const validCandidates = Array.from(candidates).filter(
+    (x) =>
+      !hasCollision(
+        {
+          ...preferredRect,
+          x,
+        },
+        existingRects
+      )
+  );
+
+  if (validCandidates.length) {
+    return validCandidates.sort((a, b) => {
+      const distanceA = Math.abs(a - preferredRect.x);
+      const distanceB = Math.abs(b - preferredRect.x);
+      if (distanceA !== distanceB) {
+        return distanceA - distanceB;
+      }
+
+      return b - a;
+    })[0];
+  }
+
+  const rightEdge = existingRects
+    .filter((rect) =>
+      overlapsVertically(preferredRect, expandRect(rect, NODE_CLEARANCE))
+    )
+    .reduce(
+      (maxX, rect) => Math.max(maxX, rect.x + rect.width),
+      preferredRect.x
+    );
+
+  return rightEdge + NODE_CLEARANCE;
+}
+
+function hasCollision(rect: CanvasRect, existingRects: CanvasRect[]) {
+  return existingRects.some((existingRect) =>
+    rectsOverlap(rect, expandRect(existingRect, NODE_CLEARANCE))
+  );
+}
+
+function getNodeRect(node: AgentCanvasNode): CanvasRect {
+  return {
+    x: node.position.x,
+    y: node.position.y,
+    width: NODE_WIDTH,
+    height: getNodeHeight(node),
+  };
+}
+
+function getNodeHeight(node: AgentCanvasNode) {
+  if (node.data.kind === "prompt") {
+    return PROMPT_NODE_HEIGHT;
+  }
+
+  if (node.data.kind === "imageResult") {
+    return RESULT_NODE_HEIGHT;
+  }
+
+  if (
+    node.data.status === "queued" &&
+    node.data.toolPart?.state === "input-streaming"
+  ) {
+    return COMPACT_RUN_NODE_HEIGHT;
+  }
+
+  return RUN_NODE_HEIGHT;
+}
+
+function expandRect(rect: CanvasRect, padding: number): CanvasRect {
+  return {
+    x: rect.x - padding,
+    y: rect.y - padding,
+    width: rect.width + padding * 2,
+    height: rect.height + padding * 2,
+  };
+}
+
+function rectsOverlap(a: CanvasRect, b: CanvasRect) {
+  return (
+    a.x < b.x + b.width &&
+    a.x + a.width > b.x &&
+    a.y < b.y + b.height &&
+    a.y + a.height > b.y
+  );
+}
+
+function overlapsVertically(a: CanvasRect, b: CanvasRect) {
+  return a.y < b.y + b.height && a.y + a.height > b.y;
 }
 
 export function extractImagesFromToolOutput(output: unknown): GeneratedImage[] {
@@ -264,4 +410,24 @@ export function toolPartFromMessagePart(part: unknown): CanvasToolPart | null {
     output: candidate.output,
     errorText: candidate.errorText,
   };
+}
+
+export function textFromMessageParts(parts: unknown[] | undefined): string {
+  if (!parts?.length) {
+    return "";
+  }
+
+  return parts
+    .flatMap((part) => {
+      if (!part || typeof part !== "object") {
+        return [];
+      }
+
+      const candidate = part as { type?: string; text?: unknown };
+      return candidate.type === "text" && typeof candidate.text === "string"
+        ? [candidate.text.trim()]
+        : [];
+    })
+    .filter(Boolean)
+    .join("\n\n");
 }

@@ -17,6 +17,29 @@
 
 ## 2026-06-07
 
+### 画布支持框选多选
+
+- 变更：空白画布左键拖拽启用 React Flow 框选，多选节点可继续批量拖拽或删除。
+- 变更：底部输入器同步显示多选数量；只有单选 Prompt 或 Image Result 时才作为下一次生成的引用锚点。
+- 文件：`src/components/CanvasWorkspace.tsx`、`src/App.css`、`README.md`。
+- 验证：`pnpm build`。
+
+### Run 节点展开后完整显示输出
+
+- 变更：展开 Run 节点时不再限制 agent 文字为 3 行，不再给输出区域设置内部滚动，工具详情改为完整换行显示。
+- 变更：展开态结果图片节点下移，避免完整输出内容与图片结果节点重叠。
+- 文件：`src/App.css`、`src/components/CanvasWorkspace.tsx`、`src/lib/graph.ts`、`src/lib/graph.test.ts`。
+- 验证：`pnpm test -- src/lib/graph.test.ts`、`pnpm build`。
+- 备注：构建仍有既有 Vite 大 chunk 提示，不影响本次验证。
+
+### Run 节点展示流式文字输出
+
+- 变更：`/api/agent-run` 在调用 `generate_image` 前使用 DeepSeek 通过 AI SDK `streamText` 输出简短执行说明，并把 text chunks 合并进 UI message stream。
+- 变更：Run 节点从 assistant message parts 中提取 text parts，与 `generate_image` 工具状态一起展示，保留节点内部滚动和错误可见状态。
+- 文件：`server/api.ts`、`src/components/CanvasWorkspace.tsx`、`src/lib/graph.ts`、`src/types/canvas.ts`、`src/App.css`、`src/lib/graph.test.ts`、`README.md`。
+- 验证：`pnpm test -- src/lib/graph.test.ts`、`pnpm build`；`http://127.0.0.1:8787/api/health` 返回 DeepSeek、Seedream、Supabase 均已配置；浏览器打开 `http://localhost:5173/` 登录页无 console error。
+- 备注：DeepSeek 文本输出失败会直接暴露错误，不降级为假执行说明；未创建临时账号做真实生成，避免污染项目数据。
+
 ### 支持一次生成多张图片结果
 
 - 变更：`generate_image` 会从 prompt 中解析显式图片数量，例如 `一次生成4张图片`，并在多图请求时关闭 Seedream `force_single`，将返回的多个 image URL 渲染成同一 Run 下的多个图片结果节点。

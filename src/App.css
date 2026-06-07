@@ -9,6 +9,8 @@
 .agent-canvas {
   width: 100%;
   height: 100%;
+  --xy-selection-background-color: rgba(41, 191, 78, 0.1);
+  --xy-selection-border: 1px solid rgba(41, 191, 78, 0.72);
 }
 
 .agent-canvas .react-flow__background {
@@ -16,11 +18,21 @@
 }
 
 .agent-canvas .react-flow__pane {
-  cursor: grab;
+  cursor: default;
 }
 
 .agent-canvas .react-flow__pane:active {
-  cursor: grabbing;
+  cursor: crosshair;
+}
+
+.agent-canvas .react-flow__pane.selection {
+  cursor: crosshair;
+}
+
+.agent-canvas .react-flow__selection,
+.agent-canvas .react-flow__nodesselection-rect {
+  border-radius: 12px;
+  box-shadow: 0 0 0 1px rgba(41, 191, 78, 0.1);
 }
 
 .agent-canvas .react-flow__handle {
@@ -789,18 +801,27 @@
   transform: rotate(-90deg);
 }
 
-.tool-stream {
-  display: flex;
-  flex-direction: column;
+.run-stream {
+  display: grid;
   gap: 8px;
+  overflow: visible;
   padding: 0 12px 12px;
+}
+
+.agent-text-output {
+  overflow: visible;
+  margin: 0;
+  color: #174222;
+  font-size: 11px;
+  line-height: 15px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .tool-call-row {
   display: flex;
-  min-height: 72px;
   flex-direction: column;
-  gap: 9px;
+  gap: 7px;
   padding: 10px;
   border: 1px solid rgba(235, 235, 235, 0.7);
   border-radius: 12px;
@@ -862,12 +883,12 @@
 }
 
 .tool-detail-line {
-  overflow: hidden;
+  overflow: visible;
   color: #555555;
   font-size: 11px;
   line-height: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .result-card {

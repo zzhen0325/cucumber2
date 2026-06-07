@@ -45,6 +45,7 @@ export type RunNodeData = {
   kind: "run";
   prompt: string;
   status: AgentRunStatus;
+  agentText?: string;
   toolPart?: CanvasToolPart;
   error?: string;
 };

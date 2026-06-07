@@ -1,6 +1,7 @@
 import {
   Controls,
   MiniMap,
+  SelectionMode,
   useReactFlow,
   useEdgesState,
   useNodesState,
@@ -50,6 +51,7 @@ import {
   createRunDraft,
   extractImagesFromToolOutput,
   getRunReferenceNodeId,
+  textFromMessageParts,
   toolPartFromMessagePart,
 } from "@/lib/graph";
 import type {
@@ -88,7 +90,6 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
   const [projectTitle, setProjectTitle] = useState("Untitled");
   const [prompt, setPrompt] = useState("");
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [contextCount, setContextCount] = useState(0);
   const [storageStatus, setStorageStatus] = useState<StorageStatus>("loading");
   const [storageError, setStorageError] = useState<string | null>(null);
@@ -185,12 +186,20 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     },
   });
 
-  const selectedNode = useMemo(
-    () => nodes.find((node) => node.id === selectedNodeId),
-    [nodes, selectedNodeId]
+  const selectedNodeIds = useMemo(
+    () => nodes.filter((node) => node.selected).map((node) => node.id),
+    [nodes]
   );
+  const selectedNode = useMemo(() => {
+    if (selectedNodeIds.length !== 1) {
+      return undefined;
+    }
+
+    return nodes.find((node) => node.id === selectedNodeIds[0]);
+  }, [nodes, selectedNodeIds]);
   const referenceNodeId = getRunReferenceNodeId(selectedNode);
   const referenceNode = referenceNodeId ? selectedNode : undefined;
+  const persistedSelectedNodeId = referenceNodeId ?? null;
   const isBusy = status === "submitted" || status === "streaming";
   const canSubmit =
     Boolean(loadedProjectId) && storageStatus !== "loading" && !storageError;
@@ -209,9 +218,12 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
         setLoadedProjectId(project.id);
         setProjectTitle(project.title);
-        setNodes(project.nodes);
+        const nextSelectedNodeIds = getInitialSelectedNodeIds(
+          project.nodes,
+          project.selectedNodeId
+        );
+        setNodes(applySelectedNodeIds(project.nodes, nextSelectedNodeIds));
         setEdges(project.edges);
-        setSelectedNodeId(project.selectedNodeId);
         activeRunId.current = project.lastRunId;
         hasLoadedProject.current = true;
         setStorageStatus("saved");
@@ -247,7 +259,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         title: projectTitle,
         nodes,
         edges,
-        selectedNodeId,
+        selectedNodeId: persistedSelectedNodeId,
         lastRunId: activeRunId.current,
       })
         .then(({ project }) => {
@@ -266,7 +278,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         window.clearTimeout(saveTimer.current);
       }
     };
-  }, [edges, loadedProjectId, nodes, projectTitle, selectedNodeId]);
+  }, [edges, loadedProjectId, nodes, persistedSelectedNodeId, projectTitle]);
 
   useEffect(() => {
     if (error) {
@@ -286,10 +298,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     const toolPart = assistantMessage?.parts
       .map((part) => toolPartFromMessagePart(part))
       .find(Boolean);
+    const agentText = textFromMessageParts(assistantMessage?.parts);
 
     if (!toolPart) {
       if (status === "submitted" || status === "streaming") {
-        updateRun(runId, { status: "running" });
+        updateRun(runId, { status: "running", agentText });
       }
       return;
     }
@@ -301,6 +314,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           : toolPart.state === "output-available"
             ? "success"
             : "running",
+      agentText,
       toolPart,
       error: toolPart.errorText,
     });
@@ -334,10 +348,13 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       activeRunId.current = draft.runNode.id;
       setContextCount(draft.upstreamContext.length);
 
-      setNodes((current) => [...current, draft.promptNode, draft.runNode]);
+      setNodes((current) => [
+        ...applySelectedNodeIds(current, []),
+        draft.promptNode,
+        draft.runNode,
+      ]);
       setEdges((current) => [...current, ...draft.edges]);
       setPrompt("");
-      setSelectedNodeId(null);
 
       await sendMessage(
         { text: value },
@@ -382,11 +399,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         edges={edges}
         onEdgesChange={onEdgesChange}
         onNodesChange={onNodesChange}
-        onNodeClick={(_, node) => setSelectedNodeId(node.id)}
-        onPaneClick={() => setSelectedNodeId(null)}
+        onPaneClick={() => setNodes((current) => applySelectedNodeIds(current, []))}
+        selectionMode={SelectionMode.Partial}
         nodesDraggable
         nodesConnectable={false}
-        panOnDrag
+        panOnDrag={false}
         proOptions={{ hideAttribution: true }}
       >
         <CanvasAutoFit nodeCount={nodes.length} />
@@ -415,6 +432,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         contextCount={contextCount}
         prompt={prompt}
         referenceNode={referenceNode}
+        selectionCount={selectedNodeIds.length}
         setPrompt={setPrompt}
         stop={stop}
         onSubmit={handleSubmit}
@@ -439,6 +457,34 @@ function CanvasAutoFit({ nodeCount }: { nodeCount: number }) {
   }, [fitView, nodeCount]);
 
   return null;
+}
+
+function getInitialSelectedNodeIds(
+  nodes: AgentCanvasNode[],
+  selectedNodeId: string | null
+) {
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const selectedNodeIds = nodes
+    .filter((node) => node.selected)
+    .map((node) => node.id);
+
+  if (selectedNodeIds.length) {
+    return selectedNodeIds;
+  }
+
+  return selectedNodeId && nodeIds.has(selectedNodeId) ? [selectedNodeId] : [];
+}
+
+function applySelectedNodeIds(
+  nodes: AgentCanvasNode[],
+  selectedNodeIds: string[]
+) {
+  const selectedNodeIdSet = new Set(selectedNodeIds);
+
+  return nodes.map((node) => {
+    const selected = selectedNodeIdSet.has(node.id);
+    return node.selected === selected ? node : { ...node, selected };
+  });
 }
 
 function TopBar({
@@ -550,6 +596,7 @@ function Composer({
   contextCount,
   prompt,
   referenceNode,
+  selectionCount,
   setPrompt,
   stop,
   onSubmit,
@@ -559,17 +606,21 @@ function Composer({
   contextCount: number;
   prompt: string;
   referenceNode?: AgentCanvasNode;
+  selectionCount: number;
   setPrompt: (value: string) => void;
   stop: () => void;
   onSubmit: (event?: FormEvent<HTMLFormElement>) => void;
 }) {
   const hasReference = Boolean(referenceNode);
+  const hasMultiSelection = selectionCount > 1;
 
   return (
     <div className="composer-wrap">
       <div className="context-pill" data-active={hasReference}>
         {hasReference
           ? `引用节点: ${getReferenceNodeLabel(referenceNode)}`
+          : hasMultiSelection
+            ? `已选中 ${selectionCount} 个节点`
           : "未引用节点"}
       </div>
       <PromptInput
@@ -678,8 +729,10 @@ function RunNode({
 
   const hasToolDetail =
     data.status !== "queued" || toolPart.state !== "input-streaming";
+  const agentText = data.agentText?.trim() ?? "";
+  const hasRunOutput = Boolean(agentText) || hasToolDetail;
   const title = getRunTitle(data.status, toolPart.state);
-  const toggleLabel = expanded ? "收起工具调用" : "展开工具调用";
+  const toggleLabel = expanded ? "收起输出" : "展开输出";
 
   return (
     <Node
@@ -695,7 +748,7 @@ function RunNode({
             aria-label={toggleLabel}
             className="run-toggle nodrag nopan"
             data-expanded={expanded}
-            disabled={!hasToolDetail}
+            disabled={!hasRunOutput}
             onClick={(event) => {
               event.stopPropagation();
               setExpanded((current) => !current);
@@ -706,9 +759,16 @@ function RunNode({
             <ChevronDown size={12} />
           </button>
         </div>
-        {hasToolDetail && expanded && (
-          <div className="tool-stream">
-            <ToolCallRow error={data.error} toolPart={toolPart} />
+        {hasRunOutput && expanded && (
+          <div className="run-stream">
+            {agentText && (
+              <p className="agent-text-output" title={agentText}>
+                {agentText}
+              </p>
+            )}
+            {hasToolDetail && (
+              <ToolCallRow error={data.error} toolPart={toolPart} />
+            )}
           </div>
         )}
       </NodeContent>
@@ -811,7 +871,7 @@ function getToolDetailLines(toolPart: CanvasToolPart, error?: string) {
     return [
       images.length ? `输出 ${images.length} 张图片` : "输出已返回",
       ...getToolInputLines(toolPart.input),
-    ].slice(0, 3);
+    ];
   }
 
   if (toolPart.state === "output-denied") {

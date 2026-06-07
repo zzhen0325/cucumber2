@@ -1,9 +1,11 @@
 import { existsSync } from "node:fs";
 import { loadEnvFile } from "node:process";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { serve } from "@hono/node-server";
 import {
   createUIMessageStream,
   createUIMessageStreamResponse,
+  streamText,
   type UIMessage,
 } from "ai";
 import { Hono, type Context } from "hono";
@@ -274,6 +276,17 @@ app.post("/api/agent-run", async (c) => {
         toolInput,
       });
 
+      const agentText = streamText({
+        model: getDeepSeekModel(),
+        system:
+          "你是 Cucumber infinite canvas 的图片生成 agent。只输出给用户看的执行文字，使用简短中文。不要说图片已经生成，不要编造工具结果，不要输出 Markdown 标题或列表。",
+        prompt: buildAgentRunTextPrompt(canvasContext, toolInput.resultCount),
+      });
+
+      for await (const chunk of agentText.toUIMessageStream()) {
+        writer.write(chunk);
+      }
+
       writer.write({
         type: "tool-input-available",
         toolCallId,
@@ -389,6 +402,42 @@ function loadServerEnv() {
       loadEnvFile(file);
     }
   }
+}
+
+function getDeepSeekModel() {
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  if (!apiKey) {
+    throw new Error("DEEPSEEK_API_KEY is required.");
+  }
+
+  return createOpenAICompatible({
+    name: "deepseek",
+    baseURL: process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com",
+    apiKey,
+  }).chatModel(process.env.DEEPSEEK_MODEL ?? "deepseek-v4-flash");
+}
+
+function buildAgentRunTextPrompt(
+  canvasContext: z.infer<typeof canvasContextSchema>,
+  resultCount: number
+) {
+  const upstreamSummary = canvasContext.upstreamContext.length
+    ? canvasContext.upstreamContext
+        .map((item, index) => {
+          const summary =
+            item.summary ?? item.prompt ?? (item.type === "image" ? "图片结果" : "提示词");
+          return `${index + 1}. ${item.type}: ${summary}`;
+        })
+        .join("\n")
+    : "无";
+
+  return [
+    `当前需求: ${canvasContext.prompt}`,
+    `选中节点: ${canvasContext.selectedNodeId ?? "无"}`,
+    `上游上下文:\n${upstreamSummary}`,
+    `目标输出: ${resultCount} 张图片`,
+    "请输出 1 到 3 句执行说明，说明你会如何理解需求并使用上游上下文。",
+  ].join("\n\n");
 }
 
 function getErrorMessage(error: unknown) {
