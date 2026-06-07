@@ -15,6 +15,15 @@
 - 备注：风险、后续项或未完成事项。
 ```
 
+## 2026-06-08
+
+### 新增 Agent OS 三阶段规划
+
+- 变更：新增 `agent-os-plan.md`，将通用 Agent OS 目标拆成 Run Kernel 与 trace 基础、Capability/Artifact/Policy 层、Canvas OS/Memory/Replay 三部分。
+- 文件：`agent-os-plan.md`、`process.md`。
+- 验证：文档内容基于当前 `server/api.ts`、`server/prompts.ts`、`src/types/canvas.ts`、`src/lib/graph.ts`、`README.md` 和 Supabase 存储契约梳理；未运行代码测试。
+- 备注：该文档是后续架构路线图，不改变当前图片生成链路；具体实现时仍需按最小相关测试集验证。
+
 ## 2026-06-07
 
 ### 新增 Ark Provider 与 Prompt 模块化
