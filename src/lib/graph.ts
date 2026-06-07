@@ -100,6 +100,7 @@ export function collectUpstreamContext(
         prompt: node.data.prompt,
         imageUrl: node.data.image.url,
         summary: node.data.image.title ?? "Generated image",
+        artifact: node.data.artifact ?? node.data.image.artifact,
       };
     }
 
@@ -230,6 +231,7 @@ export function createImageResultNodes(
     data: {
       kind: "imageResult",
       image,
+      artifact: image.artifact,
       prompt: runNode.data.kind === "run" ? runNode.data.prompt : "",
       runId: runNode.id,
     },
@@ -367,6 +369,58 @@ export function extractImagesFromToolOutput(output: unknown): GeneratedImage[] {
   const candidate = output as { images?: GeneratedImage[]; url?: string };
   if (Array.isArray(candidate.images)) {
     return candidate.images.filter((image) => image.url);
+  }
+
+  const artifacts = (output as { artifacts?: unknown }).artifacts;
+  if (Array.isArray(artifacts)) {
+    return artifacts.flatMap((artifact) => {
+      if (!artifact || typeof artifact !== "object") {
+        return [];
+      }
+
+      const candidateArtifact = artifact as {
+        id?: unknown;
+        type?: unknown;
+        uri?: unknown;
+        title?: unknown;
+        metadata?: unknown;
+      };
+      if (
+        candidateArtifact.type !== "image" ||
+        typeof candidateArtifact.id !== "string" ||
+        typeof candidateArtifact.uri !== "string"
+      ) {
+        return [];
+      }
+
+      return {
+        id: candidateArtifact.id,
+        url: candidateArtifact.uri,
+        title:
+          typeof candidateArtifact.title === "string"
+            ? candidateArtifact.title
+            : undefined,
+        metadata:
+          candidateArtifact.metadata &&
+          typeof candidateArtifact.metadata === "object"
+            ? (candidateArtifact.metadata as Record<string, unknown>)
+            : undefined,
+        artifact: {
+          id: candidateArtifact.id,
+          type: "image" as const,
+          uri: candidateArtifact.uri,
+          title:
+            typeof candidateArtifact.title === "string"
+              ? candidateArtifact.title
+              : undefined,
+          metadata:
+            candidateArtifact.metadata &&
+            typeof candidateArtifact.metadata === "object"
+              ? (candidateArtifact.metadata as Record<string, unknown>)
+              : undefined,
+        },
+      };
+    });
   }
 
   if (candidate.url) {

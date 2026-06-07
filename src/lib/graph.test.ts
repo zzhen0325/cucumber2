@@ -65,6 +65,41 @@ describe("agent canvas graph", () => {
     ]);
   });
 
+  it("carries image artifact refs into upstream context", () => {
+    const image = {
+      ...imageNode("image-1", "https://cdn.example/1.png", "初始需求"),
+      data: {
+        kind: "imageResult" as const,
+        prompt: "初始需求",
+        runId: "run-1",
+        image: {
+          id: "image-1",
+          url: "https://cdn.example/1.png",
+        },
+        artifact: {
+          id: "artifact-1",
+          type: "image" as const,
+          uri: "https://cdn.example/1.png",
+        },
+      },
+    };
+
+    expect(collectUpstreamContext("image-1", [image], [])).toEqual([
+      {
+        nodeId: "image-1",
+        type: "image",
+        prompt: "初始需求",
+        imageUrl: "https://cdn.example/1.png",
+        summary: "Generated image",
+        artifact: {
+          id: "artifact-1",
+          type: "image",
+          uri: "https://cdn.example/1.png",
+        },
+      },
+    ]);
+  });
+
   it("creates a follow-up branch from an intermediate result", () => {
     const nodes: AgentCanvasNode[] = [
       promptNode("prompt-1", "初始需求"),
@@ -160,7 +195,18 @@ describe("agent canvas graph", () => {
     const run = runNode("run-1", "生成图片");
     const { resultNodes, resultEdges } = createImageResultNodes(
       run,
-      [{ id: "a", url: "https://cdn.example/a.png", title: "A" }],
+      [
+        {
+          id: "a",
+          url: "https://cdn.example/a.png",
+          title: "A",
+          artifact: {
+            id: "a",
+            type: "image",
+            uri: "https://cdn.example/a.png",
+          },
+        },
+      ],
       [run]
     );
 
@@ -169,6 +215,7 @@ describe("agent canvas graph", () => {
       throw new Error("Expected an image result node");
     }
     expect(resultNodes[0].data.image.url).toBe("https://cdn.example/a.png");
+    expect(resultNodes[0].data.artifact?.id).toBe("a");
     expect(resultEdges[0]).toMatchObject({ source: "run-1", target: "image-a" });
   });
 
@@ -350,6 +397,36 @@ describe("agent canvas graph", () => {
     expect(extractImagesFromToolOutput(parts[1].output)).toEqual([]);
     expect(extractImagesFromToolOutput(parts[2].output)).toEqual([
       { id: "x", url: "https://cdn.example/x.png" },
+    ]);
+  });
+
+  it("extracts image artifacts as compatible generated images", () => {
+    expect(
+      extractImagesFromToolOutput({
+        artifacts: [
+          {
+            id: "artifact-a",
+            type: "image",
+            uri: "https://cdn.example/a.png",
+            title: "Artifact image",
+            metadata: { provider: "seedream" },
+          },
+        ],
+      })
+    ).toEqual([
+      {
+        id: "artifact-a",
+        url: "https://cdn.example/a.png",
+        title: "Artifact image",
+        metadata: { provider: "seedream" },
+        artifact: {
+          id: "artifact-a",
+          type: "image",
+          uri: "https://cdn.example/a.png",
+          title: "Artifact image",
+          metadata: { provider: "seedream" },
+        },
+      },
     ]);
   });
 

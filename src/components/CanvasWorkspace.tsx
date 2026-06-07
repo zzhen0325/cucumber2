@@ -379,7 +379,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
     updateRun(runId, {
       status:
-        toolParts.some((part) => part.state === "output-error")
+        toolParts.some(
+          (part) => part.state === "output-error" || part.state === "output-denied"
+        )
           ? "error"
           : toolParts.some(
                 (part) =>
@@ -1241,7 +1243,11 @@ function ToolCallRow({
     <div className={isError ? "tool-call-row error" : "tool-call-row"}>
       <div className="tool-call-main">
         <span className="tool-call-action">
-          {toolPart.state === "output-available" ? "完成" : "调用"}
+          {toolPart.state === "output-available"
+            ? "完成"
+            : toolPart.state === "output-denied"
+              ? "拒绝"
+              : "调用"}
         </span>
         <strong title={toolName}>{toolName}</strong>
         <span className={`tool-state ${toolPart.state}`}>

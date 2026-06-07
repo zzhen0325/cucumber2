@@ -96,6 +96,19 @@ type CreateSkillInput = {
   sourceManifest: Record<string, unknown>;
 };
 
+type CreateArtifactInput = {
+  id: string;
+  projectId: string;
+  runNodeId: string;
+  type: string;
+  uri?: string | null;
+  title?: string | null;
+  metadata?: Record<string, unknown> | null;
+  contentRef?: string | null;
+  toolCallId?: string | null;
+  sourceNodeId?: string | null;
+};
+
 type UpdateSkillInput = {
   skillId: string;
   userId: string;
@@ -146,6 +159,20 @@ type SkillRow = {
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+type ArtifactRow = {
+  id: string;
+  project_id: string;
+  run_node_id: string;
+  type: string;
+  uri: string | null;
+  title: string | null;
+  metadata: Record<string, unknown> | null;
+  content_ref: string | null;
+  tool_call_id: string | null;
+  source_node_id: string | null;
+  created_at: string;
 };
 
 let cachedClient: SupabaseClient | null = null;
@@ -428,6 +455,32 @@ export async function recordRunStepEvent(input: RunStepEventInput) {
   }
 }
 
+export async function createArtifact(input: CreateArtifactInput) {
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("agent_artifacts")
+    .insert({
+      id: input.id,
+      project_id: input.projectId,
+      run_node_id: input.runNodeId,
+      type: input.type,
+      uri: input.uri ?? null,
+      title: input.title ?? null,
+      metadata: input.metadata ?? {},
+      content_ref: input.contentRef ?? null,
+      tool_call_id: input.toolCallId ?? null,
+      source_node_id: input.sourceNodeId ?? null,
+    })
+    .select()
+    .single<ArtifactRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  return mapArtifactRow(data);
+}
+
 export async function listPublicSkillsForUser(userId: string) {
   const client = getSupabaseClient();
   const { data, error } = await client
@@ -443,6 +496,23 @@ export async function listPublicSkillsForUser(userId: string) {
   }
 
   return data.map((row) => mapSkillRow(row, userId));
+}
+
+export async function listLatestPublicSkills() {
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("agent_skills")
+    .select("*")
+    .eq("is_public", true)
+    .is("deleted_at", null)
+    .order("updated_at", { ascending: false })
+    .returns<SkillRow[]>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data.map((row) => mapSkillRow(row, row.owner_user_id ?? ""));
 }
 
 export async function createSkill(input: CreateSkillInput) {
@@ -693,5 +763,21 @@ function mapSkillRow(row: SkillRow, userId: string): AgentSkill {
     canEdit: canEditSkill(userId, mapSkillAccess(row)),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+function mapArtifactRow(row: ArtifactRow) {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    runNodeId: row.run_node_id,
+    type: row.type,
+    uri: row.uri ?? undefined,
+    title: row.title ?? undefined,
+    metadata: row.metadata ?? {},
+    contentRef: row.content_ref ?? undefined,
+    toolCallId: row.tool_call_id ?? undefined,
+    sourceNodeId: row.source_node_id ?? undefined,
+    createdAt: row.created_at,
   };
 }

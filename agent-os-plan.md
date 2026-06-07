@@ -86,11 +86,11 @@ Canvas UI
 
 ### 2.1 Capability Registry
 
-- [ ] 在现有 `agent_skills` 基础上增加 manifest 概念，不新建长期并行的 `skills.json`。
-- [ ] manifest 字段包括 `capabilityId`、`version`、`description`、`triggers`、`inputSchema`、`outputSchema`、`toolIds`、`tokenBudget`、`requiresApproval`。
-- [ ] 升级 `server/skill-parser.ts`，从 `SKILL.md` frontmatter 或 manifest 文件解析 capability metadata。
-- [ ] `prompt-expand` 迁移为 capability：`prompt.expand`。
-- [ ] 图片生成迁移为 capability：`image.generate`。
+- [x] 在现有 `agent_skills` 基础上增加 manifest 概念，不新建长期并行的 `skills.json`。
+- [x] manifest 字段包括 `capabilityId`、`version`、`description`、`triggers`、`inputSchema`、`outputSchema`、`toolIds`、`tokenBudget`、`requiresApproval`。
+- [x] 升级 `server/skill-parser.ts`，从 `SKILL.md` frontmatter 或 manifest 文件解析 capability metadata。
+- [x] `prompt-expand` 迁移为 capability：`prompt.expand`。
+- [x] 图片生成迁移为 capability：`image.generate`。
 
 验收标准：
 
@@ -100,11 +100,11 @@ Canvas UI
 
 ### 2.2 Router And Planner
 
-- [ ] 新增 `server/agent-router.ts`。
-- [ ] 第一版使用规则路由：用户输入、上游 artifact 类型、选中节点类型、可用 capability manifest。
-- [ ] 只在多 capability 冲突时引入 LLM router，且必须记录 router prompt 和结果。
-- [ ] Planner 输出 step graph，不直接输出 ReactFlow 节点。
-- [ ] Planner 结果必须过 Zod schema 校验。
+- [x] 新增 `server/agent-router.ts`。
+- [x] 第一版使用规则路由：用户输入、上游 artifact 类型、选中节点类型、可用 capability manifest。
+- [x] 只在多 capability 冲突时引入 LLM router，且必须记录 router prompt 和结果。
+- [x] Planner 输出 step graph，不直接输出 ReactFlow 节点。
+- [x] Planner 结果必须过 Zod schema 校验。
 
 验收标准：
 
@@ -114,11 +114,11 @@ Canvas UI
 
 ### 2.3 Artifact Store
 
-- [ ] 新增统一 `Artifact` 类型：`image`、`file`、`doc`、`code`、`webpage`、`dataset`、`decision`、`tool_result`、`memory`。
-- [ ] 数据库存储 artifact metadata，二进制或大内容只保存 URL / storage key / content ref。
-- [ ] 当前 `ImageResultNodeData.image` 渐进迁移为 artifact ref，同时保留旧字段兼容。
-- [ ] `generate_image` 输出先创建 image artifact，再由 graph projection 创建 image result node。
-- [ ] 上游上下文从 prompt/image 扩展为 artifact-aware context。
+- [x] 新增统一 `Artifact` 类型：`image`、`file`、`doc`、`code`、`webpage`、`dataset`、`decision`、`tool_result`、`memory`。
+- [x] 数据库存储 artifact metadata，二进制或大内容只保存 URL / storage key / content ref。
+- [x] 当前 `ImageResultNodeData.image` 渐进迁移为 artifact ref，同时保留旧字段兼容。
+- [x] `generate_image` 输出先创建 image artifact，再由 graph projection 创建 image result node。
+- [x] 上游上下文从 prompt/image 扩展为 artifact-aware context。
 
 验收标准：
 
@@ -128,11 +128,13 @@ Canvas UI
 
 ### 2.4 Policy And Approval
 
-- [ ] 定义 capability policy：是否可联网、是否可写文件、是否可改项目、是否需要用户确认、是否可产生外部费用。
-- [ ] Tool runtime 执行前做 permission check。
+- [x] 定义 capability policy：是否可联网、是否可写文件、是否可改项目、是否需要用户确认、是否可产生外部费用。
+- [x] Tool runtime 执行前做 permission check。
 - [ ] 高风险 tool 进入 `approval-requested` tool state，前端 Run 节点显示确认入口。
-- [ ] 未获批准时写入 `output-denied`，不继续执行后续 step。
-- [ ] 将环境变量缺失、权限不足、配额不足统一为 typed error。
+- [x] 未获批准时写入 `output-denied`，不继续执行后续 step。
+- [x] 将环境变量缺失、权限不足、配额不足统一为 typed error。
+
+备注：当前默认 `image.generate` 标记 `mayExternalCost: true` 但 `requiresApproval: false`，因此不会触发确认交互。服务端已使用 AI SDK 官方 `tool-approval-request` / `tool-output-denied` chunk 为后续高风险 capability 预留状态；完整前端确认按钮待真实审批型 capability 接入时补齐。
 
 验收标准：
 
@@ -225,10 +227,10 @@ Canvas UI
 
 第二轮做通用能力：
 
-- [ ] Capability router。
-- [ ] Artifact store。
-- [ ] Image artifact 投影兼容。
-- [ ] Policy / approval 基础状态。
+- [x] Capability router。
+- [x] Artifact store。
+- [x] Image artifact 投影兼容。
+- [x] Policy / approval 基础状态。
 
 第三轮做 OS 体验：
 

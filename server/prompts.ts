@@ -6,6 +6,14 @@ export type PromptUpstreamContextItem = {
   prompt?: string;
   imageUrl?: string;
   summary?: string;
+  artifact?: {
+    id: string;
+    type: string;
+    uri?: string;
+    title?: string;
+    metadata?: Record<string, unknown>;
+    contentRef?: string;
+  };
 };
 
 export type PromptCanvasContext = {

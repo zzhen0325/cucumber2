@@ -2,12 +2,33 @@ import type { Edge, Node } from "@xyflow/react";
 
 export type AgentRunStatus = "queued" | "running" | "success" | "error";
 
+export type ArtifactType =
+  | "image"
+  | "file"
+  | "doc"
+  | "code"
+  | "webpage"
+  | "dataset"
+  | "decision"
+  | "tool_result"
+  | "memory";
+
+export type ArtifactRef = {
+  id: string;
+  type: ArtifactType;
+  uri?: string;
+  title?: string;
+  metadata?: Record<string, unknown>;
+  contentRef?: string;
+};
+
 export type UpstreamContextItem = {
   nodeId: string;
   type: "prompt" | "image";
   prompt?: string;
   imageUrl?: string;
   summary?: string;
+  artifact?: ArtifactRef;
 };
 
 export type GeneratedImage = {
@@ -15,6 +36,7 @@ export type GeneratedImage = {
   url: string;
   title?: string;
   metadata?: Record<string, unknown>;
+  artifact?: ArtifactRef;
 };
 
 export type CanvasToolState =
@@ -57,6 +79,7 @@ export type RunNodeData = {
 export type ImageResultNodeData = {
   kind: "imageResult";
   image: GeneratedImage;
+  artifact?: ArtifactRef;
   prompt: string;
   runId: string;
 };

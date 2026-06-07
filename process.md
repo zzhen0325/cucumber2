@@ -17,6 +17,16 @@
 
 ## 2026-06-08
 
+### 开发 Agent OS Part 2 Capability、Artifact 与 Policy 基础
+
+- 变更：新增 `server/capabilities.ts` 和 `server/agent-router.ts`，将旧 `prompt-expand` 兼容注册为 `prompt.expand` capability，并以内建 `image.generate` capability 驱动当前图片 run；router 输出 Zod 校验的 step graph，不直接输出 React Flow 节点。
+- 变更：`server/skill-parser.ts` 支持从 `SKILL.md` frontmatter 或 `manifest.json` / `capability.json` 解析 capability manifest，manifest 写入 `source_manifest.capabilityManifest`，旧 skill 上传与编辑路径保持兼容。
+- 变更：新增 `agent_artifacts` migration 和 `createArtifact`，`generate_image` 成功后先写 image artifact metadata，再返回兼容的 `images` 输出和新的 `artifacts` refs；画布 image result 节点和 upstream context 都保留 artifact ref。
+- 变更：新增 capability policy 基础字段和执行前 policy gate；`image.generate` 标记为可联网且可能产生外部费用，`requiresApproval` 能写入官方 AI SDK `tool-approval-request` / `tool-output-denied` 状态并停止后续 step。默认图片能力不要求确认，因此未新增可交互审批按钮。
+- 文件：`server/capabilities.ts`、`server/agent-router.ts`、`server/run-kernel.ts`、`server/skill-parser.ts`、`server/supabase.ts`、`src/types/canvas.ts`、`src/lib/graph.ts`、`src/components/CanvasWorkspace.tsx`、`supabase/migrations/20260608004000_agent_artifacts.sql`、`README.md`、`agent-os-plan.md`。
+- 验证：`pnpm test -- server/skill-parser.test.ts server/capabilities.test.ts server/agent-router.test.ts server/run-kernel.test.ts src/lib/graph.test.ts`、`pnpm exec tsc -p tsconfig.node.json`、`pnpm exec tsc -p tsconfig.app.json`、`pnpm build`。
+- 备注：完整前端审批按钮与自动 continuation 需要等真实高风险 capability 接入时结合 `useChat.addToolApprovalResponse` 补齐；当前基础状态已按 AI SDK 官方 approval chunk 命名实现。
+
 ### 开发 Agent OS Part 1 Run Kernel 与 Trace 基础
 
 - 变更：新增 `server/run-kernel.ts`，定义 Run、Step、ToolCall、ArtifactRef、GraphPatchProposal 和 step event contract，并把 `/api/agent-run` 的图片生成链路迁移为 kernel steps：执行说明、参考图分析、prompt 扩写、图片生成。

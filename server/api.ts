@@ -64,6 +64,16 @@ const upstreamContextSchema = z.object({
   prompt: z.string().optional(),
   imageUrl: z.string().optional(),
   summary: z.string().optional(),
+  artifact: z
+    .object({
+      id: z.string(),
+      type: z.string(),
+      uri: z.string().optional(),
+      title: z.string().optional(),
+      metadata: z.record(z.string(), z.unknown()).optional(),
+      contentRef: z.string().optional(),
+    })
+    .optional(),
 });
 
 const canvasContextSchema = z.object({
@@ -490,6 +500,19 @@ function getApiError(error: unknown) {
     return {
       message:
         "Run step event 存储表未创建，请先应用 supabase/migrations/20260608003000_agent_run_step_events.sql。",
+    };
+  }
+
+  if (
+    combined.includes("agent_artifacts") &&
+    (combined.includes("Could not find the table") ||
+      combined.includes("schema cache") ||
+      combined.includes("relation") ||
+      combined.includes("does not exist"))
+  ) {
+    return {
+      message:
+        "Artifact 存储表未创建，请先应用 supabase/migrations/20260608004000_agent_artifacts.sql。",
     };
   }
 

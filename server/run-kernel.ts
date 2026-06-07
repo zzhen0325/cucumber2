@@ -3,10 +3,24 @@ import { z } from "zod";
 
 import {
   generateSeedreamImage,
+  isSeedreamConfigured,
   inferSeedreamResultCount,
   readSeedreamMaxOutputImagesFromEnv,
   type SeedreamGenerateInput,
+  type SeedreamGeneratedImage,
 } from "../seedream.ts";
+import {
+  IMAGE_GENERATE_CAPABILITY_ID,
+  PROMPT_EXPAND_CAPABILITY_ID,
+  assertCapabilityMayExecute,
+  buildCapabilityRegistry,
+  getCapability,
+  getCapabilitySummary,
+  requireCapability,
+  toTypedCapabilityError,
+  type RegisteredCapability,
+} from "./capabilities.ts";
+import { kernelStepsFromPlan, planAgentRun } from "./agent-router.ts";
 import {
   generateTextWithProvider,
   readArkMaxReferenceImagesFromEnv,
@@ -26,7 +40,8 @@ import {
   type ReferenceImageInput,
 } from "./prompts.ts";
 import {
-  getLatestPublicSkillBySlug,
+  createArtifact,
+  listLatestPublicSkills,
   recordRunEvent,
   recordRunStepEvent,
   type AgentSkill,
@@ -131,6 +146,7 @@ export type Run = {
 export type GenerateImageToolInput = SeedreamGenerateInput & {
   originalPrompt: string;
   promptSkill: ReturnType<typeof getSkillToolSummary>;
+  capabilityIds: string[];
 };
 
 type RunStepDefinition = {
@@ -268,10 +284,26 @@ export async function executeImageAgentRun({
     modelProvider
   );
   promptTrace.agentText = runTextAssembly.trace;
+  const publicSkills = await listLatestPublicSkills();
+  const capabilityRegistry = buildCapabilityRegistry(publicSkills);
+  const routePlan = planAgentRun({
+    canvasContext,
+    capabilities: capabilityRegistry,
+    hasReferenceImages: Boolean(referenceImages.length),
+  });
+  const promptSkill = getPromptExpandSkill(capabilityRegistry);
+  const imageCapability = requireCapability(
+    capabilityRegistry,
+    IMAGE_GENERATE_CAPABILITY_ID
+  );
+  const selectedCapabilityIds = routePlan.selectedCapabilityIds;
+  const selectedCapabilitySummaries = selectedCapabilityIds.map((capabilityId) =>
+    getCapabilitySummary(requireCapability(capabilityRegistry, capabilityId))
+  );
   const run = createKernelRun({
     projectId,
     runNodeId,
-    steps: getImageRunSteps(Boolean(referenceImages.length)),
+    steps: kernelStepsFromPlan(routePlan),
   });
   const toolCallIds = getToolCallIds(run);
   const skillInput = {
@@ -281,6 +313,9 @@ export async function executeImageAgentRun({
     skillSlug: "prompt-expand",
     modelProvider,
     promptTrace,
+    selectedCapabilityIds,
+    selectedCapabilities: selectedCapabilitySummaries,
+    routePlan,
   };
   let activeStepId = "agent_text";
   let activeTool: ActiveTool | null = null;
@@ -300,6 +335,22 @@ export async function executeImageAgentRun({
       selectedNodeId: canvasContext.selectedNodeId ?? null,
       upstreamContext: canvasContext.upstreamContext,
       promptTrace,
+      selectedCapabilityIds,
+      selectedCapabilities: selectedCapabilitySummaries,
+      routePlan,
+    },
+  });
+  await writeStepEvent({
+    projectId,
+    runNodeId,
+    stepId: "router",
+    type: "step.started",
+    payload: {
+      label: "Route capabilities",
+      selectedCapabilityIds,
+      selectedCapabilities: selectedCapabilitySummaries,
+      router: routePlan.router,
+      stepGraph: routePlan.stepGraph,
     },
   });
 
@@ -416,6 +467,10 @@ export async function executeImageAgentRun({
     }
 
     activeStepId = "expand_prompt";
+    const promptExpandCapability = requireCapability(
+      capabilityRegistry,
+      PROMPT_EXPAND_CAPABILITY_ID
+    );
     startKernelStep(run, activeStepId);
     await writeStepEvent({
       projectId,
@@ -426,6 +481,7 @@ export async function executeImageAgentRun({
     });
     const expandedSkillInput = {
       ...skillInput,
+      capabilityId: promptExpandCapability.manifest.capabilityId,
       referenceImageAnalysis: referenceImageAnalysis || undefined,
     };
     activeTool = {
@@ -447,8 +503,14 @@ export async function executeImageAgentRun({
         input: expandedSkillInput,
       },
     });
+    await assertToolCanExecute({
+      capability: promptExpandCapability,
+      projectId,
+      runNodeId,
+      tool: activeTool,
+      writer,
+    });
 
-    const promptSkill = await getPromptExpandSkill();
     const skillAssembly = buildSkillPromptAssembly({
       canvasContext,
       referenceImageAnalysis,
@@ -463,6 +525,7 @@ export async function executeImageAgentRun({
       originalPrompt: canvasContext.prompt,
       expandedPrompt,
       referenceImageAnalysis: referenceImageAnalysis || undefined,
+      capabilityId: promptExpandCapability.manifest.capabilityId,
       skill: getSkillToolSummary(promptSkill),
       promptTrace: skillAssembly.trace,
     };
@@ -505,6 +568,7 @@ export async function executeImageAgentRun({
         readSeedreamMaxOutputImagesFromEnv()
       ),
       promptSkill: getSkillToolSummary(promptSkill),
+      capabilityIds: selectedCapabilityIds,
     };
     activeTool = {
       stepId: activeStepId,
@@ -525,8 +589,23 @@ export async function executeImageAgentRun({
         input: toolInput,
       },
     });
+    await assertToolCanExecute({
+      capability: imageCapability,
+      projectId,
+      runNodeId,
+      tool: activeTool,
+      writer,
+    });
+    assertImageCapabilityEnvironment(imageCapability);
 
     const output = await generateSeedreamImage(toolInput);
+    const outputWithArtifacts = await createImageArtifacts({
+      images: output.images,
+      projectId,
+      runNodeId,
+      selectedNodeId: canvasContext.selectedNodeId ?? null,
+      toolCallId: activeTool.toolCallId,
+    });
 
     await recordRunEvent({
       projectId,
@@ -544,13 +623,13 @@ export async function executeImageAgentRun({
         analysisOutput,
         imageInput: toolInput,
       },
-      toolOutput: output,
+      toolOutput: outputWithArtifacts,
     });
 
     writer.write({
       type: "tool-output-available",
       toolCallId: activeTool.toolCallId,
-      output,
+      output: outputWithArtifacts,
     });
     await writeStepEvent({
       projectId,
@@ -560,17 +639,10 @@ export async function executeImageAgentRun({
       payload: {
         toolCallId: activeTool.toolCallId,
         toolName: activeTool.toolName,
-        output,
-      },
-    });
-    for (const image of output.images) {
-      const artifact = {
-        id: image.id,
-        type: "image" as const,
-        uri: image.url,
-        title: image.title,
-        metadata: image.metadata,
-      };
+          output: outputWithArtifacts,
+        },
+      });
+    for (const artifact of outputWithArtifacts.artifacts) {
       run.artifacts.push(artifact);
       await writeStepEvent({
         projectId,
@@ -579,6 +651,7 @@ export async function executeImageAgentRun({
         type: "artifact.created",
         payload: {
           artifact,
+          canvasNodeId: `image-${artifact.id}`,
           toolCallId: activeTool.toolCallId,
           toolName: activeTool.toolName,
         },
@@ -599,7 +672,8 @@ export async function executeImageAgentRun({
       },
     });
   } catch (error) {
-    const errorText = getErrorMessage(error);
+    const typedError = toTypedCapabilityError(error);
+    const errorText = typedError.message;
     console.error("[agent-run]", error);
 
     failKernelStep(run, activeStepId, errorText);
@@ -610,6 +684,8 @@ export async function executeImageAgentRun({
       type: "tool.error",
       payload: {
         errorText,
+        errorCode: typedError.code,
+        errorDetails: typedError.details,
         failedStepId: activeStepId,
         toolCallId: activeTool?.toolCallId,
         toolName: activeTool?.toolName,
@@ -633,11 +709,13 @@ export async function executeImageAgentRun({
       errorText,
     });
 
-    writeToolError(writer, activeTool ?? getFallbackActiveTool({
-      canvasContext,
-      referenceImages,
-      toolCallIds,
-    }), errorText);
+    if (typedError.code !== "approval.required") {
+      writeToolError(writer, activeTool ?? getFallbackActiveTool({
+        canvasContext,
+        referenceImages,
+        toolCallIds,
+      }), errorText);
+    }
     await writeStepEvent({
       projectId,
       runNodeId,
@@ -645,11 +723,151 @@ export async function executeImageAgentRun({
       type: "run.failed",
       payload: {
         errorText,
+        errorCode: typedError.code,
+        errorDetails: typedError.details,
         failedStepId: activeStepId,
         promptTrace,
+        selectedCapabilityIds,
       },
       errorText,
     });
+  }
+}
+
+async function createImageArtifacts({
+  images,
+  projectId,
+  runNodeId,
+  selectedNodeId,
+  toolCallId,
+}: {
+  images: SeedreamGeneratedImage[];
+  projectId: string;
+  runNodeId: string;
+  selectedNodeId: string | null;
+  toolCallId: string;
+}) {
+  const artifacts: ArtifactRef[] = [];
+  const imagesWithArtifacts: Array<SeedreamGeneratedImage & { artifact: ArtifactRef }> =
+    [];
+
+  for (const image of images) {
+    const artifact = artifactRefSchema.parse({
+      id: image.id,
+      type: "image",
+      uri: image.url,
+      title: image.title,
+      metadata: image.metadata ?? {},
+    });
+
+    await createArtifact({
+      id: artifact.id,
+      projectId,
+      runNodeId,
+      type: artifact.type,
+      uri: artifact.uri,
+      title: artifact.title,
+      metadata: artifact.metadata,
+      toolCallId,
+      sourceNodeId: selectedNodeId,
+    });
+
+    artifacts.push(artifact);
+    imagesWithArtifacts.push({
+      ...image,
+      artifact,
+    });
+  }
+
+  return {
+    images: imagesWithArtifacts,
+    artifacts,
+  };
+}
+
+async function assertToolCanExecute({
+  capability,
+  projectId,
+  runNodeId,
+  tool,
+  writer,
+}: {
+  capability: RegisteredCapability;
+  projectId: string;
+  runNodeId: string;
+  tool: ActiveTool;
+  writer: UIMessageStreamWriter<UIMessage>;
+}) {
+  try {
+    assertCapabilityMayExecute(capability);
+  } catch (error) {
+    const typedError = toTypedCapabilityError(error);
+    if (typedError.code !== "approval.required") {
+      throw typedError;
+    }
+
+    const approvalId = `approval-${tool.toolCallId}`;
+    writer.write({
+      type: "tool-approval-request",
+      approvalId,
+      toolCallId: tool.toolCallId,
+    });
+    await writeStepEvent({
+      projectId,
+      runNodeId,
+      stepId: tool.stepId,
+      type: "tool.input",
+      payload: {
+        toolCallId: tool.toolCallId,
+        toolName: tool.toolName,
+        approvalId,
+        capabilityId: capability.manifest.capabilityId,
+        state: "approval-requested",
+        policy: capability.manifest.policy,
+      },
+    });
+
+    writer.write({
+      type: "tool-output-denied",
+      toolCallId: tool.toolCallId,
+    });
+    await writeStepEvent({
+      projectId,
+      runNodeId,
+      stepId: tool.stepId,
+      type: "tool.error",
+      payload: {
+        toolCallId: tool.toolCallId,
+        toolName: tool.toolName,
+        approvalId,
+        capabilityId: capability.manifest.capabilityId,
+        state: "output-denied",
+        errorCode: typedError.code,
+        errorText: typedError.message,
+      },
+      errorText: typedError.message,
+    });
+
+    throw typedError;
+  }
+}
+
+function assertImageCapabilityEnvironment(capability: RegisteredCapability) {
+  if (!isSeedreamConfigured()) {
+    throw toTypedCapabilityError(
+      new Error(
+        "SEEDREAM_ACCESS_KEY_ID or VOLCENGINE_ACCESS_KEY_ID is not configured."
+      )
+    );
+  }
+
+  if (
+    capability.manifest.policy.mayExternalCost &&
+    !capability.manifest.policy.canUseNetwork
+  ) {
+    throw new Error(
+      `Capability ${capability.manifest.capabilityId} may create external cost but network access is disabled.`
+    );
   }
 }
 
@@ -705,30 +923,14 @@ function getSkillToolSummary(skill: AgentSkill) {
   };
 }
 
-async function getPromptExpandSkill() {
-  const latestSkill = await getLatestPublicSkillBySlug("prompt-expand");
+function getPromptExpandSkill(registry: RegisteredCapability[]) {
+  const capability = getCapability(registry, PROMPT_EXPAND_CAPABILITY_ID);
+  const latestSkill = capability?.skill as AgentSkill | undefined;
   if (!latestSkill) {
     throw new Error("请先在 Skill 面板上传 prompt-expand skill。");
   }
 
   return latestSkill;
-}
-
-function getImageRunSteps(hasReferenceImages: boolean): RunStepDefinition[] {
-  return [
-    { id: "agent_text", label: "Run explanation" },
-    ...(hasReferenceImages
-      ? [
-          {
-            id: "analyze_reference_images",
-            label: "Analyze reference images",
-            toolName: "analyze_reference_images" as const,
-          },
-        ]
-      : []),
-    { id: "expand_prompt", label: "Expand prompt", toolName: "expand_prompt" },
-    { id: "generate_image", label: "Generate image", toolName: "generate_image" },
-  ];
 }
 
 function getToolCallIds(run: Run) {
@@ -860,8 +1062,4 @@ function safeInferSeedreamResultCount(prompt: string) {
   } catch {
     return 1;
   }
-}
-
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
 }

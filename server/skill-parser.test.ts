@@ -39,6 +39,73 @@ describe("skill zip parser", () => {
     );
   });
 
+  it("extracts capability metadata from SKILL.md frontmatter", async () => {
+    const zip = new JSZip();
+    zip.file(
+      "prompt-expand/SKILL.md",
+      [
+        "---",
+        "name: prompt-expand",
+        "description: 扩写图片 prompt",
+        "capabilityId: prompt.expand",
+        "version: 1.0.0",
+        'triggers: ["图片","海报"]',
+        'toolIds: ["expand_prompt"]',
+        "tokenBudget: 1200",
+        "requiresApproval: false",
+        "---",
+        "",
+        "只输出 expanded prompt。",
+      ].join("\n")
+    );
+
+    const parsed = await parseSkillZip(await zip.generateAsync({ type: "uint8array" }));
+
+    expect(parsed.capabilityManifest?.capabilityId).toBe("prompt.expand");
+    expect(parsed.capabilityManifest?.triggers).toEqual(["图片", "海报"]);
+    expect(parsed.sourceManifest.capabilityManifest?.toolIds).toEqual([
+      "expand_prompt",
+    ]);
+  });
+
+  it("extracts capability metadata from a manifest file", async () => {
+    const zip = new JSZip();
+    zip.file(
+      "research/SKILL.md",
+      [
+        "---",
+        "name: research-helper",
+        "description: research capability",
+        "---",
+        "",
+        "Research instructions.",
+      ].join("\n")
+    );
+    zip.file(
+      "research/manifest.json",
+      JSON.stringify({
+        capabilityId: "research.web",
+        version: "0.1.0",
+        description: "Research the web",
+        triggers: ["research"],
+        inputSchema: { type: "object" },
+        outputSchema: { type: "object" },
+        toolIds: ["web_search"],
+        requiresApproval: true,
+      })
+    );
+
+    const parsed = await parseSkillZip(await zip.generateAsync({ type: "uint8array" }));
+
+    expect(parsed.capabilityManifest).toMatchObject({
+      capabilityId: "research.web",
+      requiresApproval: true,
+    });
+    expect(parsed.sourceManifest.files.map((file) => file.path)).toContain(
+      "research/manifest.json"
+    );
+  });
+
   it("throws when SKILL.md is missing", async () => {
     const zip = new JSZip();
     zip.file("prompt-expand/README.md", "missing skill file");

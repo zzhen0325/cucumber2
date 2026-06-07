@@ -1,8 +1,15 @@
 import JSZip from "jszip";
 
+import {
+  maybeParseCapabilityManifest,
+  parseCapabilityManifest,
+  type CapabilityManifest,
+} from "./capabilities.ts";
+
 export type SkillSourceManifest = {
   packageRoot: string;
   skillPath: string;
+  capabilityManifest?: CapabilityManifest;
   files: Array<{
     path: string;
     size: number | null;
@@ -15,12 +22,14 @@ export type ParsedSkillPackage = {
   description: string;
   instructions: string;
   config: Record<string, unknown>;
+  capabilityManifest?: CapabilityManifest;
   sourceManifest: SkillSourceManifest;
 };
 
 type Frontmatter = {
   name?: string;
   description?: string;
+  [key: string]: unknown;
 };
 
 export async function parseSkillZip(
@@ -50,6 +59,11 @@ export async function parseSkillZip(
   }
 
   const config = await parseConfigFiles(zip, rootPrefix);
+  const capabilityManifest = await parseCapabilityMetadata({
+    zip,
+    rootPrefix,
+    frontmatter,
+  });
 
   return {
     name,
@@ -57,9 +71,11 @@ export async function parseSkillZip(
     description: (frontmatter.description ?? "").trim().slice(0, 500),
     instructions: body.trim(),
     config,
+    capabilityManifest: capabilityManifest ?? undefined,
     sourceManifest: {
       packageRoot,
       skillPath,
+      capabilityManifest: capabilityManifest ?? undefined,
       files: files.map((file) => ({
         path: file.name,
         size: getZipFileSize(file),
@@ -129,6 +145,44 @@ async function parseConfigFiles(zip: JSZip, rootPrefix: string) {
   return config;
 }
 
+async function parseCapabilityMetadata({
+  frontmatter,
+  rootPrefix,
+  zip,
+}: {
+  frontmatter: Frontmatter;
+  rootPrefix: string;
+  zip: JSZip;
+}) {
+  const frontmatterManifest = maybeParseCapabilityManifest(frontmatter);
+  if (frontmatterManifest) {
+    return frontmatterManifest;
+  }
+
+  for (const path of [
+    "manifest.json",
+    "capability.json",
+    "config/manifest.json",
+    "config/capability.json",
+  ]) {
+    const file = zip.file(`${rootPrefix}${path}`);
+    if (!file) {
+      continue;
+    }
+
+    const raw = await file.async("string");
+    try {
+      return parseCapabilityManifest(JSON.parse(raw) as unknown);
+    } catch (error) {
+      throw new Error(`Invalid capability manifest: ${path}. ${getErrorMessage(error)}`, {
+        cause: error,
+      });
+    }
+  }
+
+  return null;
+}
+
 function parseYamlLikeFrontmatter(text: string): Frontmatter {
   const frontmatter: Frontmatter = {};
 
@@ -139,25 +193,45 @@ function parseYamlLikeFrontmatter(text: string): Frontmatter {
     }
 
     const key = match[1];
-    const value = stripYamlScalar(match[2]);
+    const value = parseYamlScalar(match[2]);
     if (key === "name") {
-      frontmatter.name = value;
-    }
-    if (key === "description") {
-      frontmatter.description = value;
+      frontmatter.name = String(value);
+    } else if (key === "description") {
+      frontmatter.description = String(value);
+    } else {
+      frontmatter[key] = value;
     }
   }
 
   return frontmatter;
 }
 
-function stripYamlScalar(value: string) {
+function parseYamlScalar(value: string): unknown {
   const trimmed = value.trim();
   if (
     (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
     (trimmed.startsWith("'") && trimmed.endsWith("'"))
   ) {
     return trimmed.slice(1, -1);
+  }
+  if (trimmed === "true") {
+    return true;
+  }
+  if (trimmed === "false") {
+    return false;
+  }
+  if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) {
+    return Number(trimmed);
+  }
+  if (
+    (trimmed.startsWith("[") && trimmed.endsWith("]")) ||
+    (trimmed.startsWith("{") && trimmed.endsWith("}"))
+  ) {
+    try {
+      return JSON.parse(trimmed) as unknown;
+    } catch {
+      return trimmed;
+    }
   }
 
   return trimmed;
