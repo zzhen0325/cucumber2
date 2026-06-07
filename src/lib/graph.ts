@@ -163,10 +163,17 @@ export function createRunDraft(
       prompt,
       status: "queued",
       toolPart: {
-        type: "tool-generate_image",
+        type: "tool-expand_prompt",
         state: "input-streaming",
-        input: { prompt, upstreamContext },
+        input: { prompt, upstreamContext, skillSlug: "prompt-expand" },
       },
+      toolParts: [
+        {
+          type: "tool-expand_prompt",
+          state: "input-streaming",
+          input: { prompt, upstreamContext, skillSlug: "prompt-expand" },
+        },
+      ],
     },
   };
 
@@ -399,17 +406,28 @@ export function toolPartFromMessagePart(part: unknown): CanvasToolPart | null {
         ? candidate.type.slice("tool-".length)
         : null;
 
-  if (toolName !== "generate_image") {
+  if (toolName !== "generate_image" && toolName !== "expand_prompt") {
     return null;
   }
 
   return {
-    type: "tool-generate_image",
+    type: `tool-${toolName}`,
     state: candidate.state ?? "input-streaming",
     input: candidate.input,
     output: candidate.output,
     errorText: candidate.errorText,
   };
+}
+
+export function toolPartsFromMessageParts(parts: unknown[] | undefined) {
+  if (!parts?.length) {
+    return [];
+  }
+
+  return parts.flatMap((part) => {
+    const toolPart = toolPartFromMessagePart(part);
+    return toolPart ? [toolPart] : [];
+  });
 }
 
 export function textFromMessageParts(parts: unknown[] | undefined): string {

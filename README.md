@@ -9,8 +9,9 @@ Agent Run nodes display both the assistant's streamed text output and the `gener
 - Vite + React + TypeScript
 - Vercel AI SDK v6 via `useChat`, `DefaultChatTransport`, and `streamText`
 - DeepSeek API for the agent model
+- Public Skill system for prompt expansion before image generation
 - Volcengine Seedream 4.6 for image generation
-- Supabase Postgres for users, projects, canvas snapshots, and run event storage
+- Supabase Postgres for users, projects, skills, canvas snapshots, and run event storage
 - AI Elements registry components for Canvas, Node, Edge, Tool, Message, and Prompt Input
 - React Flow under the AI Elements canvas
 - Hono Node server for `/api/agent-run`
@@ -53,6 +54,8 @@ SEEDREAM_CA_CERT=/absolute/path/to/corp-root-ca.pem
 
 `DEEPSEEK_API_KEY` is required for the AI SDK model call. `SEEDREAM_ACCESS_KEY_ID` and `SEEDREAM_SECRET_ACCESS_KEY` are required by the `generate_image` tool. The Seedream client also accepts `VOLCENGINE_ACCESS_KEY_ID` and `VOLCENGINE_SECRET_ACCESS_KEY` as aliases. Missing credentials are shown directly in the Run node; the app does not create placeholder images.
 
+Image generation also requires a public `prompt-expand` skill. Upload `/Users/bytedance/Desktop/prompt-expand-skill.zip` or another zip with a `SKILL.md` frontmatter `name: prompt-expand` from the canvas Skill panel. The server stores the parsed skill in `public.agent_skills`, including `SKILL.md` instructions, parsed `config/*.json`, and the source manifest. It does not install, start, or execute code from uploaded zips.
+
 When the prompt explicitly asks for multiple results, such as `一次生成4张图片`, the tool requests that many Seedream output URLs and renders them as sibling image result nodes. `SEEDREAM_MAX_OUTPUT_IMAGES` caps explicit requests; prompts above the cap fail visibly in the Run node instead of silently returning fewer images.
 
 `SUPABASE_URL` and `SUPABASE_SECRET_KEY` are required by the Hono API for database storage. Keep `SUPABASE_SECRET_KEY` server-only; do not expose it with a `VITE_` prefix. The current Supabase project is `cucumber2` (`wbjqqywnwmghtcwpoatb`).
@@ -66,33 +69,40 @@ The database stores user-owned projects without introducing a second frontend ca
 - `public.app_users`: MVP name/password users; passwords are stored as scrypt hashes.
 - `public.app_sessions`: hashed httpOnly cookie session tokens with expiry.
 - `public.agent_projects`: user-owned project snapshots with `nodes`, `edges`, `selected_node_id`, `last_run_id`, and soft-delete `deleted_at`.
+- `public.agent_skills`: public uploaded skills, owned by the uploader, with parsed instructions, config, source manifest, and soft-delete `deleted_at`.
 - `public.agent_run_events`: append-only run events keyed by `project_id` and `run_node_id`, including prompt, upstream context, tool input, output, status, and error text.
 
 All public tables have RLS enabled. Anonymous and browser-authenticated roles are revoked; server reads and writes use the Supabase secret key through `/api/auth/*`, `/api/projects/*`, and `/api/agent-run`.
 
-The migration files live in `supabase/migrations`. Existing `agent_canvases` data is renamed to `agent_projects` and remains unowned until the first user registers, at which point the API assigns those unowned projects to that user.
+The migration files live in `supabase/migrations`. Apply them before uploading skills; otherwise `/api/skills` will report that the Skill storage table is missing. Existing `agent_canvases` data is renamed to `agent_projects` and remains unowned until the first user registers, at which point the API assigns those unowned projects to that user.
 
 ## Project API
 
 - `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`
 - `GET /api/projects`, `POST /api/projects`
 - `GET /api/projects/:projectId`, `PATCH /api/projects/:projectId`, `DELETE /api/projects/:projectId`
+- `GET /api/skills`, `POST /api/skills`
+- `PATCH /api/skills/:skillId`, `DELETE /api/skills/:skillId`
 
 `DELETE /api/projects/:projectId` soft-deletes the project. `/api/agent-run` requires a logged-in session and receives `projectId` in the request body.
+
+Uploaded skills are public and visible to every logged-in user. Only the uploader can edit or delete a skill. `POST /api/skills` accepts multipart form data with a `.zip` file under the `file` field.
 
 ## Canvas Branching
 
 Submitting from the bottom composer with no referenced node creates a new root `prompt -> run` chain. Selecting a single Prompt or Image Result node makes it the reference for the next submission and creates `selected node -> prompt -> run`. Dragging on the empty canvas marquee-selects multiple nodes for group movement or deletion; multi-selection does not create a branch anchor. Agent Run nodes are status views only; selecting one does not create a branch anchor.
 
-## Seedream Tool Contract
+## Skill And Seedream Tool Contract
 
-`generate_image` receives the current prompt plus upstream canvas context:
+Every `/api/agent-run` first calls the default `prompt-expand` skill as a visible `expand_prompt` tool stage. The latest updated public skill with `slug === "prompt-expand"` is used. If no such skill exists, the Run node shows the error and Seedream is not called.
+
+`expand_prompt` receives the current prompt plus upstream canvas context:
 
 ```json
 {
   "prompt": "current user prompt",
   "selectedNodeId": "prompt-or-image-node-id-or-null",
-  "resultCount": 4,
+  "skillSlug": "prompt-expand",
   "upstreamContext": [
     {
       "nodeId": "prompt-1",
@@ -111,7 +121,7 @@ Submitting from the bottom composer with no referenced node creates a new root `
 }
 ```
 
-The server passes image node URLs from `upstreamContext` to Seedream as reference images, disables Seedream `force_single` for multi-result requests, then returns:
+It returns an `expandedPrompt`. `generate_image` then receives the expanded prompt plus the original prompt, selected node, upstream context, requested result count, and skill metadata. The server passes image node URLs from `upstreamContext` to Seedream as reference images, disables Seedream `force_single` for multi-result requests, then returns:
 
 ```json
 {

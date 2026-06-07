@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
+import { canEditSkill } from "./skill-access.ts";
 import { canAccessProject } from "./project-access.ts";
 import { getProjectSummaryStats } from "../src/lib/project-summary.ts";
 import type {
@@ -34,6 +35,21 @@ export type AgentProject = {
   updatedAt: string;
 };
 
+export type AgentSkill = {
+  id: string;
+  ownerUserId: string | null;
+  name: string;
+  slug: string;
+  description: string;
+  instructions: string;
+  config: Record<string, unknown>;
+  sourceManifest: Record<string, unknown>;
+  isPublic: boolean;
+  canEdit: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type CreateUserInput = {
   username: string;
   passwordHash: string;
@@ -62,9 +78,29 @@ type RunEventInput = {
   selectedNodeId?: string | null;
   upstreamContext: unknown[];
   status: AgentRunStatus;
+  skillInput?: unknown;
+  skillOutput?: unknown;
   toolInput?: unknown;
   toolOutput?: unknown;
   errorText?: string | null;
+};
+
+type CreateSkillInput = {
+  ownerUserId: string;
+  name: string;
+  slug: string;
+  description: string;
+  instructions: string;
+  config: Record<string, unknown>;
+  sourceManifest: Record<string, unknown>;
+};
+
+type UpdateSkillInput = {
+  skillId: string;
+  userId: string;
+  name?: string;
+  description?: string;
+  instructions?: string;
 };
 
 type UserRow = {
@@ -91,6 +127,21 @@ type ProjectRow = {
   edges: unknown[];
   selected_node_id: string | null;
   last_run_id: string | null;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type SkillRow = {
+  id: string;
+  owner_user_id: string | null;
+  name: string;
+  slug: string;
+  description: string;
+  instructions: string;
+  config: Record<string, unknown> | null;
+  source_manifest: Record<string, unknown> | null;
+  is_public: boolean;
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
@@ -340,7 +391,9 @@ export async function recordRunEvent(input: RunEventInput) {
     selected_node_id: input.selectedNodeId ?? null,
     upstream_context: input.upstreamContext,
     status: input.status,
-    tool_input: input.toolInput ?? null,
+    tool_input: input.skillInput
+      ? { skillInput: input.skillInput, imageInput: input.toolInput ?? null }
+      : input.toolInput ?? null,
     tool_output: input.toolOutput ?? null,
     error_text: input.errorText ?? null,
   });
@@ -350,6 +403,123 @@ export async function recordRunEvent(input: RunEventInput) {
   }
 }
 
+export async function listPublicSkillsForUser(userId: string) {
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("agent_skills")
+    .select("*")
+    .eq("is_public", true)
+    .is("deleted_at", null)
+    .order("updated_at", { ascending: false })
+    .returns<SkillRow[]>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data.map((row) => mapSkillRow(row, userId));
+}
+
+export async function createSkill(input: CreateSkillInput) {
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("agent_skills")
+    .insert({
+      owner_user_id: input.ownerUserId,
+      name: input.name,
+      slug: input.slug,
+      description: input.description,
+      instructions: input.instructions,
+      config: input.config,
+      source_manifest: input.sourceManifest,
+      is_public: true,
+    })
+    .select()
+    .single<SkillRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  return mapSkillRow(data, input.ownerUserId);
+}
+
+export async function updateSkillForUser(input: UpdateSkillInput) {
+  const existing = await getSkillRow(input.skillId);
+  if (!canEditSkill(input.userId, mapSkillAccess(existing))) {
+    return null;
+  }
+
+  const payload: Record<string, unknown> = {};
+  if (input.name !== undefined) {
+    payload.name = input.name;
+  }
+  if (input.description !== undefined) {
+    payload.description = input.description;
+  }
+  if (input.instructions !== undefined) {
+    payload.instructions = input.instructions;
+  }
+
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("agent_skills")
+    .update(payload)
+    .eq("id", input.skillId)
+    .eq("owner_user_id", input.userId)
+    .is("deleted_at", null)
+    .select()
+    .maybeSingle<SkillRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data ? mapSkillRow(data, input.userId) : null;
+}
+
+export async function softDeleteSkillForUser(skillId: string, userId: string) {
+  const existing = await getSkillRow(skillId);
+  if (!canEditSkill(userId, mapSkillAccess(existing))) {
+    return false;
+  }
+
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("agent_skills")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", skillId)
+    .eq("owner_user_id", userId)
+    .is("deleted_at", null)
+    .select("id")
+    .maybeSingle<{ id: string }>();
+
+  if (error) {
+    throw error;
+  }
+
+  return Boolean(data);
+}
+
+export async function getLatestPublicSkillBySlug(slug: string) {
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("agent_skills")
+    .select("*")
+    .eq("slug", slug)
+    .eq("is_public", true)
+    .is("deleted_at", null)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<SkillRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data ? mapSkillRow(data, data.owner_user_id ?? "") : null;
+}
+
 async function getProjectRow(projectId: string) {
   const client = getSupabaseClient();
   const { data, error } = await client
@@ -357,6 +527,21 @@ async function getProjectRow(projectId: string) {
     .select("*")
     .eq("id", projectId)
     .maybeSingle<ProjectRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function getSkillRow(skillId: string) {
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("agent_skills")
+    .select("*")
+    .eq("id", skillId)
+    .maybeSingle<SkillRow>();
 
   if (error) {
     throw error;
@@ -419,6 +604,17 @@ function mapProjectAccess(row: ProjectRow | null) {
   };
 }
 
+function mapSkillAccess(row: SkillRow | null) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    ownerUserId: row.owner_user_id,
+    deletedAt: row.deleted_at,
+  };
+}
+
 function mapProjectSummaryRow(row: ProjectRow): ProjectSummary {
   const nodes = normalizeNodes(row.nodes);
   const stats = getProjectSummaryStats(nodes);
@@ -456,4 +652,21 @@ function normalizeNodes(nodes: unknown[]) {
 
 function normalizeEdges(edges: unknown[]) {
   return Array.isArray(edges) ? (edges as AgentCanvasEdge[]) : [];
+}
+
+function mapSkillRow(row: SkillRow, userId: string): AgentSkill {
+  return {
+    id: row.id,
+    ownerUserId: row.owner_user_id,
+    name: row.name,
+    slug: row.slug,
+    description: row.description,
+    instructions: row.instructions,
+    config: row.config ?? {},
+    sourceManifest: row.source_manifest ?? {},
+    isPublic: row.is_public,
+    canEdit: canEditSkill(userId, mapSkillAccess(row)),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }

@@ -23,12 +23,18 @@ import {
   Frame,
   Image,
   Layers,
+  Loader2,
   MousePointer2,
   Palette,
   PenLine,
   Plus,
   Sparkles,
+  Pencil,
+  Trash2,
   Type,
+  Upload,
+  WandSparkles,
+  X,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -47,12 +53,19 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import { loadProject, updateProject } from "@/lib/project-storage";
 import {
+  deleteSkill,
+  loadSkills,
+  updateSkill,
+  uploadSkill,
+  type SkillSummary,
+} from "@/lib/skill-storage";
+import {
   createImageResultNodes,
   createRunDraft,
   extractImagesFromToolOutput,
   getRunReferenceNodeId,
   textFromMessageParts,
-  toolPartFromMessagePart,
+  toolPartsFromMessageParts,
 } from "@/lib/graph";
 import type {
   AgentCanvasEdge,
@@ -93,6 +106,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const [contextCount, setContextCount] = useState(0);
   const [storageStatus, setStorageStatus] = useState<StorageStatus>("loading");
   const [storageError, setStorageError] = useState<string | null>(null);
+  const [skillPanelOpen, setSkillPanelOpen] = useState(false);
   const activeRunId = useRef<string | null>(null);
   const hasLoadedProject = useRef(false);
   const saveTimer = useRef<ReturnType<typeof window.setTimeout> | null>(null);
@@ -116,12 +130,21 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
               error: message,
               toolPart: {
                 ...(node.data.toolPart ?? {
-                  type: "tool-generate_image",
+                  type: "tool-expand_prompt",
                   input: { prompt: node.data.prompt },
                 }),
                 state: "output-error",
                 errorText: message,
               } satisfies CanvasToolPart,
+              toolParts: [
+                ...(node.data.toolParts ?? []),
+                {
+                  type: "tool-expand_prompt",
+                  state: "output-error",
+                  input: { prompt: node.data.prompt },
+                  errorText: message,
+                },
+              ],
             },
           };
         })
@@ -295,9 +318,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     const assistantMessage = [...messages]
       .reverse()
       .find((message) => message.role === "assistant");
-    const toolPart = assistantMessage?.parts
-      .map((part) => toolPartFromMessagePart(part))
-      .find(Boolean);
+    const toolParts = toolPartsFromMessageParts(assistantMessage?.parts);
+    const toolPart = toolParts.find((part) => part.type === "tool-generate_image")
+      ?? toolParts.at(-1);
     const agentText = textFromMessageParts(assistantMessage?.parts);
 
     if (!toolPart) {
@@ -309,18 +332,27 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
     updateRun(runId, {
       status:
-        toolPart.state === "output-error"
+        toolParts.some((part) => part.state === "output-error")
           ? "error"
-          : toolPart.state === "output-available"
+          : toolParts.some(
+                (part) =>
+                  part.type === "tool-generate_image" &&
+                  part.state === "output-available"
+              )
             ? "success"
             : "running",
       agentText,
       toolPart,
+      toolParts,
       error: toolPart.errorText,
     });
 
-    if (toolPart.state === "output-available") {
-      const images = extractImagesFromToolOutput(toolPart.output);
+    const imageToolPart = toolParts.find(
+      (part) =>
+        part.type === "tool-generate_image" && part.state === "output-available"
+    );
+    if (imageToolPart) {
+      const images = extractImagesFromToolOutput(imageToolPart.output);
       if (images.length) {
         addResultsForRun(runId, images);
       }
@@ -423,7 +455,14 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         onBack={onBack}
       />
       <ToolRail />
-      <ViewportControls />
+      <ViewportControls
+        skillPanelOpen={skillPanelOpen}
+        onToggleSkills={() => setSkillPanelOpen((current) => !current)}
+      />
+      <SkillPanel
+        open={skillPanelOpen}
+        onClose={() => setSkillPanelOpen(false)}
+      />
       <EmptyState visible={!nodes.length} />
 
       <Composer
@@ -553,7 +592,13 @@ function ToolRail() {
   );
 }
 
-function ViewportControls() {
+function ViewportControls({
+  skillPanelOpen,
+  onToggleSkills,
+}: {
+  skillPanelOpen: boolean;
+  onToggleSkills: () => void;
+}) {
   return (
     <div className="viewport-controls">
       <button aria-label="Background color" type="button">
@@ -565,6 +610,15 @@ function ViewportControls() {
       <button aria-label="Generated files" type="button">
         <Image size={14} />
       </button>
+      <button
+        aria-label="Skills"
+        className={skillPanelOpen ? "active" : ""}
+        onClick={onToggleSkills}
+        title="Skills"
+        type="button"
+      >
+        <WandSparkles size={14} />
+      </button>
       <span className="divider" />
       <button aria-label="Zoom out" type="button">
         <ZoomOut size={14} />
@@ -574,6 +628,277 @@ function ViewportControls() {
         <ZoomIn size={14} />
       </button>
     </div>
+  );
+}
+
+function SkillPanel({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  const [skills, setSkills] = useState<SkillSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [editingSkillId, setEditingSkillId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
+  const [editingDescription, setEditingDescription] = useState("");
+  const [editingInstructions, setEditingInstructions] = useState("");
+  const hasPromptExpand = skills.some((skill) => skill.slug === "prompt-expand");
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    let ignore = false;
+
+    loadSkills()
+      .then(({ skills: nextSkills }) => {
+        if (!ignore) {
+          setSkills(nextSkills);
+        }
+      })
+      .catch((nextError: unknown) => {
+        if (!ignore) {
+          setError(getClientError(nextError));
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [open]);
+
+  const handleUpload = async (file: File | null) => {
+    if (!file) {
+      return;
+    }
+
+    setBusyAction("upload");
+    setError(null);
+
+    try {
+      const { skill } = await uploadSkill(file);
+      setSkills((current) => [skill, ...current]);
+    } catch (nextError) {
+      setError(getClientError(nextError));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const startEditing = (skill: SkillSummary) => {
+    setEditingSkillId(skill.id);
+    setEditingName(skill.name);
+    setEditingDescription(skill.description);
+    setEditingInstructions(skill.instructions);
+  };
+
+  const cancelEditing = () => {
+    setEditingSkillId(null);
+    setEditingName("");
+    setEditingDescription("");
+    setEditingInstructions("");
+  };
+
+  const handleSave = async (event: FormEvent<HTMLFormElement>, skillId: string) => {
+    event.preventDefault();
+    if (!editingName.trim() || !editingInstructions.trim()) {
+      return;
+    }
+
+    setBusyAction(`save:${skillId}`);
+    setError(null);
+
+    try {
+      const { skill } = await updateSkill({
+        skillId,
+        name: editingName,
+        description: editingDescription,
+        instructions: editingInstructions,
+      });
+      setSkills((current) =>
+        current.map((item) => (item.id === skill.id ? skill : item))
+      );
+      cancelEditing();
+    } catch (nextError) {
+      setError(getClientError(nextError));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleDelete = async (skill: SkillSummary) => {
+    if (!window.confirm(`删除「${skill.name}」？`)) {
+      return;
+    }
+
+    setBusyAction(`delete:${skill.id}`);
+    setError(null);
+
+    try {
+      await deleteSkill(skill.id);
+      setSkills((current) => current.filter((item) => item.id !== skill.id));
+    } catch (nextError) {
+      setError(getClientError(nextError));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <aside className="skill-panel" aria-label="Skill 面板">
+      <header className="skill-panel-header">
+        <div>
+          <strong>Skills</strong>
+          <span>{hasPromptExpand ? "prompt-expand 默认启用" : "需要上传 prompt-expand"}</span>
+        </div>
+        <button
+          aria-label="关闭 Skill 面板"
+          onClick={onClose}
+          title="关闭"
+          type="button"
+        >
+          <X size={14} />
+        </button>
+      </header>
+
+      <label className="skill-upload">
+        <input
+          accept=".zip,application/zip"
+          disabled={busyAction === "upload"}
+          type="file"
+          onChange={(event) => {
+            void handleUpload(event.currentTarget.files?.[0] ?? null);
+            event.currentTarget.value = "";
+          }}
+        />
+        {busyAction === "upload" ? <Loader2 size={14} /> : <Upload size={14} />}
+        <span>上传 zip</span>
+      </label>
+
+      {error && <div className="skill-error">{error}</div>}
+
+      <div className="skill-list">
+        {loading && (
+          <div className="skill-empty">
+            <Loader2 size={15} />
+            <span>加载中</span>
+          </div>
+        )}
+
+        {!loading && !skills.length && (
+          <div className="skill-empty">
+            <WandSparkles size={15} />
+            <span>暂无公开 skill</span>
+          </div>
+        )}
+
+        {!loading &&
+          skills.map((skill) => {
+            const isEditing = editingSkillId === skill.id;
+            const isSaving = busyAction === `save:${skill.id}`;
+            const isDeleting = busyAction === `delete:${skill.id}`;
+
+            return (
+              <section className="skill-row" key={skill.id}>
+                {isEditing ? (
+                  <form
+                    className="skill-edit-form"
+                    onSubmit={(event) => handleSave(event, skill.id)}
+                  >
+                    <input
+                      maxLength={80}
+                      value={editingName}
+                      onChange={(event) => setEditingName(event.currentTarget.value)}
+                    />
+                    <input
+                      maxLength={500}
+                      placeholder="描述"
+                      value={editingDescription}
+                      onChange={(event) =>
+                        setEditingDescription(event.currentTarget.value)
+                      }
+                    />
+                    <textarea
+                      value={editingInstructions}
+                      onChange={(event) =>
+                        setEditingInstructions(event.currentTarget.value)
+                      }
+                    />
+                    <div className="skill-edit-actions">
+                      <button
+                        aria-label="保存 skill"
+                        disabled={
+                          isSaving ||
+                          !editingName.trim() ||
+                          !editingInstructions.trim()
+                        }
+                        title="保存"
+                        type="submit"
+                      >
+                        {isSaving ? <Loader2 size={14} /> : <Check size={14} />}
+                      </button>
+                      <button
+                        aria-label="取消编辑"
+                        onClick={cancelEditing}
+                        title="取消"
+                        type="button"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <>
+                    <div className="skill-row-main">
+                      <div>
+                        <strong title={skill.name}>{skill.name}</strong>
+                        {skill.slug === "prompt-expand" && <span>默认启用</span>}
+                      </div>
+                      <p title={skill.description || skill.instructions}>
+                        {skill.description || skill.instructions}
+                      </p>
+                    </div>
+                    <div className="skill-row-actions">
+                      <button
+                        aria-label="编辑 skill"
+                        disabled={!skill.canEdit || isDeleting}
+                        onClick={() => startEditing(skill)}
+                        title={skill.canEdit ? "编辑" : "只有上传者可编辑"}
+                        type="button"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <button
+                        aria-label="删除 skill"
+                        disabled={!skill.canEdit || isDeleting}
+                        onClick={() => void handleDelete(skill)}
+                        title={skill.canEdit ? "删除" : "只有上传者可删除"}
+                        type="button"
+                      >
+                        {isDeleting ? <Loader2 size={14} /> : <Trash2 size={14} />}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </section>
+            );
+          })}
+      </div>
+    </aside>
   );
 }
 
@@ -712,11 +1037,16 @@ function RunNode({
   selected,
 }: NodeProps<FlowNode<RunNodeData, "runNode">>) {
   const [expanded, setExpanded] = useState(true);
-  const toolPart = data.toolPart ?? {
-    type: "tool-generate_image",
-    state: "input-streaming",
-    input: { prompt: data.prompt },
-  } satisfies CanvasToolPart;
+  const toolParts = data.toolParts?.length
+    ? data.toolParts
+    : [
+        data.toolPart ?? {
+          type: "tool-expand_prompt",
+          state: "input-streaming",
+          input: { prompt: data.prompt },
+        } satisfies CanvasToolPart,
+      ];
+  const latestToolPart = toolParts.at(-1) ?? toolParts[0];
 
   const statusIcon =
     data.status === "success" ? (
@@ -728,10 +1058,11 @@ function RunNode({
     );
 
   const hasToolDetail =
-    data.status !== "queued" || toolPart.state !== "input-streaming";
+    data.status !== "queued" ||
+    toolParts.some((part) => part.state !== "input-streaming");
   const agentText = data.agentText?.trim() ?? "";
   const hasRunOutput = Boolean(agentText) || hasToolDetail;
-  const title = getRunTitle(data.status, toolPart.state);
+  const title = getRunTitle(data.status, latestToolPart.state);
   const toggleLabel = expanded ? "收起输出" : "展开输出";
 
   return (
@@ -766,9 +1097,14 @@ function RunNode({
                 {agentText}
               </p>
             )}
-            {hasToolDetail && (
-              <ToolCallRow error={data.error} toolPart={toolPart} />
-            )}
+            {hasToolDetail &&
+              toolParts.map((part, index) => (
+                <ToolCallRow
+                  error={data.error}
+                  key={`${part.type}-${index}`}
+                  toolPart={part}
+                />
+              ))}
           </div>
         )}
       </NodeContent>
@@ -816,11 +1152,11 @@ function getRunTitle(status: RunNodeData["status"], state: CanvasToolPart["state
     return "生成失败";
   }
 
-  if (status === "success" || state === "output-available") {
+  if (status === "success") {
     return "生成完成";
   }
 
-  if (state === "input-available") {
+  if (state === "input-available" || state === "output-available") {
     return "调用工具";
   }
 
@@ -832,7 +1168,12 @@ function getRunTitle(status: RunNodeData["status"], state: CanvasToolPart["state
 }
 
 function getToolName(toolPart: CanvasToolPart) {
-  return toolPart.type.slice("tool-".length);
+  const names: Record<CanvasToolPart["type"], string> = {
+    "tool-expand_prompt": "提示词扩写",
+    "tool-generate_image": "生成图片",
+  };
+
+  return names[toolPart.type];
 }
 
 function getToolStateIcon(state: CanvasToolPart["state"]) {
@@ -867,11 +1208,7 @@ function getToolDetailLines(toolPart: CanvasToolPart, error?: string) {
   }
 
   if (toolPart.state === "output-available") {
-    const images = extractImagesFromToolOutput(toolPart.output);
-    return [
-      images.length ? `输出 ${images.length} 张图片` : "输出已返回",
-      ...getToolInputLines(toolPart.input),
-    ];
+    return [...getToolOutputLines(toolPart), ...getToolInputLines(toolPart.input)];
   }
 
   if (toolPart.state === "output-denied") {
@@ -881,6 +1218,20 @@ function getToolDetailLines(toolPart: CanvasToolPart, error?: string) {
   return getToolInputLines(toolPart.input);
 }
 
+function getToolOutputLines(toolPart: CanvasToolPart) {
+  if (toolPart.type === "tool-expand_prompt") {
+    const output = toolPart.output as { expandedPrompt?: unknown };
+    if (typeof output?.expandedPrompt === "string" && output.expandedPrompt.trim()) {
+      return [`扩写: ${output.expandedPrompt.trim()}`];
+    }
+
+    return ["扩写完成"];
+  }
+
+  const images = extractImagesFromToolOutput(toolPart.output);
+  return [images.length ? `输出 ${images.length} 张图片` : "输出已返回"];
+}
+
 function getToolInputLines(input: unknown) {
   if (!input || typeof input !== "object") {
     return ["等待工具参数"];
@@ -888,6 +1239,7 @@ function getToolInputLines(input: unknown) {
 
   const candidate = input as {
     prompt?: unknown;
+    skillSlug?: unknown;
     resultCount?: unknown;
     upstreamContext?: unknown;
   };
@@ -895,6 +1247,10 @@ function getToolInputLines(input: unknown) {
 
   if (typeof candidate.prompt === "string" && candidate.prompt.trim()) {
     lines.push(`输入: ${candidate.prompt.trim()}`);
+  }
+
+  if (typeof candidate.skillSlug === "string" && candidate.skillSlug.trim()) {
+    lines.push(`Skill: ${candidate.skillSlug.trim()}`);
   }
 
   if (

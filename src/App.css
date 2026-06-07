@@ -528,7 +528,8 @@
 
 .tool-rail button:hover,
 .viewport-controls button:hover,
-.tool-rail button.active {
+.tool-rail button.active,
+.viewport-controls button.active {
   background: #f6f6f3;
   color: #111111;
 }
@@ -541,7 +542,7 @@
   display: flex;
   align-items: center;
   gap: 2px;
-  width: 211px;
+  width: 243px;
   height: 38px;
   padding: 5px;
   border: 1px solid #ebebeb;
@@ -569,6 +570,227 @@
   font-size: 12px;
   line-height: 16px;
   text-align: center;
+}
+
+.skill-panel {
+  position: absolute;
+  top: 66px;
+  right: 20px;
+  z-index: 25;
+  display: grid;
+  width: min(360px, calc(100vw - 40px));
+  max-height: calc(100vh - 154px);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 12px;
+  overflow: hidden;
+  padding: 14px;
+  border: 1px solid #ebebeb;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
+}
+
+.skill-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.skill-panel-header > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.skill-panel-header strong {
+  color: #111111;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.skill-panel-header span {
+  overflow: hidden;
+  color: #737373;
+  font-size: 11px;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-panel-header button,
+.skill-row-actions button,
+.skill-edit-actions button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid #ebebeb;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #555555;
+  cursor: pointer;
+}
+
+.skill-panel-header button:hover:not(:disabled),
+.skill-row-actions button:hover:not(:disabled),
+.skill-edit-actions button:hover:not(:disabled) {
+  background: #f6f6f3;
+  color: #111111;
+}
+
+.skill-row-actions button:disabled,
+.skill-edit-actions button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.skill-upload {
+  display: inline-flex;
+  width: fit-content;
+  height: 32px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border-radius: 16px;
+  background: #29bf4e;
+  color: #07130a;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.skill-upload input {
+  display: none;
+}
+
+.skill-error {
+  padding: 9px 10px;
+  border: 1px solid rgba(229, 72, 77, 0.2);
+  border-radius: 14px;
+  background: rgba(229, 72, 77, 0.08);
+  color: #cc2e33;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.skill-list {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.skill-empty {
+  display: flex;
+  min-height: 92px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px dashed #d9d9d9;
+  border-radius: 16px;
+  color: #8a8a86;
+  font-size: 12px;
+}
+
+.skill-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #ebebeb;
+  border-radius: 16px;
+  background: #ffffff;
+}
+
+.skill-row-main {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+}
+
+.skill-row-main > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.skill-row-main strong {
+  overflow: hidden;
+  color: #111111;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 17px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-row-main span {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #f8ffbf;
+  color: #174222;
+  font-size: 10px;
+  line-height: 12px;
+}
+
+.skill-row-main p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  color: #737373;
+  font-size: 11px;
+  line-height: 15px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.skill-row-actions,
+.skill-edit-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.skill-edit-form {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 8px;
+}
+
+.skill-edit-form input,
+.skill-edit-form textarea {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid #e8e7e4;
+  background: #ffffff;
+  color: #111111;
+  font-size: 12px;
+  outline: none;
+}
+
+.skill-edit-form input {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 16px;
+}
+
+.skill-edit-form textarea {
+  min-height: 120px;
+  resize: vertical;
+  padding: 10px;
+  border-radius: 14px;
+  line-height: 16px;
+}
+
+.skill-edit-form input:focus,
+.skill-edit-form textarea:focus {
+  border-color: rgba(41, 191, 78, 0.78);
+  box-shadow: 0 0 0 3px rgba(41, 191, 78, 0.14);
 }
 
 .empty-state {
@@ -957,7 +1179,16 @@
 
   .viewport-controls {
     right: 10px;
-    width: 198px;
+    width: 232px;
+  }
+
+  .skill-panel {
+    top: auto;
+    right: 12px;
+    bottom: 86px;
+    width: calc(100vw - 24px);
+    max-height: min(520px, calc(100vh - 128px));
+    border-radius: 22px;
   }
 
   .composer-wrap {

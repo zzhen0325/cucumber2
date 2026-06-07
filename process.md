@@ -17,6 +17,15 @@
 
 ## 2026-06-07
 
+### 新增公开 Skill 系统与默认 Prompt 扩写
+
+- 变更：新增公开 `agent_skills` 数据模型和 `/api/skills` CRUD；上传 zip 时只解析 `SKILL.md` 和 `config/*.json`，不安装或执行 zip 内代码。
+- 变更：`/api/agent-run` 默认使用最新公开 `prompt-expand` skill 先执行 `expand_prompt` 工具阶段，再把扩写后的 prompt 传给 `generate_image`；缺少 skill 或扩写失败会直接显示在 Run 节点。
+- 变更：画布右上新增 Skill 面板，支持上传、查看、编辑和删除；所有登录用户可用公开 skill，只有上传者可编辑或删除。
+- 文件：`server/api.ts`、`server/supabase.ts`、`server/skill-parser.ts`、`server/skill-access.ts`、`src/components/CanvasWorkspace.tsx`、`src/lib/skill-storage.ts`、`src/types/canvas.ts`、`src/lib/graph.ts`、`supabase/migrations/20260607002000_agent_skills.sql`、`README.md`。
+- 验证：`pnpm test -- server/skill-parser.test.ts server/skill-access.test.ts src/lib/graph.test.ts`、`pnpm build`。
+- 备注：已通过 Supabase MCP 将远端 `agent_skills` migration 应用到项目 `wbjqqywnwmghtcwpoatb`；上传 500 的根因是远端缺少 `public.agent_skills` 表，另补充了 `/api/skills` 的解析错误和 Supabase 存储错误文案。
+
 ### 画布支持框选多选
 
 - 变更：空白画布左键拖拽启用 React Flow 框选，多选节点可继续批量拖拽或删除。

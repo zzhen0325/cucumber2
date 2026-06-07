@@ -8,6 +8,7 @@ import {
   getRunReferenceNodeId,
   textFromMessageParts,
   toolPartFromMessagePart,
+  toolPartsFromMessageParts,
 } from "./graph";
 import type { AgentCanvasEdge, AgentCanvasNode } from "@/types/canvas";
 
@@ -318,14 +319,38 @@ describe("agent canvas graph", () => {
     });
   });
 
+  it("extracts expand_prompt and generate_image as separate tool parts", () => {
+    const parts = toolPartsFromMessageParts([
+      {
+        type: "tool-expand_prompt",
+        state: "output-available",
+        output: { expandedPrompt: "高质量黄瓜工作台图片" },
+      },
+      {
+        type: "tool-generate_image",
+        state: "output-available",
+        output: { images: [{ id: "x", url: "https://cdn.example/x.png" }] },
+      },
+    ]);
+
+    expect(parts.map((part) => part.type)).toEqual([
+      "tool-expand_prompt",
+      "tool-generate_image",
+    ]);
+    expect(extractImagesFromToolOutput(parts[0].output)).toEqual([]);
+    expect(extractImagesFromToolOutput(parts[1].output)).toEqual([
+      { id: "x", url: "https://cdn.example/x.png" },
+    ]);
+  });
+
   it("keeps tool errors as errors without extracting images", () => {
     const part = toolPartFromMessagePart({
-      type: "tool-generate_image",
+      type: "tool-expand_prompt",
       state: "output-error",
-      errorText: "Image API failed",
+      errorText: "Skill failed",
     });
 
-    expect(part?.errorText).toBe("Image API failed");
+    expect(part?.errorText).toBe("Skill failed");
     expect(extractImagesFromToolOutput(part?.output)).toEqual([]);
   });
 });

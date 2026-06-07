@@ -5,6 +5,7 @@ import { serve } from "@hono/node-server";
 import {
   createUIMessageStream,
   createUIMessageStreamResponse,
+  generateText,
   streamText,
   type UIMessage,
 } from "ai";
@@ -30,19 +31,26 @@ import {
   claimUnownedProjects,
   createProject,
   createSession,
+  createSkill,
   createUser,
   deleteSession,
+  getLatestPublicSkillBySlug,
   getProjectForUser,
   getSessionUser,
   getUserByUsername,
   getUserCount,
   isSupabaseConfigured,
+  listPublicSkillsForUser,
   listProjects,
   recordRunEvent,
+  softDeleteSkillForUser,
+  updateSkillForUser,
   softDeleteProject,
   updateProjectForUser,
+  type AgentSkill,
   type AppUser,
 } from "./supabase.ts";
+import { parseSkillZip } from "./skill-parser.ts";
 
 loadServerEnv();
 
@@ -84,11 +92,22 @@ const projectPatchSchema = z
     message: "No project updates provided.",
   });
 
+const skillPatchSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80).optional(),
+    description: z.string().trim().max(500).optional(),
+    instructions: z.string().trim().min(1).optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "No skill updates provided.",
+  });
+
 app.use("*", cors());
 
 app.onError((error, c) => {
   console.error("[api]", error);
-  return c.text(getErrorMessage(error), 500);
+  const apiError = getApiError(error);
+  return c.json({ error: apiError.message }, 500);
 });
 
 app.get("/api/health", (c) =>
@@ -234,6 +253,89 @@ app.delete("/api/projects/:projectId", async (c) => {
   return c.json({ ok: true });
 });
 
+app.get("/api/skills", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const skills = await listPublicSkillsForUser(user.id);
+  return c.json({ skills });
+});
+
+app.post("/api/skills", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const formData = await c.req.formData();
+  const file = formData.get("file");
+  if (!isUploadedFile(file)) {
+    return c.json({ error: "请上传 skill zip 文件" }, 400);
+  }
+  if (!file.name.endsWith(".zip")) {
+    return c.json({ error: "Skill 文件必须是 .zip" }, 400);
+  }
+
+  let parsed: Awaited<ReturnType<typeof parseSkillZip>>;
+  try {
+    parsed = await parseSkillZip(await file.arrayBuffer());
+  } catch (error) {
+    return c.json({ error: getErrorMessage(error) }, 400);
+  }
+
+  const skill = await createSkill({
+    ownerUserId: user.id,
+    name: parsed.name,
+    slug: parsed.slug,
+    description: parsed.description,
+    instructions: parsed.instructions,
+    config: parsed.config,
+    sourceManifest: parsed.sourceManifest,
+  });
+
+  return c.json({ skill });
+});
+
+app.patch("/api/skills/:skillId", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const skillId = z.string().uuid().parse(c.req.param("skillId"));
+  const input = skillPatchSchema.parse(await c.req.json());
+  const skill = await updateSkillForUser({
+    skillId,
+    userId: user.id,
+    name: input.name,
+    description: input.description,
+    instructions: input.instructions,
+  });
+
+  if (!skill) {
+    return c.json({ error: "无权编辑此 skill" }, 403);
+  }
+
+  return c.json({ skill });
+});
+
+app.delete("/api/skills/:skillId", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const skillId = z.string().uuid().parse(c.req.param("skillId"));
+  const deleted = await softDeleteSkillForUser(skillId, user.id);
+  if (!deleted) {
+    return c.json({ error: "无权删除此 skill" }, 403);
+  }
+
+  return c.json({ ok: true });
+});
+
 app.post("/api/agent-run", async (c) => {
   const user = await requireUser(c);
   if (!user) {
@@ -251,20 +353,18 @@ app.post("/api/agent-run", async (c) => {
     return notFound(c);
   }
 
-  const toolInput = {
-    prompt: canvasContext.prompt,
-    selectedNodeId: canvasContext.selectedNodeId ?? null,
-    upstreamContext: canvasContext.upstreamContext,
-    resultCount: inferSeedreamResultCount(
-      canvasContext.prompt,
-      readSeedreamMaxOutputImagesFromEnv()
-    ),
-  };
-
   const stream = createUIMessageStream({
     originalMessages: messages,
     execute: async ({ writer }) => {
-      const toolCallId = `generate_image-${crypto.randomUUID()}`;
+      const expandToolCallId = `expand_prompt-${crypto.randomUUID()}`;
+      const imageToolCallId = `generate_image-${crypto.randomUUID()}`;
+      const requestedResultCount = safeInferSeedreamResultCount(canvasContext.prompt);
+      const skillInput = {
+        prompt: canvasContext.prompt,
+        selectedNodeId: canvasContext.selectedNodeId ?? null,
+        upstreamContext: canvasContext.upstreamContext,
+        skillSlug: "prompt-expand",
+      };
 
       await recordRunEvent({
         projectId,
@@ -273,14 +373,14 @@ app.post("/api/agent-run", async (c) => {
         selectedNodeId: canvasContext.selectedNodeId ?? null,
         upstreamContext: canvasContext.upstreamContext,
         status: "running",
-        toolInput,
+        skillInput,
       });
 
       const agentText = streamText({
         model: getDeepSeekModel(),
         system:
           "你是 Cucumber infinite canvas 的图片生成 agent。只输出给用户看的执行文字，使用简短中文。不要说图片已经生成，不要编造工具结果，不要输出 Markdown 标题或列表。",
-        prompt: buildAgentRunTextPrompt(canvasContext, toolInput.resultCount),
+        prompt: buildAgentRunTextPrompt(canvasContext, requestedResultCount),
       });
 
       for await (const chunk of agentText.toUIMessageStream()) {
@@ -289,12 +389,54 @@ app.post("/api/agent-run", async (c) => {
 
       writer.write({
         type: "tool-input-available",
-        toolCallId,
-        toolName: "generate_image",
-        input: toolInput,
+        toolCallId: expandToolCallId,
+        toolName: "expand_prompt",
+        input: skillInput,
       });
 
+      let promptSkill: AgentSkill;
+      let expandedPrompt = "";
+
       try {
+        const latestSkill = await getLatestPublicSkillBySlug("prompt-expand");
+        if (!latestSkill) {
+          throw new Error("请先在 Skill 面板上传 prompt-expand skill。");
+        }
+
+        promptSkill = latestSkill;
+        expandedPrompt = await expandPromptWithSkill(promptSkill, canvasContext);
+
+        const skillOutput = {
+          originalPrompt: canvasContext.prompt,
+          expandedPrompt,
+          skill: getSkillToolSummary(promptSkill),
+        };
+
+        writer.write({
+          type: "tool-output-available",
+          toolCallId: expandToolCallId,
+          output: skillOutput,
+        });
+
+        const toolInput = {
+          prompt: expandedPrompt,
+          originalPrompt: canvasContext.prompt,
+          selectedNodeId: canvasContext.selectedNodeId ?? null,
+          upstreamContext: canvasContext.upstreamContext,
+          resultCount: inferSeedreamResultCount(
+            canvasContext.prompt,
+            readSeedreamMaxOutputImagesFromEnv()
+          ),
+          promptSkill: getSkillToolSummary(promptSkill),
+        };
+
+        writer.write({
+          type: "tool-input-available",
+          toolCallId: imageToolCallId,
+          toolName: "generate_image",
+          input: toolInput,
+        });
+
         const output = await generateSeedreamImage(toolInput);
 
         await recordRunEvent({
@@ -304,13 +446,15 @@ app.post("/api/agent-run", async (c) => {
           selectedNodeId: canvasContext.selectedNodeId ?? null,
           upstreamContext: canvasContext.upstreamContext,
           status: "success",
+          skillInput,
+          skillOutput,
           toolInput,
           toolOutput: output,
         });
 
         writer.write({
           type: "tool-output-available",
-          toolCallId,
+          toolCallId: imageToolCallId,
           output,
         });
       } catch (error) {
@@ -324,13 +468,13 @@ app.post("/api/agent-run", async (c) => {
           selectedNodeId: canvasContext.selectedNodeId ?? null,
           upstreamContext: canvasContext.upstreamContext,
           status: "error",
-          toolInput,
+          skillInput,
           errorText,
         });
 
         writer.write({
           type: "tool-output-error",
-          toolCallId,
+          toolCallId: expandedPrompt ? imageToolCallId : expandToolCallId,
           errorText,
         });
       }
@@ -440,6 +584,126 @@ function buildAgentRunTextPrompt(
   ].join("\n\n");
 }
 
+async function expandPromptWithSkill(
+  skill: AgentSkill,
+  canvasContext: z.infer<typeof canvasContextSchema>
+) {
+  const result = await generateText({
+    model: getDeepSeekModel(),
+    system: [
+      "你是 Cucumber 的图像 prompt 扩写器。",
+      "严格遵循用户上传 skill 的说明，把输入扩写成可直接用于图像生成的自然语言 prompt。",
+      "只输出扩写后的 prompt，不输出 JSON、标题、列表、解释或中间过程。",
+    ].join("\n"),
+    prompt: buildSkillPrompt(skill, canvasContext),
+  });
+  const expandedPrompt = result.text.trim();
+  if (!expandedPrompt) {
+    throw new Error("prompt-expand skill returned an empty prompt.");
+  }
+
+  return expandedPrompt;
+}
+
+function buildSkillPrompt(
+  skill: AgentSkill,
+  canvasContext: z.infer<typeof canvasContextSchema>
+) {
+  const upstreamSummary = canvasContext.upstreamContext.length
+    ? canvasContext.upstreamContext
+        .map((item, index) => {
+          const summary =
+            item.summary ?? item.prompt ?? (item.type === "image" ? "图片结果" : "提示词");
+          return `${index + 1}. ${item.type}: ${summary}`;
+        })
+        .join("\n")
+    : "无";
+  const configText = JSON.stringify(skill.config).slice(0, 6_000);
+
+  return [
+    `Skill 名称: ${skill.name}`,
+    `Skill 描述: ${skill.description || "无"}`,
+    `Skill 说明:\n${skill.instructions}`,
+    `Skill 配置摘要:\n${configText || "{}"}`,
+    `当前用户 prompt:\n${canvasContext.prompt}`,
+    `选中节点: ${canvasContext.selectedNodeId ?? "无"}`,
+    `上游上下文:\n${upstreamSummary}`,
+    "请根据 skill 说明输出扩写后的图像生成 prompt。",
+  ].join("\n\n");
+}
+
+function getSkillToolSummary(skill: AgentSkill) {
+  return {
+    id: skill.id,
+    name: skill.name,
+    slug: skill.slug,
+  };
+}
+
+type UploadedFileLike = {
+  name: string;
+  arrayBuffer: () => Promise<ArrayBuffer>;
+};
+
+function isUploadedFile(value: unknown): value is UploadedFileLike {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "arrayBuffer" in value &&
+      "name" in value &&
+      typeof value.name === "string"
+  );
+}
+
+function safeInferSeedreamResultCount(prompt: string) {
+  try {
+    return inferSeedreamResultCount(prompt, readSeedreamMaxOutputImagesFromEnv());
+  } catch {
+    return 1;
+  }
+}
+
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function getApiError(error: unknown) {
+  const message = getErrorMessage(error);
+  const details = getErrorDetails(error);
+  const combined = `${message}\n${details}`;
+
+  if (
+    combined.includes("agent_skills") &&
+    (combined.includes("Could not find the table") ||
+      combined.includes("schema cache") ||
+      combined.includes("relation") ||
+      combined.includes("does not exist"))
+  ) {
+    return {
+      message:
+        "Skill 存储表未创建，请先应用 supabase/migrations/20260607002000_agent_skills.sql。",
+    };
+  }
+
+  if (
+    combined.includes("UNABLE_TO_GET_ISSUER_CERT_LOCALLY") ||
+    combined.includes("SELF_SIGNED_CERT_IN_CHAIN") ||
+    combined.includes("unable to get local issuer certificate")
+  ) {
+    return {
+      message:
+        "Supabase 证书校验失败，请用 pnpm dev:api 启动，或设置 NODE_EXTRA_CA_CERTS=/etc/ssl/cert.pem 后重启 API。",
+    };
+  }
+
+  return { message };
+}
+
+function getErrorDetails(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return "";
+  }
+
+  const details = "details" in error ? error.details : null;
+  return typeof details === "string" ? details : "";
 }

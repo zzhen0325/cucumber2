@@ -27,7 +27,7 @@ export type CanvasToolState =
   | "output-denied";
 
 export type CanvasToolPart = {
-  type: "tool-generate_image";
+  type: "tool-expand_prompt" | "tool-generate_image";
   state: CanvasToolState;
   input?: unknown;
   output?: unknown;
@@ -46,6 +46,7 @@ export type RunNodeData = {
   prompt: string;
   status: AgentRunStatus;
   agentText?: string;
+  toolParts?: CanvasToolPart[];
   toolPart?: CanvasToolPart;
   error?: string;
 };
