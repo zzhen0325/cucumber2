@@ -15,6 +15,24 @@
 - 备注：风险、后续项或未完成事项。
 ```
 
+## 2026-06-07
+
+### 调整底部输入器引用分支规则
+
+- 变更：底部输入器未引用节点时创建新的根 `prompt -> run`；选中 Prompt 或 Image Result 节点时创建 `selected node -> prompt -> run` 分支；Agent Run 节点仅展示状态，不作为引用锚点。
+- 文件：`src/lib/graph.ts`、`src/components/CanvasWorkspace.tsx`、`src/App.css`、`src/lib/graph.test.ts`、`README.md`。
+- 验证：`pnpm test -- src/lib/graph.test.ts`、`pnpm build`。
+- 备注：当前选中的非 Run 节点即引用节点，点击画布空白处取消引用。
+
+### 增加用户项目列表与项目归属
+
+- 变更：新增自建名称密码登录，密码使用 scrypt hash，Hono 通过 httpOnly cookie session 识别用户；首个用户注册时会认领迁移后的未归属旧项目。
+- 变更：将 `agent_canvases` 迁移为 `agent_projects`，项目保存画布节点、边、选中节点和最后 run；`agent_run_events` 改为通过 `project_id` 归属项目；项目删除为软删除。
+- 变更：前端拆为登录页、项目列表页和项目级画布工作区，项目列表支持创建、打开、重命名、软删除和退出登录；画布提交 `/api/agent-run` 时传 `projectId`。
+- 文件：`server/api.ts`、`server/auth.ts`、`server/supabase.ts`、`src/App.tsx`、`src/components/AuthPage.tsx`、`src/components/ProjectListPage.tsx`、`src/components/CanvasWorkspace.tsx`、`src/lib/auth-storage.ts`、`src/lib/project-storage.ts`、`supabase/migrations/*`、`README.md`。
+- 验证：Supabase MCP 已应用 `user_projects` 和 `drop_legacy_canvas_index` migration；security advisor 无 lint，performance advisor 仅剩新索引未使用的 INFO；`pnpm test -- server/auth.test.ts server/project-access.test.ts src/lib/project-summary.test.ts src/lib/graph.test.ts`、`pnpm lint`、`pnpm build` 通过；临时用户 API 冒烟覆盖注册、`/api/auth/me`、旧项目认领、项目创建/重命名/软删除/退出，并已清理临时用户和恢复旧项目未归属状态；浏览器打开 `http://localhost:5174/` 登录页无 console error。
+- 备注：本机没有 Supabase CLI，因此迁移文件由仓库手写并通过 Supabase MCP 应用；后续正式引入 CLI 后可用 `supabase migration list` 对齐历史。
+
 ## 2026-06-06
 
 ### 接入 Supabase 画布持久化
@@ -81,7 +99,8 @@
 
 ## 后续事项
 
-- 持久化画布节点、边、选中状态和 run 历史，避免刷新丢失。
+- 已修复：Seedream HTTPS 请求支持从根目录 `.env.local` 读取 `SEEDREAM_CA_CERT_PEM`、`SEEDREAM_CA_CERT` 或 `NODE_EXTRA_CA_CERTS`，用于公司代理或 VPN 注入私有根证书的场景。
+- 已完成：画布节点、边、选中状态和 run 历史已归入用户项目模型。
 - 为 Run 节点补充更真实的 tool trace 展示，区分 queued、running、success、error 的可见状态。
 - 增加附件或参考图输入时，复用当前底部输入器和画布节点风格，不另做独立上传页。
 - 为环境变量缺失、Seedream 失败、网络失败补充更友好的中文错误文案。

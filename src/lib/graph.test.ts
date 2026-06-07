@@ -5,6 +5,7 @@ import {
   createImageResultNodes,
   createRunDraft,
   extractImagesFromToolOutput,
+  getRunReferenceNodeId,
   toolPartFromMessagePart,
 } from "./graph";
 import type { AgentCanvasEdge, AgentCanvasNode } from "@/types/canvas";
@@ -16,7 +17,22 @@ describe("agent canvas graph", () => {
     expect(draft.promptNode.data.kind).toBe("prompt");
     expect(draft.runNode.data.kind).toBe("run");
     expect(draft.edges).toHaveLength(1);
+    expect(draft.edges[0]).toMatchObject({
+      source: draft.promptNode.id,
+      target: draft.runNode.id,
+    });
     expect(draft.upstreamContext).toEqual([]);
+  });
+
+  it("only treats non-run nodes as run references", () => {
+    const prompt = promptNode("prompt-1", "初始需求");
+    const run = runNode("run-1", "初始需求");
+    const image = imageNode("image-1", "https://cdn.example/1.png", "初始需求");
+
+    expect(getRunReferenceNodeId(prompt)).toBe("prompt-1");
+    expect(getRunReferenceNodeId(image)).toBe("image-1");
+    expect(getRunReferenceNodeId(run)).toBeNull();
+    expect(getRunReferenceNodeId()).toBeNull();
   });
 
   it("collects upstream prompt and image context in order", () => {
@@ -67,6 +83,50 @@ describe("agent canvas graph", () => {
       target: draft.promptNode.id,
     });
     expect(draft.promptNode.position).toEqual({ x: 262, y: 510 });
+  });
+
+  it("creates a branch from a selected prompt node", () => {
+    const nodes: AgentCanvasNode[] = [
+      promptNode("prompt-1", "初始需求"),
+      runNode("run-1", "初始需求"),
+    ];
+    const edges: AgentCanvasEdge[] = [edge("prompt-1", "run-1")];
+
+    const draft = createRunDraft("换一个方向", "prompt-1", nodes, edges);
+
+    expect(draft.edges[0]).toMatchObject({
+      source: "prompt-1",
+      target: draft.promptNode.id,
+    });
+    expect(draft.edges[1]).toMatchObject({
+      source: draft.promptNode.id,
+      target: draft.runNode.id,
+    });
+    expect(draft.upstreamContext).toEqual([
+      {
+        nodeId: "prompt-1",
+        type: "prompt",
+        prompt: "初始需求",
+        summary: "初始需求",
+      },
+    ]);
+  });
+
+  it("creates a root run when a run node is selected", () => {
+    const nodes: AgentCanvasNode[] = [
+      promptNode("prompt-1", "初始需求"),
+      runNode("run-1", "初始需求"),
+    ];
+    const edges: AgentCanvasEdge[] = [edge("prompt-1", "run-1")];
+
+    const draft = createRunDraft("新开一个输入", "run-1", nodes, edges);
+
+    expect(draft.edges).toHaveLength(1);
+    expect(draft.edges[0]).toMatchObject({
+      source: draft.promptNode.id,
+      target: draft.runNode.id,
+    });
+    expect(draft.upstreamContext).toEqual([]);
   });
 
   it("places the first follow-up under the selected result", () => {

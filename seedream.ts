@@ -1,4 +1,6 @@
 import { createHash, createHmac } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { request } from "node:https";
 import { setTimeout as delay } from "node:timers/promises";
 
 export type SeedreamUpstreamContext = {
@@ -40,6 +42,15 @@ type SignedPostResult = {
   status: number;
   body: Record<string, unknown>;
 };
+
+type HttpsPostResult = {
+  status: number;
+  text: string;
+};
+
+let cachedCaPath: string | undefined;
+let cachedCa: Buffer | undefined;
+let cachedInlineCa: string | undefined;
 
 class SeedreamClient {
   private readonly config: SeedreamConfig;
@@ -102,20 +113,19 @@ class SeedreamClient {
       `Signature=${signature}`,
     ].join(", ");
 
-    const response = await fetch(`https://${this.config.host}?${query}`, {
-      method: "POST",
-      headers: {
+    const response = await signedHttpsPost(
+      `https://${this.config.host}?${query}`,
+      {
         Authorization: authorization,
         "Content-Type": contentType,
         Host: this.config.host,
         "X-Content-Sha256": payloadHash,
         "X-Date": xDate,
       },
-      body: payload,
-    });
+      payload
+    );
 
-    const text = await response.text();
-    const parsed = parseJsonObject(text);
+    const parsed = parseJsonObject(response.text);
     return { status: response.status, body: parsed };
   }
 
@@ -365,6 +375,71 @@ function parseJsonObject(text: string): Record<string, unknown> {
   } catch {
     return { raw: text };
   }
+}
+
+function signedHttpsPost(
+  url: string,
+  headers: Record<string, string>,
+  body: string
+): Promise<HttpsPostResult> {
+  return new Promise((resolve, reject) => {
+    const req = request(
+      url,
+      {
+        method: "POST",
+        headers,
+        ca: readCustomCaFromEnv(),
+        timeout: 120_000,
+      },
+      (res) => {
+        let text = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk: string) => {
+          text += chunk;
+        });
+        res.on("end", () => {
+          resolve({ status: res.statusCode ?? 0, text });
+        });
+      }
+    );
+
+    req.on("timeout", () => {
+      req.destroy(new Error(`Seedream request timed out: ${new URL(url).host}`));
+    });
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+function readCustomCaFromEnv() {
+  const caPem = process.env.SEEDREAM_CA_CERT_PEM;
+  if (caPem) {
+    if (cachedInlineCa === caPem) {
+      return cachedCa;
+    }
+
+    cachedCaPath = undefined;
+    cachedInlineCa = caPem;
+    cachedCa = Buffer.from(caPem.replaceAll("\\n", "\n"));
+    return cachedCa;
+  }
+
+  const caPath = process.env.SEEDREAM_CA_CERT ?? process.env.NODE_EXTRA_CA_CERTS;
+  if (!caPath) {
+    return undefined;
+  }
+  if (cachedCaPath === caPath) {
+    return cachedCa;
+  }
+  if (!existsSync(caPath)) {
+    throw new Error(`TLS CA certificate file not found: ${caPath}`);
+  }
+
+  cachedCaPath = caPath;
+  cachedInlineCa = undefined;
+  cachedCa = readFileSync(caPath);
+  return cachedCa;
 }
 
 function assertSeedreamOk(step: string, result: SignedPostResult) {

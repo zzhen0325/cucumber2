@@ -24,6 +24,14 @@ const id = (prefix: string) =>
 export const isImageResultNode = (node?: AgentCanvasNode) =>
   node?.data.kind === "imageResult";
 
+export function getRunReferenceNodeId(node?: AgentCanvasNode) {
+  if (!node || node.data.kind === "run") {
+    return null;
+  }
+
+  return node.id;
+}
+
 export function collectUpstreamContext(
   selectedNodeId: string | null,
   nodes: AgentCanvasNode[],
@@ -94,16 +102,18 @@ export function createRunDraft(
   edges: AgentCanvasEdge[]
 ): RunDraft {
   const selectedNode = nodes.find((node) => node.id === selectedNodeId);
-  const siblings = selectedNodeId
-    ? edges.filter((edge) => edge.source === selectedNodeId).length
+  const referenceNodeId = getRunReferenceNodeId(selectedNode);
+  const referenceNode = referenceNodeId ? selectedNode : undefined;
+  const siblings = referenceNodeId
+    ? edges.filter((edge) => edge.source === referenceNodeId).length
     : nodes.filter((node) => node.data.kind === "prompt").length;
 
-  const upstreamContext = collectUpstreamContext(selectedNodeId, nodes, edges);
-  const baseX = selectedNode
-    ? selectedNode.position.x + siblings * FOLLOW_UP_GAP_X
+  const upstreamContext = collectUpstreamContext(referenceNodeId, nodes, edges);
+  const baseX = referenceNode
+    ? referenceNode.position.x + siblings * FOLLOW_UP_GAP_X
     : ROOT_START_X + siblings * ROOT_CHAIN_GAP;
-  const baseY = selectedNode
-    ? selectedNode.position.y + FOLLOW_UP_GAP_Y
+  const baseY = referenceNode
+    ? referenceNode.position.y + FOLLOW_UP_GAP_Y
     : ROOT_START_Y;
   const promptId = id("prompt");
   const runId = id("run");
@@ -149,10 +159,10 @@ export function createRunDraft(
     },
   ];
 
-  if (selectedNodeId) {
+  if (referenceNodeId) {
     draftEdges.unshift({
       id: id("edge"),
-      source: selectedNodeId,
+      source: referenceNodeId,
       target: promptId,
       type: "temporary",
     });

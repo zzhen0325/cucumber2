@@ -6,21 +6,46 @@ import {
   createUIMessageStreamResponse,
   type UIMessage,
 } from "ai";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
+import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { cors } from "hono/cors";
 import { z } from "zod";
 
 import { generateSeedreamImage, isSeedreamConfigured } from "../seedream.ts";
 import {
-  getDefaultCanvas,
+  createSessionToken,
+  hashPassword,
+  hashSessionToken,
+  normalizeUsername,
+  verifyPassword,
+} from "./auth.ts";
+import {
+  claimUnownedProjects,
+  createProject,
+  createSession,
+  createUser,
+  deleteSession,
+  getProjectForUser,
+  getSessionUser,
+  getUserByUsername,
+  getUserCount,
   isSupabaseConfigured,
+  listProjects,
   recordRunEvent,
-  saveCanvasSnapshot,
+  softDeleteProject,
+  updateProjectForUser,
+  type AppUser,
 } from "./supabase.ts";
 
 loadServerEnv();
 
 const app = new Hono();
+const sessionCookieName = "cucumber_session";
+
+const authInputSchema = z.object({
+  username: z.string().trim().min(1).max(80),
+  password: z.string().min(1).max(200),
+});
 
 const upstreamContextSchema = z.object({
   nodeId: z.string(),
@@ -36,14 +61,21 @@ const canvasContextSchema = z.object({
   upstreamContext: z.array(upstreamContextSchema).default([]),
 });
 
-const canvasSnapshotSchema = z.object({
-  canvasId: z.string().uuid().optional(),
+const projectCreateSchema = z.object({
   title: z.string().trim().min(1).max(120).default("Untitled"),
-  nodes: z.array(z.unknown()),
-  edges: z.array(z.unknown()),
-  selectedNodeId: z.string().nullable().optional(),
-  lastRunId: z.string().nullable().optional(),
 });
+
+const projectPatchSchema = z
+  .object({
+    title: z.string().trim().min(1).max(120).optional(),
+    nodes: z.array(z.unknown()).optional(),
+    edges: z.array(z.unknown()).optional(),
+    selectedNodeId: z.string().nullable().optional(),
+    lastRunId: z.string().nullable().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "No project updates provided.",
+  });
 
 app.use("*", cors());
 
@@ -62,23 +94,155 @@ app.get("/api/health", (c) =>
   })
 );
 
-app.get("/api/canvas", async (c) => {
-  const canvas = await getDefaultCanvas();
-  return c.json(canvas);
+app.post("/api/auth/register", async (c) => {
+  const input = authInputSchema.parse(await c.req.json());
+  const username = normalizeUsername(input.username);
+  const existingUser = await getUserByUsername(username);
+
+  if (existingUser) {
+    return c.json({ error: "名称已存在" }, 409);
+  }
+
+  const usersBeforeCreate = await getUserCount();
+  const user = await createUser({
+    username,
+    passwordHash: await hashPassword(input.password),
+  });
+
+  if (usersBeforeCreate === 0) {
+    await claimUnownedProjects(user.id);
+  }
+
+  await startSession(c, user);
+  return c.json({ user });
 });
 
-app.post("/api/canvas", async (c) => {
-  const snapshot = canvasSnapshotSchema.parse(await c.req.json());
-  const canvas = await saveCanvasSnapshot(snapshot);
-  return c.json(canvas);
+app.post("/api/auth/login", async (c) => {
+  const input = authInputSchema.parse(await c.req.json());
+  const username = normalizeUsername(input.username);
+  const user = await getUserByUsername(username);
+
+  if (!user || !(await verifyPassword(input.password, user.password_hash))) {
+    return c.json({ error: "名称或密码不正确" }, 401);
+  }
+
+  const publicUser = {
+    id: user.id,
+    username: user.username,
+    createdAt: user.created_at,
+  } satisfies AppUser;
+
+  await startSession(c, publicUser);
+  return c.json({ user: publicUser });
+});
+
+app.post("/api/auth/logout", async (c) => {
+  const token = getCookie(c, sessionCookieName);
+  if (token) {
+    await deleteSession(hashSessionToken(token));
+  }
+
+  clearSessionCookie(c);
+  return c.json({ ok: true });
+});
+
+app.get("/api/auth/me", async (c) => {
+  const user = await getOptionalUser(c);
+  return c.json({ user });
+});
+
+app.get("/api/projects", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const projects = await listProjects(user.id);
+  return c.json({ projects });
+});
+
+app.post("/api/projects", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const input = projectCreateSchema.parse(await c.req.json());
+  const project = await createProject(user.id, input.title);
+  return c.json({ project });
+});
+
+app.get("/api/projects/:projectId", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const projectId = z.string().uuid().parse(c.req.param("projectId"));
+  const project = await getProjectForUser(projectId, user.id);
+  if (!project) {
+    return notFound(c);
+  }
+
+  return c.json({ project });
+});
+
+app.patch("/api/projects/:projectId", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const projectId = z.string().uuid().parse(c.req.param("projectId"));
+  const input = projectPatchSchema.parse(await c.req.json());
+  const project = await updateProjectForUser({
+    projectId,
+    userId: user.id,
+    title: input.title,
+    nodes: input.nodes as Parameters<typeof updateProjectForUser>[0]["nodes"],
+    edges: input.edges as Parameters<typeof updateProjectForUser>[0]["edges"],
+    selectedNodeId: input.selectedNodeId,
+    lastRunId: input.lastRunId,
+  });
+
+  if (!project) {
+    return notFound(c);
+  }
+
+  return c.json({ project });
+});
+
+app.delete("/api/projects/:projectId", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const projectId = z.string().uuid().parse(c.req.param("projectId"));
+  const deleted = await softDeleteProject(projectId, user.id);
+  if (!deleted) {
+    return notFound(c);
+  }
+
+  return c.json({ ok: true });
 });
 
 app.post("/api/agent-run", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
   const body = await c.req.json();
   const messages = (body.messages ?? []) as UIMessage[];
   const canvasContext = canvasContextSchema.parse(body.canvasContext ?? {});
-  const canvasId = z.string().uuid().parse(body.canvasId);
+  const projectId = z.string().uuid().parse(body.projectId);
   const runNodeId = z.string().min(1).parse(body.runNodeId);
+  const project = await getProjectForUser(projectId, user.id);
+
+  if (!project) {
+    return notFound(c);
+  }
 
   const toolInput = {
     prompt: canvasContext.prompt,
@@ -92,7 +256,7 @@ app.post("/api/agent-run", async (c) => {
       const toolCallId = `generate_image-${crypto.randomUUID()}`;
 
       await recordRunEvent({
-        canvasId,
+        projectId,
         runNodeId,
         prompt: canvasContext.prompt,
         selectedNodeId: canvasContext.selectedNodeId ?? null,
@@ -112,7 +276,7 @@ app.post("/api/agent-run", async (c) => {
         const output = await generateSeedreamImage(toolInput);
 
         await recordRunEvent({
-          canvasId,
+          projectId,
           runNodeId,
           prompt: canvasContext.prompt,
           selectedNodeId: canvasContext.selectedNodeId ?? null,
@@ -132,7 +296,7 @@ app.post("/api/agent-run", async (c) => {
         console.error("[agent-run]", error);
 
         await recordRunEvent({
-          canvasId,
+          projectId,
           runNodeId,
           prompt: canvasContext.prompt,
           selectedNodeId: canvasContext.selectedNodeId ?? null,
@@ -160,6 +324,55 @@ const port = Number(process.env.API_PORT ?? 8787);
 serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, (info) => {
   console.log(`Cucumber Agent API listening on http://${info.address}:${info.port}`);
 });
+
+async function startSession(c: Context, user: AppUser) {
+  const session = createSessionToken();
+
+  await createSession({
+    userId: user.id,
+    tokenHash: session.tokenHash,
+    expiresAt: session.expiresAt.toISOString(),
+  });
+
+  setCookie(c, sessionCookieName, session.token, {
+    expires: session.expiresAt,
+    httpOnly: true,
+    path: "/",
+    sameSite: "Lax",
+    secure: process.env.NODE_ENV === "production",
+  });
+}
+
+async function getOptionalUser(c: Context) {
+  const token = getCookie(c, sessionCookieName);
+  if (!token) {
+    return null;
+  }
+
+  const user = await getSessionUser(hashSessionToken(token));
+  if (!user) {
+    clearSessionCookie(c);
+  }
+
+  return user;
+}
+
+async function requireUser(c: Context) {
+  return getOptionalUser(c);
+}
+
+function clearSessionCookie(c: Context) {
+  deleteCookie(c, sessionCookieName, { path: "/" });
+}
+
+function unauthorized(c: Context) {
+  clearSessionCookie(c);
+  return c.json({ error: "请先登录" }, 401);
+}
+
+function notFound(c: Context) {
+  return c.json({ error: "项目不存在" }, 404);
+}
 
 function loadServerEnv() {
   for (const file of [".env.local", ".env"]) {

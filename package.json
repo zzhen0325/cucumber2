@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n api,web -c green,cyan \"pnpm dev:api\" \"pnpm dev:web\"",
-    "dev:api": "tsx server/api.ts",
+    "dev:api": "NODE_EXTRA_CA_CERTS=${NODE_EXTRA_CA_CERTS:-/etc/ssl/cert.pem} tsx server/api.ts",
     "dev:web": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
