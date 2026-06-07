@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { canEditSkill } from "./skill-access.ts";
 import { canAccessProject } from "./project-access.ts";
 import { getProjectSummaryStats } from "../src/lib/project-summary.ts";
+import type { RunStepEventInput } from "./run-kernel.ts";
 import type {
   AgentCanvasEdge,
   AgentCanvasNode,
@@ -399,6 +400,28 @@ export async function recordRunEvent(input: RunEventInput) {
       : input.toolOutput ?? null,
     error_text: input.errorText ?? null,
   });
+
+  if (error) {
+    throw error;
+  }
+}
+
+export async function recordRunStepEvent(input: RunStepEventInput) {
+  const client = getSupabaseClient();
+  const payload: Record<string, unknown> = {
+    project_id: input.projectId,
+    run_node_id: input.runNodeId,
+    step_id: input.stepId,
+    type: input.type,
+    payload: input.payload,
+    error_text: input.errorText ?? null,
+  };
+
+  if (input.createdAt) {
+    payload.created_at = input.createdAt;
+  }
+
+  const { error } = await client.from("agent_run_step_events").insert(payload);
 
   if (error) {
     throw error;

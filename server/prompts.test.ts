@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  assemblePromptParts,
   buildSkillPrompt,
+  buildSkillPromptAssembly,
+  createPromptPart,
   formatUpstreamContext,
   selectPromptExpandMode,
   selectReferenceImages,
@@ -69,6 +72,70 @@ describe("server prompt helpers", () => {
     expect(prompt).toContain("<<<SKILL_INSTRUCTIONS>>>");
     expect(prompt).toContain("<<<RELEVANT_CONFIG>>>");
     expect(prompt).toContain("< < < END_USER_PROMPT");
+  });
+
+  it("assembles skill prompt parts into the existing prompt text with trace", () => {
+    const input = {
+      canvasContext: {
+        prompt: "生成一张绿色海报",
+        selectedNodeId: null,
+        upstreamContext: [],
+      },
+      skill,
+    };
+    const assembly = buildSkillPromptAssembly(input);
+
+    expect(assembly.prompt).toBe(buildSkillPrompt(input));
+    expect(assembly.trace.selectedPromptPartIds).toContain(
+      "prompt-expand.user-prompt"
+    );
+    expect(assembly.trace.promptDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(assembly.trace.omittedContextReason).toBeUndefined();
+  });
+
+  it("keeps prompt part order and prunes lower priority droppable parts first", () => {
+    const assembly = assemblePromptParts(
+      [
+        createPromptPart({
+          id: "stable",
+          category: "instruction",
+          content: "Stable instruction",
+          stable: true,
+          priority: 100,
+          droppable: false,
+          tokenEstimate: 5,
+        }),
+        createPromptPart({
+          id: "low-priority-context",
+          category: "upstream_context",
+          content: "Low priority context",
+          stable: false,
+          priority: 10,
+          droppable: true,
+          tokenEstimate: 4,
+        }),
+        createPromptPart({
+          id: "high-priority-context",
+          category: "reference_image_analysis",
+          content: "High priority context",
+          stable: false,
+          priority: 80,
+          droppable: true,
+          tokenEstimate: 4,
+        }),
+      ],
+      { tokenBudget: 9 }
+    );
+
+    expect(assembly.trace.selectedPromptPartIds).toEqual([
+      "stable",
+      "high-priority-context",
+    ]);
+    expect(assembly.trace.omittedPromptPartIds).toEqual([
+      "low-priority-context",
+    ]);
+    expect(assembly.prompt).toBe("Stable instruction\n\nHigh priority context");
+    expect(assembly.trace.omittedContextReason).toBe("token_budget_exceeded");
   });
 
   it("routes event prompts before image modes", () => {

@@ -40,11 +40,11 @@ Canvas UI
 
 ### 1.1 Define Kernel Contracts
 
-- [ ] 新增 `server/run-kernel.ts`，定义通用 Run、Step、ToolCall、ArtifactRef、GraphPatchProposal 类型。
-- [ ] 保留 `/api/agent-run` 作为外部入口，但内部委托给 Run Kernel。
-- [ ] 将当前 `analyze_reference_images`、`expand_prompt`、`generate_image` 表达成 kernel steps。
-- [ ] 保持 AI SDK UI message stream 输出不变，让现有 Run 节点继续消费 tool parts。
-- [ ] 为 kernel 类型补最小单元测试，验证 step 状态从 `queued -> running -> success/error`。
+- [x] 新增 `server/run-kernel.ts`，定义通用 Run、Step、ToolCall、ArtifactRef、GraphPatchProposal 类型。
+- [x] 保留 `/api/agent-run` 作为外部入口，但内部委托给 Run Kernel。
+- [x] 将当前 `analyze_reference_images`、`expand_prompt`、`generate_image` 表达成 kernel steps。
+- [x] 保持 AI SDK UI message stream 输出不变，让现有 Run 节点继续消费 tool parts。
+- [x] 为 kernel 类型补最小单元测试，验证 step 状态从 `queued -> running -> success/error`。
 
 验收标准：
 
@@ -54,11 +54,11 @@ Canvas UI
 
 ### 1.2 Turn Run Events Into Step Events
 
-- [ ] 扩展 `agent_run_events` 或新增相邻表 `agent_run_step_events`。
-- [ ] 定义事件类型：`run.created`、`step.started`、`tool.input`、`tool.output`、`tool.error`、`artifact.created`、`graph.patch.proposed`、`graph.patch.applied`、`run.completed`、`run.failed`。
-- [ ] 当前 `recordRunEvent` 保持兼容，同时写入更细的 step event。
-- [ ] 每个事件包含 `projectId`、`runNodeId`、`stepId`、`type`、`payload`、`createdAt`。
-- [ ] 错误事件必须保存 `errorText` 和失败 step，不生成假成功结果。
+- [x] 扩展 `agent_run_events` 或新增相邻表 `agent_run_step_events`。
+- [x] 定义事件类型：`run.created`、`step.started`、`tool.input`、`tool.output`、`tool.error`、`artifact.created`、`graph.patch.proposed`、`graph.patch.applied`、`run.completed`、`run.failed`。
+- [x] 当前 `recordRunEvent` 保持兼容，同时写入更细的 step event。
+- [x] 每个事件包含 `projectId`、`runNodeId`、`stepId`、`type`、`payload`、`createdAt`。
+- [x] 错误事件必须保存 `errorText` 和失败 step，不生成假成功结果。
 
 验收标准：
 
@@ -68,11 +68,11 @@ Canvas UI
 
 ### 1.3 Prompt Parts And Prompt Trace
 
-- [ ] 在 `server/prompts.ts` 引入 `PromptPart` / `PromptChunk` 类型。
-- [ ] 给每段 prompt 增加 `id`、`category`、`stable`、`priority`、`droppable`、`tokenEstimate`。
-- [ ] 将 `buildAgentRunTextPrompt`、`buildSkillPrompt`、`buildReferenceImageAnalysisPrompt` 改为先生成 parts，再 assemble。
-- [ ] 记录 `promptDigest`、`selectedPromptPartIds`、`omittedContextReason` 到 run trace。
-- [ ] 超预算策略先只做确定性裁剪，不引入模型摘要。
+- [x] 在 `server/prompts.ts` 引入 `PromptPart` / `PromptChunk` 类型。
+- [x] 给每段 prompt 增加 `id`、`category`、`stable`、`priority`、`droppable`、`tokenEstimate`。
+- [x] 将 `buildAgentRunTextPrompt`、`buildSkillPrompt`、`buildReferenceImageAnalysisPrompt` 改为先生成 parts，再 assemble。
+- [x] 记录 `promptDigest`、`selectedPromptPartIds`、`omittedContextReason` 到 run trace。
+- [x] 超预算策略先只做确定性裁剪，不引入模型摘要。
 
 验收标准：
 

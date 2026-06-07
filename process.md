@@ -17,6 +17,15 @@
 
 ## 2026-06-08
 
+### 开发 Agent OS Part 1 Run Kernel 与 Trace 基础
+
+- 变更：新增 `server/run-kernel.ts`，定义 Run、Step、ToolCall、ArtifactRef、GraphPatchProposal 和 step event contract，并把 `/api/agent-run` 的图片生成链路迁移为 kernel steps：执行说明、参考图分析、prompt 扩写、图片生成。
+- 变更：`server/prompts.ts` 引入 `PromptPart` / `PromptChunk` / prompt assembly trace，保持现有 prompt 文本等价，同时记录 `promptDigest`、选中 part、裁剪 part 和确定性低优先级裁剪原因。
+- 变更：新增 `agent_run_step_events` migration 和 `recordRunStepEvent`，兼容保留 `agent_run_events`，并记录 `run.created`、`step.started`、`tool.input`、`tool.output`、`tool.error`、`artifact.created`、`run.completed`、`run.failed`。
+- 文件：`server/run-kernel.ts`、`server/api.ts`、`server/prompts.ts`、`server/supabase.ts`、`supabase/migrations/20260608003000_agent_run_step_events.sql`、`server/run-kernel.test.ts`、`server/prompts.test.ts`、`README.md`、`agent-os-plan.md`。
+- 验证：`pnpm test -- server/prompts.test.ts server/run-kernel.test.ts src/lib/graph.test.ts`、`pnpm exec tsc -p tsconfig.node.json`；安装 Supabase CLI 后通过 `supabase db query --linked --file supabase/migrations/20260608003000_agent_run_step_events.sql` 应用远端，并用 `supabase migration repair --linked --status applied 20260608003000` 对齐该版本历史。
+- 备注：远端 migration history 仍保留旧的非本地版本 `20260606165634`、`20260606165716`、`20260607151830`；本次未擅自 repair 这些历史记录。`supabase db advisors --linked --type all --level info --fail-on none` 仅返回 unused index INFO。
+
 ### 新增 Agent OS 三阶段规划
 
 - 变更：新增 `agent-os-plan.md`，将通用 Agent OS 目标拆成 Run Kernel 与 trace 基础、Capability/Artifact/Policy 层、Canvas OS/Memory/Replay 三部分。

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 export type PromptUpstreamContextItem = {
   nodeId: string;
   type: "prompt" | "image";
@@ -26,6 +28,58 @@ export type ReferenceImageInput = {
   imageUrl: string;
   prompt?: string;
   summary?: string;
+};
+
+export type PromptPartCategory =
+  | "instruction"
+  | "user_prompt"
+  | "selected_node"
+  | "upstream_context"
+  | "run_target"
+  | "skill_metadata"
+  | "skill_instructions"
+  | "skill_config"
+  | "reference_image_analysis"
+  | "reference_images";
+
+export type PromptPart = {
+  id: string;
+  category: PromptPartCategory;
+  content: string;
+  stable: boolean;
+  priority: number;
+  droppable: boolean;
+  tokenEstimate: number;
+  sectionName?: string;
+};
+
+export type PromptChunk = {
+  id: string;
+  category: PromptPartCategory;
+  text: string;
+  tokenEstimate: number;
+};
+
+export type PromptAssemblyTrace = {
+  promptDigest: string;
+  selectedPromptPartIds: string[];
+  omittedPromptPartIds: string[];
+  omittedContextReason?: string;
+  tokenEstimate: number;
+};
+
+export type PromptAssembly = {
+  prompt: string;
+  chunks: PromptChunk[];
+  trace: PromptAssemblyTrace;
+};
+
+type PromptAssemblyOptions = {
+  tokenBudget?: number;
+};
+
+type PromptPartInput = Omit<PromptPart, "tokenEstimate"> & {
+  tokenEstimate?: number;
 };
 
 const sectionStartPattern = /</g;
@@ -93,16 +147,78 @@ export function buildAgentRunTextPrompt(
   resultCount: number,
   modelProvider: string
 ) {
+  return buildAgentRunTextPromptAssembly(
+    canvasContext,
+    resultCount,
+    modelProvider
+  ).prompt;
+}
+
+export function buildAgentRunTextPromptParts(
+  canvasContext: PromptCanvasContext,
+  resultCount: number,
+  modelProvider: string
+): PromptPart[] {
   return [
-    formatSection("USER_PROMPT", canvasContext.prompt),
-    formatSection("SELECTED_NODE", canvasContext.selectedNodeId ?? "无"),
-    formatSection("UPSTREAM_CONTEXT", formatUpstreamContext(canvasContext.upstreamContext)),
-    formatSection(
-      "RUN_TARGET",
-      [`modelProvider: ${modelProvider}`, `resultCount: ${resultCount}`].join("\n")
-    ),
-    "请输出 1 到 3 句执行说明，说明你会如何理解需求并使用上游上下文。",
-  ].join("\n\n");
+    createPromptPart({
+      id: "agent-text.user-prompt",
+      category: "user_prompt",
+      content: canvasContext.prompt,
+      sectionName: "USER_PROMPT",
+      stable: false,
+      priority: 100,
+      droppable: false,
+    }),
+    createPromptPart({
+      id: "agent-text.selected-node",
+      category: "selected_node",
+      content: canvasContext.selectedNodeId ?? "无",
+      sectionName: "SELECTED_NODE",
+      stable: false,
+      priority: 80,
+      droppable: false,
+    }),
+    createPromptPart({
+      id: "agent-text.upstream-context",
+      category: "upstream_context",
+      content: formatUpstreamContext(canvasContext.upstreamContext),
+      sectionName: "UPSTREAM_CONTEXT",
+      stable: false,
+      priority: 60,
+      droppable: true,
+    }),
+    createPromptPart({
+      id: "agent-text.run-target",
+      category: "run_target",
+      content: [`modelProvider: ${modelProvider}`, `resultCount: ${resultCount}`].join(
+        "\n"
+      ),
+      sectionName: "RUN_TARGET",
+      stable: false,
+      priority: 70,
+      droppable: false,
+    }),
+    createPromptPart({
+      id: "agent-text.instruction",
+      category: "instruction",
+      content: "请输出 1 到 3 句执行说明，说明你会如何理解需求并使用上游上下文。",
+      stable: true,
+      priority: 100,
+      droppable: false,
+    }),
+  ];
+}
+
+export function buildAgentRunTextPromptAssembly(
+  canvasContext: PromptCanvasContext,
+  resultCount: number,
+  modelProvider: string,
+  options?: PromptAssemblyOptions
+) {
+  return assemblePromptParts(
+    buildAgentRunTextPromptParts(canvasContext, resultCount, modelProvider),
+    options
+  );
 }
 
 export function buildSkillPrompt({
@@ -114,39 +230,159 @@ export function buildSkillPrompt({
   referenceImageAnalysis?: string;
   skill: PromptSkill;
 }) {
+  return buildSkillPromptAssembly({
+    canvasContext,
+    referenceImageAnalysis,
+    skill,
+  }).prompt;
+}
+
+export function buildSkillPromptParts({
+  canvasContext,
+  referenceImageAnalysis,
+  skill,
+}: {
+  canvasContext: PromptCanvasContext;
+  referenceImageAnalysis?: string;
+  skill: PromptSkill;
+}): PromptPart[] {
   const mode = selectPromptExpandMode(canvasContext);
   const relevantConfig = selectRelevantSkillConfig(skill, mode);
 
   return [
-    formatSection(
-      "SKILL_METADATA",
-      [
+    createPromptPart({
+      id: "prompt-expand.skill-metadata",
+      category: "skill_metadata",
+      content: [
         `name: ${skill.name}`,
         `description: ${skill.description?.trim() || "无"}`,
         `mode: ${mode}`,
-      ].join("\n")
-    ),
-    formatSection("SKILL_INSTRUCTIONS", skill.instructions),
-    formatSection("RELEVANT_CONFIG", JSON.stringify(relevantConfig, null, 2)),
-    formatSection("USER_PROMPT", canvasContext.prompt),
-    formatSection("SELECTED_NODE", canvasContext.selectedNodeId ?? "无"),
-    formatSection("UPSTREAM_CONTEXT", formatUpstreamContext(canvasContext.upstreamContext)),
-    formatSection("REFERENCE_IMAGE_ANALYSIS", referenceImageAnalysis?.trim() || "无"),
-    "请根据以上 section 输出一段可直接用于图像生成的自然语言 prompt，保持用户原意，优先吸收参考图视觉摘要和相关上游上下文，目标不超过 800 字符。",
-  ].join("\n\n");
+      ].join("\n"),
+      sectionName: "SKILL_METADATA",
+      stable: false,
+      priority: 80,
+      droppable: false,
+    }),
+    createPromptPart({
+      id: "prompt-expand.skill-instructions",
+      category: "skill_instructions",
+      content: skill.instructions,
+      sectionName: "SKILL_INSTRUCTIONS",
+      stable: true,
+      priority: 95,
+      droppable: false,
+    }),
+    createPromptPart({
+      id: "prompt-expand.relevant-config",
+      category: "skill_config",
+      content: JSON.stringify(relevantConfig, null, 2),
+      sectionName: "RELEVANT_CONFIG",
+      stable: true,
+      priority: 70,
+      droppable: true,
+    }),
+    createPromptPart({
+      id: "prompt-expand.user-prompt",
+      category: "user_prompt",
+      content: canvasContext.prompt,
+      sectionName: "USER_PROMPT",
+      stable: false,
+      priority: 100,
+      droppable: false,
+    }),
+    createPromptPart({
+      id: "prompt-expand.selected-node",
+      category: "selected_node",
+      content: canvasContext.selectedNodeId ?? "无",
+      sectionName: "SELECTED_NODE",
+      stable: false,
+      priority: 80,
+      droppable: false,
+    }),
+    createPromptPart({
+      id: "prompt-expand.upstream-context",
+      category: "upstream_context",
+      content: formatUpstreamContext(canvasContext.upstreamContext),
+      sectionName: "UPSTREAM_CONTEXT",
+      stable: false,
+      priority: 60,
+      droppable: true,
+    }),
+    createPromptPart({
+      id: "prompt-expand.reference-image-analysis",
+      category: "reference_image_analysis",
+      content: referenceImageAnalysis?.trim() || "无",
+      sectionName: "REFERENCE_IMAGE_ANALYSIS",
+      stable: false,
+      priority: 75,
+      droppable: true,
+    }),
+    createPromptPart({
+      id: "prompt-expand.instruction",
+      category: "instruction",
+      content:
+        "请根据以上 section 输出一段可直接用于图像生成的自然语言 prompt，保持用户原意，优先吸收参考图视觉摘要和相关上游上下文，目标不超过 800 字符。",
+      stable: true,
+      priority: 100,
+      droppable: false,
+    }),
+  ];
+}
+
+export function buildSkillPromptAssembly(input: {
+  canvasContext: PromptCanvasContext;
+  referenceImageAnalysis?: string;
+  skill: PromptSkill;
+}, options?: PromptAssemblyOptions) {
+  return assemblePromptParts(buildSkillPromptParts(input), options);
 }
 
 export function buildReferenceImageAnalysisPrompt(
   canvasContext: PromptCanvasContext,
   referenceImages: ReferenceImageInput[]
 ) {
+  return buildReferenceImageAnalysisPromptAssembly(
+    canvasContext,
+    referenceImages
+  ).prompt;
+}
+
+export function buildReferenceImageAnalysisPromptParts(
+  canvasContext: PromptCanvasContext,
+  referenceImages: ReferenceImageInput[]
+): PromptPart[] {
   return [
-    formatSection("USER_PROMPT", canvasContext.prompt),
-    formatSection("SELECTED_NODE", canvasContext.selectedNodeId ?? "无"),
-    formatSection("UPSTREAM_CONTEXT", formatUpstreamContext(canvasContext.upstreamContext)),
-    formatSection(
-      "REFERENCE_IMAGES",
-      referenceImages
+    createPromptPart({
+      id: "reference-analysis.user-prompt",
+      category: "user_prompt",
+      content: canvasContext.prompt,
+      sectionName: "USER_PROMPT",
+      stable: false,
+      priority: 100,
+      droppable: false,
+    }),
+    createPromptPart({
+      id: "reference-analysis.selected-node",
+      category: "selected_node",
+      content: canvasContext.selectedNodeId ?? "无",
+      sectionName: "SELECTED_NODE",
+      stable: false,
+      priority: 80,
+      droppable: false,
+    }),
+    createPromptPart({
+      id: "reference-analysis.upstream-context",
+      category: "upstream_context",
+      content: formatUpstreamContext(canvasContext.upstreamContext),
+      sectionName: "UPSTREAM_CONTEXT",
+      stable: false,
+      priority: 60,
+      droppable: true,
+    }),
+    createPromptPart({
+      id: "reference-analysis.reference-images",
+      category: "reference_images",
+      content: referenceImages
         .map((image, index) =>
           [
             `[${index + 1}]`,
@@ -156,10 +392,33 @@ export function buildReferenceImageAnalysisPrompt(
             `imageUrl: ${image.imageUrl}`,
           ].join("\n")
         )
-        .join("\n\n")
-    ),
-    "请输出一段中文视觉摘要，聚焦主体、风格、构图、色彩、材质、光影、文字版式和与当前用户需求相关的可复用约束。",
-  ].join("\n\n");
+        .join("\n\n"),
+      sectionName: "REFERENCE_IMAGES",
+      stable: false,
+      priority: 90,
+      droppable: false,
+    }),
+    createPromptPart({
+      id: "reference-analysis.instruction",
+      category: "instruction",
+      content:
+        "请输出一段中文视觉摘要，聚焦主体、风格、构图、色彩、材质、光影、文字版式和与当前用户需求相关的可复用约束。",
+      stable: true,
+      priority: 100,
+      droppable: false,
+    }),
+  ];
+}
+
+export function buildReferenceImageAnalysisPromptAssembly(
+  canvasContext: PromptCanvasContext,
+  referenceImages: ReferenceImageInput[],
+  options?: PromptAssemblyOptions
+) {
+  return assemblePromptParts(
+    buildReferenceImageAnalysisPromptParts(canvasContext, referenceImages),
+    options
+  );
 }
 
 export function selectPromptExpandMode(
@@ -232,10 +491,93 @@ export function selectReferenceImages(
   return images;
 }
 
+export function createPromptPart(input: PromptPartInput): PromptPart {
+  return {
+    ...input,
+    tokenEstimate: input.tokenEstimate ?? estimatePromptTokens(input.content),
+  };
+}
+
+export function assemblePromptParts(
+  parts: PromptPart[],
+  options: PromptAssemblyOptions = {}
+): PromptAssembly {
+  const selected = selectPromptPartsWithinBudget(parts, options.tokenBudget);
+  const selectedIds = new Set(selected.map((part) => part.id));
+  const chunks = selected.map((part) => ({
+    id: part.id,
+    category: part.category,
+    text: renderPromptPart(part),
+    tokenEstimate: part.tokenEstimate,
+  }));
+  const prompt = chunks.map((chunk) => chunk.text).join("\n\n");
+  const omittedPromptPartIds = parts
+    .filter((part) => !selectedIds.has(part.id))
+    .map((part) => part.id);
+
+  return {
+    prompt,
+    chunks,
+    trace: {
+      promptDigest: createHash("sha256").update(prompt).digest("hex"),
+      selectedPromptPartIds: selected.map((part) => part.id),
+      omittedPromptPartIds,
+      omittedContextReason: omittedPromptPartIds.length
+        ? "token_budget_exceeded"
+        : undefined,
+      tokenEstimate: selected.reduce((total, part) => total + part.tokenEstimate, 0),
+    },
+  };
+}
+
 function formatSection(name: string, content: string) {
   return [`<<<${name}>>>`, escapeSectionContent(content.trim() || "无"), `<<<END_${name}>>>`].join(
     "\n"
   );
+}
+
+function renderPromptPart(part: PromptPart) {
+  return part.sectionName
+    ? formatSection(part.sectionName, part.content)
+    : part.content.trim() || "无";
+}
+
+function selectPromptPartsWithinBudget(
+  parts: PromptPart[],
+  tokenBudget: number | undefined
+) {
+  if (!Number.isFinite(tokenBudget)) {
+    return parts;
+  }
+
+  const budget = Math.max(0, tokenBudget ?? 0);
+  const selected = [...parts];
+
+  while (
+    selected.reduce((total, part) => total + part.tokenEstimate, 0) > budget
+  ) {
+    const dropCandidate = selected
+      .map((part, index) => ({ index, part }))
+      .filter(({ part }) => part.droppable)
+      .sort(
+        (left, right) =>
+          left.part.priority - right.part.priority ||
+          Number(left.part.stable) - Number(right.part.stable) ||
+          right.index - left.index
+      )[0];
+
+    if (!dropCandidate) {
+      break;
+    }
+
+    selected.splice(dropCandidate.index, 1);
+  }
+
+  return selected;
+}
+
+function estimatePromptTokens(content: string) {
+  return Math.max(1, Math.ceil(Array.from(content.trim() || "无").length / 4));
 }
 
 function escapeSectionContent(content: string) {

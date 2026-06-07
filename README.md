@@ -15,7 +15,7 @@ Agent Run nodes display both the assistant's streamed text output and the `gener
 - Supabase Postgres for users, projects, skills, canvas snapshots, and run event storage
 - AI Elements registry components for Canvas, Node, Edge, Tool, Message, and Prompt Input
 - React Flow under the AI Elements canvas
-- Hono Node server for `/api/agent-run`
+- Hono Node server for `/api/agent-run`, backed by a service-side Run Kernel
 
 ## Run Locally
 
@@ -79,10 +79,11 @@ The database stores user-owned projects without introducing a second frontend ca
 - `public.agent_projects`: user-owned project snapshots with `nodes`, `edges`, `selected_node_id`, `last_run_id`, and soft-delete `deleted_at`.
 - `public.agent_skills`: public uploaded skills, owned by the uploader, with parsed instructions, config, source manifest, and soft-delete `deleted_at`.
 - `public.agent_run_events`: append-only run events keyed by `project_id` and `run_node_id`, including prompt, upstream context, tool input, output, status, and error text.
+- `public.agent_run_step_events`: append-only kernel trace events keyed by `project_id`, `run_node_id`, and `step_id`, including `run.created`, `step.started`, `tool.input`, `tool.output`, `tool.error`, `artifact.created`, `run.completed`, and `run.failed`.
 
 All public tables have RLS enabled. Anonymous and browser-authenticated roles are revoked; server reads and writes use the Supabase secret key through `/api/auth/*`, `/api/projects/*`, and `/api/agent-run`.
 
-The migration files live in `supabase/migrations`. Apply them before uploading skills; otherwise `/api/skills` will report that the Skill storage table is missing. Existing `agent_canvases` data is renamed to `agent_projects` and remains unowned until the first user registers, at which point the API assigns those unowned projects to that user.
+The migration files live in `supabase/migrations`. Apply them before uploading skills or running agent traces; otherwise `/api/skills` will report that the Skill storage table is missing, or `/api/agent-run` will report that `agent_run_step_events` is missing. Existing `agent_canvases` data is renamed to `agent_projects` and remains unowned until the first user registers, at which point the API assigns those unowned projects to that user.
 
 ## Project API
 
@@ -103,7 +104,9 @@ Submitting from the bottom composer with no referenced node creates a new root `
 
 ## Skill And Seedream Tool Contract
 
-Every `/api/agent-run` uses the selected text model provider for the streamed Run explanation and `prompt-expand` stage. If the upstream context contains image result nodes, the server first runs a visible `analyze_reference_images` stage with Ark Responses API, then passes the visual summary into `expand_prompt`. The latest updated public skill with `slug === "prompt-expand"` is used. If no such skill exists, model credentials are missing, or any tool stage fails, the Run node shows the error and Seedream is not called.
+Every `/api/agent-run` delegates to `server/run-kernel.ts`. The kernel uses the selected text model provider for the streamed Run explanation and `prompt-expand` stage. If the upstream context contains image result nodes, the server first runs a visible `analyze_reference_images` stage with Ark Responses API, then passes the visual summary into `expand_prompt`. The latest updated public skill with `slug === "prompt-expand"` is used. If no such skill exists, model credentials are missing, or any tool stage fails, the Run node shows the error and Seedream is not called.
+
+The kernel records both the compatible `agent_run_events` row and finer `agent_run_step_events` trace rows. Prompt construction is assembled from `PromptPart` metadata with a `promptDigest`, selected part ids, omitted part ids, and deterministic low-priority pruning when a token budget is provided.
 
 `expand_prompt` receives the current prompt plus upstream canvas context:
 

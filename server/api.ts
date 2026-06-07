@@ -11,33 +11,13 @@ import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { cors } from "hono/cors";
 import { z } from "zod";
 
+import { isSeedreamConfigured } from "../seedream.ts";
 import {
-  generateSeedreamImage,
-  inferSeedreamResultCount,
-  isSeedreamConfigured,
-  readSeedreamMaxOutputImagesFromEnv,
-  type SeedreamGenerateInput,
-} from "../seedream.ts";
-import {
-  generateTextWithProvider,
   getDefaultModelProviderId,
   getModelProviderSummaries,
   isArkConfigured,
   modelProviderIds,
-  readArkMaxReferenceImagesFromEnv,
-  streamTextWithProvider,
-  type ModelProviderId,
 } from "./model-providers.ts";
-import {
-  AGENT_RUN_TEXT_SYSTEM_PROMPT,
-  PROMPT_EXPAND_SYSTEM_PROMPT,
-  REFERENCE_IMAGE_ANALYSIS_SYSTEM_PROMPT,
-  buildAgentRunTextPrompt,
-  buildReferenceImageAnalysisPrompt,
-  buildSkillPrompt,
-  selectReferenceImages,
-  type ReferenceImageInput,
-} from "./prompts.ts";
 import {
   createSessionToken,
   hashPassword,
@@ -52,7 +32,6 @@ import {
   createSkill,
   createUser,
   deleteSession,
-  getLatestPublicSkillBySlug,
   getProjectForUser,
   getSessionUser,
   getUserByUsername,
@@ -60,15 +39,14 @@ import {
   isSupabaseConfigured,
   listPublicSkillsForUser,
   listProjects,
-  recordRunEvent,
   softDeleteSkillForUser,
   updateSkillForUser,
   softDeleteProject,
   updateProjectForUser,
-  type AgentSkill,
   type AppUser,
 } from "./supabase.ts";
 import { parseSkillZip } from "./skill-parser.ts";
+import { executeImageAgentRun } from "./run-kernel.ts";
 
 loadServerEnv();
 
@@ -94,10 +72,6 @@ const canvasContextSchema = z.object({
   upstreamContext: z.array(upstreamContextSchema).default([]),
 });
 const modelProviderSchema = z.enum(modelProviderIds);
-type GenerateImageToolInput = SeedreamGenerateInput & {
-  originalPrompt: string;
-  promptSkill: ReturnType<typeof getSkillToolSummary>;
-};
 
 const projectCreateSchema = z.object({
   title: z.string().trim().min(1).max(120).default("Untitled"),
@@ -392,203 +366,13 @@ app.post("/api/agent-run", async (c) => {
   const stream = createUIMessageStream({
     originalMessages: messages,
     execute: async ({ writer }) => {
-      const analysisToolCallId = `analyze_reference_images-${crypto.randomUUID()}`;
-      const expandToolCallId = `expand_prompt-${crypto.randomUUID()}`;
-      const imageToolCallId = `generate_image-${crypto.randomUUID()}`;
-      let activeToolCallId = expandToolCallId;
-      const requestedResultCount = safeInferSeedreamResultCount(canvasContext.prompt);
-      const referenceImages = selectReferenceImages(
+      await executeImageAgentRun({
         canvasContext,
-        readArkMaxReferenceImagesFromEnv()
-      );
-      let referenceImageAnalysis = "";
-      let analysisInput: unknown = null;
-      let analysisOutput: unknown = null;
-      let skillOutput: unknown = null;
-      let toolInput: GenerateImageToolInput | null = null;
-      const skillInput = {
-        prompt: canvasContext.prompt,
-        selectedNodeId: canvasContext.selectedNodeId ?? null,
-        upstreamContext: canvasContext.upstreamContext,
-        skillSlug: "prompt-expand",
         modelProvider,
-      };
-
-      await recordRunEvent({
         projectId,
         runNodeId,
-        prompt: canvasContext.prompt,
-        selectedNodeId: canvasContext.selectedNodeId ?? null,
-        upstreamContext: canvasContext.upstreamContext,
-        status: "running",
-        skillInput,
+        writer,
       });
-
-      let promptSkill: AgentSkill;
-
-      try {
-        for await (const chunk of streamTextWithProvider(modelProvider, {
-          system: AGENT_RUN_TEXT_SYSTEM_PROMPT,
-          prompt: buildAgentRunTextPrompt(
-            canvasContext,
-            requestedResultCount,
-            modelProvider
-          ),
-          maxOutputTokens: 240,
-        })) {
-          writer.write(chunk);
-        }
-
-        if (referenceImages.length) {
-          activeToolCallId = analysisToolCallId;
-          analysisInput = {
-            prompt: canvasContext.prompt,
-            selectedNodeId: canvasContext.selectedNodeId ?? null,
-            imageCount: referenceImages.length,
-            referenceImages: referenceImages.map((image) => ({
-              nodeId: image.nodeId,
-              imageUrl: image.imageUrl,
-              prompt: image.prompt,
-              summary: image.summary,
-            })),
-            modelProvider: "ark",
-          };
-
-          writer.write({
-            type: "tool-input-available",
-            toolCallId: analysisToolCallId,
-            toolName: "analyze_reference_images",
-            input: analysisInput,
-          });
-
-          referenceImageAnalysis = await analyzeReferenceImages(
-            canvasContext,
-            referenceImages
-          );
-          analysisOutput = {
-            imageCount: referenceImages.length,
-            analysis: referenceImageAnalysis,
-            modelProvider: "ark",
-          };
-
-          writer.write({
-            type: "tool-output-available",
-            toolCallId: analysisToolCallId,
-            output: analysisOutput,
-          });
-        }
-
-        activeToolCallId = expandToolCallId;
-        const expandedSkillInput = {
-          ...skillInput,
-          referenceImageAnalysis: referenceImageAnalysis || undefined,
-        };
-
-        writer.write({
-          type: "tool-input-available",
-          toolCallId: expandToolCallId,
-          toolName: "expand_prompt",
-          input: expandedSkillInput,
-        });
-
-        const latestSkill = await getLatestPublicSkillBySlug("prompt-expand");
-        if (!latestSkill) {
-          throw new Error("请先在 Skill 面板上传 prompt-expand skill。");
-        }
-
-        promptSkill = latestSkill;
-        const expandedPrompt = await expandPromptWithSkill({
-          canvasContext,
-          modelProvider,
-          referenceImageAnalysis,
-          skill: promptSkill,
-        });
-
-        skillOutput = {
-          originalPrompt: canvasContext.prompt,
-          expandedPrompt,
-          referenceImageAnalysis: referenceImageAnalysis || undefined,
-          skill: getSkillToolSummary(promptSkill),
-        };
-
-        writer.write({
-          type: "tool-output-available",
-          toolCallId: expandToolCallId,
-          output: skillOutput,
-        });
-
-        activeToolCallId = imageToolCallId;
-        toolInput = {
-          prompt: expandedPrompt,
-          originalPrompt: canvasContext.prompt,
-          selectedNodeId: canvasContext.selectedNodeId ?? null,
-          upstreamContext: canvasContext.upstreamContext,
-          resultCount: inferSeedreamResultCount(
-            canvasContext.prompt,
-            readSeedreamMaxOutputImagesFromEnv()
-          ),
-          promptSkill: getSkillToolSummary(promptSkill),
-        };
-
-        writer.write({
-          type: "tool-input-available",
-          toolCallId: imageToolCallId,
-          toolName: "generate_image",
-          input: toolInput,
-        });
-
-        const output = await generateSeedreamImage(toolInput);
-
-        await recordRunEvent({
-          projectId,
-          runNodeId,
-          prompt: canvasContext.prompt,
-          selectedNodeId: canvasContext.selectedNodeId ?? null,
-          upstreamContext: canvasContext.upstreamContext,
-          status: "success",
-          skillInput: {
-            ...skillInput,
-            analysisInput,
-          },
-          skillOutput,
-          toolInput: {
-            analysisOutput,
-            imageInput: toolInput,
-          },
-          toolOutput: output,
-        });
-
-        writer.write({
-          type: "tool-output-available",
-          toolCallId: imageToolCallId,
-          output,
-        });
-      } catch (error) {
-        const errorText = getErrorMessage(error);
-        console.error("[agent-run]", error);
-
-        await recordRunEvent({
-          projectId,
-          runNodeId,
-          prompt: canvasContext.prompt,
-          selectedNodeId: canvasContext.selectedNodeId ?? null,
-          upstreamContext: canvasContext.upstreamContext,
-          status: "error",
-          skillInput: {
-            ...skillInput,
-            analysisInput,
-          },
-          skillOutput,
-          toolInput,
-          errorText,
-        });
-
-        writer.write({
-          type: "tool-output-error",
-          toolCallId: activeToolCallId,
-          errorText,
-        });
-      }
     },
     onError: getErrorMessage,
   });
@@ -659,62 +443,6 @@ function loadServerEnv() {
   }
 }
 
-async function analyzeReferenceImages(
-  canvasContext: z.infer<typeof canvasContextSchema>,
-  referenceImages: ReferenceImageInput[]
-) {
-  const analysis = (
-    await generateTextWithProvider("ark", {
-      system: REFERENCE_IMAGE_ANALYSIS_SYSTEM_PROMPT,
-      prompt: buildReferenceImageAnalysisPrompt(canvasContext, referenceImages),
-      imageUrls: referenceImages.map((image) => image.imageUrl),
-      maxOutputTokens: 900,
-    })
-  ).trim();
-
-  if (!analysis) {
-    throw new Error("Ark reference image analysis returned empty text.");
-  }
-
-  return analysis;
-}
-
-async function expandPromptWithSkill({
-  canvasContext,
-  modelProvider,
-  referenceImageAnalysis,
-  skill,
-}: {
-  canvasContext: z.infer<typeof canvasContextSchema>;
-  modelProvider: ModelProviderId;
-  referenceImageAnalysis?: string;
-  skill: AgentSkill;
-}) {
-  const expandedPrompt = (
-    await generateTextWithProvider(modelProvider, {
-      system: PROMPT_EXPAND_SYSTEM_PROMPT,
-      prompt: buildSkillPrompt({ canvasContext, referenceImageAnalysis, skill }),
-      maxOutputTokens: 1_200,
-    })
-  ).trim();
-  if (!expandedPrompt) {
-    throw new Error("prompt-expand skill returned an empty prompt.");
-  }
-  if (Array.from(expandedPrompt).length > 800) {
-    throw new Error("prompt-expand skill returned more than 800 characters.");
-  }
-
-  return expandedPrompt;
-}
-
-function getSkillToolSummary(skill: AgentSkill) {
-  return {
-    id: skill.id,
-    name: skill.name,
-    slug: skill.slug,
-  };
-}
-
 type UploadedFileLike = {
   name: string;
   arrayBuffer: () => Promise<ArrayBuffer>;
@@ -728,14 +456,6 @@ function isUploadedFile(value: unknown): value is UploadedFileLike {
       "name" in value &&
       typeof value.name === "string"
   );
-}
-
-function safeInferSeedreamResultCount(prompt: string) {
-  try {
-    return inferSeedreamResultCount(prompt, readSeedreamMaxOutputImagesFromEnv());
-  } catch {
-    return 1;
-  }
 }
 
 function getErrorMessage(error: unknown) {
@@ -757,6 +477,19 @@ function getApiError(error: unknown) {
     return {
       message:
         "Skill 存储表未创建，请先应用 supabase/migrations/20260607002000_agent_skills.sql。",
+    };
+  }
+
+  if (
+    combined.includes("agent_run_step_events") &&
+    (combined.includes("Could not find the table") ||
+      combined.includes("schema cache") ||
+      combined.includes("relation") ||
+      combined.includes("does not exist"))
+  ) {
+    return {
+      message:
+        "Run step event 存储表未创建，请先应用 supabase/migrations/20260608003000_agent_run_step_events.sql。",
     };
   }
 
