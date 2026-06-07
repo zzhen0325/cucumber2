@@ -27,7 +27,10 @@ export type CanvasToolState =
   | "output-denied";
 
 export type CanvasToolPart = {
-  type: "tool-expand_prompt" | "tool-generate_image";
+  type:
+    | "tool-analyze_reference_images"
+    | "tool-expand_prompt"
+    | "tool-generate_image";
   state: CanvasToolState;
   input?: unknown;
   output?: unknown;

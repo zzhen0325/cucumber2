@@ -1,12 +1,9 @@
 import { existsSync } from "node:fs";
 import { loadEnvFile } from "node:process";
-import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { serve } from "@hono/node-server";
 import {
   createUIMessageStream,
   createUIMessageStreamResponse,
-  generateText,
-  streamText,
   type UIMessage,
 } from "ai";
 import { Hono, type Context } from "hono";
@@ -19,7 +16,28 @@ import {
   inferSeedreamResultCount,
   isSeedreamConfigured,
   readSeedreamMaxOutputImagesFromEnv,
+  type SeedreamGenerateInput,
 } from "../seedream.ts";
+import {
+  generateTextWithProvider,
+  getDefaultModelProviderId,
+  getModelProviderSummaries,
+  isArkConfigured,
+  modelProviderIds,
+  readArkMaxReferenceImagesFromEnv,
+  streamTextWithProvider,
+  type ModelProviderId,
+} from "./model-providers.ts";
+import {
+  AGENT_RUN_TEXT_SYSTEM_PROMPT,
+  PROMPT_EXPAND_SYSTEM_PROMPT,
+  REFERENCE_IMAGE_ANALYSIS_SYSTEM_PROMPT,
+  buildAgentRunTextPrompt,
+  buildReferenceImageAnalysisPrompt,
+  buildSkillPrompt,
+  selectReferenceImages,
+  type ReferenceImageInput,
+} from "./prompts.ts";
 import {
   createSessionToken,
   hashPassword,
@@ -75,6 +93,11 @@ const canvasContextSchema = z.object({
   selectedNodeId: z.string().nullable().optional(),
   upstreamContext: z.array(upstreamContextSchema).default([]),
 });
+const modelProviderSchema = z.enum(modelProviderIds);
+type GenerateImageToolInput = SeedreamGenerateInput & {
+  originalPrompt: string;
+  promptSkill: ReturnType<typeof getSkillToolSummary>;
+};
 
 const projectCreateSchema = z.object({
   title: z.string().trim().min(1).max(120).default("Untitled"),
@@ -114,9 +137,19 @@ app.get("/api/health", (c) =>
   c.json({
     ok: true,
     deepseekConfigured: Boolean(process.env.DEEPSEEK_API_KEY),
+    arkConfigured: isArkConfigured(),
     seedreamConfigured: isSeedreamConfigured(),
     supabaseConfigured: isSupabaseConfigured(),
     model: process.env.DEEPSEEK_MODEL ?? "deepseek-v4-flash",
+    modelProviders: getModelProviderSummaries(),
+    defaultModelProvider: getDefaultModelProviderId(),
+  })
+);
+
+app.get("/api/model-providers", (c) =>
+  c.json({
+    defaultProvider: getDefaultModelProviderId(),
+    providers: getModelProviderSummaries(),
   })
 );
 
@@ -345,6 +378,9 @@ app.post("/api/agent-run", async (c) => {
   const body = await c.req.json();
   const messages = (body.messages ?? []) as UIMessage[];
   const canvasContext = canvasContextSchema.parse(body.canvasContext ?? {});
+  const modelProvider = modelProviderSchema
+    .default(getDefaultModelProviderId())
+    .parse(body.modelProvider);
   const projectId = z.string().uuid().parse(body.projectId);
   const runNodeId = z.string().min(1).parse(body.runNodeId);
   const project = await getProjectForUser(projectId, user.id);
@@ -356,14 +392,26 @@ app.post("/api/agent-run", async (c) => {
   const stream = createUIMessageStream({
     originalMessages: messages,
     execute: async ({ writer }) => {
+      const analysisToolCallId = `analyze_reference_images-${crypto.randomUUID()}`;
       const expandToolCallId = `expand_prompt-${crypto.randomUUID()}`;
       const imageToolCallId = `generate_image-${crypto.randomUUID()}`;
+      let activeToolCallId = expandToolCallId;
       const requestedResultCount = safeInferSeedreamResultCount(canvasContext.prompt);
+      const referenceImages = selectReferenceImages(
+        canvasContext,
+        readArkMaxReferenceImagesFromEnv()
+      );
+      let referenceImageAnalysis = "";
+      let analysisInput: unknown = null;
+      let analysisOutput: unknown = null;
+      let skillOutput: unknown = null;
+      let toolInput: GenerateImageToolInput | null = null;
       const skillInput = {
         prompt: canvasContext.prompt,
         selectedNodeId: canvasContext.selectedNodeId ?? null,
         upstreamContext: canvasContext.upstreamContext,
         skillSlug: "prompt-expand",
+        modelProvider,
       };
 
       await recordRunEvent({
@@ -376,39 +424,90 @@ app.post("/api/agent-run", async (c) => {
         skillInput,
       });
 
-      const agentText = streamText({
-        model: getDeepSeekModel(),
-        system:
-          "你是 Cucumber infinite canvas 的图片生成 agent。只输出给用户看的执行文字，使用简短中文。不要说图片已经生成，不要编造工具结果，不要输出 Markdown 标题或列表。",
-        prompt: buildAgentRunTextPrompt(canvasContext, requestedResultCount),
-      });
-
-      for await (const chunk of agentText.toUIMessageStream()) {
-        writer.write(chunk);
-      }
-
-      writer.write({
-        type: "tool-input-available",
-        toolCallId: expandToolCallId,
-        toolName: "expand_prompt",
-        input: skillInput,
-      });
-
       let promptSkill: AgentSkill;
-      let expandedPrompt = "";
 
       try {
+        for await (const chunk of streamTextWithProvider(modelProvider, {
+          system: AGENT_RUN_TEXT_SYSTEM_PROMPT,
+          prompt: buildAgentRunTextPrompt(
+            canvasContext,
+            requestedResultCount,
+            modelProvider
+          ),
+          maxOutputTokens: 240,
+        })) {
+          writer.write(chunk);
+        }
+
+        if (referenceImages.length) {
+          activeToolCallId = analysisToolCallId;
+          analysisInput = {
+            prompt: canvasContext.prompt,
+            selectedNodeId: canvasContext.selectedNodeId ?? null,
+            imageCount: referenceImages.length,
+            referenceImages: referenceImages.map((image) => ({
+              nodeId: image.nodeId,
+              imageUrl: image.imageUrl,
+              prompt: image.prompt,
+              summary: image.summary,
+            })),
+            modelProvider: "ark",
+          };
+
+          writer.write({
+            type: "tool-input-available",
+            toolCallId: analysisToolCallId,
+            toolName: "analyze_reference_images",
+            input: analysisInput,
+          });
+
+          referenceImageAnalysis = await analyzeReferenceImages(
+            canvasContext,
+            referenceImages
+          );
+          analysisOutput = {
+            imageCount: referenceImages.length,
+            analysis: referenceImageAnalysis,
+            modelProvider: "ark",
+          };
+
+          writer.write({
+            type: "tool-output-available",
+            toolCallId: analysisToolCallId,
+            output: analysisOutput,
+          });
+        }
+
+        activeToolCallId = expandToolCallId;
+        const expandedSkillInput = {
+          ...skillInput,
+          referenceImageAnalysis: referenceImageAnalysis || undefined,
+        };
+
+        writer.write({
+          type: "tool-input-available",
+          toolCallId: expandToolCallId,
+          toolName: "expand_prompt",
+          input: expandedSkillInput,
+        });
+
         const latestSkill = await getLatestPublicSkillBySlug("prompt-expand");
         if (!latestSkill) {
           throw new Error("请先在 Skill 面板上传 prompt-expand skill。");
         }
 
         promptSkill = latestSkill;
-        expandedPrompt = await expandPromptWithSkill(promptSkill, canvasContext);
+        const expandedPrompt = await expandPromptWithSkill({
+          canvasContext,
+          modelProvider,
+          referenceImageAnalysis,
+          skill: promptSkill,
+        });
 
-        const skillOutput = {
+        skillOutput = {
           originalPrompt: canvasContext.prompt,
           expandedPrompt,
+          referenceImageAnalysis: referenceImageAnalysis || undefined,
           skill: getSkillToolSummary(promptSkill),
         };
 
@@ -418,7 +517,8 @@ app.post("/api/agent-run", async (c) => {
           output: skillOutput,
         });
 
-        const toolInput = {
+        activeToolCallId = imageToolCallId;
+        toolInput = {
           prompt: expandedPrompt,
           originalPrompt: canvasContext.prompt,
           selectedNodeId: canvasContext.selectedNodeId ?? null,
@@ -446,9 +546,15 @@ app.post("/api/agent-run", async (c) => {
           selectedNodeId: canvasContext.selectedNodeId ?? null,
           upstreamContext: canvasContext.upstreamContext,
           status: "success",
-          skillInput,
+          skillInput: {
+            ...skillInput,
+            analysisInput,
+          },
           skillOutput,
-          toolInput,
+          toolInput: {
+            analysisOutput,
+            imageInput: toolInput,
+          },
           toolOutput: output,
         });
 
@@ -468,13 +574,18 @@ app.post("/api/agent-run", async (c) => {
           selectedNodeId: canvasContext.selectedNodeId ?? null,
           upstreamContext: canvasContext.upstreamContext,
           status: "error",
-          skillInput,
+          skillInput: {
+            ...skillInput,
+            analysisInput,
+          },
+          skillOutput,
+          toolInput,
           errorText,
         });
 
         writer.write({
           type: "tool-output-error",
-          toolCallId: expandedPrompt ? imageToolCallId : expandToolCallId,
+          toolCallId: activeToolCallId,
           errorText,
         });
       }
@@ -548,88 +659,52 @@ function loadServerEnv() {
   }
 }
 
-function getDeepSeekModel() {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) {
-    throw new Error("DEEPSEEK_API_KEY is required.");
+async function analyzeReferenceImages(
+  canvasContext: z.infer<typeof canvasContextSchema>,
+  referenceImages: ReferenceImageInput[]
+) {
+  const analysis = (
+    await generateTextWithProvider("ark", {
+      system: REFERENCE_IMAGE_ANALYSIS_SYSTEM_PROMPT,
+      prompt: buildReferenceImageAnalysisPrompt(canvasContext, referenceImages),
+      imageUrls: referenceImages.map((image) => image.imageUrl),
+      maxOutputTokens: 900,
+    })
+  ).trim();
+
+  if (!analysis) {
+    throw new Error("Ark reference image analysis returned empty text.");
   }
 
-  return createOpenAICompatible({
-    name: "deepseek",
-    baseURL: process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com",
-    apiKey,
-  }).chatModel(process.env.DEEPSEEK_MODEL ?? "deepseek-v4-flash");
+  return analysis;
 }
 
-function buildAgentRunTextPrompt(
-  canvasContext: z.infer<typeof canvasContextSchema>,
-  resultCount: number
-) {
-  const upstreamSummary = canvasContext.upstreamContext.length
-    ? canvasContext.upstreamContext
-        .map((item, index) => {
-          const summary =
-            item.summary ?? item.prompt ?? (item.type === "image" ? "图片结果" : "提示词");
-          return `${index + 1}. ${item.type}: ${summary}`;
-        })
-        .join("\n")
-    : "无";
-
-  return [
-    `当前需求: ${canvasContext.prompt}`,
-    `选中节点: ${canvasContext.selectedNodeId ?? "无"}`,
-    `上游上下文:\n${upstreamSummary}`,
-    `目标输出: ${resultCount} 张图片`,
-    "请输出 1 到 3 句执行说明，说明你会如何理解需求并使用上游上下文。",
-  ].join("\n\n");
-}
-
-async function expandPromptWithSkill(
-  skill: AgentSkill,
-  canvasContext: z.infer<typeof canvasContextSchema>
-) {
-  const result = await generateText({
-    model: getDeepSeekModel(),
-    system: [
-      "你是 Cucumber 的图像 prompt 扩写器。",
-      "严格遵循用户上传 skill 的说明，把输入扩写成可直接用于图像生成的自然语言 prompt。",
-      "只输出扩写后的 prompt，不输出 JSON、标题、列表、解释或中间过程。",
-    ].join("\n"),
-    prompt: buildSkillPrompt(skill, canvasContext),
-  });
-  const expandedPrompt = result.text.trim();
+async function expandPromptWithSkill({
+  canvasContext,
+  modelProvider,
+  referenceImageAnalysis,
+  skill,
+}: {
+  canvasContext: z.infer<typeof canvasContextSchema>;
+  modelProvider: ModelProviderId;
+  referenceImageAnalysis?: string;
+  skill: AgentSkill;
+}) {
+  const expandedPrompt = (
+    await generateTextWithProvider(modelProvider, {
+      system: PROMPT_EXPAND_SYSTEM_PROMPT,
+      prompt: buildSkillPrompt({ canvasContext, referenceImageAnalysis, skill }),
+      maxOutputTokens: 1_200,
+    })
+  ).trim();
   if (!expandedPrompt) {
     throw new Error("prompt-expand skill returned an empty prompt.");
   }
+  if (Array.from(expandedPrompt).length > 800) {
+    throw new Error("prompt-expand skill returned more than 800 characters.");
+  }
 
   return expandedPrompt;
-}
-
-function buildSkillPrompt(
-  skill: AgentSkill,
-  canvasContext: z.infer<typeof canvasContextSchema>
-) {
-  const upstreamSummary = canvasContext.upstreamContext.length
-    ? canvasContext.upstreamContext
-        .map((item, index) => {
-          const summary =
-            item.summary ?? item.prompt ?? (item.type === "image" ? "图片结果" : "提示词");
-          return `${index + 1}. ${item.type}: ${summary}`;
-        })
-        .join("\n")
-    : "无";
-  const configText = JSON.stringify(skill.config).slice(0, 6_000);
-
-  return [
-    `Skill 名称: ${skill.name}`,
-    `Skill 描述: ${skill.description || "无"}`,
-    `Skill 说明:\n${skill.instructions}`,
-    `Skill 配置摘要:\n${configText || "{}"}`,
-    `当前用户 prompt:\n${canvasContext.prompt}`,
-    `选中节点: ${canvasContext.selectedNodeId ?? "无"}`,
-    `上游上下文:\n${upstreamSummary}`,
-    "请根据 skill 说明输出扩写后的图像生成 prompt。",
-  ].join("\n\n");
 }
 
 function getSkillToolSummary(skill: AgentSkill) {

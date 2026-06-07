@@ -8,7 +8,8 @@ Agent Run nodes display both the assistant's streamed text output and the `gener
 
 - Vite + React + TypeScript
 - Vercel AI SDK v6 via `useChat`, `DefaultChatTransport`, and `streamText`
-- DeepSeek API for the agent model
+- DeepSeek and Volcengine Ark as selectable text model providers
+- Volcengine Ark Responses API for reference image analysis
 - Public Skill system for prompt expansion before image generation
 - Volcengine Seedream 4.6 for image generation
 - Supabase Postgres for users, projects, skills, canvas snapshots, and run event storage
@@ -35,6 +36,11 @@ DEEPSEEK_API_KEY=...
 DEEPSEEK_MODEL=deepseek-v4-flash
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 
+ARK_API_KEY=...
+ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+ARK_MODEL=doubao-seed-2-0-lite-260428
+ARK_MAX_REFERENCE_IMAGES=4
+
 SEEDREAM_ACCESS_KEY_ID=...
 SEEDREAM_SECRET_ACCESS_KEY=...
 SEEDREAM_REQ_KEY=jimeng_seedream46_cvtob
@@ -52,7 +58,9 @@ NODE_EXTRA_CA_CERTS=/absolute/path/to/corp-root-ca.pem
 SEEDREAM_CA_CERT=/absolute/path/to/corp-root-ca.pem
 ```
 
-`DEEPSEEK_API_KEY` is required for the AI SDK model call. `SEEDREAM_ACCESS_KEY_ID` and `SEEDREAM_SECRET_ACCESS_KEY` are required by the `generate_image` tool. The Seedream client also accepts `VOLCENGINE_ACCESS_KEY_ID` and `VOLCENGINE_SECRET_ACCESS_KEY` as aliases. Missing credentials are shown directly in the Run node; the app does not create placeholder images.
+`DEEPSEEK_API_KEY` and `ARK_API_KEY` configure selectable text model providers. The canvas stores the user's global provider preference in browser localStorage under `cucumber:model-provider` and sends it with each `/api/agent-run` request. `ARK_API_KEY` is also required when a follow-up branch includes reference image nodes because the server runs an `analyze_reference_images` stage through Ark Responses image input. Keep API keys server-only; rotate any key that has been pasted into chat or logs.
+
+`SEEDREAM_ACCESS_KEY_ID` and `SEEDREAM_SECRET_ACCESS_KEY` are required by the `generate_image` tool. The Seedream client also accepts `VOLCENGINE_ACCESS_KEY_ID` and `VOLCENGINE_SECRET_ACCESS_KEY` as aliases. Missing credentials are shown directly in the Run node; the app does not create placeholder images.
 
 Image generation also requires a public `prompt-expand` skill. Upload `/Users/bytedance/Desktop/prompt-expand-skill.zip` or another zip with a `SKILL.md` frontmatter `name: prompt-expand` from the canvas Skill panel. The server stores the parsed skill in `public.agent_skills`, including `SKILL.md` instructions, parsed `config/*.json`, and the source manifest. It does not install, start, or execute code from uploaded zips.
 
@@ -83,6 +91,7 @@ The migration files live in `supabase/migrations`. Apply them before uploading s
 - `GET /api/projects/:projectId`, `PATCH /api/projects/:projectId`, `DELETE /api/projects/:projectId`
 - `GET /api/skills`, `POST /api/skills`
 - `PATCH /api/skills/:skillId`, `DELETE /api/skills/:skillId`
+- `GET /api/model-providers`
 
 `DELETE /api/projects/:projectId` soft-deletes the project. `/api/agent-run` requires a logged-in session and receives `projectId` in the request body.
 
@@ -94,7 +103,7 @@ Submitting from the bottom composer with no referenced node creates a new root `
 
 ## Skill And Seedream Tool Contract
 
-Every `/api/agent-run` first calls the default `prompt-expand` skill as a visible `expand_prompt` tool stage. The latest updated public skill with `slug === "prompt-expand"` is used. If no such skill exists, the Run node shows the error and Seedream is not called.
+Every `/api/agent-run` uses the selected text model provider for the streamed Run explanation and `prompt-expand` stage. If the upstream context contains image result nodes, the server first runs a visible `analyze_reference_images` stage with Ark Responses API, then passes the visual summary into `expand_prompt`. The latest updated public skill with `slug === "prompt-expand"` is used. If no such skill exists, model credentials are missing, or any tool stage fails, the Run node shows the error and Seedream is not called.
 
 `expand_prompt` receives the current prompt plus upstream canvas context:
 
@@ -103,6 +112,8 @@ Every `/api/agent-run` first calls the default `prompt-expand` skill as a visibl
   "prompt": "current user prompt",
   "selectedNodeId": "prompt-or-image-node-id-or-null",
   "skillSlug": "prompt-expand",
+  "modelProvider": "deepseek-or-ark",
+  "referenceImageAnalysis": "optional Ark visual summary",
   "upstreamContext": [
     {
       "nodeId": "prompt-1",

@@ -17,6 +17,15 @@
 
 ## 2026-06-07
 
+### 新增 Ark Provider 与 Prompt 模块化
+
+- 变更：新增 `server/model-providers.ts`，将 DeepSeek 与 Ark 作为可选文本 provider；Ark Responses API 同时负责上游图片的 `analyze_reference_images` 阶段。
+- 变更：新增 `server/prompts.ts`，统一 `formatUpstreamContext`、结构化 section、prompt-expand 模式路由和相关 config 选择，避免继续在 `server/api.ts` 中拼大块 prompt。
+- 变更：前端顶部新增全局 provider 选择，偏好写入 `localStorage` 的 `cucumber:model-provider`；Run 节点支持展示参考图分析、提示词扩写、生成图片三个工具阶段。
+- 文件：`server/api.ts`、`server/model-providers.ts`、`server/prompts.ts`、`server/supabase.ts`、`src/components/CanvasWorkspace.tsx`、`src/lib/model-providers.ts`、`src/lib/graph.ts`、`src/types/canvas.ts`、`src/App.css`、`README.md`。
+- 验证：`pnpm test -- server/prompts.test.ts server/model-providers.test.ts src/lib/graph.test.ts server/skill-parser.test.ts`、`pnpm lint`、`pnpm build`；用 Vite dev server + Playwright mock API 验证 provider 选择器可渲染并显示配置状态。
+- 备注：`ARK_API_KEY` 只通过环境变量读取；已在 README 记录贴出过的 key 需要轮换。
+
 ### 新增公开 Skill 系统与默认 Prompt 扩写
 
 - 变更：新增公开 `agent_skills` 数据模型和 `/api/skills` CRUD；上传 zip 时只解析 `SKILL.md` 和 `config/*.json`，不安装或执行 zip 内代码。

@@ -19,6 +19,7 @@ import {
   ChevronDown,
   CircleAlert,
   CircleDot,
+  Cpu,
   Database,
   Frame,
   Image,
@@ -51,6 +52,21 @@ import {
   PromptInputSubmit,
   PromptInputTextarea,
 } from "@/components/ai-elements/prompt-input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  isModelProviderId,
+  loadModelProviders,
+  readStoredModelProvider,
+  storeModelProvider,
+  type ModelProviderId,
+  type ModelProviderSummary,
+} from "@/lib/model-providers";
 import { loadProject, updateProject } from "@/lib/project-storage";
 import {
   deleteSkill,
@@ -107,6 +123,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const [storageStatus, setStorageStatus] = useState<StorageStatus>("loading");
   const [storageError, setStorageError] = useState<string | null>(null);
   const [skillPanelOpen, setSkillPanelOpen] = useState(false);
+  const [modelProvider, setModelProvider] = useState<ModelProviderId>(
+    () => readStoredModelProvider() ?? "deepseek"
+  );
+  const [modelProviders, setModelProviders] = useState<ModelProviderSummary[]>([]);
+  const [modelProviderError, setModelProviderError] = useState<string | null>(null);
   const activeRunId = useRef<string | null>(null);
   const hasLoadedProject = useRef(false);
   const saveTimer = useRef<ReturnType<typeof window.setTimeout> | null>(null);
@@ -226,6 +247,32 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const isBusy = status === "submitted" || status === "streaming";
   const canSubmit =
     Boolean(loadedProjectId) && storageStatus !== "loading" && !storageError;
+
+  useEffect(() => {
+    let ignore = false;
+
+    loadModelProviders()
+      .then(({ defaultProvider, providers }) => {
+        if (ignore) {
+          return;
+        }
+
+        setModelProviders(providers);
+        setModelProviderError(null);
+        if (!readStoredModelProvider()) {
+          setModelProvider(defaultProvider);
+        }
+      })
+      .catch((nextError: unknown) => {
+        if (!ignore) {
+          setModelProviderError(getClientError(nextError));
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   useEffect(() => {
     let ignore = false;
@@ -394,6 +441,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           body: {
             projectId: loadedProjectId,
             runNodeId: draft.runNode.id,
+            modelProvider,
             canvasContext: {
               prompt: value,
               selectedNodeId: anchorId,
@@ -407,6 +455,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       edges,
       isBusy,
       loadedProjectId,
+      modelProvider,
       nodes,
       prompt,
       referenceNodeId,
@@ -416,6 +465,15 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       storageError,
     ]
   );
+
+  const handleModelProviderChange = useCallback((nextProvider: string) => {
+    if (!isModelProviderId(nextProvider)) {
+      return;
+    }
+
+    setModelProvider(nextProvider);
+    storeModelProvider(nextProvider);
+  }, []);
 
   return (
     <main className="app-shell">
@@ -449,10 +507,14 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       </Canvas>
 
       <TopBar
+        modelProvider={modelProvider}
+        modelProviderError={modelProviderError}
+        modelProviders={modelProviders}
         storageError={storageError}
         storageStatus={storageStatus}
         title={projectTitle}
         onBack={onBack}
+        onModelProviderChange={handleModelProviderChange}
       />
       <ToolRail />
       <ViewportControls
@@ -527,16 +589,35 @@ function applySelectedNodeIds(
 }
 
 function TopBar({
+  modelProvider,
+  modelProviderError,
+  modelProviders,
   storageError,
   storageStatus,
   title,
   onBack,
+  onModelProviderChange,
 }: {
+  modelProvider: ModelProviderId;
+  modelProviderError: string | null;
+  modelProviders: ModelProviderSummary[];
   storageError: string | null;
   storageStatus: StorageStatus;
   title: string;
   onBack: () => void;
+  onModelProviderChange: (provider: string) => void;
 }) {
+  const selectedProvider = modelProviders.find(
+    (provider) => provider.id === modelProvider
+  );
+  const providerTitle = modelProviderError
+    ? modelProviderError
+    : selectedProvider
+      ? `${selectedProvider.label} · ${selectedProvider.model} · ${
+          selectedProvider.configured ? "已配置" : "未配置"
+        }`
+      : "AI provider";
+
   return (
     <div className="top-bar">
       <button
@@ -559,6 +640,38 @@ function TopBar({
         <Database size={13} />
         {getStorageStatusLabel(storageStatus)}
       </span>
+      <Select value={modelProvider} onValueChange={onModelProviderChange}>
+        <SelectTrigger
+          aria-label="AI model provider"
+          className="provider-select-trigger"
+          size="sm"
+          title={providerTitle}
+        >
+          <Cpu size={13} />
+          <SelectValue placeholder="Model" />
+        </SelectTrigger>
+        <SelectContent align="start" className="provider-select-content">
+          {(modelProviders.length
+            ? modelProviders
+            : [
+                {
+                  id: modelProvider,
+                  label: modelProvider,
+                  configured: false,
+                  model: "loading",
+                  capabilities: { text: true, vision: false },
+                } satisfies ModelProviderSummary,
+              ]
+          ).map((provider) => (
+            <SelectItem key={provider.id} value={provider.id}>
+              <span>{provider.label}</span>
+              <span className={provider.configured ? "configured" : "unconfigured"}>
+                {provider.configured ? "已配置" : "未配置"}
+              </span>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }
@@ -1169,6 +1282,7 @@ function getRunTitle(status: RunNodeData["status"], state: CanvasToolPart["state
 
 function getToolName(toolPart: CanvasToolPart) {
   const names: Record<CanvasToolPart["type"], string> = {
+    "tool-analyze_reference_images": "参考图分析",
     "tool-expand_prompt": "提示词扩写",
     "tool-generate_image": "生成图片",
   };
@@ -1219,6 +1333,24 @@ function getToolDetailLines(toolPart: CanvasToolPart, error?: string) {
 }
 
 function getToolOutputLines(toolPart: CanvasToolPart) {
+  if (toolPart.type === "tool-analyze_reference_images") {
+    const output = toolPart.output as {
+      analysis?: unknown;
+      imageCount?: unknown;
+    };
+    const lines = [
+      typeof output?.imageCount === "number"
+        ? `参考图: ${output.imageCount} 张`
+        : "参考图分析完成",
+    ];
+
+    if (typeof output?.analysis === "string" && output.analysis.trim()) {
+      lines.push(`视觉摘要: ${output.analysis.trim()}`);
+    }
+
+    return lines;
+  }
+
   if (toolPart.type === "tool-expand_prompt") {
     const output = toolPart.output as { expandedPrompt?: unknown };
     if (typeof output?.expandedPrompt === "string" && output.expandedPrompt.trim()) {
@@ -1239,6 +1371,8 @@ function getToolInputLines(input: unknown) {
 
   const candidate = input as {
     prompt?: unknown;
+    imageCount?: unknown;
+    modelProvider?: unknown;
     skillSlug?: unknown;
     resultCount?: unknown;
     upstreamContext?: unknown;
@@ -1247,6 +1381,10 @@ function getToolInputLines(input: unknown) {
 
   if (typeof candidate.prompt === "string" && candidate.prompt.trim()) {
     lines.push(`输入: ${candidate.prompt.trim()}`);
+  }
+
+  if (typeof candidate.modelProvider === "string" && candidate.modelProvider.trim()) {
+    lines.push(`模型: ${candidate.modelProvider.trim()}`);
   }
 
   if (typeof candidate.skillSlug === "string" && candidate.skillSlug.trim()) {
@@ -1258,6 +1396,13 @@ function getToolInputLines(input: unknown) {
     Number.isInteger(candidate.resultCount)
   ) {
     lines.push(`目标: ${candidate.resultCount} 张图片`);
+  }
+
+  if (
+    typeof candidate.imageCount === "number" &&
+    Number.isInteger(candidate.imageCount)
+  ) {
+    lines.push(`参考图: ${candidate.imageCount} 张`);
   }
 
   if (Array.isArray(candidate.upstreamContext)) {

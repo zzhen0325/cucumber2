@@ -85,6 +85,9 @@ describe("agent canvas graph", () => {
       target: draft.promptNode.id,
     });
     expect(draft.promptNode.position).toEqual({ x: 262, y: 510 });
+    expect(draft.runNode.data.kind === "run" && draft.runNode.data.toolPart).toMatchObject({
+      type: "tool-analyze_reference_images",
+    });
   });
 
   it("creates a branch from a selected prompt node", () => {
@@ -322,6 +325,11 @@ describe("agent canvas graph", () => {
   it("extracts expand_prompt and generate_image as separate tool parts", () => {
     const parts = toolPartsFromMessageParts([
       {
+        type: "tool-analyze_reference_images",
+        state: "output-available",
+        output: { analysis: "参考图是绿色海报", imageCount: 1 },
+      },
+      {
         type: "tool-expand_prompt",
         state: "output-available",
         output: { expandedPrompt: "高质量黄瓜工作台图片" },
@@ -334,11 +342,13 @@ describe("agent canvas graph", () => {
     ]);
 
     expect(parts.map((part) => part.type)).toEqual([
+      "tool-analyze_reference_images",
       "tool-expand_prompt",
       "tool-generate_image",
     ]);
     expect(extractImagesFromToolOutput(parts[0].output)).toEqual([]);
-    expect(extractImagesFromToolOutput(parts[1].output)).toEqual([
+    expect(extractImagesFromToolOutput(parts[1].output)).toEqual([]);
+    expect(extractImagesFromToolOutput(parts[2].output)).toEqual([
       { id: "x", url: "https://cdn.example/x.png" },
     ]);
   });

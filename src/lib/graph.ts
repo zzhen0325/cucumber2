@@ -162,18 +162,8 @@ export function createRunDraft(
       kind: "run",
       prompt,
       status: "queued",
-      toolPart: {
-        type: "tool-expand_prompt",
-        state: "input-streaming",
-        input: { prompt, upstreamContext, skillSlug: "prompt-expand" },
-      },
-      toolParts: [
-        {
-          type: "tool-expand_prompt",
-          state: "input-streaming",
-          input: { prompt, upstreamContext, skillSlug: "prompt-expand" },
-        },
-      ],
+      toolPart: getInitialRunToolPart(prompt, upstreamContext),
+      toolParts: [getInitialRunToolPart(prompt, upstreamContext)],
     },
   };
 
@@ -406,7 +396,11 @@ export function toolPartFromMessagePart(part: unknown): CanvasToolPart | null {
         ? candidate.type.slice("tool-".length)
         : null;
 
-  if (toolName !== "generate_image" && toolName !== "expand_prompt") {
+  if (
+    toolName !== "analyze_reference_images" &&
+    toolName !== "generate_image" &&
+    toolName !== "expand_prompt"
+  ) {
     return null;
   }
 
@@ -416,6 +410,29 @@ export function toolPartFromMessagePart(part: unknown): CanvasToolPart | null {
     input: candidate.input,
     output: candidate.output,
     errorText: candidate.errorText,
+  };
+}
+
+function getInitialRunToolPart(
+  prompt: string,
+  upstreamContext: UpstreamContextItem[]
+): CanvasToolPart {
+  const imageCount = upstreamContext.filter(
+    (item) => item.type === "image" && Boolean(item.imageUrl)
+  ).length;
+
+  if (imageCount) {
+    return {
+      type: "tool-analyze_reference_images",
+      state: "input-streaming",
+      input: { prompt, upstreamContext, imageCount, modelProvider: "ark" },
+    };
+  }
+
+  return {
+    type: "tool-expand_prompt",
+    state: "input-streaming",
+    input: { prompt, upstreamContext, skillSlug: "prompt-expand" },
   };
 }
 

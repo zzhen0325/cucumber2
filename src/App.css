@@ -96,6 +96,55 @@
   box-shadow: 0 4px 16px rgba(41, 191, 78, 0.18);
 }
 
+.provider-select-trigger {
+  width: 142px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  justify-content: flex-start !important;
+  gap: 7px !important;
+  overflow: hidden;
+  padding: 0 9px !important;
+  border: 1px solid #ebebeb !important;
+  border-radius: 16px !important;
+  background: rgba(255, 255, 255, 0.94) !important;
+  color: #545454 !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03) !important;
+}
+
+.provider-select-trigger [data-slot="select-value"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-select-trigger svg:last-child {
+  margin-left: auto;
+}
+
+.provider-select-content {
+  border-color: #ebebeb !important;
+  background: #ffffff !important;
+  color: #111111 !important;
+  font-size: 12px !important;
+}
+
+.provider-select-content [data-slot="select-item"] {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px !important;
+}
+
+.provider-select-content .configured {
+  color: #1d7a35;
+}
+
+.provider-select-content .unconfigured {
+  color: #9a5a00;
+}
+
 .app-state-screen,
 .auth-shell,
 .projects-shell {

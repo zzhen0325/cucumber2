@@ -392,9 +392,11 @@ export async function recordRunEvent(input: RunEventInput) {
     upstream_context: input.upstreamContext,
     status: input.status,
     tool_input: input.skillInput
-      ? { skillInput: input.skillInput, imageInput: input.toolInput ?? null }
+      ? { skillInput: input.skillInput, toolInput: input.toolInput ?? null }
       : input.toolInput ?? null,
-    tool_output: input.toolOutput ?? null,
+    tool_output: input.skillOutput
+      ? { skillOutput: input.skillOutput, toolOutput: input.toolOutput ?? null }
+      : input.toolOutput ?? null,
     error_text: input.errorText ?? null,
   });
 
