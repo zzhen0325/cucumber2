@@ -451,6 +451,23 @@ describe("agent canvas graph", () => {
     });
   });
 
+  it("keeps tool approval metadata from AI SDK tool parts", () => {
+    const part = toolPartFromMessagePart({
+      type: "tool-generate_image",
+      toolCallId: "generate-image-call",
+      state: "approval-requested",
+      input: { prompt: "生成图片" },
+      approval: { id: "approval-run-1-generate_image" },
+    });
+
+    expect(part).toMatchObject({
+      type: "tool-generate_image",
+      toolCallId: "generate-image-call",
+      state: "approval-requested",
+      approval: { id: "approval-run-1-generate_image" },
+    });
+  });
+
   it("extracts expand_prompt and generate_image as separate tool parts", () => {
     const parts = toolPartsFromMessageParts([
       {

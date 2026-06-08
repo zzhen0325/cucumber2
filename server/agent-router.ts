@@ -75,18 +75,16 @@ export function planAgentRun({
     capabilities,
     IMAGE_GENERATE_CAPABILITY_ID
   );
-  const matchedTerminalCapabilities = selectTerminalCapabilities(
+  const matchedTerminalCapabilities = matchTerminalCapabilities(
     canvasContext,
     capabilities
   );
+  const selectedTerminalCapability = selectTerminalCapability(
+    matchedTerminalCapabilities,
+    imageGenerate
+  );
 
-  if (
-    matchedTerminalCapabilities.length > 1 &&
-    !matchedTerminalCapabilities.some(
-      (capability) =>
-        capability.manifest.capabilityId === IMAGE_GENERATE_CAPABILITY_ID
-    )
-  ) {
+  if (matchedTerminalCapabilities.length > 1) {
     throw new CapabilityRuntimeError(
       "capability.route_missing",
       "多个 capability 同时匹配，当前规则路由无法选择唯一执行计划。",
@@ -94,6 +92,21 @@ export function planAgentRun({
         matchedCapabilityIds: matchedTerminalCapabilities.map(
           (capability) => capability.manifest.capabilityId
         ),
+      }
+    );
+  }
+
+  if (
+    selectedTerminalCapability.manifest.capabilityId !==
+    IMAGE_GENERATE_CAPABILITY_ID
+  ) {
+    throw new CapabilityRuntimeError(
+      "capability.route_missing",
+      `能力 ${selectedTerminalCapability.manifest.capabilityId} 已匹配，但当前 Run Kernel 尚未接入对应 executor。`,
+      {
+        matchedCapabilityIds: [
+          selectedTerminalCapability.manifest.capabilityId,
+        ],
       }
     );
   }
@@ -112,10 +125,15 @@ export function planAgentRun({
         matchedCapabilityIds: matchedTerminalCapabilities.map(
           (capability) => capability.manifest.capabilityId
         ),
-        selectedCapabilities: [
-          getCapabilitySummary(promptExpand),
-          getCapabilitySummary(imageGenerate),
-        ],
+        selectedCapabilities: selectedTerminalCapability
+          ? [
+              getCapabilitySummary(promptExpand),
+              getCapabilitySummary(selectedTerminalCapability),
+            ]
+          : [
+              getCapabilitySummary(promptExpand),
+              getCapabilitySummary(imageGenerate),
+            ],
       },
     },
     stepGraph: {
@@ -132,7 +150,7 @@ export function kernelStepsFromPlan(plan: AgentRunPlan) {
   }));
 }
 
-function selectTerminalCapabilities(
+function matchTerminalCapabilities(
   canvasContext: PromptCanvasContext,
   capabilities: RegisteredCapability[]
 ) {
@@ -144,14 +162,14 @@ function selectTerminalCapabilities(
     matchesCapability(canvasContext, capability)
   );
 
-  if (matched.length) {
-    return matched;
-  }
+  return matched;
+}
 
-  return terminalCapabilities.filter(
-    (capability) =>
-      capability.manifest.capabilityId === IMAGE_GENERATE_CAPABILITY_ID
-  );
+function selectTerminalCapability(
+  matchedCapabilities: RegisteredCapability[],
+  fallbackImageCapability: RegisteredCapability
+) {
+  return matchedCapabilities[0] ?? fallbackImageCapability;
 }
 
 function matchesCapability(

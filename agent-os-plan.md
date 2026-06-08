@@ -130,11 +130,11 @@ Canvas UI
 
 - [x] 定义 capability policy：是否可联网、是否可写文件、是否可改项目、是否需要用户确认、是否可产生外部费用。
 - [x] Tool runtime 执行前做 permission check。
-- [ ] 高风险 tool 进入 `approval-requested` tool state，前端 Run 节点显示确认入口。
+- [x] 高风险 tool 进入 `approval-requested` tool state，前端 Run 节点显示确认入口。
 - [x] 未获批准时写入 `output-denied`，不继续执行后续 step。
 - [x] 将环境变量缺失、权限不足、配额不足统一为 typed error。
 
-备注：当前默认 `image.generate` 标记 `mayExternalCost: true` 但 `requiresApproval: false`，因此不会触发确认交互。服务端已使用 AI SDK 官方 `tool-approval-request` / `tool-output-denied` chunk 为后续高风险 capability 预留状态；完整前端确认按钮待真实审批型 capability 接入时补齐。
+备注：当前默认 `image.generate` 标记 `mayExternalCost: true` 但 `requiresApproval: false`，因此不会触发确认交互。服务端使用 AI SDK 官方 `tool-approval-request` / `tool-output-denied` chunk 暂停高风险 capability；前端 Run 节点通过 `addToolApprovalResponse` 提供确认和拒绝入口。
 
 验收标准：
 

@@ -88,4 +88,42 @@ describe("agent router", () => {
       })
     ).toThrow("prompt.expand");
   });
+
+  it("does not silently route matched non-image capabilities to image generation", () => {
+    const capabilities = buildCapabilityRegistry([
+      promptExpandSkill,
+      {
+        id: "skill-doc",
+        name: "document writer",
+        slug: "document-writer",
+        description: "生成文档",
+        instructions: "写文档。",
+        config: {},
+        sourceManifest: {
+          capabilityManifest: {
+            capabilityId: "document.write",
+            version: "1.0.0",
+            description: "Write document artifacts",
+            triggers: ["文档"],
+            inputSchema: { type: "object" },
+            outputSchema: { type: "object" },
+            toolIds: ["write_document"],
+          },
+        },
+        updatedAt: "2026-06-08T00:00:00.000Z",
+      },
+    ]);
+
+    expect(() =>
+      planAgentRun({
+        capabilities,
+        hasReferenceImages: false,
+        canvasContext: {
+          prompt: "写一份文档",
+          selectedNodeId: null,
+          upstreamContext: [],
+        },
+      })
+    ).toThrow("document.write");
+  });
 });

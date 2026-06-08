@@ -70,9 +70,15 @@ export type CanvasToolPart = {
     | "tool-expand_prompt"
     | "tool-generate_image";
   state: CanvasToolState;
+  toolCallId?: string;
   input?: unknown;
   output?: unknown;
   errorText?: string;
+  approval?: {
+    id: string;
+    approved?: boolean;
+    reason?: string;
+  };
 };
 
 export type RunStepTimelineItem = {

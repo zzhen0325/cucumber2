@@ -726,9 +726,15 @@ export function toolPartFromMessagePart(part: unknown): CanvasToolPart | null {
     type?: string;
     toolName?: string;
     state?: CanvasToolPart["state"];
+    toolCallId?: string;
     input?: unknown;
     output?: unknown;
     errorText?: string;
+    approval?: {
+      id?: unknown;
+      approved?: unknown;
+      reason?: unknown;
+    };
   };
   const toolName =
     candidate.type === "dynamic-tool"
@@ -748,9 +754,28 @@ export function toolPartFromMessagePart(part: unknown): CanvasToolPart | null {
   return {
     type: `tool-${toolName}`,
     state: candidate.state ?? "input-streaming",
+    toolCallId: candidate.toolCallId,
     input: candidate.input,
     output: candidate.output,
     errorText: candidate.errorText,
+    approval: readToolApproval(candidate.approval),
+  };
+}
+
+function readToolApproval(approval: {
+  id?: unknown;
+  approved?: unknown;
+  reason?: unknown;
+} | undefined): CanvasToolPart["approval"] {
+  if (!approval || typeof approval.id !== "string") {
+    return undefined;
+  }
+
+  return {
+    id: approval.id,
+    approved:
+      typeof approval.approved === "boolean" ? approval.approved : undefined,
+    reason: typeof approval.reason === "string" ? approval.reason : undefined,
   };
 }
 

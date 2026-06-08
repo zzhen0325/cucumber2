@@ -13,6 +13,7 @@ import {
 import {
   IMAGE_GENERATE_CAPABILITY_ID,
   PROMPT_EXPAND_CAPABILITY_ID,
+  CapabilityRuntimeError,
   assertCapabilityMayExecute,
   buildCapabilityRegistry,
   getCapability,
@@ -162,6 +163,7 @@ type ImageAgentRunInput = {
   projectId: string;
   runNodeId: string;
   canvasContext: PromptCanvasContext;
+  messages: UIMessage[];
   modelProvider: ModelProviderId;
   writer: UIMessageStreamWriter<UIMessage>;
 };
@@ -172,6 +174,7 @@ type ActiveTool = {
   toolName: RunStepDefinition["toolName"];
   input: unknown;
   inputWritten: boolean;
+  metadata?: Record<string, string>;
 };
 
 type PromptTraceByStage = {
@@ -270,6 +273,7 @@ export function completeKernelRun(run: Run, now = new Date().toISOString()) {
 
 export async function executeImageAgentRun({
   canvasContext,
+  messages,
   modelProvider,
   projectId,
   runNodeId,
@@ -336,6 +340,7 @@ export async function executeImageAgentRun({
     type: "run.created",
     payload: {
       prompt: canvasContext.prompt,
+      promptNodeId: canvasContext.promptNodeId ?? null,
       selectedNodeId: canvasContext.selectedNodeId ?? null,
       upstreamContext: canvasContext.upstreamContext,
       contextTrace: canvasContext.contextTrace,
@@ -428,6 +433,12 @@ export async function executeImageAgentRun({
         toolName: "analyze_reference_images",
         input: analysisInput,
         inputWritten: false,
+        metadata: getToolMetadata({
+          projectId,
+          runNodeId,
+          stepId: activeStepId,
+          capabilityId: IMAGE_GENERATE_CAPABILITY_ID,
+        }),
       };
       await writeToolInput(writer, activeTool);
       await writeStepEvent({
@@ -495,6 +506,12 @@ export async function executeImageAgentRun({
       toolName: "expand_prompt",
       input: expandedSkillInput,
       inputWritten: false,
+      metadata: getToolMetadata({
+        projectId,
+        runNodeId,
+        stepId: activeStepId,
+        capabilityId: promptExpandCapability.manifest.capabilityId,
+      }),
     };
     await writeToolInput(writer, activeTool);
     await writeStepEvent({
@@ -511,6 +528,7 @@ export async function executeImageAgentRun({
     await assertToolCanExecute({
       capability: promptExpandCapability,
       projectId,
+      messages,
       runNodeId,
       tool: activeTool,
       writer,
@@ -584,6 +602,12 @@ export async function executeImageAgentRun({
       toolName: "generate_image",
       input: imageToolInput,
       inputWritten: false,
+      metadata: getToolMetadata({
+        projectId,
+        runNodeId,
+        stepId: activeStepId,
+        capabilityId: imageCapability.manifest.capabilityId,
+      }),
     };
     await writeToolInput(writer, activeTool);
     await writeStepEvent({
@@ -600,6 +624,7 @@ export async function executeImageAgentRun({
     await assertToolCanExecute({
       capability: imageCapability,
       projectId,
+      messages,
       runNodeId,
       tool: activeTool,
       writer,
@@ -652,6 +677,7 @@ export async function executeImageAgentRun({
       });
     for (const artifact of outputWithArtifacts.artifacts) {
       run.artifacts.push(artifact);
+      const canvasNodeId = `image-${artifact.id}`;
       await writeStepEvent({
         projectId,
         runNodeId,
@@ -659,10 +685,33 @@ export async function executeImageAgentRun({
         type: "artifact.created",
         payload: {
           artifact,
-          canvasNodeId: `image-${artifact.id}`,
+          canvasNodeId,
           toolCallId: activeTool.toolCallId,
           toolName: activeTool.toolName,
         },
+      });
+      const patch = {
+        id: `patch-${runNodeId}-${artifact.id}`,
+        projectId,
+        type: "attachArtifact",
+        payload: {
+          nodeId: canvasNodeId,
+          artifact,
+        },
+      };
+      await writeStepEvent({
+        projectId,
+        runNodeId,
+        stepId: activeStepId,
+        type: "graph.patch.proposed",
+        payload: { patch },
+      });
+      await writeStepEvent({
+        projectId,
+        runNodeId,
+        stepId: activeStepId,
+        type: "graph.patch.applied",
+        payload: { patch },
       });
     }
 
@@ -680,26 +729,33 @@ export async function executeImageAgentRun({
       },
     });
   } catch (error) {
+    if (error instanceof ApprovalPendingSignal) {
+      return;
+    }
+
+    const approvalDenied = error instanceof ApprovalDeniedSignal;
     const typedError = toTypedCapabilityError(error);
     const errorText = typedError.message;
     console.error("[agent-run]", error);
 
     failKernelStep(run, activeStepId, errorText);
-    await writeStepEvent({
-      projectId,
-      runNodeId,
-      stepId: activeStepId,
-      type: "tool.error",
-      payload: {
+    if (!approvalDenied) {
+      await writeStepEvent({
+        projectId,
+        runNodeId,
+        stepId: activeStepId,
+        type: "tool.error",
+        payload: {
+          errorText,
+          errorCode: typedError.code,
+          errorDetails: typedError.details,
+          failedStepId: activeStepId,
+          toolCallId: activeTool?.toolCallId,
+          toolName: activeTool?.toolName,
+        },
         errorText,
-        errorCode: typedError.code,
-        errorDetails: typedError.details,
-        failedStepId: activeStepId,
-        toolCallId: activeTool?.toolCallId,
-        toolName: activeTool?.toolName,
-      },
-      errorText,
-    });
+      });
+    }
 
     await recordRunEvent({
       projectId,
@@ -717,7 +773,7 @@ export async function executeImageAgentRun({
       errorText,
     });
 
-    if (typedError.code !== "approval.required") {
+    if (typedError.code !== "approval.required" && !approvalDenied) {
       writeToolError(writer, activeTool ?? getFallbackActiveTool({
         canvasContext,
         referenceImages,
@@ -825,12 +881,14 @@ function toSeedreamUpstreamContext(
 
 async function assertToolCanExecute({
   capability,
+  messages,
   projectId,
   runNodeId,
   tool,
   writer,
 }: {
   capability: RegisteredCapability;
+  messages: UIMessage[];
   projectId: string;
   runNodeId: string;
   tool: ActiveTool;
@@ -844,7 +902,54 @@ async function assertToolCanExecute({
       throw typedError;
     }
 
-    const approvalId = `approval-${tool.toolCallId}`;
+    const approvalId = getApprovalId(runNodeId, tool.stepId);
+    const approvalResponse = findToolApprovalResponse(messages, approvalId);
+    if (approvalResponse?.approved === true) {
+      await writeStepEvent({
+        projectId,
+        runNodeId,
+        stepId: tool.stepId,
+        type: "tool.input",
+        payload: {
+          toolCallId: tool.toolCallId,
+          toolName: tool.toolName,
+          approvalId,
+          capabilityId: capability.manifest.capabilityId,
+          state: "approval-responded",
+          approved: true,
+          reason: approvalResponse.reason,
+          policy: capability.manifest.policy,
+        },
+      });
+      return;
+    }
+
+    if (approvalResponse?.approved === false) {
+      writer.write({
+        type: "tool-output-denied",
+        toolCallId: tool.toolCallId,
+      });
+      await writeStepEvent({
+        projectId,
+        runNodeId,
+        stepId: tool.stepId,
+        type: "tool.error",
+        payload: {
+          toolCallId: tool.toolCallId,
+          toolName: tool.toolName,
+          approvalId,
+          capabilityId: capability.manifest.capabilityId,
+          state: "output-denied",
+          approved: false,
+          reason: approvalResponse.reason,
+          errorCode: typedError.code,
+          errorText: approvalResponse.reason ?? typedError.message,
+        },
+        errorText: approvalResponse.reason ?? typedError.message,
+      });
+      throw new ApprovalDeniedSignal(approvalResponse.reason ?? typedError.message);
+    }
+
     writer.write({
       type: "tool-approval-request",
       approvalId,
@@ -865,29 +970,61 @@ async function assertToolCanExecute({
       },
     });
 
-    writer.write({
-      type: "tool-output-denied",
-      toolCallId: tool.toolCallId,
-    });
-    await writeStepEvent({
-      projectId,
-      runNodeId,
-      stepId: tool.stepId,
-      type: "tool.error",
-      payload: {
-        toolCallId: tool.toolCallId,
-        toolName: tool.toolName,
-        approvalId,
-        capabilityId: capability.manifest.capabilityId,
-        state: "output-denied",
-        errorCode: typedError.code,
-        errorText: typedError.message,
-      },
-      errorText: typedError.message,
-    });
-
-    throw typedError;
+    throw new ApprovalPendingSignal(typedError.message);
   }
+}
+
+class ApprovalPendingSignal extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ApprovalPendingSignal";
+  }
+}
+
+class ApprovalDeniedSignal extends CapabilityRuntimeError {
+  constructor(message: string) {
+    super("approval.required", message);
+    this.name = "ApprovalDeniedSignal";
+  }
+}
+
+function getApprovalId(runNodeId: string, stepId: string) {
+  return `approval-${runNodeId}-${stepId}`;
+}
+
+function findToolApprovalResponse(messages: UIMessage[], approvalId: string) {
+  for (const message of [...messages].reverse()) {
+    if (message.role !== "assistant") {
+      continue;
+    }
+
+    for (const part of [...message.parts].reverse()) {
+      if (!part || typeof part !== "object") {
+        continue;
+      }
+
+      const approval = (part as { approval?: unknown }).approval;
+      if (!approval || typeof approval !== "object") {
+        continue;
+      }
+
+      const candidate = approval as {
+        id?: unknown;
+        approved?: unknown;
+        reason?: unknown;
+      };
+      if (candidate.id !== approvalId || typeof candidate.approved !== "boolean") {
+        continue;
+      }
+
+      return {
+        approved: candidate.approved,
+        reason: typeof candidate.reason === "string" ? candidate.reason : undefined,
+      };
+    }
+  }
+
+  return null;
 }
 
 function assertImageCapabilityEnvironment(capability: RegisteredCapability) {
@@ -994,6 +1131,7 @@ async function writeToolInput(
     toolCallId: tool.toolCallId,
     toolName: tool.toolName,
     input: tool.input,
+    toolMetadata: tool.metadata,
   });
   tool.inputWritten = true;
 }
@@ -1060,6 +1198,25 @@ function getFallbackActiveTool({
       skillSlug: "prompt-expand",
     },
     inputWritten: false,
+  };
+}
+
+function getToolMetadata({
+  capabilityId,
+  projectId,
+  runNodeId,
+  stepId,
+}: {
+  capabilityId: string;
+  projectId: string;
+  runNodeId: string;
+  stepId: string;
+}) {
+  return {
+    capabilityId,
+    projectId,
+    runNodeId,
+    stepId,
   };
 }
 

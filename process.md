@@ -17,6 +17,14 @@
 
 ## 2026-06-08
 
+### 修复 Agent OS 三阶段审查遗漏
+
+- 变更：补齐 high-risk capability approval UI，服务端在 `approval-requested` 时暂停，不再立即写 `output-denied`；前端 Run 节点显示确认/拒绝按钮，并通过 AI SDK `addToolApprovalResponse` 带原 run body 继续执行或拒绝。
+- 变更：router 不再把已匹配的非图片 terminal capability 静默路由到 `image.generate`，未接入 executor 时返回明确 `capability.route_missing`；run trace 记录真实 `promptNodeId` 并写入 artifact attach graph patch proposed/applied 事件，便于 replay 和 trace 解释。
+- 变更：默认画布中未接入的左侧工具按钮、背景/图层/文件/缩放按钮改为 disabled，避免看起来可点但没有行为。
+- 文件：`server/run-kernel.ts`、`server/agent-router.ts`、`server/api.ts`、`server/prompts.ts`、`src/types/canvas.ts`、`src/lib/graph.ts`、`src/lib/graph.test.ts`、`src/lib/graph-projection.test.ts`、`src/components/CanvasWorkspace.tsx`、`src/App.css`、`agent-os-plan.md`。
+- 验证：`pnpm test -- src/lib/graph.test.ts src/lib/graph-projection.test.ts server/run-kernel.test.ts server/agent-router.test.ts server/capabilities.test.ts`、`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm lint`、`pnpm build` 通过；Browser 打开 `http://localhost:5173/`，注册态项目列表和空画布非空、无 console error/warn，未接入工具按钮均为 disabled，Skills 面板可打开并加载公开 skill。
+
 ### 开发 Agent OS Part 3 Canvas OS、Memory 与 Replay
 
 - 变更：新增 `src/lib/graph-projection.ts`，将 run step events、artifact refs 和 graph patch proposal 投影为 `AgentCanvasNode` / `AgentCanvasEdge`；patch reducer 校验重复节点、断边、非法 node kind、非 Run 状态修改和 project id mismatch。

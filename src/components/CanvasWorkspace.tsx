@@ -34,6 +34,7 @@ import {
   Sparkles,
   Type,
   WandSparkles,
+  X,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -115,6 +116,18 @@ const edgeTypes = {
 const initialNodes: AgentCanvasNode[] = [];
 const initialEdges: AgentCanvasEdge[] = [];
 type StorageStatus = "loading" | "saving" | "saved" | "error";
+type AgentRunRequestBody = {
+  projectId: string;
+  runNodeId: string;
+  modelProvider: ModelProviderId;
+  canvasContext: {
+    prompt: string;
+    promptNodeId: string;
+    selectedNodeId: string | null;
+    upstreamContext: ReturnType<typeof createRunDraft>["upstreamContext"];
+    contextTrace: ReturnType<typeof createRunDraft>["contextTrace"];
+  };
+};
 
 type CanvasWorkspaceProps = {
   projectId: string;
@@ -146,6 +159,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const [modelProviders, setModelProviders] = useState<ModelProviderSummary[]>([]);
   const [modelProviderError, setModelProviderError] = useState<string | null>(null);
   const activeRunId = useRef<string | null>(null);
+  const activeRunRequest = useRef<AgentRunRequestBody | null>(null);
   const hasLoadedProject = useRef(false);
   const saveTimer = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const isReplayMode = Boolean(replaySnapshot);
@@ -243,7 +257,14 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     [setEdges, setNodes]
   );
 
-  const { messages, sendMessage, status, error, stop } = useChat({
+  const {
+    addToolApprovalResponse,
+    messages,
+    sendMessage,
+    status,
+    error,
+    stop,
+  } = useChat({
     transport: new DefaultChatTransport({ api: "/api/agent-run" }),
     onError: (nextError) => {
       markRunError(activeRunId.current, nextError.message);
@@ -265,10 +286,24 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const referenceNode = referenceNodeId ? selectedNode : undefined;
   const persistedSelectedNodeId = referenceNodeId ?? null;
   const isBusy = status === "submitted" || status === "streaming";
+  const hasPendingApproval = useMemo(
+    () =>
+      nodes.some(
+        (node) =>
+          node.data.kind === "run" &&
+          (node.data.toolParts ?? [node.data.toolPart]).some(
+            (part) =>
+              part?.state === "approval-requested" &&
+              part.approval?.approved === undefined
+          )
+      ),
+    [nodes]
+  );
   const canSubmit =
     Boolean(loadedProjectId) &&
     storageStatus !== "loading" &&
     !storageError &&
+    !hasPendingApproval &&
     !isReplayMode;
 
   useEffect(() => {
@@ -320,6 +355,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
     hasLoadedProject.current = false;
     activeRunId.current = null;
+    activeRunRequest.current = null;
 
     loadProject(projectId)
       .then(({ project }) => {
@@ -440,6 +476,55 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   }, [error, markRunError]);
 
   useEffect(() => {
+    const handleApprovalResponse = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{ approvalId?: unknown; approved?: unknown }>
+      ).detail;
+      if (
+        typeof detail?.approvalId !== "string" ||
+        typeof detail.approved !== "boolean"
+      ) {
+        return;
+      }
+
+      const requestBody = activeRunRequest.current;
+      const approvalId = detail.approvalId;
+      const approved = detail.approved;
+      if (!requestBody) {
+        markRunError(activeRunId.current, "审批上下文已失效，请重新提交。");
+        return;
+      }
+
+      void (async () => {
+        try {
+          await addToolApprovalResponse({
+            id: approvalId,
+            approved,
+            reason: approved ? "用户确认执行" : "用户拒绝执行",
+          });
+          await sendMessage(undefined, {
+            body: requestBody,
+          });
+        } catch (nextError) {
+          markRunError(activeRunId.current, getClientError(nextError));
+        }
+      })();
+    };
+
+    window.addEventListener(
+      "cucumber:respond-tool-approval",
+      handleApprovalResponse
+    );
+
+    return () => {
+      window.removeEventListener(
+        "cucumber:respond-tool-approval",
+        handleApprovalResponse
+      );
+    };
+  }, [addToolApprovalResponse, markRunError, sendMessage]);
+
+  useEffect(() => {
     const runId = activeRunId.current;
     if (!runId) {
       return;
@@ -492,7 +577,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     async (event?: FormEvent<HTMLFormElement>) => {
       event?.preventDefault();
       const value = prompt.trim();
-      if (!value || isBusy) {
+      if (!value || isBusy || hasPendingApproval) {
         return;
       }
       if (!loadedProjectId) {
@@ -508,6 +593,19 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       const draft = createRunDraft(value, anchorId, nodes, edges);
       activeRunId.current = draft.runNode.id;
       setContextCount(draft.upstreamContext.length);
+      const requestBody: AgentRunRequestBody = {
+        projectId: loadedProjectId,
+        runNodeId: draft.runNode.id,
+        modelProvider,
+        canvasContext: {
+          prompt: value,
+          promptNodeId: draft.promptNode.id,
+          selectedNodeId: anchorId,
+          upstreamContext: draft.upstreamContext,
+          contextTrace: draft.contextTrace,
+        },
+      };
+      activeRunRequest.current = requestBody;
 
       setNodes((current) => [
         ...applySelectedNodeIds(current, []),
@@ -520,22 +618,13 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       await sendMessage(
         { text: value },
         {
-          body: {
-            projectId: loadedProjectId,
-            runNodeId: draft.runNode.id,
-            modelProvider,
-            canvasContext: {
-              prompt: value,
-              selectedNodeId: anchorId,
-              upstreamContext: draft.upstreamContext,
-              contextTrace: draft.contextTrace,
-            },
-          },
+          body: requestBody,
         }
       );
     },
     [
       edges,
+      hasPendingApproval,
       isBusy,
       loadedProjectId,
       modelProvider,
@@ -662,6 +751,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       <Composer
         busy={isBusy}
         canSubmit={canSubmit}
+        approvalPending={hasPendingApproval}
         contextCount={contextCount}
         prompt={prompt}
         referenceNode={referenceNode}
@@ -812,24 +902,25 @@ function TopBar({
 function ToolRail() {
   const tools = [
     { icon: MousePointer2, label: "Select", active: true },
-    { icon: PenLine, label: "Draw" },
-    { icon: Type, label: "Text" },
-    { icon: Frame, label: "Frame" },
-    { icon: Plus, label: "Insert" },
-    { icon: Image, label: "Image" },
-    { icon: Box, label: "Container" },
-    { icon: ArrowUpRight, label: "Connector" },
+    { icon: PenLine, label: "Draw", disabled: true },
+    { icon: Type, label: "Text", disabled: true },
+    { icon: Frame, label: "Frame", disabled: true },
+    { icon: Plus, label: "Insert", disabled: true },
+    { icon: Image, label: "Image", disabled: true },
+    { icon: Box, label: "Container", disabled: true },
+    { icon: ArrowUpRight, label: "Connector", disabled: true },
   ];
 
   return (
     <aside className="tool-rail" aria-label="Canvas tools">
-      {tools.map(({ icon: Icon, label, active }) => (
+      {tools.map(({ icon: Icon, label, active, disabled }) => (
         <button
           aria-label={label}
           className={active ? "active" : ""}
+          disabled={disabled}
           key={label}
           type="button"
-          title={label}
+          title={disabled ? "暂未开放" : label}
         >
           <Icon size={16} />
         </button>
@@ -847,13 +938,13 @@ function ViewportControls({
 }) {
   return (
     <div className="viewport-controls">
-      <button aria-label="Background color" type="button">
+      <button aria-label="Background color" disabled title="暂未开放" type="button">
         <Palette size={14} />
       </button>
-      <button aria-label="Layers" type="button">
+      <button aria-label="Layers" disabled title="暂未开放" type="button">
         <Layers size={14} />
       </button>
-      <button aria-label="Generated files" type="button">
+      <button aria-label="Generated files" disabled title="暂未开放" type="button">
         <Image size={14} />
       </button>
       <button
@@ -866,11 +957,11 @@ function ViewportControls({
         <WandSparkles size={14} />
       </button>
       <span className="divider" />
-      <button aria-label="Zoom out" type="button">
+      <button aria-label="Zoom out" disabled title="暂未开放" type="button">
         <ZoomOut size={14} />
       </button>
       <span className="zoom-label">100%</span>
-      <button aria-label="Zoom in" type="button">
+      <button aria-label="Zoom in" disabled title="暂未开放" type="button">
         <ZoomIn size={14} />
       </button>
     </div>
@@ -893,6 +984,7 @@ function EmptyState({ visible }: { visible: boolean }) {
 function Composer({
   busy,
   canSubmit,
+  approvalPending,
   contextCount,
   prompt,
   referenceNode,
@@ -904,6 +996,7 @@ function Composer({
 }: {
   busy: boolean;
   canSubmit: boolean;
+  approvalPending: boolean;
   contextCount: number;
   prompt: string;
   referenceNode?: AgentCanvasNode;
@@ -935,6 +1028,8 @@ function Composer({
             placeholder={
               replayActive
                 ? "Run 回放模式为只读..."
+                : approvalPending
+                ? "请先处理 Run 节点中的确认..."
                 : !canSubmit
                 ? "项目连接失败，无法提交..."
                 : hasReference
@@ -1237,6 +1332,8 @@ function ToolCallRow({
   const stateLabel = getToolStateLabel(toolPart.state);
   const detailLines = getToolDetailLines(toolPart, error);
   const isError = toolPart.state === "output-error";
+  const approvalId =
+    toolPart.state === "approval-requested" ? toolPart.approval?.id : undefined;
 
   return (
     <div className={isError ? "tool-call-row error" : "tool-call-row"}>
@@ -1261,7 +1358,41 @@ function ToolCallRow({
           </small>
         ))}
       </div>
+      {approvalId && (
+        <div className="tool-approval-actions">
+          <button
+            className="nodrag nopan"
+            onClick={(event) => {
+              event.stopPropagation();
+              dispatchToolApprovalResponse(approvalId, true);
+            }}
+            type="button"
+          >
+            <Check size={11} />
+            确认
+          </button>
+          <button
+            className="nodrag nopan secondary"
+            onClick={(event) => {
+              event.stopPropagation();
+              dispatchToolApprovalResponse(approvalId, false);
+            }}
+            type="button"
+          >
+            <X size={11} />
+            拒绝
+          </button>
+        </div>
+      )}
     </div>
+  );
+}
+
+function dispatchToolApprovalResponse(approvalId: string, approved: boolean) {
+  window.dispatchEvent(
+    new CustomEvent("cucumber:respond-tool-approval", {
+      detail: { approvalId, approved },
+    })
   );
 }
 
@@ -1280,6 +1411,10 @@ function getRunTitle(status: RunNodeData["status"], state: CanvasToolPart["state
 
   if (state === "approval-requested") {
     return "等待确认";
+  }
+
+  if (state === "approval-responded") {
+    return "继续执行";
   }
 
   return "Thinking...";
@@ -1332,6 +1467,16 @@ function getToolDetailLines(toolPart: CanvasToolPart, error?: string) {
 
   if (toolPart.state === "output-denied") {
     return ["工具调用被拒绝"];
+  }
+
+  if (toolPart.state === "approval-requested") {
+    return ["需要确认后继续执行"];
+  }
+
+  if (toolPart.state === "approval-responded") {
+    return [
+      toolPart.approval?.approved === false ? "已拒绝执行" : "已确认执行",
+    ];
   }
 
   return getToolInputLines(toolPart.input);

@@ -106,6 +106,30 @@ describe("graph projection", () => {
     ]);
   });
 
+  it("reuses the real prompt node id when it is present in the trace", () => {
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      existingNodes: [
+        {
+          ...promptNode("prompt-real"),
+          position: { x: 88, y: 99 },
+        },
+      ],
+      events: [
+        event("run.created", "run-1", "run", {
+          prompt: "生成图片",
+          promptNodeId: "prompt-real",
+          selectedNodeId: null,
+        }),
+      ],
+    });
+
+    expect(projection.nodes[0]).toMatchObject({
+      id: "prompt-real",
+      position: { x: 88, y: 99 },
+    });
+  });
+
   it("rejects duplicate nodes, dangling edges, illegal kinds, and project mismatch", () => {
     const state = {
       projectId: "project-1",

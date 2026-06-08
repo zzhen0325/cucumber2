@@ -31,6 +31,7 @@ export type PromptUpstreamContextItem = {
 
 export type PromptCanvasContext = {
   prompt: string;
+  promptNodeId?: string | null;
   selectedNodeId?: string | null;
   upstreamContext: PromptUpstreamContextItem[];
   contextTrace?: {

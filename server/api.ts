@@ -93,6 +93,7 @@ const upstreamContextSchema = z.object({
 
 const canvasContextSchema = z.object({
   prompt: z.string(),
+  promptNodeId: z.string().nullable().optional(),
   selectedNodeId: z.string().nullable().optional(),
   upstreamContext: z.array(upstreamContextSchema).default([]),
   contextTrace: z
@@ -422,6 +423,7 @@ app.post("/api/agent-run", async (c) => {
     execute: async ({ writer }) => {
       await executeImageAgentRun({
         canvasContext,
+        messages,
         modelProvider,
         projectId,
         runNodeId,

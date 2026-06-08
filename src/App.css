@@ -575,12 +575,18 @@
   border-radius: 50%;
 }
 
-.tool-rail button:hover,
-.viewport-controls button:hover,
+.tool-rail button:hover:not(:disabled),
+.viewport-controls button:hover:not(:disabled),
 .tool-rail button.active,
 .viewport-controls button.active {
   background: #f6f6f3;
   color: #111111;
+}
+
+.tool-rail button:disabled,
+.viewport-controls button:disabled {
+  cursor: default;
+  opacity: 0.38;
 }
 
 .viewport-controls {
@@ -1192,6 +1198,37 @@
   line-height: 13px;
   overflow-wrap: anywhere;
   white-space: normal;
+}
+
+.tool-approval-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.tool-approval-actions button {
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 999px;
+  background: #29bf4e;
+  color: #07130a;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 13px;
+}
+
+.tool-approval-actions button.secondary {
+  border: 1px solid rgba(229, 72, 77, 0.18);
+  background: #ffffff;
+  color: #cc2e33;
+}
+
+.tool-approval-actions button:hover {
+  filter: brightness(0.97);
 }
 
 .artifact-card {
