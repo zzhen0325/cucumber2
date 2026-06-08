@@ -132,6 +132,11 @@ export type ArtifactNodeData = ArtifactBackedNodeData & {
   kind: "artifact";
 };
 
+export type MarkdownNodeData = ArtifactBackedNodeData & {
+  kind: "markdown";
+  content: string;
+};
+
 export type DecisionNodeData = ArtifactBackedNodeData & {
   kind: "decision";
   decision: string;
@@ -165,6 +170,7 @@ export type AgentCanvasNodeData =
   | RunNodeData
   | ImageResultNodeData
   | ArtifactNodeData
+  | MarkdownNodeData
   | DecisionNodeData
   | MemoryNodeData
   | ToolResultNodeData

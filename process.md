@@ -17,6 +17,14 @@
 
 ## 2026-06-08
 
+### 增加 Markdown 画布容器
+
+- 变更：新增 `markdownNode`，当 Agent/tool 输出 `{ markdown }`、`documents[]` 或带 `format: "markdown"` / `mimeType: "text/markdown"` 的 `doc` artifact 时，自动投影成独立 Markdown 文档容器；容器复用 Streamdown 渲染，支持标题、列表、代码块和内部滚动。
+- 变更：实时 Run 输出不再只处理 `generate_image`，所有 `output-available` tool part 都会进入 graph projection；文档型纯文本 Run 在没有工具输出时可按调研/分析/报告类 prompt 自动升格为 Markdown 容器。
+- 文件：`src/types/canvas.ts`、`src/lib/graph.ts`、`src/lib/graph-projection.ts`、`src/components/CanvasWorkspace.tsx`、`src/App.css`、`src/lib/graph.test.ts`、`README.md`。
+- 验证：`pnpm test -- src/lib/graph.test.ts`、`pnpm build` 通过；Browser 打开 `http://localhost:5174/`，在测试项目快照中渲染 `markdownNode`，确认标题、列表、代码块、内部滚动、选中态和 follow-up 引用文案可见且无 console error/warn。
+- 备注：当前服务端 rule planner 仍只接入图片 executor；真正 research/analyze executor 接入后，只要返回上述 Markdown 输出契约即可落到该容器。
+
 ### 修复 Agent OS 三阶段审查遗漏
 
 - 变更：补齐 high-risk capability approval UI，服务端在 `approval-requested` 时暂停，不再立即写 `output-denied`；前端 Run 节点显示确认/拒绝按钮，并通过 AI SDK `addToolApprovalResponse` 带原 run body 继续执行或拒绝。

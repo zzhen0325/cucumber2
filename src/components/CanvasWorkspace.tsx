@@ -43,6 +43,7 @@ import type { FormEvent } from "react";
 
 import { Canvas } from "@/components/ai-elements/canvas";
 import { Edge } from "@/components/ai-elements/edge";
+import { MessageResponse } from "@/components/ai-elements/message";
 import { Node, NodeContent } from "@/components/ai-elements/node";
 import { ReplayBanner, RunTracePanel } from "@/components/RunTracePanel";
 import { SkillPanel } from "@/components/SkillPanel";
@@ -76,6 +77,7 @@ import {
 import {
   createRunDraft,
   extractImagesFromToolOutput,
+  shouldCreateMarkdownFromAgentText,
   getRunReferenceNodeId,
   textFromMessageParts,
   toolPartsFromMessageParts,
@@ -91,6 +93,7 @@ import type {
   CanvasToolPart,
   GeneratedImage,
   ImageResultNodeData,
+  MarkdownNodeData,
   PromptNodeData,
   RunNodeData,
 } from "@/types/canvas";
@@ -104,6 +107,7 @@ const nodeTypes = {
   promptNode: memo(PromptNode),
   runNode: memo(RunNode),
   imageResultNode: memo(ImageResultNode),
+  markdownNode: memo(MarkdownNode),
   toolResultNode: memo(ArtifactLikeNode),
   webpageNode: memo(ArtifactLikeNode),
 } as NodeTypes;
@@ -243,6 +247,35 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         const { resultNodes, resultEdges } = projectToolOutputToCanvas(
           runNode,
           output,
+          currentNodes
+        );
+
+        if (!resultNodes.length) {
+          return currentNodes;
+        }
+
+        setEdges((currentEdges) => [...currentEdges, ...resultEdges]);
+        return [...currentNodes, ...resultNodes];
+      });
+    },
+    [setEdges, setNodes]
+  );
+
+  const addMarkdownForRun = useCallback(
+    (runId: string, content: string) => {
+      setNodes((currentNodes) => {
+        const runNode = currentNodes.find((node) => node.id === runId);
+        if (!runNode || runNode.data.kind !== "run") {
+          return currentNodes;
+        }
+
+        const { resultNodes, resultEdges } = projectToolOutputToCanvas(
+          runNode,
+          {
+            markdown: content,
+            id: `${runId}-agent-text`,
+            title: "分析文档",
+          },
           currentNodes
         );
 
@@ -541,6 +574,14 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     if (!toolPart) {
       if (status === "submitted" || status === "streaming") {
         updateRun(runId, { status: "running", agentText });
+      } else if (
+        shouldCreateMarkdownFromAgentText(
+          activeRunRequest.current?.canvasContext.prompt ?? "",
+          agentText
+        )
+      ) {
+        updateRun(runId, { status: "success", agentText });
+        addMarkdownForRun(runId, agentText);
       }
       return;
     }
@@ -564,14 +605,12 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       error: toolPart.errorText,
     });
 
-    const imageToolPart = toolParts.find(
-      (part) =>
-        part.type === "tool-generate_image" && part.state === "output-available"
-    );
-    if (imageToolPart) {
-      addResultsForRun(runId, imageToolPart.output);
+    for (const outputToolPart of toolParts.filter(
+      (part) => part.state === "output-available"
+    )) {
+      addResultsForRun(runId, outputToolPart.output);
     }
-  }, [addResultsForRun, messages, status, updateRun]);
+  }, [addMarkdownForRun, addResultsForRun, messages, status, updateRun]);
 
   const handleSubmit = useCallback(
     async (event?: FormEvent<HTMLFormElement>) => {
@@ -1115,6 +1154,7 @@ type ArtifactLikeNodeData = Extract<
   {
     kind:
       | "artifact"
+      | "markdown"
       | "decision"
       | "memory"
       | "toolResult"
@@ -1280,6 +1320,9 @@ function RunNode({
 }
 
 function ArtifactNodeIcon({ kind }: { kind: ArtifactLikeNodeProps["data"]["kind"] }) {
+  if (kind === "markdown") {
+    return <FileText size={14} />;
+  }
   if (kind === "webpage") {
     return <Globe2 size={14} />;
   }
@@ -1302,6 +1345,7 @@ function getArtifactNodeLabel(kind: ArtifactLikeNodeProps["data"]["kind"]) {
     code: "Code",
     decision: "Decision",
     document: "Document",
+    markdown: "Markdown",
     memory: "Memory",
     toolResult: "Tool Result",
     webpage: "Webpage",
@@ -1311,6 +1355,9 @@ function getArtifactNodeLabel(kind: ArtifactLikeNodeProps["data"]["kind"]) {
 }
 
 function getArtifactNodeSummary(data: ArtifactLikeNodeProps["data"]) {
+  if (data.kind === "markdown") {
+    return data.summary ?? data.content;
+  }
   if (data.kind === "decision") {
     return data.decision;
   }
@@ -1319,6 +1366,37 @@ function getArtifactNodeSummary(data: ArtifactLikeNodeProps["data"]) {
   }
 
   return data.summary ?? data.artifact.contentRef ?? data.artifact.uri;
+}
+
+function MarkdownNode({
+  data,
+  selected,
+}: NodeProps<FlowNode<MarkdownNodeData, "markdownNode">>) {
+  return (
+    <Node
+      className={
+        selected
+          ? "canvas-node selected markdown-card"
+          : "canvas-node markdown-card"
+      }
+      handles={{ source: true, target: true }}
+    >
+      <NodeContent className="markdown-content">
+        <div className="markdown-heading">
+          <span className="artifact-icon">
+            <FileText size={14} />
+          </span>
+          <div>
+            <span>Markdown</span>
+            <strong title={data.title}>{data.title}</strong>
+          </div>
+        </div>
+        <div className="markdown-body nodrag nopan">
+          <MessageResponse>{data.content}</MessageResponse>
+        </div>
+      </NodeContent>
+    </Node>
+  );
 }
 
 function ToolCallRow({

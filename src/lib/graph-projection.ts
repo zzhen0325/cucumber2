@@ -1,6 +1,8 @@
 import {
   createImageResultNodes,
+  createMarkdownDocumentNodes,
   extractImagesFromToolOutput,
+  extractMarkdownDocumentsFromToolOutput,
 } from "@/lib/graph";
 import type {
   AgentCanvasEdge,
@@ -237,7 +239,24 @@ export function projectToolOutputToCanvas(
   existingNodes: AgentCanvasNode[]
 ) {
   const images = extractImagesFromToolOutput(output);
-  return createImageResultNodes(runNode, images, existingNodes);
+  const imageProjection = createImageResultNodes(runNode, images, existingNodes);
+  const markdownDocuments = extractMarkdownDocumentsFromToolOutput(output);
+  const markdownProjection = createMarkdownDocumentNodes(
+    runNode,
+    markdownDocuments,
+    [...existingNodes, ...imageProjection.resultNodes]
+  );
+
+  return {
+    resultNodes: [
+      ...imageProjection.resultNodes,
+      ...markdownProjection.resultNodes,
+    ],
+    resultEdges: [
+      ...imageProjection.resultEdges,
+      ...markdownProjection.resultEdges,
+    ],
+  };
 }
 
 export function projectRunTraceToCanvas({
@@ -422,6 +441,7 @@ function getNodeTypeForKind(kind: AgentCanvasNodeData["kind"]) {
     decision: "decisionNode",
     document: "documentNode",
     imageResult: "imageResultNode",
+    markdown: "markdownNode",
     memory: "memoryNode",
     prompt: "promptNode",
     run: "runNode",
@@ -644,7 +664,13 @@ function createArtifactCanvasNode({
     type: nodeType,
     position: existingPosition ?? basePosition,
     data:
-      kind === "decision"
+      kind === "markdown"
+        ? {
+            ...baseData,
+            kind,
+            content: readMarkdownArtifactContent(artifact) ?? "",
+          }
+        : kind === "decision"
         ? { ...baseData, kind, decision: baseData.summary ?? title }
         : kind === "memory"
           ? { ...baseData, kind, memory: baseData.summary ?? title }
@@ -697,6 +723,9 @@ function getExistingOrProjectedEdge(
 function getArtifactNodeKind(
   artifact: ArtifactRef
 ): Exclude<AgentCanvasNodeData["kind"], "prompt" | "run" | "imageResult"> {
+  if (artifact.type === "doc" && isMarkdownArtifact(artifact)) {
+    return "markdown";
+  }
   if (artifact.type === "doc") {
     return "document";
   }
@@ -721,13 +750,36 @@ function getArtifactNodeKind(
 
 function getArtifactNodeId(artifact: ArtifactRef) {
   if (artifact.type === "doc") {
-    return `document-${artifact.id}`;
+    return isMarkdownArtifact(artifact)
+      ? `markdown-${artifact.id}`
+      : `document-${artifact.id}`;
   }
   if (artifact.type === "tool_result") {
     return `tool-result-${artifact.id}`;
   }
 
   return `${getArtifactNodeKind(artifact)}-${artifact.id}`;
+}
+
+function isMarkdownArtifact(artifact: ArtifactRef) {
+  const format = readString(artifact.metadata?.format)?.toLowerCase();
+  const mimeType = readString(artifact.metadata?.mimeType)?.toLowerCase();
+
+  return (
+    format === "markdown" ||
+    format === "md" ||
+    mimeType === "text/markdown" ||
+    artifact.uri?.endsWith(".md") ||
+    artifact.contentRef?.endsWith(".md")
+  );
+}
+
+function readMarkdownArtifactContent(artifact: ArtifactRef) {
+  return (
+    readString(artifact.metadata?.markdown) ??
+    readString(artifact.metadata?.content) ??
+    readString(artifact.metadata?.text)
+  );
 }
 
 function getArtifactFallbackTitle(artifact: ArtifactRef) {

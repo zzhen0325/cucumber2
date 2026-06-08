@@ -14,6 +14,8 @@ const PROMPT_NODE_HEIGHT = 84;
 const COMPACT_RUN_NODE_HEIGHT = 36;
 const RUN_NODE_HEIGHT = 300;
 const RESULT_NODE_HEIGHT = 240;
+const MARKDOWN_NODE_WIDTH = 420;
+const MARKDOWN_NODE_HEIGHT = 360;
 const ARTIFACT_NODE_HEIGHT = 132;
 const RESULT_GAP = 17;
 const NODE_CLEARANCE = 24;
@@ -34,6 +36,14 @@ type CanvasRect = {
   y: number;
   width: number;
   height: number;
+};
+
+export type GeneratedMarkdownDocument = {
+  id: string;
+  title: string;
+  content: string;
+  summary?: string;
+  artifact?: ArtifactRef;
 };
 
 export type ContextCollectionTrace = {
@@ -295,6 +305,78 @@ export function createImageResultNodes(
   return { resultNodes, resultEdges };
 }
 
+export function createMarkdownDocumentNodes(
+  runNode: AgentCanvasNode,
+  documents: GeneratedMarkdownDocument[],
+  existingNodes: AgentCanvasNode[]
+) {
+  const alreadyRendered = new Set(
+    existingNodes.flatMap((node) => {
+      if (node.data.kind !== "markdown") {
+        return [];
+      }
+
+      return [node.data.artifact?.id ?? node.id.replace(/^markdown-/, "")];
+    })
+  );
+  const visibleDocuments = documents.filter(
+    (document) =>
+      document.content.trim() &&
+      !alreadyRendered.has(document.artifact?.id ?? document.id)
+  );
+
+  const resultNodes: AgentCanvasNode[] = [];
+  const resultEdges: AgentCanvasEdge[] = [];
+
+  for (const document of visibleDocuments) {
+    const nodeId = `markdown-${safeNodeId(document.artifact?.id ?? document.id)}`;
+    const preferredRect = {
+      x: runNode.position.x - (MARKDOWN_NODE_WIDTH - NODE_WIDTH) / 2,
+      y: runNode.position.y + EXPANDED_RESULT_OFFSET_FROM_PROMPT_Y - RUN_OFFSET_Y,
+      width: MARKDOWN_NODE_WIDTH,
+      height: MARKDOWN_NODE_HEIGHT,
+    };
+    const x = resolveNonOverlappingX(preferredRect, [
+      ...existingNodes,
+      ...resultNodes,
+    ]);
+    const artifact =
+      document.artifact ??
+      ({
+        id: document.id,
+        type: "doc",
+        title: document.title,
+        metadata: {
+          format: "markdown",
+          summary: document.summary,
+        },
+      } satisfies ArtifactRef);
+
+    resultNodes.push({
+      id: nodeId,
+      type: "markdownNode",
+      position: { x, y: preferredRect.y },
+      data: {
+        kind: "markdown",
+        artifact,
+        content: document.content.trim(),
+        prompt: runNode.data.kind === "run" ? runNode.data.prompt : undefined,
+        runId: runNode.id,
+        summary: document.summary ?? summarizeMarkdown(document.content),
+        title: document.title,
+      },
+    });
+    resultEdges.push({
+      id: id("edge"),
+      source: runNode.id,
+      target: nodeId,
+      type: "animated",
+    });
+  }
+
+  return { resultNodes, resultEdges };
+}
+
 function resolveNonOverlappingX(
   preferredRect: CanvasRect,
   existingNodes: AgentCanvasNode[]
@@ -363,9 +445,17 @@ function getNodeRect(node: AgentCanvasNode): CanvasRect {
   return {
     x: node.position.x,
     y: node.position.y,
-    width: NODE_WIDTH,
+    width: getNodeWidth(node),
     height: getNodeHeight(node),
   };
+}
+
+function getNodeWidth(node: AgentCanvasNode) {
+  if (node.data.kind === "markdown") {
+    return MARKDOWN_NODE_WIDTH;
+  }
+
+  return NODE_WIDTH;
 }
 
 function getNodeHeight(node: AgentCanvasNode) {
@@ -375,6 +465,10 @@ function getNodeHeight(node: AgentCanvasNode) {
 
   if (node.data.kind === "imageResult") {
     return RESULT_NODE_HEIGHT;
+  }
+
+  if (node.data.kind === "markdown") {
+    return MARKDOWN_NODE_HEIGHT;
   }
 
   if (isArtifactBackedKind(node.data.kind)) {
@@ -488,6 +582,7 @@ type ArtifactBackedCanvasNode = AgentCanvasNode & {
     {
       kind:
         | "artifact"
+        | "markdown"
         | "decision"
         | "memory"
         | "toolResult"
@@ -499,6 +594,10 @@ type ArtifactBackedCanvasNode = AgentCanvasNode & {
 };
 
 function getArtifactNodeSummary(node: ArtifactBackedCanvasNode) {
+  if (node.data.kind === "markdown") {
+    return node.data.summary ?? summarizeMarkdown(node.data.content);
+  }
+
   if (node.data.kind === "decision") {
     return node.data.decision;
   }
@@ -625,6 +724,7 @@ function isArtifactBackedKind(
   kind: AgentCanvasNode["data"]["kind"]
 ): kind is
   | "artifact"
+  | "markdown"
   | "decision"
   | "memory"
   | "toolResult"
@@ -633,6 +733,7 @@ function isArtifactBackedKind(
   | "webpage" {
   return (
     kind === "artifact" ||
+    kind === "markdown" ||
     kind === "decision" ||
     kind === "memory" ||
     kind === "toolResult" ||
@@ -646,6 +747,51 @@ function isArtifactBackedNode(
   node: AgentCanvasNode
 ): node is ArtifactBackedCanvasNode {
   return isArtifactBackedKind(node.data.kind);
+}
+
+export function extractMarkdownDocumentsFromToolOutput(
+  output: unknown
+): GeneratedMarkdownDocument[] {
+  if (!output || typeof output !== "object") {
+    return [];
+  }
+
+  const documents: GeneratedMarkdownDocument[] = [];
+  const candidate = output as Record<string, unknown>;
+  const directMarkdown =
+    readString(candidate.markdown) ??
+    (candidate.format === "markdown" || candidate.mimeType === "text/markdown"
+      ? readString(candidate.content)
+      : undefined);
+
+  if (directMarkdown) {
+    documents.push({
+      id: readString(candidate.id) ?? "agent-markdown",
+      title: readString(candidate.title) ?? "Markdown 文档",
+      content: directMarkdown,
+      summary: readString(candidate.summary) ?? summarizeMarkdown(directMarkdown),
+    });
+  }
+
+  const documentItems = Array.isArray(candidate.documents)
+    ? candidate.documents
+    : [];
+  for (const item of documentItems) {
+    const document = readMarkdownDocument(item);
+    if (document) {
+      documents.push(document);
+    }
+  }
+
+  const artifacts = Array.isArray(candidate.artifacts) ? candidate.artifacts : [];
+  for (const artifact of artifacts) {
+    const document = readMarkdownArtifactDocument(artifact);
+    if (document) {
+      documents.push(document);
+    }
+  }
+
+  return dedupeMarkdownDocuments(documents);
 }
 
 export function extractImagesFromToolOutput(output: unknown): GeneratedImage[] {
@@ -831,4 +977,173 @@ export function textFromMessageParts(parts: unknown[] | undefined): string {
     })
     .filter(Boolean)
     .join("\n\n");
+}
+
+export function shouldCreateMarkdownFromAgentText(prompt: string, text: string) {
+  const normalizedPrompt = prompt.toLowerCase();
+  const asksForDocument =
+    /调研|分析|报告|文档|总结|梳理|方案|markdown|\bmd\b/.test(
+      normalizedPrompt
+    );
+
+  return asksForDocument && looksLikeMarkdownDocument(text);
+}
+
+function readMarkdownDocument(item: unknown): GeneratedMarkdownDocument | null {
+  if (!item || typeof item !== "object") {
+    return null;
+  }
+
+  const candidate = item as Record<string, unknown>;
+  const content = readString(candidate.markdown) ?? readString(candidate.content);
+  if (!content) {
+    return null;
+  }
+
+  return {
+    id: readString(candidate.id) ?? stableTextId(content),
+    title: readString(candidate.title) ?? getMarkdownTitle(content),
+    content,
+    summary: readString(candidate.summary) ?? summarizeMarkdown(content),
+  };
+}
+
+function readMarkdownArtifactDocument(
+  item: unknown
+): GeneratedMarkdownDocument | null {
+  if (!item || typeof item !== "object") {
+    return null;
+  }
+
+  const candidate = item as Record<string, unknown>;
+  const artifact = readArtifactRef(candidate);
+  if (!artifact || !isMarkdownArtifact(artifact)) {
+    return null;
+  }
+
+  const metadata = artifact.metadata ?? {};
+  const content =
+    readString(metadata.markdown) ??
+    readString(metadata.content) ??
+    readString(metadata.text);
+  if (!content) {
+    return null;
+  }
+
+  return {
+    id: artifact.id,
+    title: artifact.title ?? getMarkdownTitle(content),
+    content,
+    summary: readString(metadata.summary) ?? summarizeMarkdown(content),
+    artifact,
+  };
+}
+
+function readArtifactRef(candidate: Record<string, unknown>): ArtifactRef | null {
+  const idValue = readString(candidate.id);
+  const typeValue = candidate.type;
+  if (!idValue || !isArtifactType(typeValue)) {
+    return null;
+  }
+
+  return {
+    id: idValue,
+    type: typeValue,
+    uri: readString(candidate.uri),
+    title: readString(candidate.title),
+    contentRef: readString(candidate.contentRef),
+    metadata:
+      candidate.metadata && typeof candidate.metadata === "object"
+        ? (candidate.metadata as Record<string, unknown>)
+        : undefined,
+  };
+}
+
+function isArtifactType(value: unknown): value is ArtifactRef["type"] {
+  return (
+    value === "image" ||
+    value === "file" ||
+    value === "doc" ||
+    value === "code" ||
+    value === "webpage" ||
+    value === "dataset" ||
+    value === "decision" ||
+    value === "tool_result" ||
+    value === "memory"
+  );
+}
+
+function isMarkdownArtifact(artifact: ArtifactRef) {
+  const format = readString(artifact.metadata?.format)?.toLowerCase();
+  const mimeType = readString(artifact.metadata?.mimeType)?.toLowerCase();
+
+  return (
+    artifact.type === "doc" &&
+    (format === "markdown" ||
+      format === "md" ||
+      mimeType === "text/markdown" ||
+      artifact.uri?.endsWith(".md") ||
+      artifact.contentRef?.endsWith(".md"))
+  );
+}
+
+function looksLikeMarkdownDocument(text: string) {
+  const trimmed = text.trim();
+  if (trimmed.length < 80) {
+    return false;
+  }
+
+  return /^#{1,3}\s+\S/m.test(trimmed) || /\n[-*]\s+\S/.test(trimmed);
+}
+
+function getMarkdownTitle(content: string) {
+  const heading = content
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => /^#{1,3}\s+\S/.test(line));
+
+  return heading?.replace(/^#{1,3}\s+/, "").trim() || "Markdown 文档";
+}
+
+function summarizeMarkdown(content: string) {
+  return (
+    content
+      .replace(/```[\s\S]*?```/g, "")
+      .split("\n")
+      .map((line) => line.replace(/^#{1,6}\s+/, "").trim())
+      .filter(Boolean)
+      .find((line) => !/^[-*]\s*$/.test(line))
+      ?.slice(0, 160) ?? "Markdown document"
+  );
+}
+
+function stableTextId(text: string) {
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
+  }
+
+  return `md-${hash.toString(36)}`;
+}
+
+function safeNodeId(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "-");
+}
+
+function dedupeMarkdownDocuments(documents: GeneratedMarkdownDocument[]) {
+  const seen = new Set<string>();
+
+  return documents.filter((document) => {
+    const key = document.artifact?.id ?? document.id;
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }

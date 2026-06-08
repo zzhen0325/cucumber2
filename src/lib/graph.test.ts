@@ -4,9 +4,12 @@ import {
   collectUpstreamContext,
   collectUpstreamContextWithTrace,
   createImageResultNodes,
+  createMarkdownDocumentNodes,
   createRunDraft,
   extractImagesFromToolOutput,
+  extractMarkdownDocumentsFromToolOutput,
   getRunReferenceNodeId,
+  shouldCreateMarkdownFromAgentText,
   textFromMessageParts,
   toolPartFromMessagePart,
   toolPartsFromMessageParts,
@@ -301,6 +304,90 @@ describe("agent canvas graph", () => {
     expect(resultEdges[0]).toMatchObject({ source: "run-1", target: "image-a" });
   });
 
+  it("maps markdown tool output into a document container node", () => {
+    const run = runNode("run-1", "调研竞品并输出 Markdown");
+    const documents = extractMarkdownDocumentsFromToolOutput({
+      artifacts: [
+        {
+          id: "doc-1",
+          type: "doc",
+          title: "竞品分析",
+          metadata: {
+            format: "markdown",
+            markdown: "# 竞品分析\n\n- A 产品更偏运营\n- B 产品更偏创作",
+          },
+        },
+      ],
+    });
+    const { resultNodes, resultEdges } = createMarkdownDocumentNodes(
+      run,
+      documents,
+      [run]
+    );
+
+    expect(resultNodes).toHaveLength(1);
+    expect(resultNodes[0]).toMatchObject({
+      id: "markdown-doc-1",
+      type: "markdownNode",
+      position: { x: -90, y: 480 },
+      data: {
+        kind: "markdown",
+        title: "竞品分析",
+        content: "# 竞品分析\n\n- A 产品更偏运营\n- B 产品更偏创作",
+      },
+    });
+    expect(resultEdges[0]).toMatchObject({
+      source: "run-1",
+      target: "markdown-doc-1",
+    });
+  });
+
+  it("does not duplicate an already rendered markdown document", () => {
+    const run = runNode("run-1", "输出 Markdown");
+    const documents = [
+      {
+        id: "doc-1",
+        title: "分析文档",
+        content: "# 分析文档\n\n- 结论",
+      },
+    ];
+    const firstProjection = createMarkdownDocumentNodes(run, documents, [run]);
+    const secondProjection = createMarkdownDocumentNodes(run, documents, [
+      run,
+      ...firstProjection.resultNodes,
+    ]);
+
+    expect(firstProjection.resultNodes).toHaveLength(1);
+    expect(secondProjection.resultNodes).toEqual([]);
+  });
+
+  it("collects markdown document context from the canvas", () => {
+    const markdown = markdownNode(
+      "markdown-doc-1",
+      "竞品分析",
+      "# 竞品分析\n\n- A 产品更偏运营"
+    );
+
+    expect(collectUpstreamContext("markdown-doc-1", [markdown], [])).toEqual([
+      {
+        nodeId: "markdown-doc-1",
+        type: "doc",
+        prompt: undefined,
+        summary: "竞品分析",
+        artifact: {
+          id: "doc-1",
+          type: "doc",
+          title: "竞品分析",
+          metadata: { format: "markdown" },
+        },
+        title: "竞品分析",
+        contentRef: undefined,
+        imageUrl: undefined,
+        priority: 100,
+      },
+    ]);
+  });
+
   it("uses the compact Figma result offset while the run is still collapsed", () => {
     const run = {
       ...runNode("run-1", "生成图片"),
@@ -432,6 +519,21 @@ describe("agent canvas graph", () => {
         { type: "text", text: "然后调用图像工具。" },
       ])
     ).toBe("我会先理解画面方向。\n\n然后调用图像工具。");
+  });
+
+  it("only promotes document-like agent text into markdown containers", () => {
+    expect(
+      shouldCreateMarkdownFromAgentText(
+        "帮我调研这个方向，输出 MD",
+        "# 调研结论\n\n- 现有方案偏重图片生成，文档型输出仍然停留在 Run 节点文本里。\n- 需要补充独立 Markdown 容器，让分析、总结、方案和报告能作为画布节点继续分支。\n- 后续 research tool 可以直接返回 markdown artifact。"
+      )
+    ).toBe(true);
+    expect(
+      shouldCreateMarkdownFromAgentText(
+        "生成一张图片",
+        "我会先理解画面方向，然后调用图像工具。"
+      )
+    ).toBe(false);
   });
 
   it("extracts AI SDK dynamic tool parts for generate_image", () => {
@@ -581,6 +683,31 @@ function imageNode(id: string, url: string, prompt: string): AgentCanvasNode {
         id,
         url,
       },
+    },
+  };
+}
+
+function markdownNode(
+  id: string,
+  title: string,
+  content: string
+): AgentCanvasNode {
+  return {
+    id,
+    type: "markdownNode",
+    position: { x: 0, y: 480 },
+    data: {
+      kind: "markdown",
+      artifact: {
+        id: "doc-1",
+        type: "doc",
+        title,
+        metadata: { format: "markdown" },
+      },
+      title,
+      content,
+      summary: title,
+      runId: "run-1",
     },
   };
 }
