@@ -99,6 +99,7 @@ import type {
   ImageResultNodeData,
   MarkdownNodeData,
   PromptNodeData,
+  WebpageNodeData,
 } from "@/types/canvas";
 import type { InputAttachment } from "@/types/runtime";
 
@@ -113,7 +114,7 @@ const nodeTypes = {
   imageResultNode: memo(ImageResultNode),
   markdownNode: memo(MarkdownNode),
   toolResultNode: memo(ArtifactLikeNode),
-  webpageNode: memo(ArtifactLikeNode),
+  webpageNode: memo(HtmlPageNode),
 } as NodeTypes;
 
 const edgeTypes = {
@@ -1420,6 +1421,66 @@ function ArtifactLikeNode({ data, selected }: ArtifactLikeNodeProps) {
   );
 }
 
+function HtmlPageNode({
+  data,
+  selected,
+}: NodeProps<FlowNode<WebpageNodeData, "webpageNode">>) {
+  const previewUrl = data.previewUrl ?? data.artifact.contentRef ?? data.artifact.uri;
+  const frameTitle = `${data.title} preview`;
+
+  return (
+    <Node
+      className={
+        selected
+          ? "canvas-node selected html-page-card"
+          : "canvas-node html-page-card"
+      }
+      handles={{ source: true, target: true }}
+    >
+      <NodeContent className="html-page-content">
+        <div className="html-page-heading">
+          <span className="artifact-icon">
+            <Globe2 size={14} />
+          </span>
+          <div>
+            <span>HTML</span>
+            <strong title={data.title}>{data.title}</strong>
+          </div>
+          {previewUrl && (
+            <a
+              aria-label="打开页面预览"
+              className="html-page-open nodrag nopan"
+              href={previewUrl}
+              rel="noreferrer"
+              target="_blank"
+              title="打开页面预览"
+            >
+              <ArrowUpRight size={13} />
+            </a>
+          )}
+        </div>
+        <div className="html-page-frame nodrag nopan">
+          {data.html || previewUrl ? (
+            <iframe
+              sandbox=""
+              src={data.html ? undefined : previewUrl}
+              srcDoc={data.html}
+              title={frameTitle}
+            />
+          ) : (
+            <div className="html-page-empty">暂无预览</div>
+          )}
+        </div>
+        {selected && (
+          <div className="html-page-footer">
+            <span>{data.summary ?? "页面预览"}</span>
+          </div>
+        )}
+      </NodeContent>
+    </Node>
+  );
+}
+
 function ArtifactNodeIcon({ kind }: { kind: ArtifactLikeNodeProps["data"]["kind"] }) {
   if (kind === "markdown") {
     return <FileText size={14} />;
@@ -1511,6 +1572,9 @@ function ImageResultNode({
   data,
   selected,
 }: NodeProps<FlowNode<ImageResultNodeData, "imageResultNode">>) {
+  const status = data.status ?? (data.image.url ? "ready" : "loading");
+  const requestLabel = formatImageRequestLabel(data.request);
+
   return (
     <Node
       className={
@@ -1518,12 +1582,36 @@ function ImageResultNode({
       }
       handles={{ source: true, target: true }}
     >
-      <div className="result-image-frame">
-        <img src={data.image.url} alt={data.image.title ?? "Generated result"} />
+      <div className={`result-image-frame ${status}`}>
+        {data.image.url ? (
+          <img src={data.image.url} alt={data.image.title ?? "Generated result"} />
+        ) : (
+          <div className="result-placeholder" aria-label={data.image.title}>
+            <span>{status === "error" ? "生成失败" : "生成中"}</span>
+            {requestLabel && <small>{requestLabel}</small>}
+          </div>
+        )}
       </div>
-      {selected && <NodeFooterLike image={data.image} />}
+      {selected && status === "ready" && <NodeFooterLike image={data.image} />}
     </Node>
   );
+}
+
+function formatImageRequestLabel(request: ImageResultNodeData["request"]) {
+  if (!request) {
+    return "";
+  }
+
+  const count = request.count ? `${request.index ?? 1}/${request.count}` : "";
+  const size =
+    request.width && request.height
+      ? `${request.width}x${request.height}`
+      : request.size
+        ? `${Math.round(Math.sqrt(request.size) / 1024)}K`
+        : "";
+  const ratio = request.aspectRatio ?? "";
+
+  return [count, ratio, size].filter(Boolean).join(" · ");
 }
 
 function NodeFooterLike({ image }: { image: GeneratedImage }) {

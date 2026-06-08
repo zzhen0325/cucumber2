@@ -55,6 +55,26 @@ export type GeneratedImage = {
   artifact?: ArtifactRef;
 };
 
+export type GeneratedHtmlPage = {
+  id: string;
+  title: string;
+  html: string;
+  previewUrl: string;
+  summary?: string;
+  artifact?: ArtifactRef;
+};
+
+export type ImageResultStatus = "loading" | "ready" | "error";
+
+export type ImageRequestPreview = {
+  index?: number;
+  count?: number;
+  width?: number;
+  height?: number;
+  size?: number;
+  aspectRatio?: string;
+};
+
 export type CanvasToolState =
   | "input-streaming"
   | "input-available"
@@ -68,7 +88,13 @@ export type CanvasToolPart = {
   type:
     | "tool-analyze_reference_images"
     | "tool-expand_prompt"
-    | "tool-generate_image";
+    | "tool-generate_image"
+    | "tool-web.read"
+    | "tool-asset.analyze_context"
+    | "tool-page.generate"
+    | "tool-web_search"
+    | "tool-write_document"
+    | "tool-runtime";
   state: CanvasToolState;
   toolCallId?: string;
   input?: unknown;
@@ -132,6 +158,8 @@ export type ImageResultNodeData = {
   artifact?: ArtifactRef;
   prompt: string;
   runId: string;
+  request?: ImageRequestPreview;
+  status?: ImageResultStatus;
 };
 
 export type ArtifactBackedNodeData = {
@@ -178,6 +206,8 @@ export type CodeNodeData = ArtifactBackedNodeData & {
 
 export type WebpageNodeData = ArtifactBackedNodeData & {
   kind: "webpage";
+  html?: string;
+  previewUrl?: string;
 };
 
 export type AgentCanvasNodeData =

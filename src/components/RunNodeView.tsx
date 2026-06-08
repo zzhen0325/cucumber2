@@ -348,8 +348,14 @@ function getRunEvaluationTitle(evaluation: NonNullable<RunNodeData["evaluation"]
 function getToolName(toolPart: CanvasToolPart) {
   const names: Record<CanvasToolPart["type"], string> = {
     "tool-analyze_reference_images": "参考图分析",
+    "tool-asset.analyze_context": "素材分析",
     "tool-expand_prompt": "提示词扩写",
     "tool-generate_image": "生成图片",
+    "tool-page.generate": "生成页面",
+    "tool-runtime": "运行错误",
+    "tool-web.read": "读取网页",
+    "tool-web_search": "搜索网页",
+    "tool-write_document": "写文档",
   };
 
   return names[toolPart.type];
@@ -381,7 +387,7 @@ function getToolStateLabel(state: CanvasToolPart["state"]) {
 
 function getToolDetailLines(toolPart: CanvasToolPart, error?: string) {
   if (toolPart.state === "output-error") {
-    return [error ?? toolPart.errorText ?? "工具调用失败"];
+    return [toolPart.errorText ?? error ?? "工具调用失败"];
   }
   if (toolPart.state === "output-available") {
     return [...getToolOutputLines(toolPart), ...getToolInputLines(toolPart.input)];
@@ -426,6 +432,89 @@ function getToolOutputLines(toolPart: CanvasToolPart) {
     return ["扩写完成"];
   }
 
+  if (toolPart.type === "tool-write_document") {
+    const output = toolPart.output as {
+      markdown?: unknown;
+      summary?: unknown;
+      title?: unknown;
+    };
+    if (typeof output?.title === "string" && output.title.trim()) {
+      return [`文档: ${output.title.trim()}`];
+    }
+    if (typeof output?.summary === "string" && output.summary.trim()) {
+      return [`摘要: ${output.summary.trim()}`];
+    }
+    if (typeof output?.markdown === "string" && output.markdown.trim()) {
+      return ["Markdown 文档已生成"];
+    }
+
+    return ["文档已生成"];
+  }
+
+  if (toolPart.type === "tool-page.generate") {
+    const output = toolPart.output as {
+      title?: unknown;
+      html?: unknown;
+      artifactId?: unknown;
+    };
+    if (typeof output?.title === "string" && output.title.trim()) {
+      return [`页面: ${output.title.trim()}`];
+    }
+    if (typeof output?.html === "string" && output.html.trim()) {
+      return ["HTML 页面已生成"];
+    }
+    if (typeof output?.artifactId === "string" && output.artifactId.trim()) {
+      return ["页面产物已生成"];
+    }
+
+    return ["页面已生成"];
+  }
+
+  if (toolPart.type === "tool-web.read") {
+    const output = toolPart.output as { sources?: unknown };
+    const sourceCount = Array.isArray(output?.sources)
+      ? output.sources.length
+      : undefined;
+    return [
+      typeof sourceCount === "number"
+        ? `读取完成: ${sourceCount} 个网页`
+        : "网页读取完成",
+    ];
+  }
+
+  if (toolPart.type === "tool-asset.analyze_context") {
+    const output = toolPart.output as {
+      imageCount?: unknown;
+      summary?: unknown;
+    };
+    if (typeof output?.imageCount === "number") {
+      return [`素材分析: ${output.imageCount} 张图片`];
+    }
+    if (typeof output?.summary === "string" && output.summary.trim()) {
+      return [`素材摘要: ${output.summary.trim()}`];
+    }
+
+    return ["素材分析完成"];
+  }
+
+  if (toolPart.type === "tool-web_search") {
+    const output = toolPart.output as {
+      answer?: unknown;
+      sources?: unknown;
+    };
+    const sourceCount = Array.isArray(output?.sources)
+      ? output.sources.length
+      : undefined;
+    if (typeof sourceCount === "number") {
+      return [`搜索完成: ${sourceCount} 个来源`];
+    }
+    if (typeof output?.answer === "string" && output.answer.trim()) {
+      return [`搜索摘要: ${output.answer.trim()}`];
+    }
+
+    return ["搜索完成"];
+  }
+
   const images = extractImagesFromToolOutput(toolPart.output);
   return [images.length ? `输出 ${images.length} 张图片` : "输出已返回"];
 }
@@ -437,6 +526,8 @@ function getToolInputLines(input: unknown) {
 
   const candidate = input as {
     prompt?: unknown;
+    brief?: unknown;
+    query?: unknown;
     imageCount?: unknown;
     modelProvider?: unknown;
     skillSlug?: unknown;
@@ -447,6 +538,12 @@ function getToolInputLines(input: unknown) {
 
   if (typeof candidate.prompt === "string" && candidate.prompt.trim()) {
     lines.push(`输入: ${candidate.prompt.trim()}`);
+  }
+  if (typeof candidate.brief === "string" && candidate.brief.trim()) {
+    lines.push(`输入: ${candidate.brief.trim()}`);
+  }
+  if (typeof candidate.query === "string" && candidate.query.trim()) {
+    lines.push(`查询: ${candidate.query.trim()}`);
   }
   if (typeof candidate.modelProvider === "string" && candidate.modelProvider.trim()) {
     lines.push(`模型: ${candidate.modelProvider.trim()}`);

@@ -10,6 +10,10 @@ import {
 } from "../prompts.ts";
 import { streamTextWithProvider, type ModelProviderId } from "../model-providers.ts";
 import {
+  inferSeedreamResultCount,
+  readSeedreamMaxOutputImagesFromEnv,
+} from "../../seedream.ts";
+import {
   type AgentProject,
   listLatestPublicSkills,
   recordRunEvent,
@@ -773,6 +777,10 @@ async function runReasoningStep({
   run: AgentRun;
   streamWriter: UIMessageStreamWriter<UIMessage>;
 }) {
+  const resultCount = inferSeedreamResultCount(
+    run.input.userMessage,
+    readSeedreamMaxOutputImagesFromEnv()
+  );
   const runtimePrompt = renderRuntimePromptParts([
     ...context.promptParts,
     {
@@ -780,7 +788,7 @@ async function runReasoningStep({
       category: "run_target",
       content: [
         `modelProvider: ${run.input.metadata.modelProvider}`,
-        "resultCount: 1",
+        `resultCount: ${resultCount}`,
         "instruction: 请输出 1 到 3 句执行说明，说明你会如何理解需求并使用已选择的上下文。",
       ].join("\n"),
       tokenEstimate: 32,
@@ -883,12 +891,33 @@ function getRuntimeArtifactCanvasNodeId(artifact: AgentRun["artifacts"][number])
     return `code-${artifact.id}`;
   }
   if (artifact.type === "doc") {
-    return `document-${artifact.id}`;
+    return isMarkdownArtifact(artifact)
+      ? `markdown-${artifact.id}`
+      : `document-${artifact.id}`;
   }
   if (artifact.type === "tool_result") {
     return `tool-result-${artifact.id}`;
   }
   return `artifact-${artifact.id}`;
+}
+
+function isMarkdownArtifact(artifact: AgentRun["artifacts"][number]) {
+  const format =
+    typeof artifact.metadata?.format === "string"
+      ? artifact.metadata.format.toLowerCase()
+      : "";
+  const mimeType =
+    typeof artifact.metadata?.mimeType === "string"
+      ? artifact.metadata.mimeType.toLowerCase()
+      : "";
+
+  return (
+    format === "markdown" ||
+    format === "md" ||
+    mimeType === "text/markdown" ||
+    artifact.uri?.endsWith(".md") ||
+    artifact.contentRef?.endsWith(".md")
+  );
 }
 
 function toLegacyGraphPatch(operation: ToolResult["canvasOperations"][number]) {

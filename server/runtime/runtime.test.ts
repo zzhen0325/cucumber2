@@ -26,7 +26,12 @@ import {
   runtimeEventTypeSchema,
 } from "./schemas";
 import { runtimeEventTypes } from "../../src/types/runtime";
-import type { BuiltContext, PlanStep, ToolDefinition } from "../../src/types/runtime";
+import type {
+  BuiltContext,
+  PlanStep,
+  StructuredTask,
+  ToolDefinition,
+} from "../../src/types/runtime";
 
 const promptExpandSkill = {
   id: "skill-1",
@@ -378,6 +383,347 @@ describe("runtime core", () => {
     });
   });
 
+  it("routes text-first analysis to a Markdown document artifact when the document tool is available", async () => {
+    const capabilities = buildCapabilityRegistry([promptExpandSkill]);
+    const canvasContext = {
+      prompt: "分析下Gemini的视觉风格",
+      selectedNodeId: null,
+      upstreamContext: [],
+    };
+    const toolRegistry = buildToolRegistry({
+      canvasContext,
+      capabilities,
+      modelProvider: "deepseek",
+      projectId: "project-1",
+      runNodeId: "run-1",
+    });
+    const input = normalizeAgentInput({
+      userId: "user-1",
+      projectId: "project-1",
+      runNodeId: "run-1",
+      modelProvider: "deepseek",
+      messages: [],
+      canvasContext,
+    });
+    const intent = await routeIntent({
+      capabilities,
+      input,
+      modelProvider: "deepseek",
+      toolRegistry,
+      async generateIntentResult() {
+        return {
+          primaryIntent: "image_generation",
+          confidence: 0.91,
+          task: {
+            kind: "image_generation",
+            goals: [input.userMessage],
+            targets: [],
+            constraints: [],
+            deliverables: [
+              { kind: "image", description: "Incorrect image artifact." },
+            ],
+            operations: [
+              { kind: "generate", target: "expanded_prompt", toolHint: toolIds.generateImage },
+            ],
+          },
+          requiredCapabilities: ["prompt.expand", "image.generate"],
+          requiredTools: [toolIds.expandPrompt, toolIds.generateImage],
+          needsPlanning: true,
+          ambiguity: [],
+          routingReason: "Misrouted image generation fixture.",
+        };
+      },
+    });
+    const context = buildContext({
+      input,
+      intent,
+      publicSkills: [promptExpandSkill],
+      runId: "agent-run-1",
+      toolRegistry,
+    });
+    const plan = (
+      await createPlan({
+        context,
+        generatePlanSteps: async () =>
+          buildPlanFromIntentDeterministically(intent),
+        intent,
+        modelProvider: "deepseek",
+        toolRegistry,
+      })
+    ).normalizedPlan;
+
+    expect(intent).toMatchObject({
+      primaryIntent: "document.analysis",
+      requiredCapabilities: ["document.write"],
+      requiredTools: [toolIds.writeDocument],
+      task: {
+        kind: "document_writing",
+        deliverables: [{ kind: "document" }],
+      },
+    });
+    expect(context.availableTools.map((tool) => tool.id)).toEqual([
+      toolIds.writeDocument,
+    ]);
+    expect(plan.map((step) => step.id)).toEqual([
+      "agent_text",
+      "write_document",
+      "evaluate_result",
+    ]);
+    expect(plan.find((step) => step.id === "write_document")).toMatchObject({
+      toolId: toolIds.writeDocument,
+      expectedArtifacts: [{ type: "doc", count: 1 }],
+    });
+  });
+
+  it("routes executable document tasks before calling the model router", async () => {
+    const capabilities = buildCapabilityRegistry([promptExpandSkill]);
+    const canvasContext = {
+      prompt: "分析下Gemini的视觉风格",
+      selectedNodeId: null,
+      upstreamContext: [],
+    };
+    const toolRegistry = buildToolRegistry({
+      canvasContext,
+      capabilities,
+      modelProvider: "deepseek",
+      projectId: "project-1",
+      runNodeId: "run-1",
+    });
+    const input = normalizeAgentInput({
+      userId: "user-1",
+      projectId: "project-1",
+      runNodeId: "run-1",
+      modelProvider: "deepseek",
+      messages: [],
+      canvasContext,
+    });
+    let modelRouterCalled = false;
+    const intent = await routeIntent({
+      capabilities,
+      input,
+      modelProvider: "deepseek",
+      toolRegistry,
+      async generateIntentResult() {
+        modelRouterCalled = true;
+        throw new Error("model router should not be called for document routes");
+      },
+    });
+
+    expect(modelRouterCalled).toBe(false);
+    expect(intent).toMatchObject({
+      primaryIntent: "document.analysis",
+      requiredTools: [toolIds.writeDocument],
+    });
+  });
+
+  it("plans document tasks before calling the model planner", async () => {
+    const capabilities = buildCapabilityRegistry([promptExpandSkill]);
+    const canvasContext = {
+      prompt: "分析下Gemini的视觉风格",
+      selectedNodeId: null,
+      upstreamContext: [],
+    };
+    const toolRegistry = buildToolRegistry({
+      canvasContext,
+      capabilities,
+      modelProvider: "deepseek",
+      projectId: "project-1",
+      runNodeId: "run-1",
+    });
+    const input = normalizeAgentInput({
+      userId: "user-1",
+      projectId: "project-1",
+      runNodeId: "run-1",
+      modelProvider: "deepseek",
+      messages: [],
+      canvasContext,
+    });
+    const intent = routeIntentDeterministically({
+      capabilities,
+      input,
+      toolRegistry,
+    });
+    const context = buildContext({
+      input,
+      intent,
+      publicSkills: [promptExpandSkill],
+      runId: "agent-run-1",
+      toolRegistry,
+    });
+    let modelPlannerCalled = false;
+    const plan = await createPlan({
+      context,
+      intent,
+      modelProvider: "deepseek",
+      toolRegistry,
+      async generatePlanSteps() {
+        modelPlannerCalled = true;
+        throw new Error("model planner should not be called for document routes");
+      },
+    });
+
+    expect(modelPlannerCalled).toBe(false);
+    expect(plan.normalizedPlan.map((step) => step.id)).toEqual([
+      "agent_text",
+      "write_document",
+      "evaluate_result",
+    ]);
+  });
+
+  it("turns unsupported non-image routing into a capability report document when possible", async () => {
+    const capabilities = buildCapabilityRegistry([promptExpandSkill]);
+    const canvasContext = {
+      prompt: "修改代码并修复类型错误",
+      selectedNodeId: null,
+      upstreamContext: [],
+    };
+    const toolRegistry = buildToolRegistry({
+      canvasContext,
+      capabilities,
+      modelProvider: "deepseek",
+      projectId: "project-1",
+      runNodeId: "run-1",
+    });
+    const input = normalizeAgentInput({
+      userId: "user-1",
+      projectId: "project-1",
+      runNodeId: "run-1",
+      modelProvider: "deepseek",
+      messages: [],
+      canvasContext,
+    });
+    const intent = await routeIntent({
+      capabilities,
+      input,
+      modelProvider: "deepseek",
+      toolRegistry,
+      async generateIntentResult() {
+        return {
+          primaryIntent: "capability.route_missing",
+          confidence: 0.44,
+          task: createUnsupportedFixture(input.userMessage, "code_modification"),
+          requiredCapabilities: ["code.modify"],
+          requiredTools: [],
+          needsPlanning: true,
+          ambiguity: [
+            {
+              id: "missing-code-tool",
+              question: "code.modify is not executable.",
+              severity: "high",
+            },
+          ],
+          routingReason: "No code modification executor.",
+        };
+      },
+    });
+
+    expect(intent).toMatchObject({
+      primaryIntent: "document.capability_report",
+      requiredCapabilities: ["document.write"],
+      requiredTools: [toolIds.writeDocument],
+      ambiguity: [{ severity: "medium" }],
+    });
+  });
+
+  it("routes operational non-image requests to an honest capability report document", () => {
+    const capabilities = buildCapabilityRegistry([promptExpandSkill]);
+    const canvasContext = {
+      prompt: "登录这个网站并完成支付",
+      selectedNodeId: null,
+      upstreamContext: [],
+    };
+    const toolRegistry = buildToolRegistry({
+      canvasContext,
+      capabilities,
+      modelProvider: "deepseek",
+      projectId: "project-1",
+      runNodeId: "run-1",
+    });
+    const input = normalizeAgentInput({
+      userId: "user-1",
+      projectId: "project-1",
+      runNodeId: "run-1",
+      modelProvider: "deepseek",
+      messages: [],
+      canvasContext,
+    });
+    const intent = routeIntentDeterministically({
+      capabilities,
+      input,
+      toolRegistry,
+    });
+
+    expect(intent).toMatchObject({
+      primaryIntent: "document.capability_report",
+      requiredTools: [toolIds.writeDocument],
+      task: { kind: "document_writing" },
+    });
+  });
+
+  it("routes web research through Tavily search before document writing", async () => {
+    const capabilities = buildCapabilityRegistry([promptExpandSkill]);
+    const toolRegistry = createRuntimeToolRegistry();
+    const input = normalizeAgentInput({
+      userId: "user-1",
+      projectId: "project-1",
+      runNodeId: "run-1",
+      modelProvider: "deepseek",
+      messages: [],
+      canvasContext: {
+        prompt: "搜索最新 AI SDK Tavily 文档并总结来源",
+        selectedNodeId: null,
+        upstreamContext: [],
+      },
+    });
+    const intent = await routeIntent({
+      capabilities,
+      input,
+      modelProvider: "deepseek",
+      toolRegistry,
+      async generateIntentResult() {
+        throw new Error("model router should not be called for web research");
+      },
+    });
+    const context = buildContext({
+      input,
+      intent,
+      publicSkills: [promptExpandSkill],
+      runId: "agent-run-1",
+      toolRegistry,
+    });
+    const plan = (
+      await createPlan({
+        context,
+        intent,
+        modelProvider: "deepseek",
+        toolRegistry,
+        async generatePlanSteps() {
+          throw new Error("model planner should not be called for web research");
+        },
+      })
+    ).normalizedPlan;
+
+    expect(intent).toMatchObject({
+      primaryIntent: "web_research",
+      requiredCapabilities: ["web.research", "document.write"],
+      requiredTools: [toolIds.searchWeb, toolIds.writeDocument],
+      task: { kind: "web_research" },
+    });
+    expect(context.availableTools.map((tool) => tool.id).sort()).toEqual(
+      [toolIds.searchWeb, toolIds.writeDocument].sort()
+    );
+    expect(plan.map((step) => step.id)).toEqual([
+      "agent_text",
+      "search_web",
+      "write_document",
+      "evaluate_result",
+    ]);
+    expect(plan.find((step) => step.id === "search_web")).toMatchObject({
+      toolId: toolIds.searchWeb,
+      capabilityId: "web.research",
+    });
+  });
+
   it("routes landing page generation as an executable multi-step task", async () => {
     const capabilities = buildCapabilityRegistry([promptExpandSkill]);
     const toolRegistry = createRuntimeToolRegistry();
@@ -457,6 +803,87 @@ describe("runtime core", () => {
       expectedArtifacts: [{ type: "webpage" }],
       expectedCanvasOperations: [{ type: "createNode" }],
     });
+  });
+
+  it("routes compound analysis-to-page tasks through report and HTML tools without model planning", async () => {
+    const capabilities = buildCapabilityRegistry([promptExpandSkill]);
+    const toolRegistry = createRuntimeToolRegistry();
+    const input = normalizeAgentInput({
+      userId: "user-1",
+      projectId: "project-1",
+      runNodeId: "run-1",
+      modelProvider: "deepseek",
+      messages: [],
+      canvasContext: {
+        prompt: "帮我分析一个品牌的视觉风格，并做成 html 页面",
+        selectedNodeId: null,
+        upstreamContext: [],
+      },
+    });
+    let modelRouterCalled = false;
+    const intent = await routeIntent({
+      capabilities,
+      input,
+      modelProvider: "deepseek",
+      toolRegistry,
+      async generateIntentResult() {
+        modelRouterCalled = true;
+        throw new Error("model router should not be called for compound page tasks");
+      },
+    });
+    const context = buildContext({
+      input,
+      intent,
+      publicSkills: [promptExpandSkill],
+      runId: "agent-run-1",
+      toolRegistry,
+    });
+    let modelPlannerCalled = false;
+    const plan = await createPlan({
+      context,
+      intent,
+      modelProvider: "deepseek",
+      toolRegistry,
+      async generatePlanSteps() {
+        modelPlannerCalled = true;
+        throw new Error("model planner should not be called for compound page tasks");
+      },
+    });
+
+    expect(modelRouterCalled).toBe(false);
+    expect(modelPlannerCalled).toBe(false);
+    expect(intent).toMatchObject({
+      primaryIntent: "multi_step.landing_page",
+      requiredCapabilities: ["document.write", "page.generate"],
+      requiredTools: [toolIds.writeDocument, toolIds.generatePage],
+      task: {
+        kind: "multi_step",
+        deliverables: [{ kind: "document" }, { kind: "webpage" }],
+      },
+    });
+    expect(context.availableTools.map((tool) => tool.id)).toEqual([
+      toolIds.writeDocument,
+      toolIds.generatePage,
+    ]);
+    expect(plan.normalizedPlan.map((step) => step.id)).toEqual([
+      "agent_text",
+      "write_report",
+      "generate_page",
+      "evaluate_result",
+    ]);
+    expect(plan.normalizedPlan.find((step) => step.id === "write_report"))
+      .toMatchObject({
+        toolId: toolIds.writeDocument,
+        dependsOn: ["agent_text"],
+        expectedArtifacts: [{ type: "doc", count: 1 }],
+      });
+    expect(plan.normalizedPlan.find((step) => step.id === "generate_page"))
+      .toMatchObject({
+        toolId: toolIds.generatePage,
+        dependsOn: ["write_report"],
+        expectedArtifacts: [{ type: "webpage" }],
+        expectedCanvasOperations: [],
+      });
   });
 
   it("provides deterministic schema fixtures for common structured intents", () => {
@@ -690,6 +1117,66 @@ describe("runtime core", () => {
       },
     ]);
     expect(plan.validation.ok).toBe(true);
+  });
+
+  it("preserves requested image counts across intent and plan normalization", async () => {
+    const capabilities = buildCapabilityRegistry([promptExpandSkill]);
+    const toolRegistry = createTestToolRegistry();
+    const input = normalizeAgentInput({
+      userId: "user-1",
+      projectId: "project-1",
+      runNodeId: "run-1",
+      modelProvider: "deepseek",
+      messages: [],
+      canvasContext: {
+        prompt: "一次生成4张图片",
+        selectedNodeId: null,
+        upstreamContext: [],
+      },
+    });
+    const intent = routeIntentDeterministically({
+      capabilities,
+      input,
+      toolRegistry,
+    });
+    const context = buildContext({
+      input,
+      intent,
+      publicSkills: [promptExpandSkill],
+      runId: "agent-run-1",
+      toolRegistry,
+    });
+    const rawPlan = buildPlanFromIntentDeterministically(intent).map((step) =>
+      step.id === "generate_image"
+        ? {
+            ...step,
+            expectedArtifacts: [
+              { type: "image" as const, description: "Generated image" },
+            ],
+          }
+        : step
+    );
+    const plan = await createPlan({
+      context,
+      intent,
+      modelProvider: "deepseek",
+      toolRegistry,
+      async generatePlanSteps() {
+        return rawPlan;
+      },
+    });
+
+    expect(intent.task.deliverables).toContainEqual({
+      kind: "image",
+      description: "Generated image artifact attached to the run branch.",
+      count: 4,
+    });
+    expect(
+      plan.normalizedPlan.find((step) => step.id === "generate_image")
+        ?.expectedArtifacts
+    ).toEqual([
+      { type: "image", description: "Generated image", count: 4 },
+    ]);
   });
 
   it("builds image tool prompt traces from BuiltContext prompt parts", () => {
@@ -969,6 +1456,25 @@ function buildToolStep(id: string, toolId: string): PlanStep {
     expectedCanvasOperations: [],
     risk: "low",
     approvalRequired: false,
+  };
+}
+
+function createUnsupportedFixture(
+  prompt: string,
+  kind: StructuredTask["kind"]
+): StructuredTask {
+  return {
+    kind,
+    goals: [prompt],
+    targets: [],
+    constraints: [
+      {
+        kind: "policy",
+        text: "Unsupported fixture for route guard test.",
+      },
+    ],
+    deliverables: [{ kind: "analysis", description: "Capability report" }],
+    operations: [],
   };
 }
 

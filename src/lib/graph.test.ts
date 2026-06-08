@@ -4,9 +4,11 @@ import {
   buildRunRevisionPrompt,
   collectUpstreamContext,
   collectUpstreamContextWithTrace,
+  createHtmlPageNodes,
   createImageResultNodes,
   createMarkdownDocumentNodes,
   createRunDraft,
+  extractHtmlPagesFromToolOutput,
   extractImagesFromToolOutput,
   extractMarkdownDocumentsFromToolOutput,
   getRunReferenceNodeId,
@@ -409,6 +411,58 @@ describe("agent canvas graph", () => {
     ];
     const firstProjection = createMarkdownDocumentNodes(run, documents, [run]);
     const secondProjection = createMarkdownDocumentNodes(run, documents, [
+      run,
+      ...firstProjection.resultNodes,
+    ]);
+
+    expect(firstProjection.resultNodes).toHaveLength(1);
+    expect(secondProjection.resultNodes).toEqual([]);
+  });
+
+  it("maps html tool output into a previewable webpage node", () => {
+    const run = runNode("run-1", "生成一个产品页面");
+    const html = "<!doctype html><html><head><title>产品页面</title></head><body><h1>Hello</h1></body></html>";
+    const pages = extractHtmlPagesFromToolOutput({
+      artifactId: "page-1",
+      html,
+      title: "产品页面",
+    });
+    const { resultNodes, resultEdges } = createHtmlPageNodes(run, pages, [run]);
+
+    expect(resultNodes).toHaveLength(1);
+    expect(resultNodes[0]).toMatchObject({
+      id: "webpage-page-1",
+      type: "webpageNode",
+      position: { x: -90, y: 480 },
+      data: {
+        kind: "webpage",
+        title: "产品页面",
+        html,
+      },
+    });
+    expect(resultNodes[0].data.kind).toBe("webpage");
+    if (resultNodes[0].data.kind !== "webpage") {
+      throw new Error("Expected a webpage node");
+    }
+    expect(resultNodes[0].data.previewUrl).toMatch(/^data:text\/html/);
+    expect(resultEdges[0]).toMatchObject({
+      source: "run-1",
+      target: "webpage-page-1",
+    });
+  });
+
+  it("does not duplicate an already rendered html page", () => {
+    const run = runNode("run-1", "输出 HTML");
+    const pages = [
+      {
+        id: "page-1",
+        title: "页面",
+        html: "<!doctype html><title>页面</title>",
+        previewUrl: "data:text/html;charset=utf-8,%3Ctitle%3E",
+      },
+    ];
+    const firstProjection = createHtmlPageNodes(run, pages, [run]);
+    const secondProjection = createHtmlPageNodes(run, pages, [
       run,
       ...firstProjection.resultNodes,
     ]);

@@ -15,7 +15,7 @@
 - `server/runtime/schemas.ts` 为跨边界 runtime 对象提供 Zod schema。
 - `server/runtime/input-normalizer.ts`、`intent-router.ts`、`context-builder.ts`、`planner.ts`、`tool-registry.ts`、`executor.ts`、`evaluator.ts` 分别实现输入标准化、结构化意图、上下文选择、schema-validated plan、工具注册、通用 step 执行和基础质量评估。
 - `server/runtime/run-store.ts` 负责 `AgentRun` 快照，`supabase/migrations/20260608005000_agent_runtime_core.sql` 新增 `agent_runs`、`agent_run_steps` 并扩展 event 类型约束。
-- Tool Registry 已注册当前图片链路工具：`vision.analyzeReferenceImages`、`prompt.expand`、`seedream.generateImage`，以及 `canvas.createNode`、`canvas.updateNode`、`canvas.createEdge`、`canvas.attachArtifact` proposal tools。
+- Tool Registry 已注册当前图片链路工具：`vision.analyzeReferenceImages`、`prompt.expand`、`seedream.generateImage`；文本产物工具：`document.write`；网页/页面工具：`web.read`、`asset.analyzeContext`、`page.generate`；以及 `canvas.createNode`、`canvas.updateNode`、`canvas.createEdge`、`canvas.attachArtifact` proposal tools。
 - `src/lib/runtime-event-renderer.ts` 提供明确的 Runtime Event -> Canvas 投影入口，复用现有 `src/lib/graph-projection.ts` reducer。
 - `src/lib/graph.ts` 已有 `collectUpstreamContextWithTrace`，能按 ReactFlow 图结构收集上游 prompt、image、artifact、doc、code、webpage、memory 等 context item。
 - `server/prompts.ts` 仍保留具体 prompt render helper；Context Builder 负责 runtime selection、budget、tool exposure 和 skill injection trace。
@@ -49,7 +49,7 @@
 
 仍未完成或需要继续增强：
 
-- 非图片能力中 document writing、code modification 还缺工具 executor；page generation 已有第一版 HTML artifact 工具，web research 已有 URL read/summarize 工具。
+- 非图片能力中 code modification 还缺工具 executor；document writing 已有 Markdown artifact 工具，page generation 已有第一版 HTML artifact 工具，web research 已有 URL read/summarize 工具。
 - Trace Panel 已按 runtime event 分区展示 run snapshot、intent、context selection reason、skill injection detail、raw/normalized plan、plan validation、step timeline、tool IO、tool schema digest、tool duration/logs、retry、artifact、canvas operations、evaluation 和 errors。
 - Run 节点已显示 intent、context、plan、artifact、step timeline、tool state 和 evaluator 用户级摘要。
 - Composer attachments 已能展示/删除待提交附件，并把文件/网页链接标准化进入 Input Layer。

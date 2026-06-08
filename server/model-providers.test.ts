@@ -5,9 +5,11 @@ import {
   buildArkResponsesRequest,
   extractArkResponseText,
   generateStructuredObjectWithProvider,
+  generateTextWithProvider,
   getDefaultModelProviderId,
   getModelProviderSummaries,
   readArkMaxReferenceImagesFromEnv,
+  withJsonModeInstruction,
 } from "./model-providers";
 
 const originalEnv = { ...process.env };
@@ -63,6 +65,48 @@ describe("model providers", () => {
         ],
       })
     ).toBe("嵌套文本");
+    expect(
+      extractArkResponseText({
+        choices: [
+          {
+            message: {
+              content: [{ type: "text", text: "兼容文本" }],
+            },
+          },
+        ],
+      })
+    ).toBe("兼容文本");
+    expect(
+      extractArkResponseText({
+        choices: [
+          {
+            delta: {
+              content: "增量文本",
+            },
+          },
+        ],
+      })
+    ).toBe("增量文本");
+  });
+
+  it("includes Ark response diagnostics when a successful response has no text", async () => {
+    process.env.ARK_API_KEY = "ark-secret";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        status: "completed",
+        output: [{ type: "message", content: [] }],
+      }),
+    } as Response);
+
+    await expect(
+      generateTextWithProvider("ark", {
+        system: "Expand prompts.",
+        prompt: "生成四张小狗插画",
+      })
+    ).rejects.toThrow(
+      "Ark Responses API returned an empty response. status=completed; output_items=1; output_types=message."
+    );
   });
 
   it("reports configured providers without exposing secrets", () => {
@@ -108,5 +152,16 @@ describe("model providers", () => {
       kind: "image_generation",
       confidence: 0.91,
     });
+  });
+
+  it("adds explicit JSON wording for DeepSeek structured output prompts", () => {
+    const input = withJsonModeInstruction({
+      system: "Return only structured intent data.",
+      prompt: "Route this request.",
+      schema: z.object({ kind: z.string() }),
+    });
+
+    expect(input.system).toMatch(/\bJSON\b/i);
+    expect(input.prompt).toMatch(/\bJSON\b/i);
   });
 });

@@ -25,7 +25,7 @@ export type SeedreamGeneratedImage = {
   metadata?: Record<string, unknown>;
 };
 
-type SeedreamConfig = {
+export type SeedreamConfig = {
   accessKeyId: string;
   secretAccessKey: string;
   reqKey: string;
@@ -38,6 +38,7 @@ type SeedreamConfig = {
   forceSingle: boolean;
   maxInputImages: number;
   maxOutputImages: number;
+  scale?: number;
 };
 
 type SignedPostResult = {
@@ -213,27 +214,10 @@ export async function generateSeedreamImage(
   input: SeedreamGenerateInput,
   config = readSeedreamConfigFromEnv()
 ): Promise<{ images: SeedreamGeneratedImage[] }> {
-  const prompt = normalizeSeedreamPrompt(input.prompt);
-  if (!prompt) {
-    throw new Error("Seedream image prompt is empty.");
-  }
-
-  const resultCount = resolveSeedreamResultCount(input, config.maxOutputImages);
-  const imageUrls = collectInputImageUrls(
-    input.upstreamContext ?? [],
-    config.maxInputImages
+  const { body, imageUrls, resultCount } = buildSeedreamRequestBody(
+    input,
+    config
   );
-  const body: Record<string, unknown> = {
-    prompt,
-    width: config.width,
-    height: config.height,
-    force_single: resultCount === 1 ? config.forceSingle : false,
-  };
-
-  if (imageUrls.length) {
-    body.image_urls = imageUrls;
-  }
-
   const result = await new SeedreamClient(config).submitAndPoll(body);
   const urls = getNestedArray(result, ["data", "image_urls"]).filter(
     (item): item is string => typeof item === "string" && item.length > 0
@@ -268,6 +252,37 @@ export async function generateSeedreamImage(
       },
     })),
   };
+}
+
+export function buildSeedreamRequestBody(
+  input: SeedreamGenerateInput,
+  config: SeedreamConfig
+) {
+  const prompt = normalizeSeedreamPrompt(input.prompt);
+  if (!prompt) {
+    throw new Error("Seedream image prompt is empty.");
+  }
+
+  const resultCount = resolveSeedreamResultCount(input, config.maxOutputImages);
+  const imageUrls = collectInputImageUrls(
+    input.upstreamContext ?? [],
+    config.maxInputImages
+  );
+  const geometry = resolveSeedreamGeometry(prompt, config);
+  const body: Record<string, unknown> = {
+    prompt: withSeedreamResultCountInstruction(prompt, resultCount),
+    force_single: resultCount === 1 ? config.forceSingle : false,
+    ...geometry,
+  };
+
+  if (imageUrls.length) {
+    body.image_urls = imageUrls;
+  }
+  if (config.scale !== undefined) {
+    body.scale = config.scale;
+  }
+
+  return { body, imageUrls, resultCount };
 }
 
 export function inferSeedreamResultCount(prompt: string, maxOutputImages = 4) {
@@ -311,6 +326,130 @@ function resolveSeedreamResultCount(
   }
 
   return inferSeedreamResultCount(input.prompt, maxOutputImages);
+}
+
+function withSeedreamResultCountInstruction(prompt: string, resultCount: number) {
+  if (resultCount === 1) {
+    return prompt;
+  }
+
+  return [
+    prompt,
+    `请生成 ${resultCount} 张彼此不同的独立图片结果。`,
+  ].join("\n");
+}
+
+function resolveSeedreamGeometry(prompt: string, config: SeedreamConfig) {
+  const explicitDimensions = findExplicitDimensions(prompt);
+  if (explicitDimensions) {
+    return explicitDimensions;
+  }
+
+  const area = findExplicitOutputArea(prompt) ?? config.width * config.height;
+  const aspectRatio = findExplicitAspectRatio(prompt);
+  if (aspectRatio) {
+    return dimensionsFromAspectRatio(aspectRatio, area);
+  }
+
+  if (findExplicitOutputArea(prompt)) {
+    return { size: area };
+  }
+
+  return { width: config.width, height: config.height };
+}
+
+function findExplicitDimensions(prompt: string) {
+  const dimensionMatch = prompt.match(
+    /\b(\d{3,5})\s*(?:x|×|\*)\s*(\d{3,5})\b/i
+  );
+  if (!dimensionMatch) {
+    return null;
+  }
+
+  const width = Number(dimensionMatch[1]);
+  const height = Number(dimensionMatch[2]);
+  validateSeedreamDimensions(width, height);
+  return { width, height };
+}
+
+function findExplicitOutputArea(prompt: string) {
+  if (/\b4\s*k\b|4k|4K|４K|４k/.test(prompt)) {
+    return 4096 * 4096;
+  }
+  if (/\b2\s*k\b|2k|2K|２K|２k/.test(prompt)) {
+    return 2048 * 2048;
+  }
+  if (/\b1\s*k\b|1k|1K|１K|１k/.test(prompt)) {
+    return 1024 * 1024;
+  }
+
+  return null;
+}
+
+function findExplicitAspectRatio(prompt: string) {
+  const ratioMatch = prompt.match(/\b(\d{1,2})\s*[:：]\s*(\d{1,2})\b/);
+  if (ratioMatch) {
+    const widthRatio = Number(ratioMatch[1]);
+    const heightRatio = Number(ratioMatch[2]);
+    if (widthRatio > 0 && heightRatio > 0) {
+      return widthRatio / heightRatio;
+    }
+  }
+
+  if (/(横版|横图|宽屏|landscape|wide)/i.test(prompt)) {
+    return 16 / 9;
+  }
+  if (/(竖版|竖图|纵向|portrait|vertical)/i.test(prompt)) {
+    return 9 / 16;
+  }
+  if (/(方图|方形|正方形|square)/i.test(prompt)) {
+    return 1;
+  }
+
+  return null;
+}
+
+function dimensionsFromAspectRatio(aspectRatio: number, targetArea: number) {
+  const boundedArea = Math.min(
+    Math.max(Math.round(targetArea), 1024 * 1024),
+    4096 * 4096
+  );
+  const height = Math.sqrt(boundedArea / aspectRatio);
+  let width = Math.max(1, Math.round(height * aspectRatio));
+  let roundedHeight = Math.max(1, Math.round(height));
+
+  if (width * roundedHeight < 1024 * 1024) {
+    const scale = Math.sqrt((1024 * 1024) / (width * roundedHeight));
+    width = Math.ceil(width * scale);
+    roundedHeight = Math.ceil(roundedHeight * scale);
+  }
+  if (width * roundedHeight > 4096 * 4096) {
+    const scale = Math.sqrt((4096 * 4096) / (width * roundedHeight));
+    width = Math.floor(width * scale);
+    roundedHeight = Math.floor(roundedHeight * scale);
+  }
+
+  validateSeedreamDimensions(width, roundedHeight);
+  return { width, height: roundedHeight };
+}
+
+function validateSeedreamDimensions(width: number, height: number) {
+  const area = width * height;
+  const aspectRatio = width / height;
+  if (
+    !Number.isInteger(width) ||
+    !Number.isInteger(height) ||
+    width <= 0 ||
+    height <= 0 ||
+    area < 1024 * 1024 ||
+    area > 4096 * 4096 ||
+    aspectRatio < 1 / 16 ||
+    aspectRatio > 16
+  ) {
+    throw new Error(
+      "Seedream width and height must produce a 1K to 4K image within the supported aspect ratio."
+    );
+  }
 }
 
 function findExplicitImageCount(prompt: string) {
@@ -397,6 +536,7 @@ function readSeedreamConfigFromEnv(): SeedreamConfig {
     forceSingle: process.env.SEEDREAM_FORCE_SINGLE !== "false",
     maxInputImages: readNumberEnv("SEEDREAM_MAX_INPUT_IMAGES", 14),
     maxOutputImages: readSeedreamMaxOutputImagesFromEnv(),
+    scale: readOptionalNumberEnv("SEEDREAM_SCALE"),
   };
 }
 
@@ -453,6 +593,16 @@ function readNumberEnv(name: string, fallback: number) {
 
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function readOptionalNumberEnv(name: string) {
+  const raw = process.env[name];
+  if (!raw) {
+    return undefined;
+  }
+
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function signingKey(
@@ -580,6 +730,8 @@ function summarizeSeedreamBody(body: Record<string, unknown>) {
     imageCount: imageUrls.length,
     width: typeof body.width === "number" ? body.width : null,
     height: typeof body.height === "number" ? body.height : null,
+    size: typeof body.size === "number" ? body.size : null,
+    scale: typeof body.scale === "number" ? body.scale : null,
     forceSingle: body.force_single === true,
   };
 }

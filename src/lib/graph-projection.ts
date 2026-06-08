@@ -1,6 +1,9 @@
 import {
+  createHtmlPageNodes,
   createImageResultNodes,
   createMarkdownDocumentNodes,
+  createPendingImageResultNodes,
+  extractHtmlPagesFromToolOutput,
   extractImagesFromToolOutput,
   extractMarkdownDocumentsFromToolOutput,
 } from "@/lib/graph";
@@ -12,6 +15,7 @@ import type {
   ArtifactRef,
   CanvasToolPart,
   GeneratedImage,
+  ImageRequestPreview,
   RunEvaluationSummary,
   RunStepTimelineItem,
   RunSummaryItem,
@@ -200,7 +204,9 @@ export function applyGraphPatch(
     };
   }
 
-  const existing = state.nodes.find((node) => node.id === patch.payload.nodeId);
+  const existing =
+    state.nodes.find((node) => node.id === patch.payload.nodeId) ??
+    findNodeByArtifactId(state.nodes, patch.payload.artifact.id);
   if (!existing) {
     return rejectPatch(state, patch, "missing_node");
   }
@@ -209,7 +215,7 @@ export function applyGraphPatch(
     state: {
       ...state,
       nodes: state.nodes.map((node) =>
-        node.id === patch.payload.nodeId
+        node.id === existing.id
           ? attachArtifactToNode(node, patch.payload.artifact)
           : node
       ),
@@ -230,15 +236,27 @@ export function projectToolOutputToCanvas(
     markdownDocuments,
     [...existingNodes, ...imageProjection.resultNodes]
   );
+  const htmlPages = extractHtmlPagesFromToolOutput(output);
+  const htmlProjection = createHtmlPageNodes(
+    runNode,
+    htmlPages,
+    [
+      ...existingNodes,
+      ...imageProjection.resultNodes,
+      ...markdownProjection.resultNodes,
+    ]
+  );
 
   return {
     resultNodes: [
       ...imageProjection.resultNodes,
       ...markdownProjection.resultNodes,
+      ...htmlProjection.resultNodes,
     ],
     resultEdges: [
       ...imageProjection.resultEdges,
       ...markdownProjection.resultEdges,
+      ...htmlProjection.resultEdges,
     ],
   };
 }
@@ -333,6 +351,19 @@ export function projectRunTraceToCanvas({
       },
     }
   );
+  const expectedImageRequest = readExpectedImageRequest(orderedEvents, prompt);
+  const pendingImageProjection = expectedImageRequest
+    ? createPendingImageResultNodes(
+        runNode,
+        expectedImageRequest.count,
+        existingNodes,
+        {
+          request: expectedImageRequest.preview,
+          status: runStatus === "error" ? "error" : "loading",
+        }
+      )
+    : { resultNodes: [], resultEdges: [] };
+  const pendingImageNodes = [...pendingImageProjection.resultNodes];
   const projectedNodes = [promptNode, runNode];
   const projectedEdges: AgentCanvasEdge[] = [];
   const rejectedPatches: RejectedGraphPatch[] = [];
@@ -358,6 +389,9 @@ export function projectRunTraceToCanvas({
     })
   );
 
+  projectedNodes.push(...pendingImageProjection.resultNodes);
+  projectedEdges.push(...pendingImageProjection.resultEdges);
+
   for (const event of orderedEvents) {
     if (event.type === "artifact.created") {
       const artifact = readArtifactRef(event.payload.artifact);
@@ -365,17 +399,32 @@ export function projectRunTraceToCanvas({
         continue;
       }
 
+      const pendingImageNode =
+        artifact.type === "image" ? pendingImageNodes.shift() : undefined;
       const artifactNodeId =
+        pendingImageNode?.id ??
         readString(event.payload.canvasNodeId) ?? getArtifactNodeId(artifact);
       const artifactNode = createArtifactCanvasNode({
         artifact,
         existingNodes,
         index: projectedNodes.length,
         nodeId: artifactNodeId,
+        position: pendingImageNode?.position,
+        request:
+          pendingImageNode?.data.kind === "imageResult"
+            ? pendingImageNode.data.request
+            : undefined,
         runNode,
         sourceEvent: event,
       });
-      projectedNodes.push(artifactNode);
+      const existingProjectedIndex = projectedNodes.findIndex(
+        (node) => node.id === artifactNode.id
+      );
+      if (existingProjectedIndex >= 0) {
+        projectedNodes[existingProjectedIndex] = artifactNode;
+      } else {
+        projectedNodes.push(artifactNode);
+      }
       projectedEdges.push(
         getExistingOrProjectedEdge(existingEdges, targetRunNodeId, artifactNode.id, {
           id: `edge-${targetRunNodeId}-${artifactNode.id}`,
@@ -463,7 +512,9 @@ function attachArtifactToNode(
         image: {
           ...node.data.image,
           artifact,
+          url: artifact.uri ?? node.data.image.url,
         },
+        status: artifact.uri ? "ready" : node.data.status,
       },
     };
   }
@@ -479,6 +530,27 @@ function attachArtifactToNode(
   }
 
   return node;
+}
+
+function findNodeByArtifactId(
+  nodes: AgentCanvasNode[],
+  artifactId: string | undefined
+) {
+  if (!artifactId) {
+    return undefined;
+  }
+
+  return nodes.find((node) => {
+    if (node.data.kind === "imageResult") {
+      return (
+        node.data.artifact?.id === artifactId ||
+        node.data.image.artifact?.id === artifactId ||
+        node.data.image.id === artifactId
+      );
+    }
+
+    return "artifact" in node.data && node.data.artifact.id === artifactId;
+  });
 }
 
 function buildToolParts(
@@ -544,7 +616,7 @@ function buildToolParts(
   const errorText = readString(failure?.payload.errorText) ?? failure?.errorText;
   if (!toolParts.size && errorText) {
     toolParts.set("run-failed", {
-      type: "tool-expand_prompt",
+      type: "tool-runtime",
       state: "output-error",
       input: { prompt },
       errorText,
@@ -760,11 +832,214 @@ function readArtifactSummary(events: RunStepTraceEvent[]): RunSummaryItem | unde
   };
 }
 
+function readExpectedImageRequest(
+  events: RunStepTraceEvent[],
+  prompt: string
+): { count: number; preview: Omit<ImageRequestPreview, "index" | "count"> } | null {
+  const intentEvent = events.findLast(
+    (candidate) => candidate.type === "intent.routed"
+  );
+  const intent = readRecord(intentEvent?.payload.intent);
+  const intentLooksLikeImage = isImageGenerationIntent(intent);
+  const count =
+    readImageCountFromIntent(intent) ??
+    readImageCountFromPlan(events) ??
+    readImageCountFromGenerateInput(events) ??
+    (intentLooksLikeImage ? inferImageCountFromPrompt(prompt) : undefined);
+
+  if (!intentLooksLikeImage && !readImageCountFromGenerateInput(events)) {
+    return null;
+  }
+
+  return {
+    count: Math.max(1, count ?? 1),
+    preview: readImageRequestPreview(prompt),
+  };
+}
+
+function isImageGenerationIntent(intent: Record<string, unknown> | null) {
+  const task = readRecord(intent?.task);
+  const requiredTools = Array.isArray(intent?.requiredTools)
+    ? intent.requiredTools
+    : [];
+
+  return (
+    intent?.primaryIntent === "image_generation" ||
+    task?.kind === "image_generation" ||
+    task?.kind === "image_editing" ||
+    requiredTools.includes("seedream.generateImage") ||
+    requiredTools.includes("generate_image")
+  );
+}
+
+function readImageCountFromIntent(intent: Record<string, unknown> | null) {
+  const task = readRecord(intent?.task);
+  const deliverables = Array.isArray(task?.deliverables)
+    ? task.deliverables
+    : [];
+  const count = deliverables.reduce((total, deliverable) => {
+    const record = readRecord(deliverable);
+    if (record?.kind !== "image") {
+      return total;
+    }
+
+    return total + Math.max(1, readNumber(record.count) ?? 1);
+  }, 0);
+
+  return count > 0 ? count : undefined;
+}
+
+function readImageCountFromPlan(events: RunStepTraceEvent[]) {
+  const planEvent = events.findLast((event) => event.type === "plan.created");
+  const steps = Array.isArray(planEvent?.payload.normalizedPlan)
+    ? planEvent.payload.normalizedPlan
+    : Array.isArray(planEvent?.payload.rawPlan)
+      ? planEvent.payload.rawPlan
+      : [];
+  const count = steps.reduce((total, step) => {
+    const record = readRecord(step);
+    const expectedArtifacts = Array.isArray(record?.expectedArtifacts)
+      ? record.expectedArtifacts
+      : [];
+
+    return (
+      total +
+      expectedArtifacts.reduce((artifactTotal, artifact) => {
+        const artifactRecord = readRecord(artifact);
+        if (artifactRecord?.type !== "image") {
+          return artifactTotal;
+        }
+
+        return artifactTotal + Math.max(1, readNumber(artifactRecord.count) ?? 1);
+      }, 0)
+    );
+  }, 0);
+
+  return count > 0 ? count : undefined;
+}
+
+function readImageCountFromGenerateInput(events: RunStepTraceEvent[]) {
+  const toolInput = events
+    .filter((event) => event.type === "tool.input")
+    .findLast((event) => readToolName(event.payload.toolName) === "generate_image");
+  const input = readRecord(toolInput?.payload.input);
+  const count = readNumber(input?.resultCount);
+
+  return count && count > 0 ? Math.floor(count) : undefined;
+}
+
+function readImageRequestPreview(
+  prompt: string
+): Omit<ImageRequestPreview, "index" | "count"> {
+  const dimensions = prompt.match(/\b(\d{3,5})\s*(?:x|×|\*)\s*(\d{3,5})\b/i);
+  if (dimensions) {
+    return {
+      width: Number(dimensions[1]),
+      height: Number(dimensions[2]),
+      aspectRatio: simplifyAspectRatio(
+        Number(dimensions[1]),
+        Number(dimensions[2])
+      ),
+    };
+  }
+
+  const ratio = prompt.match(/\b(\d{1,2})\s*[:：]\s*(\d{1,2})\b/);
+  if (ratio) {
+    return {
+      aspectRatio: `${Number(ratio[1])}:${Number(ratio[2])}`,
+      size: inferImageAreaFromPrompt(prompt),
+    };
+  }
+
+  const orientationRatio =
+    /(横版|横图|宽屏|landscape|wide)/i.test(prompt)
+      ? "16:9"
+      : /(竖版|竖图|纵向|portrait|vertical)/i.test(prompt)
+        ? "9:16"
+        : /(方图|方形|正方形|square)/i.test(prompt)
+          ? "1:1"
+          : undefined;
+
+  return {
+    aspectRatio: orientationRatio,
+    size: inferImageAreaFromPrompt(prompt),
+  };
+}
+
+function inferImageCountFromPrompt(prompt: string) {
+  const arabicMatch = prompt.match(
+    /(?:生成|出|要|做|给我|create|generate|make)?\s*(\d{1,2})\s*(?:张|幅|个|款|版|组|images?|imgs?|pictures?|results?)/i
+  );
+  if (arabicMatch) {
+    return Number(arabicMatch[1]);
+  }
+
+  const chineseMatch = prompt.match(
+    /(?:生成|出|要|做|给我)?\s*([一二两三四五六七八九十])\s*(?:张|幅|个|款|版|组|图片|图|结果)/
+  );
+  if (chineseMatch) {
+    return chineseImageCountToNumber(chineseMatch[1]) ?? 1;
+  }
+
+  return 1;
+}
+
+function chineseImageCountToNumber(value: string) {
+  const numbers: Record<string, number> = {
+    一: 1,
+    二: 2,
+    两: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+    十: 10,
+  };
+
+  return numbers[value];
+}
+
+function inferImageAreaFromPrompt(prompt: string) {
+  if (/\b4\s*k\b|4k|4K|４K|４k/.test(prompt)) {
+    return 4096 * 4096;
+  }
+  if (/\b2\s*k\b|2k|2K|２K|２k/.test(prompt)) {
+    return 2048 * 2048;
+  }
+  if (/\b1\s*k\b|1k|1K|１K|１k/.test(prompt)) {
+    return 1024 * 1024;
+  }
+
+  return undefined;
+}
+
+function simplifyAspectRatio(width: number, height: number) {
+  const divisor = greatestCommonDivisor(width, height);
+  return `${width / divisor}:${height / divisor}`;
+}
+
+function greatestCommonDivisor(left: number, right: number): number {
+  let a = Math.abs(left);
+  let b = Math.abs(right);
+  while (b) {
+    const next = a % b;
+    a = b;
+    b = next;
+  }
+
+  return a || 1;
+}
+
 function createArtifactCanvasNode({
   artifact,
   existingNodes,
   index,
   nodeId,
+  position,
+  request,
   runNode,
   sourceEvent,
 }: {
@@ -772,6 +1047,8 @@ function createArtifactCanvasNode({
   existingNodes: AgentCanvasNode[];
   index: number;
   nodeId: string;
+  position?: AgentCanvasNode["position"];
+  request?: ImageRequestPreview;
   runNode: AgentCanvasNode;
   sourceEvent: RunStepTraceEvent;
 }): AgentCanvasNode {
@@ -796,13 +1073,15 @@ function createArtifactCanvasNode({
     return getExistingOrProjectedNode(existingNodes, nodeId, {
       id: nodeId,
       type: "imageResultNode",
-      position: existingPosition ?? projected?.position ?? basePosition,
+      position: existingPosition ?? position ?? projected?.position ?? basePosition,
       data: {
         kind: "imageResult",
         artifact,
         image,
         prompt: readString(sourceEvent.payload.prompt) ?? "",
+        request,
         runId: runNode.id,
+        status: "ready",
       },
     });
   }
@@ -845,6 +1124,13 @@ function createArtifactCanvasNode({
                   kind,
                   language: readString(artifact.metadata?.language),
                 }
+              : kind === "webpage"
+                ? {
+                    ...baseData,
+                    kind,
+                    html: readHtmlArtifactContent(artifact),
+                    previewUrl: artifact.contentRef ?? artifact.uri,
+                  }
               : { ...baseData, kind },
   } as AgentCanvasNode);
 }
@@ -939,6 +1225,32 @@ function readMarkdownArtifactContent(artifact: ArtifactRef) {
     readString(artifact.metadata?.content) ??
     readString(artifact.metadata?.text)
   );
+}
+
+function readHtmlArtifactContent(artifact: ArtifactRef) {
+  return (
+    readString(artifact.metadata?.html) ??
+    readString(artifact.metadata?.content) ??
+    readHtmlFromDataUrl(artifact.contentRef) ??
+    readHtmlFromDataUrl(artifact.uri)
+  );
+}
+
+function readHtmlFromDataUrl(value: string | undefined) {
+  if (!value?.startsWith("data:text/html")) {
+    return undefined;
+  }
+
+  const [, payload = ""] = value.split(",", 2);
+  if (!payload) {
+    return undefined;
+  }
+
+  try {
+    return decodeURIComponent(payload);
+  } catch {
+    return undefined;
+  }
 }
 
 function getArtifactFallbackTitle(artifact: ArtifactRef) {
@@ -1047,7 +1359,12 @@ function readToolName(value: unknown) {
   if (
     value === "analyze_reference_images" ||
     value === "expand_prompt" ||
-    value === "generate_image"
+    value === "generate_image" ||
+    value === "web.read" ||
+    value === "asset.analyze_context" ||
+    value === "page.generate" ||
+    value === "web_search" ||
+    value === "write_document"
   ) {
     return value;
   }

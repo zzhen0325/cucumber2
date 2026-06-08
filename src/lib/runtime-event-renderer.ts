@@ -7,7 +7,9 @@ import {
   type RejectedGraphPatch,
 } from "./graph-projection";
 import {
+  extractHtmlPagesFromToolOutput,
   extractImagesFromToolOutput,
+  extractMarkdownDocumentsFromToolOutput,
   toolPartsFromMessageParts,
 } from "./graph";
 import type {
@@ -256,7 +258,7 @@ function legacyRuntimeEventsFromToolParts(
         events.push(
           legacyEvent(options, events.length, stepId, "artifact.created", {
             artifact,
-            canvasNodeId: `image-${artifact.id}`,
+            canvasNodeId: getLegacyArtifactCanvasNodeId(artifact),
             toolCallId,
             toolName,
           })
@@ -331,11 +333,52 @@ function readLegacyToolStepId(toolType: string, index: number) {
 }
 
 function legacyArtifactsFromToolOutput(output: unknown): ArtifactRef[] {
-  return extractImagesFromToolOutput(output).map((image) => ({
-    id: image.artifact?.id ?? image.id,
-    type: "image",
-    uri: image.artifact?.uri ?? image.url,
-    title: image.artifact?.title ?? image.title,
-    metadata: image.artifact?.metadata ?? image.metadata,
-  }));
+  return [
+    ...extractImagesFromToolOutput(output).map((image) => ({
+      id: image.artifact?.id ?? image.id,
+      type: "image" as const,
+      uri: image.artifact?.uri ?? image.url,
+      title: image.artifact?.title ?? image.title,
+      metadata: image.artifact?.metadata ?? image.metadata,
+    })),
+    ...extractMarkdownDocumentsFromToolOutput(output).map((document) => ({
+      id: document.artifact?.id ?? document.id,
+      type: "doc" as const,
+      title: document.artifact?.title ?? document.title,
+      metadata: {
+        ...(document.artifact?.metadata ?? {}),
+        content: document.content,
+        format: "markdown",
+        markdown: document.content,
+        mimeType: "text/markdown",
+        summary: document.summary,
+      },
+    })),
+    ...extractHtmlPagesFromToolOutput(output).map((page) => ({
+      id: page.artifact?.id ?? page.id,
+      type: "webpage" as const,
+      title: page.artifact?.title ?? page.title,
+      contentRef: page.artifact?.contentRef ?? page.previewUrl,
+      metadata: {
+        ...(page.artifact?.metadata ?? {}),
+        format: "html",
+        html: page.html,
+        mimeType: "text/html",
+        summary: page.summary,
+      },
+    })),
+  ];
+}
+
+function getLegacyArtifactCanvasNodeId(artifact: ArtifactRef) {
+  if (artifact.type === "image") {
+    return `image-${artifact.id}`;
+  }
+  if (artifact.type === "doc") {
+    return `markdown-${artifact.id}`;
+  }
+  if (artifact.type === "webpage") {
+    return `webpage-${artifact.id}`;
+  }
+  return `artifact-${artifact.id}`;
 }

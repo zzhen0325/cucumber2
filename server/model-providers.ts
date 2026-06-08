@@ -126,15 +126,16 @@ export async function generateStructuredObjectWithProvider<T>(
   assertTextProviderConfigured(providerId);
 
   if (providerId === "deepseek") {
+    const jsonModeInput = withJsonModeInstruction(input);
     const result = await generateText({
       model: getDeepSeekModel(),
-      system: input.system,
-      prompt: input.prompt,
-      maxOutputTokens: input.maxOutputTokens,
+      system: jsonModeInput.system,
+      prompt: jsonModeInput.prompt,
+      maxOutputTokens: jsonModeInput.maxOutputTokens,
       output: Output.object({
-        schema: input.schema,
-        name: input.schemaName,
-        description: input.schemaDescription,
+        schema: jsonModeInput.schema,
+        name: jsonModeInput.schemaName,
+        description: jsonModeInput.schemaDescription,
       }),
     });
 
@@ -152,6 +153,28 @@ export async function generateStructuredObjectWithProvider<T>(
   });
 
   return input.schema.parse(parseJsonObjectText(text));
+}
+
+export function withJsonModeInstruction<T>(
+  input: StructuredGenerationInput<T>
+): StructuredGenerationInput<T> {
+  const instruction =
+    "Return only a valid JSON object matching the requested schema. Do not wrap the JSON in Markdown.";
+  const systemContainsJson = /\bjson\b/i.test(input.system);
+  const promptContainsJson = /\bjson\b/i.test(input.prompt);
+  if (systemContainsJson && promptContainsJson) {
+    return input;
+  }
+
+  return {
+    ...input,
+    system: systemContainsJson
+      ? input.system
+      : [input.system, instruction].join("\n"),
+    prompt: promptContainsJson
+      ? input.prompt
+      : [input.prompt, "", instruction].join("\n"),
+  };
 }
 
 export async function* streamTextWithProvider(
@@ -273,9 +296,12 @@ async function generateArkText(input: TextGenerationInput) {
     );
   }
 
-  const text = extractArkResponseText(await response.json()).trim();
+  const body = await response.json();
+  const text = extractArkResponseText(body).trim();
   if (!text) {
-    throw new Error("Ark Responses API returned an empty response.");
+    throw new Error(
+      `Ark Responses API returned an empty response. ${summarizeArkResponseForError(body)}`
+    );
   }
 
   return text;
@@ -340,22 +366,115 @@ function parseJsonObjectText(text: string) {
   }
 }
 
-function collectTextFields(value: unknown): string[] {
+function summarizeArkResponseForError(body: unknown) {
+  if (!body || typeof body !== "object") {
+    return `Response body type: ${typeof body}.`;
+  }
+
+  const candidate = body as Record<string, unknown>;
+  const parts: string[] = [];
+
+  for (const key of ["status", "finish_reason", "stop_reason"]) {
+    const value = candidate[key];
+    if (typeof value === "string" && value.trim()) {
+      parts.push(`${key}=${value.trim()}`);
+    }
+  }
+
+  const incompleteDetails = summarizeUnknownField(candidate.incomplete_details);
+  if (incompleteDetails) {
+    parts.push(`incomplete_details=${incompleteDetails}`);
+  }
+
+  const error = summarizeUnknownField(candidate.error);
+  if (error) {
+    parts.push(`error=${error}`);
+  }
+
+  if (Array.isArray(candidate.output)) {
+    parts.push(`output_items=${candidate.output.length}`);
+    const outputTypes = candidate.output
+      .map((item) =>
+        item && typeof item === "object"
+          ? readShortString((item as Record<string, unknown>).type)
+          : typeof item
+      )
+      .filter(Boolean);
+    if (outputTypes.length) {
+      parts.push(`output_types=${outputTypes.join(",")}`);
+    }
+  }
+
+  if (Array.isArray(candidate.choices)) {
+    parts.push(`choices=${candidate.choices.length}`);
+    const finishReasons = candidate.choices
+      .map((choice) =>
+        choice && typeof choice === "object"
+          ? readShortString((choice as Record<string, unknown>).finish_reason)
+          : undefined
+      )
+      .filter(Boolean);
+    if (finishReasons.length) {
+      parts.push(`choice_finish_reasons=${finishReasons.join(",")}`);
+    }
+  }
+
+  if (!parts.length) {
+    parts.push(`keys=${Object.keys(candidate).slice(0, 8).join(",") || "none"}`);
+  }
+
+  return parts.join("; ") + ".";
+}
+
+function summarizeUnknownField(value: unknown) {
+  if (!value) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return truncateForError(value.trim());
+  }
+  try {
+    return truncateForError(JSON.stringify(value));
+  } catch {
+    return truncateForError(String(value));
+  }
+}
+
+function readShortString(value: unknown) {
+  return typeof value === "string" && value.trim()
+    ? truncateForError(value.trim(), 48)
+    : undefined;
+}
+
+function truncateForError(value: string, maxLength = 180) {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, maxLength - 1)}...`;
+}
+
+function collectTextFields(value: unknown, seen = new WeakSet<object>()): string[] {
   if (!value) {
     return [];
   }
   if (typeof value === "string") {
-    return [value];
+    return value.trim() ? [value.trim()] : [];
   }
   if (Array.isArray(value)) {
-    return value.flatMap((item) => collectTextFields(item));
+    return value.flatMap((item) => collectTextFields(item, seen));
   }
   if (typeof value !== "object") {
     return [];
   }
 
+  if (seen.has(value)) {
+    return [];
+  }
+  seen.add(value);
+
   const candidate = value as Record<string, unknown>;
-  const directText = [candidate.text, candidate.output_text, candidate.content]
+  const directText = [candidate.text, candidate.output_text]
     .filter(
       (item): item is string => typeof item === "string" && item.trim().length > 0
     )
@@ -363,8 +482,10 @@ function collectTextFields(value: unknown): string[] {
 
   return [
     ...directText,
-    ...collectTextFields(candidate.content),
-    ...collectTextFields(candidate.message),
+    ...collectTextFields(candidate.content, seen),
+    ...collectTextFields(candidate.message, seen),
+    ...collectTextFields(candidate.delta, seen),
+    ...collectTextFields(candidate.parts, seen),
   ];
 }
 

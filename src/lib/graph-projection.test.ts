@@ -106,6 +106,52 @@ describe("graph projection", () => {
     ]);
   });
 
+  it("projects generated webpage artifacts into iframe preview nodes", () => {
+    const html = "<!doctype html><html><head><title>页面节点</title></head><body><h1>OK</h1></body></html>";
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      events: [
+        event("run.created", "run-1", "run", {
+          prompt: "生成一个 HTML 页面",
+          selectedNodeId: null,
+        }),
+        event("artifact.created", "run-1", "generate_page", {
+          artifact: {
+            id: "page-1",
+            type: "webpage",
+            title: "页面节点",
+            contentRef: `data:text/html;charset=utf-8,${encodeURIComponent(html)}`,
+            metadata: {
+              format: "html",
+              mimeType: "text/html",
+              summary: "生成一个 HTML 页面",
+            },
+          },
+          canvasNodeId: "webpage-page-1",
+          toolName: "page.generate",
+        }),
+      ],
+    });
+
+    const page = projection.nodes.find((node) => node.id === "webpage-page-1");
+    expect(page?.data.kind).toBe("webpage");
+    if (page?.data.kind !== "webpage") {
+      throw new Error("Expected webpage node");
+    }
+    expect(page).toMatchObject({
+      type: "webpageNode",
+      data: {
+        title: "页面节点",
+        html,
+        previewUrl: `data:text/html;charset=utf-8,${encodeURIComponent(html)}`,
+      },
+    });
+    expect(projection.edges.at(-1)).toMatchObject({
+      source: "run-1",
+      target: "webpage-page-1",
+    });
+  });
+
   it("reuses the real prompt node id when it is present in the trace", () => {
     const projection = projectRunTraceToCanvas({
       projectId: "project-1",
@@ -269,6 +315,115 @@ describe("graph projection", () => {
       },
       { kind: "artifact", label: "产物", detail: "1 image" },
     ]);
+  });
+
+  it("pre-allocates loading image nodes once the router selects image generation", () => {
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      events: [
+        event("run.created", "run-1", "run", {
+          prompt: "生成4张 16:9 横版 2K 海报",
+          selectedNodeId: null,
+        }),
+        event("intent.routed", "run-1", "intent", {
+          intent: {
+            primaryIntent: "image_generation",
+            task: {
+              kind: "image_generation",
+              deliverables: [{ kind: "image", count: 4 }],
+            },
+            requiredTools: ["prompt.expand", "seedream.generateImage"],
+          },
+        }),
+      ],
+    });
+    const imageNodes = projection.nodes.filter(
+      (node) => node.data.kind === "imageResult"
+    );
+
+    expect(imageNodes).toHaveLength(4);
+    expect(imageNodes.map((node) => node.data.kind === "imageResult" && node.data.status))
+      .toEqual(["loading", "loading", "loading", "loading"]);
+    expect(imageNodes.map((node) => node.position.x)).toEqual([
+      -125.5,
+      131.5,
+      388.5,
+      645.5,
+    ]);
+    expect(imageNodes[0].data.kind).toBe("imageResult");
+    if (imageNodes[0].data.kind !== "imageResult") {
+      throw new Error("Expected image result node");
+    }
+    expect(imageNodes[0].data.request).toMatchObject({
+      index: 1,
+      count: 4,
+      aspectRatio: "16:9",
+      size: 2048 * 2048,
+    });
+  });
+
+  it("fills pre-allocated image nodes in place as artifacts arrive", () => {
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      events: [
+        event("run.created", "run-1", "run", {
+          prompt: "一次生成2张图片",
+          selectedNodeId: null,
+        }),
+        event("intent.routed", "run-1", "intent", {
+          intent: {
+            primaryIntent: "image_generation",
+            task: {
+              kind: "image_generation",
+              deliverables: [{ kind: "image", count: 2 }],
+            },
+            requiredTools: ["seedream.generateImage"],
+          },
+        }),
+        event("artifact.created", "run-1", "generate_image", {
+          artifact: {
+            id: "image-1",
+            type: "image",
+            uri: "https://cdn.example/1.png",
+            title: "Result 1",
+          },
+          canvasNodeId: "image-image-1",
+        }),
+        event("graph.patch.applied", "run-1", "generate_image", {
+          patch: {
+            id: "patch-image-1",
+            type: "attachArtifact",
+            payload: {
+              nodeId: "image-image-1",
+              artifact: {
+                id: "image-1",
+                type: "image",
+                uri: "https://cdn.example/1.png",
+              },
+            },
+          },
+        }),
+      ],
+    });
+    const imageNodes = projection.nodes.filter(
+      (node) => node.data.kind === "imageResult"
+    );
+
+    expect(imageNodes).toHaveLength(2);
+    expect(imageNodes[0].id).toBe("image-pending-run-1-1");
+    expect(imageNodes[0].data.kind).toBe("imageResult");
+    expect(imageNodes[1].data.kind).toBe("imageResult");
+    if (
+      imageNodes[0].data.kind !== "imageResult" ||
+      imageNodes[1].data.kind !== "imageResult"
+    ) {
+      throw new Error("Expected image result nodes");
+    }
+    expect(imageNodes[0].data.status).toBe("ready");
+    expect(imageNodes[0].data.image.url).toBe("https://cdn.example/1.png");
+    expect(imageNodes.map((node) => node.position.x)).toEqual([131.5, 388.5]);
+    expect(imageNodes[1].data.status).toBe("loading");
+    expect(projection.rejectedPatches).toEqual([]);
   });
 
   it("rejects duplicate nodes, dangling edges, illegal kinds, and project mismatch", () => {

@@ -1239,21 +1239,18 @@
 .run-stream {
   display: grid;
   gap: 8px;
-  max-height: 260px;
-  overflow: auto;
+  overflow: visible;
   padding: 0 12px 12px;
 }
 
 .agent-text-output {
-  display: -webkit-box;
-  overflow: hidden;
+  display: block;
   margin: 0;
   color: #174222;
   font-size: 11px;
   line-height: 15px;
   overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  white-space: pre-wrap;
 }
 
 .run-summary-list {
@@ -1447,14 +1444,12 @@
 }
 
 .tool-detail-line {
-  display: -webkit-box;
-  overflow: hidden;
+  display: block;
   color: #555555;
   font-size: 11px;
   line-height: 13px;
   overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  white-space: pre-wrap;
 }
 
 .tool-approval-actions {
@@ -1546,6 +1541,102 @@
   height: 360px;
   min-height: 360px;
   overflow: hidden;
+}
+
+.html-page-card {
+  width: 420px !important;
+  height: 320px;
+  min-height: 320px;
+  overflow: hidden;
+}
+
+.html-page-content {
+  display: grid;
+  height: 318px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 12px;
+}
+
+.html-page-heading {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 22px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 8px;
+}
+
+.html-page-heading > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.html-page-heading span {
+  color: #737373;
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.html-page-heading strong {
+  overflow: hidden;
+  color: #111111;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 17px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.html-page-open {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 50%;
+  background: #f6f6f3;
+  color: #174222;
+  text-decoration: none;
+  transition:
+    background 140ms ease,
+    color 140ms ease;
+}
+
+.html-page-open:hover {
+  background: rgba(41, 191, 78, 0.12);
+  color: #07130a;
+}
+
+.html-page-frame {
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid #efefed;
+  border-radius: 16px;
+  background: #fbfbfa;
+}
+
+.html-page-frame iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #ffffff;
+}
+
+.html-page-empty {
+  display: grid;
+  height: 100%;
+  place-items: center;
+  color: #737373;
+  font-size: 12px;
+}
+
+.html-page-footer {
+  overflow: hidden;
+  color: #737373;
+  font-size: 11px;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .markdown-content {
@@ -1680,11 +1771,63 @@
   background: #ffffff;
 }
 
+.result-image-frame.loading,
+.result-image-frame.error {
+  display: grid;
+  place-items: center;
+  border: 1px solid #ebebeb;
+  background:
+    linear-gradient(110deg, rgba(255, 255, 255, 0) 32%, rgba(41, 191, 78, 0.1) 46%, rgba(255, 255, 255, 0) 60%),
+    #ffffff;
+  background-size: 260% 100%, auto;
+  animation: result-loading-sheen 1.8s ease-in-out infinite;
+}
+
+.result-image-frame.error {
+  border-color: rgba(229, 72, 77, 0.28);
+  background: #ffffff;
+  animation: none;
+}
+
 .result-image-frame img {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.result-placeholder {
+  display: grid;
+  gap: 5px;
+  justify-items: center;
+  color: #111111;
+  font-size: 12px;
+  line-height: 16px;
+  pointer-events: none;
+}
+
+.result-placeholder span {
+  font-weight: 600;
+}
+
+.result-placeholder small {
+  max-width: 180px;
+  overflow: hidden;
+  color: #737373;
+  font-size: 11px;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes result-loading-sheen {
+  0% {
+    background-position: 120% 0, 0 0;
+  }
+
+  100% {
+    background-position: -120% 0, 0 0;
+  }
 }
 
 .result-footer {

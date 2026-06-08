@@ -3,7 +3,10 @@ import type {
   AgentCanvasNode,
   ArtifactRef,
   CanvasToolPart,
+  GeneratedHtmlPage,
   GeneratedImage,
+  ImageRequestPreview,
+  ImageResultStatus,
   RunDraft,
   RunNodeData,
   UpstreamContextItem,
@@ -17,6 +20,8 @@ const RUN_NODE_HEIGHT = 300;
 const RESULT_NODE_HEIGHT = 240;
 const MARKDOWN_NODE_WIDTH = 420;
 const MARKDOWN_NODE_HEIGHT = 360;
+const WEBPAGE_NODE_WIDTH = 420;
+const WEBPAGE_NODE_HEIGHT = 320;
 const ARTIFACT_NODE_HEIGHT = 132;
 const RESULT_GAP = 17;
 const NODE_CLEARANCE = 24;
@@ -47,6 +52,8 @@ export type GeneratedMarkdownDocument = {
   artifact?: ArtifactRef;
 };
 
+export type { GeneratedHtmlPage };
+
 export type ContextCollectionTrace = {
   selectedNodeId: string | null;
   budget?: number;
@@ -65,6 +72,12 @@ export const isImageResultNode = (node?: AgentCanvasNode) =>
 
 export function getRunReferenceNodeId(node?: AgentCanvasNode) {
   if (!node || node.data.kind === "run") {
+    return null;
+  }
+  if (
+    node.data.kind === "imageResult" &&
+    (node.data.status === "loading" || node.data.status === "error")
+  ) {
     return null;
   }
 
@@ -299,6 +312,67 @@ export function createImageResultNodes(
   );
   const visibleImages = images.filter((image) => !alreadyRendered.has(image.id));
 
+  return createAlignedImageResultNodes(
+    runNode,
+    visibleImages.map((image) => ({
+      id: `image-${image.id}`,
+      image,
+      artifact: image.artifact,
+      status: "ready" as const,
+    })),
+    existingNodes
+  );
+}
+
+export function createPendingImageResultNodes(
+  runNode: AgentCanvasNode,
+  count: number,
+  existingNodes: AgentCanvasNode[],
+  options: {
+    request?: Omit<ImageRequestPreview, "index" | "count">;
+    status?: ImageResultStatus;
+  } = {}
+) {
+  const safeCount = Math.max(0, Math.floor(count));
+  const status = options.status ?? "loading";
+  const pendingImages = Array.from({ length: safeCount }, (_, index) => {
+    const imageId = `pending-${runNode.id}-${index + 1}`;
+    const request = {
+      ...options.request,
+      index: index + 1,
+      count: safeCount,
+    };
+
+    return {
+      id: `image-${imageId}`,
+      image: {
+        id: imageId,
+        url: "",
+        title:
+          status === "error"
+            ? `生成失败 ${index + 1}/${safeCount}`
+            : `生成中 ${index + 1}/${safeCount}`,
+        metadata: { request },
+      },
+      request,
+      status,
+    };
+  });
+
+  return createAlignedImageResultNodes(runNode, pendingImages, existingNodes);
+}
+
+function createAlignedImageResultNodes(
+  runNode: AgentCanvasNode,
+  results: Array<{
+    id: string;
+    image: GeneratedImage;
+    artifact?: ArtifactRef;
+    request?: ImageRequestPreview;
+    status?: ImageResultStatus;
+  }>,
+  existingNodes: AgentCanvasNode[]
+) {
   const resultOffset =
     runNode.data.kind === "run" &&
     (runNode.data.status !== "queued" ||
@@ -307,41 +381,49 @@ export function createImageResultNodes(
       : RESULT_OFFSET_FROM_PROMPT_Y;
   const preferredStartX =
     runNode.position.x -
-    ((visibleImages.length - 1) * (NODE_WIDTH + RESULT_GAP)) / 2;
+    ((results.length - 1) * (NODE_WIDTH + RESULT_GAP)) / 2;
   const y = runNode.position.y + resultOffset - RUN_OFFSET_Y;
   const startX = resolveNonOverlappingX(
     {
       x: preferredStartX,
       y,
       width:
-        visibleImages.length * NODE_WIDTH +
-        Math.max(visibleImages.length - 1, 0) * RESULT_GAP,
+        results.length * NODE_WIDTH +
+        Math.max(results.length - 1, 0) * RESULT_GAP,
       height: RESULT_NODE_HEIGHT,
     },
     existingNodes
   );
 
-  const resultNodes: AgentCanvasNode[] = visibleImages.map((image, index) => ({
-    id: `image-${image.id}`,
+  const resultNodes: AgentCanvasNode[] = results.map((result, index) => ({
+    id: result.id,
     type: "imageResultNode",
-    position: { x: startX + index * (NODE_WIDTH + RESULT_GAP), y },
+    position:
+      getExistingPosition(existingNodes, result.id) ??
+      { x: startX + index * (NODE_WIDTH + RESULT_GAP), y },
     data: {
       kind: "imageResult",
-      image,
-      artifact: image.artifact,
+      image: result.image,
+      artifact: result.artifact,
       prompt: runNode.data.kind === "run" ? runNode.data.prompt : "",
       runId: runNode.id,
+      request: result.request,
+      status: result.status,
     },
   }));
 
   const resultEdges: AgentCanvasEdge[] = resultNodes.map((node) => ({
-    id: id("edge"),
+    id: `edge-${runNode.id}-${node.id}`,
     source: runNode.id,
     target: node.id,
     type: "animated",
   }));
 
   return { resultNodes, resultEdges };
+}
+
+function getExistingPosition(nodes: AgentCanvasNode[], nodeId: string) {
+  return nodes.find((node) => node.id === nodeId)?.position;
 }
 
 export function createMarkdownDocumentNodes(
@@ -403,6 +485,80 @@ export function createMarkdownDocumentNodes(
         runId: runNode.id,
         summary: document.summary ?? summarizeMarkdown(document.content),
         title: document.title,
+      },
+    });
+    resultEdges.push({
+      id: id("edge"),
+      source: runNode.id,
+      target: nodeId,
+      type: "animated",
+    });
+  }
+
+  return { resultNodes, resultEdges };
+}
+
+export function createHtmlPageNodes(
+  runNode: AgentCanvasNode,
+  pages: GeneratedHtmlPage[],
+  existingNodes: AgentCanvasNode[]
+) {
+  const alreadyRendered = new Set(
+    existingNodes.flatMap((node) => {
+      if (node.data.kind !== "webpage") {
+        return [];
+      }
+
+      return [node.data.artifact?.id ?? node.id.replace(/^webpage-/, "")];
+    })
+  );
+  const visiblePages = pages.filter(
+    (page) => page.html.trim() && !alreadyRendered.has(page.artifact?.id ?? page.id)
+  );
+
+  const resultNodes: AgentCanvasNode[] = [];
+  const resultEdges: AgentCanvasEdge[] = [];
+
+  for (const page of visiblePages) {
+    const nodeId = `webpage-${safeNodeId(page.artifact?.id ?? page.id)}`;
+    const preferredRect = {
+      x: runNode.position.x - (WEBPAGE_NODE_WIDTH - NODE_WIDTH) / 2,
+      y: runNode.position.y + EXPANDED_RESULT_OFFSET_FROM_PROMPT_Y - RUN_OFFSET_Y,
+      width: WEBPAGE_NODE_WIDTH,
+      height: WEBPAGE_NODE_HEIGHT,
+    };
+    const x = resolveNonOverlappingX(preferredRect, [
+      ...existingNodes,
+      ...resultNodes,
+    ]);
+    const artifact =
+      page.artifact ??
+      ({
+        id: page.id,
+        type: "webpage",
+        title: page.title,
+        contentRef: page.previewUrl,
+        metadata: {
+          format: "html",
+          html: page.html,
+          mimeType: "text/html",
+          summary: page.summary,
+        },
+      } satisfies ArtifactRef);
+
+    resultNodes.push({
+      id: nodeId,
+      type: "webpageNode",
+      position: { x, y: preferredRect.y },
+      data: {
+        kind: "webpage",
+        artifact,
+        html: page.html,
+        previewUrl: page.previewUrl,
+        prompt: runNode.data.kind === "run" ? runNode.data.prompt : undefined,
+        runId: runNode.id,
+        summary: page.summary,
+        title: page.title,
       },
     });
     resultEdges.push({
@@ -493,6 +649,9 @@ function getNodeWidth(node: AgentCanvasNode) {
   if (node.data.kind === "markdown") {
     return MARKDOWN_NODE_WIDTH;
   }
+  if (node.data.kind === "webpage") {
+    return WEBPAGE_NODE_WIDTH;
+  }
 
   return NODE_WIDTH;
 }
@@ -508,6 +667,9 @@ function getNodeHeight(node: AgentCanvasNode) {
 
   if (node.data.kind === "markdown") {
     return MARKDOWN_NODE_HEIGHT;
+  }
+  if (node.data.kind === "webpage") {
+    return WEBPAGE_NODE_HEIGHT;
   }
 
   if (isArtifactBackedKind(node.data.kind)) {
@@ -850,6 +1012,54 @@ export function extractMarkdownDocumentsFromToolOutput(
   return dedupeMarkdownDocuments(documents);
 }
 
+export function extractHtmlPagesFromToolOutput(
+  output: unknown
+): GeneratedHtmlPage[] {
+  if (!output || typeof output !== "object") {
+    return [];
+  }
+
+  const pages: GeneratedHtmlPage[] = [];
+  const candidate = output as Record<string, unknown>;
+  const directHtml =
+    readString(candidate.html) ??
+    (candidate.format === "html" || candidate.mimeType === "text/html"
+      ? readString(candidate.content)
+      : undefined);
+
+  if (directHtml) {
+    const idValue =
+      readString(candidate.artifactId) ??
+      readString(candidate.id) ??
+      stableTextId(directHtml);
+    pages.push({
+      id: idValue,
+      title: readString(candidate.title) ?? getHtmlTitle(directHtml),
+      html: directHtml,
+      previewUrl: toHtmlPreviewUrl(directHtml),
+      summary: readString(candidate.summary),
+    });
+  }
+
+  const pageItems = Array.isArray(candidate.pages) ? candidate.pages : [];
+  for (const item of pageItems) {
+    const page = readHtmlPage(item);
+    if (page) {
+      pages.push(page);
+    }
+  }
+
+  const artifacts = Array.isArray(candidate.artifacts) ? candidate.artifacts : [];
+  for (const artifact of artifacts) {
+    const page = readHtmlArtifactPage(artifact);
+    if (page) {
+      pages.push(page);
+    }
+  }
+
+  return dedupeHtmlPages(pages);
+}
+
 export function extractImagesFromToolOutput(output: unknown): GeneratedImage[] {
   if (!output || typeof output !== "object") {
     return [];
@@ -948,7 +1158,12 @@ export function toolPartFromMessagePart(part: unknown): CanvasToolPart | null {
   if (
     toolName !== "analyze_reference_images" &&
     toolName !== "generate_image" &&
-    toolName !== "expand_prompt"
+    toolName !== "expand_prompt" &&
+    toolName !== "web.read" &&
+    toolName !== "asset.analyze_context" &&
+    toolName !== "page.generate" &&
+    toolName !== "web_search" &&
+    toolName !== "write_document"
   ) {
     return null;
   }
@@ -1095,6 +1310,57 @@ function readMarkdownArtifactDocument(
   };
 }
 
+function readHtmlPage(item: unknown): GeneratedHtmlPage | null {
+  if (!item || typeof item !== "object") {
+    return null;
+  }
+
+  const candidate = item as Record<string, unknown>;
+  const html = readString(candidate.html) ?? readString(candidate.content);
+  if (!html) {
+    return null;
+  }
+
+  return {
+    id: readString(candidate.id) ?? stableTextId(html),
+    title: readString(candidate.title) ?? getHtmlTitle(html),
+    html,
+    previewUrl: readString(candidate.previewUrl) ?? toHtmlPreviewUrl(html),
+    summary: readString(candidate.summary),
+  };
+}
+
+function readHtmlArtifactPage(item: unknown): GeneratedHtmlPage | null {
+  if (!item || typeof item !== "object") {
+    return null;
+  }
+
+  const candidate = item as Record<string, unknown>;
+  const artifact = readArtifactRef(candidate);
+  if (!artifact || !isHtmlArtifact(artifact)) {
+    return null;
+  }
+
+  const metadata = artifact.metadata ?? {};
+  const html =
+    readString(metadata.html) ??
+    readString(metadata.content) ??
+    readHtmlFromDataUrl(artifact.contentRef) ??
+    readHtmlFromDataUrl(artifact.uri);
+  if (!html) {
+    return null;
+  }
+
+  return {
+    id: artifact.id,
+    title: artifact.title ?? getHtmlTitle(html),
+    html,
+    previewUrl: artifact.contentRef ?? artifact.uri ?? toHtmlPreviewUrl(html),
+    summary: readString(metadata.summary),
+    artifact,
+  };
+}
+
 function readArtifactRef(candidate: Record<string, unknown>): ArtifactRef | null {
   const idValue = readString(candidate.id);
   const typeValue = candidate.type;
@@ -1143,6 +1409,21 @@ function isMarkdownArtifact(artifact: ArtifactRef) {
   );
 }
 
+function isHtmlArtifact(artifact: ArtifactRef) {
+  const format = readString(artifact.metadata?.format)?.toLowerCase();
+  const mimeType = readString(artifact.metadata?.mimeType)?.toLowerCase();
+
+  return (
+    artifact.type === "webpage" &&
+    (format === "html" ||
+      mimeType === "text/html" ||
+      artifact.uri?.startsWith("data:text/html") ||
+      artifact.contentRef?.startsWith("data:text/html") ||
+      artifact.uri?.endsWith(".html") ||
+      artifact.contentRef?.endsWith(".html"))
+  );
+}
+
 function looksLikeMarkdownDocument(text: string) {
   const trimmed = text.trim();
   if (trimmed.length < 80) {
@@ -1173,6 +1454,35 @@ function summarizeMarkdown(content: string) {
   );
 }
 
+function getHtmlTitle(html: string) {
+  return (
+    html.match(/<title[^>]*>(.*?)<\/title>/is)?.[1]
+      ?.replace(/\s+/g, " ")
+      .trim() || "HTML 页面"
+  );
+}
+
+function toHtmlPreviewUrl(html: string) {
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+}
+
+function readHtmlFromDataUrl(value: string | undefined) {
+  if (!value?.startsWith("data:text/html")) {
+    return undefined;
+  }
+
+  const [, payload = ""] = value.split(",", 2);
+  if (!payload) {
+    return undefined;
+  }
+
+  try {
+    return decodeURIComponent(payload);
+  } catch {
+    return undefined;
+  }
+}
+
 function stableTextId(text: string) {
   let hash = 0;
   for (let index = 0; index < text.length; index += 1) {
@@ -1191,6 +1501,20 @@ function dedupeMarkdownDocuments(documents: GeneratedMarkdownDocument[]) {
 
   return documents.filter((document) => {
     const key = document.artifact?.id ?? document.id;
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+function dedupeHtmlPages(pages: GeneratedHtmlPage[]) {
+  const seen = new Set<string>();
+
+  return pages.filter((page) => {
+    const key = page.artifact?.id ?? page.id;
     if (seen.has(key)) {
       return false;
     }

@@ -39,6 +39,34 @@ export async function createPlan({
   modelProvider: ModelProviderId;
   toolRegistry: ToolRegistry;
 }) {
+  const deterministicPlan = planBeforeModel(intent);
+  if (deterministicPlan) {
+    const normalizedPlan = normalizePlan(deterministicPlan, {
+      expectedImageCount: getExpectedImageCount(intent),
+    });
+    const validation = validatePlanAgainstRegistry(
+      normalizedPlan,
+      toolRegistry,
+      context
+    );
+
+    if (!validation.ok) {
+      throwAgentError({
+        code: runtimeErrorCodes.PLAN_INVALID,
+        message: validation.errors.join("; "),
+        retryable: false,
+        severity: "error",
+        details: { validation },
+      });
+    }
+
+    return {
+      rawPlan: deterministicPlan,
+      normalizedPlan,
+      validation,
+    };
+  }
+
   const prompt = buildPlannerPrompt({ context, intent, toolRegistry });
   const rawPlan = generatePlanSteps
     ? await generatePlanSteps(prompt)
@@ -53,7 +81,9 @@ export async function createPlan({
           maxOutputTokens: 1_800,
         })
       ).steps;
-  const normalizedPlan = normalizePlan(rawPlan);
+  const normalizedPlan = normalizePlan(rawPlan, {
+    expectedImageCount: getExpectedImageCount(intent),
+  });
   const validation = validatePlanAgainstRegistry(
     normalizedPlan,
     toolRegistry,
@@ -77,13 +107,34 @@ export async function createPlan({
   };
 }
 
-export function normalizePlan(plan: PlanStep[]) {
+function planBeforeModel(intent: IntentResult): PlanStep[] | undefined {
+  if (intent.requiredTools.includes(toolIds.searchWeb)) {
+    return buildPlanFromIntentDeterministically(intent);
+  }
+
+  if (intent.requiredTools.includes(toolIds.generatePage)) {
+    return buildPlanFromIntentDeterministically(intent);
+  }
+
+  if (intent.requiredTools.includes(toolIds.writeDocument)) {
+    return buildPlanFromIntentDeterministically(intent);
+  }
+
+  return undefined;
+}
+
+export function normalizePlan(
+  plan: PlanStep[],
+  options: { expectedImageCount?: number } = {}
+) {
+  const expectedImageCount = Math.max(options.expectedImageCount ?? 1, 1);
+
   return planSchema.parse(
     plan.map((step, index) => ({
       ...step,
       id: step.id || `plan-step-${index + 1}`,
       dependsOn: step.dependsOn ?? [],
-      expectedArtifacts: step.expectedArtifacts ?? [],
+      expectedArtifacts: normalizeExpectedArtifacts(step, expectedImageCount),
       expectedCanvasOperations: step.expectedCanvasOperations ?? [],
       retryPolicy: step.retryPolicy ?? defaultRetryPolicy,
       approvalRequired: step.approvalRequired ?? false,
@@ -213,8 +264,16 @@ function canvasOperationProducerToolIds(
 }
 
 export function buildPlanFromIntentDeterministically(intent: IntentResult): PlanStep[] {
+  if (intent.requiredTools.includes(toolIds.searchWeb)) {
+    return buildWebResearchPlan();
+  }
+
   if (intent.requiredTools.includes(toolIds.generatePage)) {
     return buildLandingPagePlan(intent);
+  }
+
+  if (intent.requiredTools.includes(toolIds.writeDocument)) {
+    return buildDocumentPlan(intent);
   }
 
   if (
@@ -296,7 +355,13 @@ export function buildPlanFromIntentDeterministically(intent: IntentResult): Plan
       toolId: toolIds.generateImage,
       capabilityId: "image.generate",
       dependsOn: ["expand_prompt"],
-      expectedArtifacts: [{ type: "image", description: "Generated image" }],
+      expectedArtifacts: [
+        {
+          type: "image",
+          count: getExpectedImageCount(intent),
+          description: "Generated image",
+        },
+      ],
       expectedCanvasOperations: [
         {
           type: "attachArtifact",
@@ -324,6 +389,45 @@ export function buildPlanFromIntentDeterministically(intent: IntentResult): Plan
   return steps;
 }
 
+function getExpectedImageCount(intent: IntentResult) {
+  return Math.max(
+    1,
+    intent.task.deliverables
+      .filter((deliverable) => deliverable.kind === "image")
+      .reduce((total, deliverable) => total + (deliverable.count ?? 1), 0)
+  );
+}
+
+function normalizeExpectedArtifacts(
+  step: PlanStep,
+  expectedImageCount: number
+) {
+  const expectedArtifacts = step.expectedArtifacts ?? [];
+  if (step.toolId !== toolIds.generateImage) {
+    return expectedArtifacts;
+  }
+
+  if (!expectedArtifacts.some((artifact) => artifact.type === "image")) {
+    return [
+      ...expectedArtifacts,
+      {
+        type: "image" as const,
+        count: expectedImageCount,
+        description: "Generated image",
+      },
+    ];
+  }
+
+  return expectedArtifacts.map((artifact) =>
+    artifact.type === "image"
+      ? {
+          ...artifact,
+          count: Math.max(artifact.count ?? expectedImageCount, expectedImageCount),
+        }
+      : artifact
+  );
+}
+
 function buildLandingPagePlan(intent: IntentResult): PlanStep[] {
   const steps: PlanStep[] = [
     {
@@ -340,6 +444,16 @@ function buildLandingPagePlan(intent: IntentResult): PlanStep[] {
     },
   ];
   const generationDependencies = ["agent_text"];
+  const generatePageExpectedCanvasOperations = intent.requiredTools.includes(
+    toolIds.createCanvasNode
+  )
+    ? [
+        {
+          type: "createNode" as const,
+          description: "Create a canvas node for the generated page.",
+        },
+      ]
+    : [];
 
   if (intent.requiredTools.includes(toolIds.readWebpage)) {
     steps.push({
@@ -377,21 +491,40 @@ function buildLandingPagePlan(intent: IntentResult): PlanStep[] {
     generationDependencies.push("analyze_assets");
   }
 
+  if (intent.requiredTools.includes(toolIds.writeDocument)) {
+    steps.push({
+      id: "write_report",
+      title: "Write source report",
+      goal: "Create a Markdown report that turns the user goal and gathered context into source material for the page.",
+      kind: "tool",
+      toolId: toolIds.writeDocument,
+      capabilityId: "document.write",
+      dependsOn: [...generationDependencies],
+      expectedArtifacts: [
+        {
+          type: "doc",
+          count: 1,
+          description: "Markdown report artifact for downstream page generation.",
+        },
+      ],
+      expectedCanvasOperations: [],
+      risk: "low",
+      approvalRequired: false,
+      retryPolicy: defaultRetryPolicy,
+    });
+    generationDependencies.splice(0, generationDependencies.length, "write_report");
+  }
+
   steps.push({
     id: "generate_page",
     title: "Generate page artifact",
-    goal: "Create the landing page artifact from sources and analyzed assets.",
+    goal: "Create the HTML page artifact from the task brief and previous tool results.",
     kind: "tool",
     toolId: toolIds.generatePage,
     capabilityId: "page.generate",
     dependsOn: generationDependencies,
     expectedArtifacts: [{ type: "webpage", description: "Generated landing page artifact" }],
-    expectedCanvasOperations: [
-      {
-        type: "createNode",
-        description: "Create a canvas node for the generated landing page.",
-      },
-    ],
+    expectedCanvasOperations: generatePageExpectedCanvasOperations,
     risk: "low",
     approvalRequired: false,
     retryPolicy: defaultRetryPolicy,
@@ -482,6 +615,8 @@ function buildPlannerPrompt({
     "PLANNING_POLICY",
     [
       "Use a reasoning step first when user-facing run explanation is needed.",
+      `For web research, current information, or source-grounded answers, use ${toolIds.searchWeb} before ${toolIds.writeDocument}.`,
+      `For text-first analysis, summaries, reports, plans, answers, or capability reports, use ${toolIds.writeDocument} to create a Markdown document artifact.`,
       `For simple image generation, include ${toolIds.expandPrompt} and ${toolIds.generateImage}.`,
       `For landing page work, use ${toolIds.readWebpage} when webpage sources are present, ${toolIds.analyzeAssets} for image or artifact context, ${toolIds.generatePage} to create the page artifact, and ${toolIds.createCanvasNode} when the page must appear on canvas.`,
       `Use ${toolIds.analyzeReferenceImages} before prompt expansion when selected/upstream images need visual analysis.`,
@@ -489,6 +624,125 @@ function buildPlannerPrompt({
       "If no executable tool is exposed for the task, create an approval step asking for clarification instead of inventing a tool.",
     ].join("\n"),
   ].join("\n");
+}
+
+function buildWebResearchPlan(): PlanStep[] {
+  return [
+    {
+      id: "agent_text",
+      title: "Run explanation",
+      goal: "Explain that the run will search the web and produce a Markdown research document.",
+      kind: "reasoning",
+      dependsOn: [],
+      expectedArtifacts: [],
+      expectedCanvasOperations: [],
+      risk: "low",
+      approvalRequired: false,
+      retryPolicy: defaultRetryPolicy,
+    },
+    {
+      id: "search_web",
+      title: "Search web",
+      goal: "Search current web sources for the requested research question.",
+      kind: "tool",
+      toolId: toolIds.searchWeb,
+      capabilityId: "web.research",
+      dependsOn: ["agent_text"],
+      expectedArtifacts: [],
+      expectedCanvasOperations: [],
+      risk: "low",
+      approvalRequired: false,
+      retryPolicy: {
+        maxRetries: 1,
+        backoffMs: 500,
+        retryableErrorCodes: [runtimeErrorCodes.TOOL_TIMEOUT],
+      },
+    },
+    {
+      id: "write_document",
+      title: "Write research document",
+      goal: "Create a source-grounded Markdown document from the search results and available context.",
+      kind: "tool",
+      toolId: toolIds.writeDocument,
+      capabilityId: "document.write",
+      dependsOn: ["search_web"],
+      expectedArtifacts: [
+        {
+          type: "doc",
+          count: 1,
+          description: "Markdown research document artifact.",
+        },
+      ],
+      expectedCanvasOperations: [],
+      risk: "low",
+      approvalRequired: false,
+      retryPolicy: defaultRetryPolicy,
+    },
+    {
+      id: "evaluate_result",
+      title: "Evaluate result",
+      goal: "Check that the Markdown research document artifact exists and has content.",
+      kind: "evaluation",
+      dependsOn: ["write_document"],
+      expectedArtifacts: [],
+      expectedCanvasOperations: [],
+      risk: "low",
+      approvalRequired: false,
+      retryPolicy: defaultRetryPolicy,
+    },
+  ];
+}
+
+function buildDocumentPlan(intent: IntentResult): PlanStep[] {
+  return [
+    {
+      id: "agent_text",
+      title: "Run explanation",
+      goal: "Explain that the run will produce a Markdown document artifact.",
+      kind: "reasoning",
+      dependsOn: [],
+      expectedArtifacts: [],
+      expectedCanvasOperations: [],
+      risk: "low",
+      approvalRequired: false,
+      retryPolicy: defaultRetryPolicy,
+    },
+    {
+      id: "write_document",
+      title:
+        intent.primaryIntent === "document.capability_report"
+          ? "Write capability report"
+          : "Write document",
+      goal: "Create the requested Markdown document artifact from the routed task and available context.",
+      kind: "tool",
+      toolId: toolIds.writeDocument,
+      capabilityId: "document.write",
+      dependsOn: ["agent_text"],
+      expectedArtifacts: [
+        {
+          type: "doc",
+          count: 1,
+          description: "Markdown document artifact.",
+        },
+      ],
+      expectedCanvasOperations: [],
+      risk: "low",
+      approvalRequired: false,
+      retryPolicy: defaultRetryPolicy,
+    },
+    {
+      id: "evaluate_result",
+      title: "Evaluate result",
+      goal: "Check that the Markdown document artifact exists and has content.",
+      kind: "evaluation",
+      dependsOn: ["write_document"],
+      expectedArtifacts: [],
+      expectedCanvasOperations: [],
+      risk: "low",
+      approvalRequired: false,
+      retryPolicy: defaultRetryPolicy,
+    },
+  ];
 }
 
 function hasCycle(plan: PlanStep[]) {

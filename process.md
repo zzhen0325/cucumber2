@@ -17,6 +17,79 @@
 
 ## 2026-06-08
 
+### 补强复合页面任务 Router/Planner
+
+- 变更：页面/HTML 请求如果同时包含分析、报告、总结等文本产物目标，会作为通用 multi-step 任务暴露 `document.write -> page.generate` 工具链，而不是落到模型 planner schema 输出。
+- 变更：Planner 对包含 `page.generate` 的复合任务按已暴露工具组合生成 DAG；前序 `document.write` 的 Markdown 会作为页面生成素材传给 `page.generate`。只有用户明确要求画布/节点 mutation 时才加入 `canvas.createNode` 和对应 expected canvas operation。
+- 变更：对照 AI SDK 官方 multi-step/tool-calling、ToolLoopAgent、loop control 和 structured-output-with-tools 文档，继续用本仓库的 `IntentResult -> PlanStep[] -> generic executor` 映射多步工具循环。
+- 文件：`server/runtime/intent-router.ts`、`server/runtime/planner.ts`、`server/runtime/tools/web-page-tools.ts`、`server/runtime/runtime.test.ts`、`README.md`、`process.md`。
+- 验证：`pnpm test -- server/runtime/runtime.test.ts`、`pnpm exec tsc -p tsconfig.node.json --noEmit` 通过。
+
+### 页面类需求输出 HTML 预览节点
+
+- 变更：页面/网页/HTML/站点等页面产物意图会路由到 `page.generate`，生成的 `webpage` artifact 会投影为可预览的 `webpageNode`；节点使用 iframe 渲染 `srcDoc`/`data:text/html`，并保留打开预览入口。
+- 变更：graph projection、legacy tool part fallback 和 Run 节点工具状态都支持 `web.read`、`asset.analyze_context`、`page.generate`，避免页面生成过程只停留在聊天文本或普通 artifact 卡片里。
+- 文件：`server/runtime/intent-router.ts`、`src/types/canvas.ts`、`src/lib/graph.ts`、`src/lib/graph-projection.ts`、`src/lib/runtime-event-renderer.ts`、`src/components/CanvasWorkspace.tsx`、`src/components/RunNodeView.tsx`、`src/App.css`、`src/lib/graph.test.ts`、`src/lib/graph-projection.test.ts`、`process.md`。
+- 验证：已对照 AI SDK UI `createUIMessageStream` / streaming data 文档确认沿用 message parts/runtime event 流；`pnpm test src/lib/graph.test.ts src/lib/graph-projection.test.ts server/runtime/runtime.test.ts`、`pnpm build` 通过；Browser 打开 `http://localhost:5174/` 创建空项目，画布、输入器和存储状态正常且无 console error/warn。
+- 备注：未提交真实页面生成请求，避免触发模型调用；HTML 节点数据落点由 graph/projection 单元测试覆盖。
+
+### 接入 Tavily AI SDK Web Search 工具
+
+- 变更：撤销上一版搜索依赖，改为依赖 `@tavily/ai-sdk`；Tool Registry 新增 `web.search`，通过 Tavily search 返回 sources，缺 `TAVILY_API_KEY` 时直接在 Run 节点显示工具错误。
+- 变更：搜索/调研/最新信息类请求会确定性路由到 `web_research`，计划为 `agent_text -> search_web -> write_document -> evaluate_result`；`document.write` 会把 Tavily 搜索结果注入 Markdown 文档 prompt，最终仍生成可继续分支的 `markdownNode`。
+- 变更：前端 Run 节点识别并展示 `web_search` 工具状态、查询和来源数量。
+- 文件：`package.json`、`pnpm-lock.yaml`、`server/runtime/tools/web-page-tools.ts`、`server/runtime/tools/document-tools.ts`、`server/runtime/tools/ids.ts`、`server/runtime/tool-registry.ts`、`server/runtime/intent-router.ts`、`server/runtime/planner.ts`、`server/runtime/runtime.test.ts`、`src/types/canvas.ts`、`src/lib/graph.ts`、`src/lib/graph-projection.ts`、`src/components/RunNodeView.tsx`、`README.md`、`process.md`。
+- 验证：`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm test -- server/runtime/runtime.test.ts src/lib/graph.test.ts src/lib/graph-projection.test.ts src/lib/runtime-event-renderer.test.ts`、`pnpm build` 通过。
+
+### 修复文档任务 Router/Planner schema 失败
+
+- 变更：`routeIntent` 对非图片且本地规则可确定的可执行任务先走 deterministic policy，`分析下Gemini的视觉风格` 会直接路由到 `document.analysis -> document.write`，不再调用模型结构化 Router。
+- 变更：`createPlan` 对 `document.write` 意图直接生成固定计划 `agent_text -> write_document -> evaluate_result`，避免文档任务在 Planner 阶段因模型返回非 schema JSON 而失败。
+- 变更：`document.write` 工具改用普通文本生成 Markdown，再本地推导标题和摘要；操作型但当前不可执行的非图片请求会产出诚实的能力说明文档。
+- 文件：`server/runtime/intent-router.ts`、`server/runtime/planner.ts`、`server/runtime/tools/document-tools.ts`、`server/runtime/runtime.test.ts`、`process.md`。
+- 验证：`pnpm test -- server/runtime/runtime.test.ts server/model-providers.test.ts src/lib/graph-projection.test.ts src/lib/runtime-event-renderer.test.ts src/lib/graph.test.ts`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm build` 通过。
+
+### 修复 DeepSeek Structured Output JSON mode 要求
+
+- 变更：`generateStructuredObjectWithProvider` 的 DeepSeek 路径会统一向 system 与 user prompt 注入显式 `JSON` 指令，满足 DeepSeek/OpenAI-compatible `response_format: json_object` 对 prompt 文本的要求。
+- 变更：早期 runtime 失败的 Run 节点 fallback 不再显示为“提示词扩写”，改为“运行错误”，避免把 router/planner/model provider 失败误导成 prompt-expand tool 失败。
+- 文件：`server/model-providers.ts`、`server/model-providers.test.ts`、`src/types/canvas.ts`、`src/lib/graph-projection.ts`、`src/components/RunNodeView.tsx`、`process.md`。
+- 验证：`pnpm test -- server/model-providers.test.ts server/runtime/runtime.test.ts src/lib/graph-projection.test.ts src/lib/runtime-event-renderer.test.ts src/lib/graph.test.ts`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm build` 通过。
+
+### 非图片文本任务输出 Markdown 文档
+
+- 变更：Tool Registry 新增 `document.write`，通过当前文本模型生成结构化 `{ title, markdown, summary }`，并返回 `doc` artifact；runtime event projection 会将其渲染为 `markdownNode`。
+- 变更：Intent Router 增加 post-route policy gate：明确图片仍走生图，页面/画布仍走专用工具；分析、总结、报告、方案、问答等 text-first 任务改走 `document.write`，LLM 误判为 `image_generation` 或 `route_missing` 时也会被纠正为文档产物。
+- 变更：未接执行器的非图片操作会生成诚实的能力缺口/下一步 Markdown 文档，不伪造 web/code/file 操作成功，也不再静默走 Seedream。
+- 文件：`server/runtime/tools/document-tools.ts`、`server/runtime/tools/ids.ts`、`server/runtime/tool-registry.ts`、`server/runtime/intent-router.ts`、`server/runtime/planner.ts`、`server/runtime/executor.ts`、`server/runtime/runtime.test.ts`、`src/types/canvas.ts`、`src/lib/graph.ts`、`src/lib/runtime-event-renderer.ts`、`src/lib/graph-projection.ts`、`src/components/RunNodeView.tsx`、`README.md`、`process.md`。
+- 验证：`pnpm test -- server/runtime/runtime.test.ts src/lib/graph.test.ts src/lib/runtime-event-renderer.test.ts src/lib/graph-projection.test.ts`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm build` 通过。
+- 备注：官方 AI SDK 未提供单一“万能 Intent Router”API；本实现对齐其 structured output routing、schema tools、multi-step/tool-state streaming 等推荐模式。
+
+### Router 后预占位图片结果节点
+
+- 变更：`intent.routed` 判定为 image generation / image editing 后，runtime event projection 会按 intent/plan/tool input 中的图片数量和 prompt 尺寸/比例提示，提前创建对应数量的 loading image result nodes。
+- 变更：真实 `artifact.created` 到达后复用第 N 个 loading 节点的 id 和位置原位填充图片 URL；server 后续 `attachArtifact` patch 即使指向 `image-${artifact.id}`，投影层也会按 artifact id 找到已填充节点并接受更新。
+- 变更：loading/error 图片占位节点显示轻量骨架态，不作为 follow-up 引用锚点；ready 后恢复可选中继续分支。
+- 文件：`src/types/canvas.ts`、`src/lib/graph.ts`、`src/lib/graph-projection.ts`、`src/lib/graph-projection.test.ts`、`src/components/CanvasWorkspace.tsx`、`src/App.css`、`README.md`、`process.md`。
+- 验证：`pnpm test -- src/lib/graph-projection.test.ts src/lib/graph.test.ts`、`pnpm build`、Browser 打开 `http://localhost:5173/` 项目页正常渲染且无 console error。
+- 备注：未提交真实生图请求，避免触发 Seedream/Ark 外部调用费用。
+
+### 修复 Seedream 多图数量与请求参数丢失
+
+- 变更：`seedream.generateImage` 在多图请求时会把 `resultCount` 写回最终 Seedream prompt，避免 prompt-expand 吞掉“四张”等数量后 Visual API 只返回 1 个 URL。
+- 变更：Seedream request body 现在会从上游上下文收集多张参考图 URL，并从 prompt 解析显式尺寸、`2K/4K`、`16:9` / 横版 / 竖版 / 方图等比例信息，透传可选 `SEEDREAM_SCALE`；Planner 会把 intent 中的图片数量归一化到 `expectedArtifacts.count`。
+- 文件：`seedream.ts`、`seedream.test.ts`、`server/runtime/intent-router.ts`、`server/runtime/planner.ts`、`server/runtime/executor.ts`、`server/runtime/runtime.test.ts`、`README.md`、`process.md`。
+- 验证：`pnpm test -- seedream.test.ts server/runtime/runtime.test.ts`、`pnpm build`、`curl http://127.0.0.1:8787/api/health`。
+- 备注：未重新提交真实图片生成请求，避免触发 Seedream/Ark 外部调用费用。
+
+### 修复 Run 节点输出被裁剪与 Ark 空响应诊断
+
+- 变更：Run 节点展开区移除固定 `max-height` 和输出行数截断，长工具输出会自然撑高节点；错误工具行优先显示自身 `errorText`，避免被全局 run error 错配到其他工具行。
+- 变更：Ark Responses 2xx 但无可提取文本时，错误信息追加响应状态、output/choices 形状等诊断摘要；Ark 文本提取补充兼容 `message.content`、`delta.content` 和 `parts` 结构。
+- 文件：`src/App.css`、`src/components/RunNodeView.tsx`、`server/model-providers.ts`、`server/model-providers.test.ts`、`process.md`。
+- 验证：`pnpm test -- server/model-providers.test.ts`、`pnpm build`、`curl http://127.0.0.1:8787/api/health`、Browser 打开 `http://localhost:5173/` 检查页面非空/无控制台错误，并确认运行中 CSS 已无 `.run-stream` 最大高度和输出 line clamp。
+- 备注：未重新提交真实图片生成请求，避免触发 Seedream/Ark 外部调用费用。
+
 ### 修复非图片任务误进提示词扩写链路
 
 - 变更：Intent Router 增加图片产物硬判断，`分析Gemini的视觉风格` 这类分析任务即使被模型误判为 `image_generation`，也会被纠正为 `capability.route_missing` / `asset.analyze`，不再执行 `prompt.expand` 或 `seedream.generateImage`。

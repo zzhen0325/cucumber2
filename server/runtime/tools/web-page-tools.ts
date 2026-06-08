@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { tavilySearch } from "@tavily/ai-sdk";
 
 import type { ArtifactRef, UpstreamContextItem } from "../../../src/types/canvas.ts";
 import type { RuntimeToolDefinition } from "../tool-registry.ts";
@@ -10,6 +11,17 @@ const noRetry = { maxRetries: 0, backoffMs: 0, retryableErrorCodes: [] };
 
 const readWebpageInputSchema = z.object({
   urls: z.array(z.string().url()).max(5).optional(),
+});
+
+const searchWebInputSchema = z.object({
+  query: z.string().min(1).max(500),
+  searchDepth: z
+    .enum(["basic", "advanced", "fast", "ultra-fast"])
+    .optional(),
+  timeRange: z
+    .enum(["year", "month", "week", "day", "y", "m", "w", "d"])
+    .optional(),
+  exactMatch: z.boolean().optional(),
 });
 
 const analyzeAssetsInputSchema = z.object({
@@ -27,7 +39,24 @@ const generatePageInputSchema = z.object({
   brief: z.string().min(1),
   sourceUrls: z.array(z.string().url()).optional(),
   assetSummary: z.string().optional(),
+  reportMarkdown: z.string().optional(),
   title: z.string().min(1).optional(),
+});
+
+const searchWebOutputSchema = z.object({
+  answer: z.string().optional(),
+  query: z.string(),
+  responseTime: z.number().optional(),
+  requestId: z.string().optional(),
+  sources: z.array(
+    z.object({
+      title: z.string(),
+      url: z.string().url(),
+      content: z.string(),
+      score: z.number().optional(),
+      publishedDate: z.string().optional(),
+    })
+  ),
 });
 
 export function createReadWebpageTool(): RuntimeToolDefinition {
@@ -112,6 +141,67 @@ export function createReadWebpageTool(): RuntimeToolDefinition {
         })),
         canvasOperations: [],
         logs: [toolLog(`Read ${sources.length} webpage source(s).`)],
+      });
+    },
+  };
+}
+
+export function createSearchWebTool(): RuntimeToolDefinition {
+  return {
+    id: toolIds.searchWeb,
+    version: TOOL_DEFINITION_VERSION,
+    toPlannerToolName: "web_search",
+    capabilityId: "web.research",
+    name: "Search web",
+    description:
+      "Search the web with Tavily for current information, citations, news, articles, and research sources.",
+    inputSchema: searchWebInputSchema,
+    outputSchema: searchWebOutputSchema,
+    policy: {
+      canUseNetwork: true,
+      canWriteFiles: false,
+      canModifyProject: false,
+      requiresApproval: false,
+      mayExternalCost: true,
+    },
+    timeoutMs: 20_000,
+    retryPolicy: {
+      maxRetries: 1,
+      backoffMs: 500,
+      retryableErrorCodes: [runtimeErrorCodes.TOOL_TIMEOUT],
+    },
+    risk: "low",
+    renderHint: { kind: "text", label: "Search web" },
+    prepareInput({ context }) {
+      return {
+        query:
+          context.promptParts.find((part) => part.id === "runtime.user-message")
+            ?.content ?? context.taskContext,
+        searchDepth: "basic",
+      };
+    },
+    async execute(input) {
+      const parsed = searchWebInputSchema.parse(input);
+      const tool = tavilySearch({
+        includeAnswer: "basic",
+        includeRawContent: "markdown",
+        maxResults: 5,
+      });
+      const result = await executeTavilySearch(tool, parsed);
+      const sources = readTavilySources(result);
+
+      return toolResultSchema.parse({
+        ok: true,
+        data: searchWebOutputSchema.parse({
+          answer: readStringFromRecord(result, "answer") || undefined,
+          query: readStringFromRecord(result, "query") || parsed.query,
+          requestId: readStringFromRecord(result, "requestId") || undefined,
+          responseTime: readNumberFromRecord(result, "responseTime"),
+          sources,
+        }),
+        artifacts: [],
+        canvasOperations: [],
+        logs: [toolLog(`Searched Tavily and found ${sources.length} source(s).`)],
       });
     },
   };
@@ -203,6 +293,9 @@ export function createGeneratePageTool(): RuntimeToolDefinition {
       const assetSummary = previousSteps
         .map((step) => readStringFromRecord(step.output?.data, "summary"))
         .find((summary) => summary.length > 0);
+      const reportMarkdown = previousSteps
+        .map((step) => readStringFromRecord(step.output?.data, "markdown"))
+        .find((markdown) => markdown.trim().length > 0);
       const brief =
         context.promptParts.find((part) => part.id === "runtime.user-message")
           ?.content ?? context.taskContext;
@@ -211,6 +304,7 @@ export function createGeneratePageTool(): RuntimeToolDefinition {
         brief,
         sourceUrls: webSources.map((source) => source.url),
         assetSummary,
+        reportMarkdown,
         title: inferPageTitle(brief),
       };
     },
@@ -220,6 +314,7 @@ export function createGeneratePageTool(): RuntimeToolDefinition {
       const html = renderLandingPageHtml({
         assetSummary: parsed.assetSummary,
         brief: parsed.brief,
+        reportMarkdown: parsed.reportMarkdown,
         sourceUrls: parsed.sourceUrls ?? [],
         title,
       });
@@ -246,6 +341,73 @@ export function createGeneratePageTool(): RuntimeToolDefinition {
       });
     },
   };
+}
+
+async function executeTavilySearch(
+  tool: ReturnType<typeof tavilySearch>,
+  input: z.infer<typeof searchWebInputSchema>
+) {
+  if (!tool.execute) {
+    throwAgentError({
+      code: runtimeErrorCodes.TOOL_ERROR,
+      message: "Tavily search tool does not expose an execute function.",
+      retryable: false,
+      severity: "error",
+      toolId: toolIds.searchWeb,
+    });
+  }
+
+  try {
+    return await tool.execute(input, {
+      abortSignal: undefined,
+      messages: [],
+      toolCallId: `web_search-${stableId(input.query)}`,
+    } as never);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throwAgentError({
+      code: /TAVILY_API_KEY|api key/i.test(message)
+        ? runtimeErrorCodes.ENV_MISSING
+        : runtimeErrorCodes.TOOL_ERROR,
+      message,
+      retryable: false,
+      severity: "error",
+      toolId: toolIds.searchWeb,
+    });
+  }
+}
+
+function readTavilySources(value: unknown) {
+  const results =
+    value && typeof value === "object" && Array.isArray((value as { results?: unknown }).results)
+      ? (value as { results: unknown[] }).results
+      : [];
+
+  return results.flatMap((source) => {
+    if (!source || typeof source !== "object") {
+      return [];
+    }
+
+    const candidate = source as Record<string, unknown>;
+    const url = readStringFromRecord(candidate, "url");
+    if (!isHttpUrl(url)) {
+      return [];
+    }
+
+    return [
+      {
+        title: readStringFromRecord(candidate, "title") || url,
+        url,
+        content:
+          readStringFromRecord(candidate, "rawContent") ||
+          readStringFromRecord(candidate, "content") ||
+          "",
+        score: readNumberFromRecord(candidate, "score"),
+        publishedDate:
+          readStringFromRecord(candidate, "publishedDate") || undefined,
+      },
+    ];
+  });
 }
 
 function readImageContext(item: UpstreamContextItem) {
@@ -281,14 +443,24 @@ function readStringFromRecord(value: unknown, key: string) {
   return typeof candidate === "string" ? candidate : "";
 }
 
+function readNumberFromRecord(value: unknown, key: string) {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const candidate = (value as Record<string, unknown>)[key];
+  return typeof candidate === "number" ? candidate : undefined;
+}
+
 function renderLandingPageHtml({
   assetSummary,
   brief,
+  reportMarkdown,
   sourceUrls,
   title,
 }: {
   assetSummary?: string;
   brief: string;
+  reportMarkdown?: string;
   sourceUrls: string[];
   title: string;
 }) {
@@ -309,6 +481,14 @@ function renderLandingPageHtml({
     "<main>",
     `<h1>${escapeHtml(title)}</h1>`,
     `<p>${escapeHtml(brief)}</p>`,
+    reportMarkdown?.trim()
+      ? [
+          '<section class="panel">',
+          "<h2>分析报告</h2>",
+          renderMarkdownFragment(reportMarkdown),
+          "</section>",
+        ].join("")
+      : "",
     '<section class="panel">',
     "<h2>视觉与素材方向</h2>",
     `<p>${escapeHtml(assetSummary ?? "Use the selected canvas context as the primary visual reference.")}</p>`,
@@ -321,6 +501,47 @@ function renderLandingPageHtml({
     "</body>",
     "</html>",
   ].join("");
+}
+
+function renderMarkdownFragment(markdown: string) {
+  const blocks: string[] = [];
+  let listItems: string[] = [];
+
+  function flushList() {
+    if (!listItems.length) {
+      return;
+    }
+    blocks.push(`<ul>${listItems.join("")}</ul>`);
+    listItems = [];
+  }
+
+  for (const rawLine of markdown.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      flushList();
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      flushList();
+      const level = Math.min(heading[1].length + 1, 4);
+      blocks.push(`<h${level}>${escapeHtml(heading[2])}</h${level}>`);
+      continue;
+    }
+
+    const listItem = line.match(/^[-*]\s+(.+)$/);
+    if (listItem) {
+      listItems.push(`<li>${escapeHtml(listItem[1])}</li>`);
+      continue;
+    }
+
+    flushList();
+    blocks.push(`<p>${escapeHtml(line)}</p>`);
+  }
+
+  flushList();
+  return blocks.join("");
 }
 
 function inferPageTitle(brief: string) {

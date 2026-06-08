@@ -8,6 +8,10 @@ import {
   generateStructuredObjectWithProvider,
   type ModelProviderId,
 } from "../model-providers.ts";
+import {
+  inferSeedreamResultCount,
+  readSeedreamMaxOutputImagesFromEnv,
+} from "../../seedream.ts";
 import type { AgentInput, IntentResult, StructuredTask } from "../../src/types/runtime.ts";
 import { intentResultSchema } from "./schemas.ts";
 import { toolIds, type ToolRegistry } from "./tool-registry.ts";
@@ -36,6 +40,19 @@ export async function routeIntent({
   modelProvider: ModelProviderId;
   toolRegistry: ToolRegistry;
 }): Promise<IntentResult> {
+  const deterministicIntent = routeIntentBeforeModel({
+    capabilities,
+    input,
+    toolRegistry,
+  });
+  if (deterministicIntent) {
+    return validateRoutedIntent({
+      capabilities,
+      intent: deterministicIntent,
+      toolRegistry,
+    });
+  }
+
   const prompt = buildIntentRouterPrompt({ capabilities, input, toolRegistry });
   const routed = intentResultSchema.parse(
     generateIntentResult
@@ -50,7 +67,48 @@ export async function routeIntent({
           maxOutputTokens: 1_400,
         })
   );
-  const intent = guardImageRoute({ input, routed, toolRegistry });
+  const intent = guardNonImageRoute({
+    input,
+    routed: guardImageRoute({ input, routed, toolRegistry }),
+    toolRegistry,
+  });
+  return validateRoutedIntent({ capabilities, intent, toolRegistry });
+}
+
+function routeIntentBeforeModel({
+  capabilities,
+  input,
+  toolRegistry,
+}: {
+  capabilities: RegisteredCapability[];
+  input: AgentInput;
+  toolRegistry: ToolRegistry;
+}): IntentResult | undefined {
+  if (isExplicitImageGenerationRequest(input)) {
+    return undefined;
+  }
+
+  const intent = routeIntentDeterministically({
+    capabilities,
+    input,
+    toolRegistry,
+  });
+  if (intent.requiredTools.length || intent.task.kind === "canvas_operation") {
+    return intent;
+  }
+
+  return undefined;
+}
+
+function validateRoutedIntent({
+  capabilities,
+  intent,
+  toolRegistry,
+}: {
+  capabilities: RegisteredCapability[];
+  intent: IntentResult;
+  toolRegistry: ToolRegistry;
+}) {
   const validation = validateIntentAgainstRegistry({
     capabilities,
     intent,
@@ -95,6 +153,16 @@ export function routeIntentDeterministically({
   );
 
   if (nonImageCapability) {
+    const documentRoute = !isExplicitImageGenerationRequest(input)
+      ? inferDocumentRoute(text, input, toolRegistry)
+      : undefined;
+    if (documentRoute) {
+      return intentResultSchema.parse({
+        ...documentRoute,
+        routingReason: `Matched non-image capability ${nonImageCapability.manifest.capabilityId}; routed to Markdown document output instead of image generation.`,
+      });
+    }
+
     return intentResultSchema.parse({
       primaryIntent: ROUTE_MISSING_INTENT,
       confidence: 0.72,
@@ -134,7 +202,7 @@ export function routeIntentDeterministically({
     return intentResultSchema.parse({
       primaryIntent: ROUTE_MISSING_INTENT,
       confidence: 0.7,
-      task: complexRoute.task,
+      task: getMissingComplexRouteTask(input, complexRoute),
       requiredCapabilities: complexRoute.requiredCapabilities,
       requiredTools: [],
       needsPlanning: true,
@@ -154,41 +222,45 @@ export function routeIntentDeterministically({
     return intentResultSchema.parse(canvasOperation);
   }
 
-  const missingCapability = inferMissingCapability(text);
-  if (missingCapability) {
-    return intentResultSchema.parse({
-      primaryIntent: ROUTE_MISSING_INTENT,
-      confidence: 0.68,
-      task: createUnsupportedTask(
-        input,
-        missingCapability.capabilityId,
-        missingCapability.taskKind
-      ),
-      requiredCapabilities: [missingCapability.capabilityId],
-      requiredTools: [],
-      needsPlanning: true,
-      ambiguity: [
-        {
-          id: ROUTE_MISSING_INTENT,
-          question: `Capability ${missingCapability.capabilityId} is required before this request can run.`,
-          severity: "high",
-        },
-      ],
-      routingReason: `Request requires ${missingCapability.capabilityId}, but no executor tool is registered for that capability.`,
-    });
-  }
-
   if (!isExplicitImageGenerationRequest(input)) {
+    const documentRoute = inferDocumentRoute(text, input, toolRegistry);
+    if (documentRoute) {
+      return documentRoute;
+    }
+
     const missingCapability =
       inferMissingCapability(text) ?? inferAnalysisCapability(text);
-    const capabilityId = missingCapability?.capabilityId ?? "capability.unsupported";
+    if (missingCapability) {
+      return intentResultSchema.parse({
+        primaryIntent: ROUTE_MISSING_INTENT,
+        confidence: 0.68,
+        task: createUnsupportedTask(
+          input,
+          missingCapability.capabilityId,
+          missingCapability.taskKind
+        ),
+        requiredCapabilities: [missingCapability.capabilityId],
+        requiredTools: [],
+        needsPlanning: true,
+        ambiguity: [
+          {
+            id: ROUTE_MISSING_INTENT,
+            question: `Capability ${missingCapability.capabilityId} is required before this request can run.`,
+            severity: "high",
+          },
+        ],
+        routingReason: `Request requires ${missingCapability.capabilityId}, but no executor tool is registered for that capability.`,
+      });
+    }
+
+    const capabilityId = "capability.unsupported";
     return intentResultSchema.parse({
       primaryIntent: ROUTE_MISSING_INTENT,
       confidence: 0.66,
       task: createUnsupportedTask(
         input,
         capabilityId,
-        missingCapability?.taskKind ?? "multi_step"
+        "multi_step"
       ),
       requiredCapabilities: [capabilityId],
       requiredTools: [],
@@ -312,7 +384,7 @@ function guardImageRoute({
     return intentResultSchema.parse({
       primaryIntent: ROUTE_MISSING_INTENT,
       confidence: 0.68,
-      task: complexRoute.task,
+      task: getMissingComplexRouteTask(input, complexRoute),
       requiredCapabilities: complexRoute.requiredCapabilities,
       requiredTools: [],
       needsPlanning: true,
@@ -334,6 +406,15 @@ function guardImageRoute({
       ...canvasOperation,
       routingReason:
         "Image route rejected because the request asks for canvas mutation, not an image artifact.",
+    });
+  }
+
+  const documentRoute = inferDocumentRoute(text, input, toolRegistry);
+  if (documentRoute) {
+    return intentResultSchema.parse({
+      ...documentRoute,
+      routingReason:
+        "Image route rejected because the request has a text/document deliverable, not an image artifact.",
     });
   }
 
@@ -360,6 +441,67 @@ function guardImageRoute({
     ],
     routingReason:
       "Image route rejected because the request does not explicitly ask for an image artifact.",
+  });
+}
+
+function guardNonImageRoute({
+  input,
+  routed,
+  toolRegistry,
+}: {
+  input: AgentInput;
+  routed: IntentResult;
+  toolRegistry: ToolRegistry;
+}) {
+  if (
+    isExplicitImageGenerationRequest(input) ||
+    routed.requiredTools.length ||
+    routed.task.kind === "canvas_operation"
+  ) {
+    return routed;
+  }
+
+  const text = input.userMessage.toLowerCase();
+  const complexRoute = inferComplexRoute(text, input);
+  if (complexRoute) {
+    const missingTools = complexRoute.requiredTools.filter(
+      (toolId) => !toolRegistry.getTool(toolId)
+    );
+    if (!missingTools.length) {
+      return intentResultSchema.parse({
+        primaryIntent: "multi_step.landing_page",
+        confidence: Math.max(routed.confidence, 0.74),
+        task: complexRoute.task,
+        requiredCapabilities: complexRoute.requiredCapabilities,
+        requiredTools: complexRoute.requiredTools,
+        needsPlanning: true,
+        ambiguity: [],
+        routingReason:
+          "Post-route policy selected an executable multi-step workflow from the available tool registry.",
+      });
+    }
+  }
+
+  const canvasOperation = inferCanvasOperation(text, input);
+  if (canvasOperation) {
+    return intentResultSchema.parse({
+      ...canvasOperation,
+      routingReason:
+        "Post-route policy selected an executable canvas operation from the available tool registry.",
+    });
+  }
+
+  const documentRoute = inferDocumentRoute(text, input, toolRegistry);
+  if (!documentRoute) {
+    return routed;
+  }
+
+  return intentResultSchema.parse({
+    ...documentRoute,
+    routingReason:
+      routed.primaryIntent === ROUTE_MISSING_INTENT
+        ? "Unsupported or empty routed intent was converted to an honest Markdown document artifact instead of stopping without output."
+        : "Text-first routed intent had no executable tools, so it was converted to a Markdown document artifact.",
   });
 }
 
@@ -471,24 +613,36 @@ function inferComplexRoute(
       task: StructuredTask;
     }
   | undefined {
-  const wantsPage = /(落地页|页面|网站|landing|page|website)/i.test(text);
-  const wantsWeb = /(网页|调研|搜索|research|search|web)/i.test(text);
-  const wantsImage = /(图片|图像|image|photo|视觉)/i.test(text);
+  const wantsPage = isPageRequest(text);
+  const wantsWeb =
+    /(https?:\/\/|调研|搜索|查找|资料|来源|联网|research|search|sources?|current|latest|(?:根据|基于|参考).{0,12}网页|网页.{0,8}(?:资料|来源|调研|搜索))/i.test(
+      text
+    );
+  const wantsAssetContext =
+    /(图片|图像|照片|素材|image|photo|asset)/i.test(text) ||
+    input.canvasContext.upstreamContext.some(
+      (item) => item.type === "image" || item.artifact?.type === "image"
+    );
   const wantsCanvas = /(画布|放到画布|canvas|节点|node)/i.test(text);
+  const wantsReportFirst =
+    wantsTextDocumentOutput(text) ||
+    /(分析|报告|研究|总结|梳理|视觉风格|风格|analysis|report|style)/i.test(text);
 
-  if (!(wantsPage && (wantsWeb || wantsImage || wantsCanvas))) {
+  if (!wantsPage) {
     return undefined;
   }
 
   const requiredCapabilities = [
     ...(wantsWeb ? ["web.research"] : []),
-    ...(wantsImage ? ["asset.analyze"] : []),
+    ...(wantsAssetContext ? ["asset.analyze"] : []),
+    ...(wantsReportFirst ? ["document.write"] : []),
     "page.generate",
     ...(wantsCanvas ? ["canvas.mutate"] : []),
   ];
   const requiredTools = [
     ...(wantsWeb ? [toolIds.readWebpage] : []),
-    ...(wantsImage ? [toolIds.analyzeAssets] : []),
+    ...(wantsAssetContext ? [toolIds.analyzeAssets] : []),
+    ...(wantsReportFirst ? [toolIds.writeDocument] : []),
     toolIds.generatePage,
     ...(wantsCanvas ? [toolIds.createCanvasNode] : []),
   ];
@@ -516,20 +670,35 @@ function inferComplexRoute(
         },
       ],
       deliverables: [
+        ...(wantsReportFirst
+          ? [
+              {
+                kind: "document" as const,
+                description: "Markdown analysis report used as source material for the HTML page.",
+              },
+            ]
+          : []),
         {
           kind: "webpage",
-          description: "Generated landing page artifact.",
+          description: wantsReportFirst
+            ? "Generated HTML page artifact based on the analysis report."
+            : "Generated landing page artifact.",
         },
-        {
-          kind: "canvas_node",
-          description: "Canvas node containing or linking to the generated page.",
-        },
+        ...(wantsCanvas
+          ? [
+              {
+                kind: "canvas_node" as const,
+                description:
+                  "Canvas node containing or linking to the generated page artifact.",
+              },
+            ]
+          : []),
       ],
       operations: [
         ...(wantsWeb
           ? [{ kind: "search" as const, target: "web_sources", toolHint: toolIds.readWebpage }]
           : []),
-        ...(wantsImage
+        ...(wantsAssetContext
           ? [
               {
                 kind: "analyze" as const,
@@ -538,7 +707,20 @@ function inferComplexRoute(
               },
             ]
           : []),
-        { kind: "write", target: "landing_page", toolHint: toolIds.generatePage },
+        ...(wantsReportFirst
+          ? [
+              {
+                kind: "write" as const,
+                target: "analysis_report",
+                toolHint: toolIds.writeDocument,
+              },
+            ]
+          : []),
+        {
+          kind: "write",
+          target: wantsReportFirst ? "html_page_from_report" : "landing_page",
+          toolHint: toolIds.generatePage,
+        },
         ...(wantsCanvas
           ? [
               {
@@ -551,6 +733,165 @@ function inferComplexRoute(
       ],
     },
   };
+}
+
+function getMissingComplexRouteTask(
+  input: AgentInput,
+  complexRoute: NonNullable<ReturnType<typeof inferComplexRoute>>
+): StructuredTask {
+  if (
+    complexRoute.requiredTools.length === 1 &&
+    complexRoute.requiredTools[0] === toolIds.generatePage
+  ) {
+    return createUnsupportedTask(input, "page.generate", "page_generation");
+  }
+
+  return complexRoute.task;
+}
+
+function inferDocumentRoute(
+  text: string,
+  input: AgentInput,
+  toolRegistry: ToolRegistry
+): IntentResult | undefined {
+  if (!toolRegistry.getTool(toolIds.writeDocument)) {
+    return undefined;
+  }
+
+  const wantsWebResearch =
+    /(最新|今天|现在|近期|网页|联网|调研|搜索|查找|资料|来源|news|latest|current|recent|research|search|web|sources?)/i.test(
+      text
+    );
+  if (wantsWebResearch && toolRegistry.getTool(toolIds.searchWeb)) {
+    return intentResultSchema.parse({
+      primaryIntent: "web_research",
+      confidence: 0.82,
+      task: {
+        kind: "web_research",
+        goals: [input.userMessage],
+        targets: input.canvasContext.selectedNodeId
+          ? [
+              {
+                id: input.canvasContext.selectedNodeId,
+                kind: "canvas_node",
+                ref: input.canvasContext.selectedNodeId,
+                summary: "Selected canvas context for web research",
+              },
+            ]
+          : [],
+        constraints: [
+          {
+            kind: "policy",
+            text: "Web research must use the registered search tool and cite returned sources in the Markdown document artifact.",
+          },
+        ],
+        deliverables: [
+          {
+            kind: "document",
+            description:
+              "Markdown research document grounded in Tavily search results.",
+          },
+        ],
+        operations: [
+          { kind: "search", target: "web_sources", toolHint: toolIds.searchWeb },
+          {
+            kind: "write",
+            target: "research_document",
+            toolHint: toolIds.writeDocument,
+          },
+          { kind: "evaluate", target: "document_artifact" },
+        ],
+      },
+      requiredCapabilities: ["web.research", "document.write"],
+      requiredTools: [toolIds.searchWeb, toolIds.writeDocument],
+      needsPlanning: true,
+      ambiguity: [],
+      routingReason:
+        "Request asks for web research/current sources; route to Tavily web search followed by Markdown document output.",
+    });
+  }
+
+  const wantsDocument = wantsTextDocumentOutput(text);
+  const missingCapability = inferMissingCapability(text);
+  const analysisCapability = inferAnalysisCapability(text);
+  const operationalOnly = isOperationalOnlyRequest(text);
+  const isCapabilityReport = Boolean(
+    !wantsDocument && (missingCapability || (operationalOnly && !analysisCapability))
+  );
+  const primaryIntent = isCapabilityReport
+    ? "document.capability_report"
+    : analysisCapability
+      ? "document.analysis"
+      : "document_writing";
+  const operations = [
+    ...(analysisCapability
+      ? [{ kind: "analyze" as const, target: "available_context" }]
+      : []),
+    {
+      kind: "write" as const,
+      target: isCapabilityReport ? "capability_gap_report" : "markdown_document",
+      toolHint: toolIds.writeDocument,
+    },
+    { kind: "evaluate" as const, target: "document_artifact" },
+  ];
+
+  return intentResultSchema.parse({
+    primaryIntent,
+    confidence: isCapabilityReport ? 0.58 : 0.78,
+    task: {
+      kind: "document_writing",
+      goals: [input.userMessage],
+      targets: input.canvasContext.selectedNodeId
+        ? [
+            {
+              id: input.canvasContext.selectedNodeId,
+              kind: "canvas_node",
+              ref: input.canvasContext.selectedNodeId,
+              summary: "Selected canvas context for document output",
+            },
+          ]
+        : [],
+      constraints: [
+        {
+          kind: "policy",
+          text: "Text-first tasks must produce a Markdown document artifact instead of silently routing to image generation.",
+        },
+        ...(isCapabilityReport && missingCapability
+          ? [
+              {
+                kind: "policy" as const,
+                text: `The requested ${missingCapability.capabilityId} action is not executable; document the limitation and next steps without claiming completion.`,
+              },
+            ]
+          : []),
+      ],
+      deliverables: [
+        {
+          kind: "document",
+          description: isCapabilityReport
+            ? "Markdown document explaining the unsupported capability and next steps."
+            : "Markdown document artifact with the requested analysis or written output.",
+        },
+      ],
+      operations,
+    },
+    requiredCapabilities: ["document.write"],
+    requiredTools: [toolIds.writeDocument],
+    needsPlanning: true,
+    ambiguity: isCapabilityReport
+      ? [
+          {
+            id: "document.capability_report",
+            question:
+              "The requested operational capability is not executable in this runtime, so a document report will be produced instead.",
+            severity: "medium",
+          },
+        ]
+      : [],
+    routingReason: isCapabilityReport
+      ? "Request needs an unavailable operational capability; route to a Markdown capability report so the user still gets an honest artifact."
+      : "Request is text-first and does not explicitly ask for an image artifact; route to Markdown document output.",
+  });
 }
 
 function inferCanvasOperation(
@@ -610,6 +951,11 @@ function createImageTask(
   input: AgentInput,
   hasReferenceImage: boolean
 ): StructuredTask {
+  const resultCount = inferSeedreamResultCount(
+    input.userMessage,
+    readSeedreamMaxOutputImagesFromEnv()
+  );
+
   return {
     kind: hasReferenceImage ? "image_editing" : "image_generation",
     goals: [input.userMessage],
@@ -633,6 +979,7 @@ function createImageTask(
       {
         kind: "image",
         description: "Generated image artifact attached to the run branch.",
+        count: resultCount,
       },
     ],
     operations: [
@@ -686,7 +1033,7 @@ function inferMissingCapability(text: string):
   if (/(写|文档|报告|总结|document|doc|report|write)/i.test(text)) {
     return { capabilityId: "document.write", taskKind: "document_writing" };
   }
-  if (/(落地页|页面|网站|landing|page|website)/i.test(text)) {
+  if (isPageRequest(text)) {
     return { capabilityId: "page.generate", taskKind: "page_generation" };
   }
   if (/(网页|调研|搜索|research|search|web)/i.test(text)) {
@@ -702,6 +1049,20 @@ function inferMissingCapability(text: string):
   return undefined;
 }
 
+function isPageRequest(text: string) {
+  if (/(落地页|官网|单页|h5|html|landing\s*page|web\s*page|homepage)/i.test(text)) {
+    return true;
+  }
+
+  return (
+    /(网页|页面|网站|站点|website|site|\bpage\b)/i.test(text) &&
+    /(生成|创建|制作|做|设计|写|搭|输出|预览|create|make|build|design|generate|write|prototype)/i.test(
+      text
+    ) &&
+    !isOperationalOnlyRequest(text)
+  );
+}
+
 function inferAnalysisCapability(text: string):
   | {
       capabilityId: string;
@@ -713,4 +1074,16 @@ function inferAnalysisCapability(text: string):
   }
 
   return undefined;
+}
+
+function wantsTextDocumentOutput(text: string) {
+  return /(分析|总结|报告|文档|方案|规划|计划|说明|解释|比较|评估|复盘|建议|问答|回答|写|输出\s*(?:md|markdown)|analyze|analysis|summarize|summary|report|document|doc|plan|explain|compare|evaluate|write|answer)/i.test(
+    text
+  );
+}
+
+function isOperationalOnlyRequest(text: string) {
+  return /(修改代码|修复代码|提交代码|创建文件|删除文件|部署|发邮件|付款|支付|登录|操作浏览器|code\s*(?:modify|patch|change)|deploy|send email|payment|login|browser automation)/i.test(
+    text
+  );
 }

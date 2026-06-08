@@ -32,11 +32,13 @@ import {
   createReferenceImageTool,
   selectRuntimeReferenceImages,
 } from "./tools/image-tools.ts";
+import { createDocumentWriteTool } from "./tools/document-tools.ts";
 import { toolIds } from "./tools/ids.ts";
 import {
   createAnalyzeAssetsTool,
   createGeneratePageTool,
   createReadWebpageTool,
+  createSearchWebTool,
 } from "./tools/web-page-tools.ts";
 
 export { toolIds };
@@ -141,6 +143,8 @@ export function buildToolRegistry({
       projectId,
       runNodeId,
     }),
+    createDocumentWriteTool({ modelProvider }),
+    createSearchWebTool(),
     createReadWebpageTool(),
     createAnalyzeAssetsTool(),
     createGeneratePageTool(),
