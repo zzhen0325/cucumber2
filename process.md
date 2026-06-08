@@ -17,6 +17,34 @@
 
 ## 2026-06-09
 
+### Agent Run 后续工具改为服务端确定性 activeTools
+
+- 变更：新增 `server/runtime/tool-router.ts`，按 prompt 和画布上下文在服务端确定 obvious tool route：图片走 `prompt.expand` / `seedream.generateImage`，参考图补 `vision.analyzeReferenceImages`，网页/HTML 走 `html.generate`，最新/搜索/来源走 `web.search` / `document.write`，普通分析/总结/计划走 `document.write`。
+- 变更：`server/runtime/ai-sdk-runner.ts` 仍在第 0 步强制 `plan_agent_run` 记录 intent/context/plan，但第 1 步开始的 AI SDK `activeTools` 改用确定性 route 映射出的 AI SDK tool names，避免错误 plan 直接污染后续工具 allowlist。
+- 文件：`server/runtime/tool-router.ts`、`server/runtime/tool-router.test.ts`、`server/runtime/ai-sdk-runner.ts`、`README.md`、`process.md`。
+- 验证：已对照 AI SDK 官方 `prepareStep` / `activeTools` 文档；`pnpm test server/runtime/tool-router.test.ts`、`pnpm exec tsc -p tsconfig.node.json --noEmit` 通过。
+
+### document.write 改为 Markdown Artifactizer
+
+- 变更：`document.write` 移除内部 `generateTextWithProvider` 调用，输入改为 `title`、完整 `markdown`、`summary` 和可选 `sourcesUsed`；工具只校验输入、生成 `doc` artifact、返回 canvas runtime event 所需结果。
+- 变更：AI SDK runner 主提示词要求主 `streamText` 模型直接把最终 Markdown 作为 `write_document` tool input 生成；web research 仍先调用 `web_search`，再由主模型基于工具结果写 Markdown 和来源列表。
+- 文件：`server/runtime/tools/document-tools.ts`、`server/runtime/tool-registry.ts`、`server/runtime/planner.ts`、`server/runtime/ai-sdk-runner.ts`、`server/runtime/tools/document-tools.test.ts`、`README.md`、`process.md`。
+- 验证：已对照 AI SDK 官方 tool calling / `streamText` 工具输入文档；`pnpm test -- server/runtime/tools/document-tools.test.ts server/runtime/runtime.test.ts`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm build` 通过。
+
+### Agent Run 记录 AI SDK step 与工具生命周期
+
+- 变更：`streamText` 增加 `onStepFinish`，每个 AI SDK step 结束时写入 `step.finished` trace，记录 step number、text、toolCalls、toolResults、finishReason、usage 和模型信息。
+- 变更：`streamText` 增加 `experimental_onToolCallStart` / `experimental_onToolCallFinish`，写入 `tool.execution.started` / `tool.execution.finished` trace，观察工具执行前后、耗时和成功/错误摘要；画布默认可见状态仍由 `tool.input`、`tool.output`、`tool.error` 驱动。
+- 文件：`server/runtime/ai-sdk-runner.ts`、`src/types/runtime.ts`、`src/components/run-trace-summary.ts`、`README.md`、`process.md`。
+- 验证：已对照 AI SDK 官方 `onStepFinish` 和 tool execution lifecycle callbacks 文档；`pnpm build`、`pnpm exec vitest run src/lib/runtime-event-renderer.test.ts src/lib/graph-projection.test.ts src/components/RunTracePanel.test.tsx`、`pnpm exec vitest run server/runtime/runtime.test.ts --testNamePattern "keeps runtime event schema aligned"` 通过。`pnpm test -- server/runtime/runtime.test.ts` 仍被既有 document planner fixture 失败阻断。
+
+### Agent Run 接入 UIMessage 校验与模型消息转换
+
+- 变更：`executeAiSdkAgentRun` 在调用 `streamText` 前，先用 AI SDK `validateUIMessages` 校验历史 `messages`、runtime data parts、message metadata 和当前工具集合，再用 `convertToModelMessages` 转为模型消息。
+- 变更：当前画布 prompt 作为新的 user UI message 追加到已校验历史之后；`streamText` 改为接收 `messages`，不再只依赖拼出的 `prompt` 字段。`data-runtime-event` 继续作为 UI/画布状态，不转换成模型文本。
+- 文件：`server/runtime/ai-sdk-runner.ts`、`server/runtime/schemas.ts`、`server/runtime/runtime.test.ts`、`process.md`。
+- 验证：已对照 AI SDK 官方 `validateUIMessages`、`convertToModelMessages` 和 Message Persistence 文档；`pnpm test server/runtime/runtime.test.ts`、`pnpm build` 通过。
+
 ### 新增 generate_html 页面工具
 
 - 变更：移除旧页面模板生成路径，页面、组件、落地页、网站和 HTML 请求统一暴露 `html.generate` / AI SDK `generate_html` 工具。

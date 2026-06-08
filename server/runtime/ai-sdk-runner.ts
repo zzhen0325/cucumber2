@@ -1,7 +1,9 @@
 import {
+  convertToModelMessages,
   stepCountIs,
   streamText,
   tool as aiTool,
+  validateUIMessages,
   type UIMessage,
   type UIMessageStreamWriter,
   type ToolSet,
@@ -43,11 +45,20 @@ import {
   type ToolRegistry,
 } from "./tool-registry.ts";
 import {
+  resolveRoutedAiSdkToolNames,
+  routeToolsDeterministically,
+} from "./tool-router.ts";
+import {
   createAgentError,
   runtimeErrorCodes,
   toAgentError,
 } from "./errors.ts";
-import { intentResultSchema, planSchema } from "./schemas.ts";
+import {
+  intentResultSchema,
+  planSchema,
+  runtimeDataSchemas,
+  runtimeMetadataSchema,
+} from "./schemas.ts";
 import { runWithRetry } from "./retry.ts";
 import { validateCanvasOperations } from "./canvas-operation-policy.ts";
 
@@ -68,6 +79,10 @@ type MutableAiRunState = {
   plan: PlanStep[];
   toolNamesById: Map<string, string>;
 };
+
+type RuntimeValidationTools = Parameters<
+  typeof validateUIMessages<UIMessage>
+>[0]["tools"];
 
 const planAgentRunToolName = "plan_agent_run";
 const defaultRetryPolicy = {
@@ -134,6 +149,12 @@ export async function executeAiSdkAgentRun({
         getAiSdkToolName(runtimeTool),
       ])
     );
+    const routedTools = routeToolsDeterministically(canvasContext);
+    const routedToolNames = resolveRoutedAiSdkToolNames({
+      route: routedTools,
+      toolNamesById: state.toolNamesById,
+    });
+    const shouldUsePlanner = true;
 
     await appendEvent(store, run.id, eventWriter, {
       projectId,
@@ -147,6 +168,7 @@ export async function executeAiSdkAgentRun({
         upstreamContext: canvasContext.upstreamContext,
         contextTrace: canvasContext.contextTrace,
         runtime: "vercel-ai-sdk",
+        deterministicToolRoute: routedTools,
       },
     });
     await appendEvent(store, run.id, eventWriter, {
@@ -168,36 +190,105 @@ export async function executeAiSdkAgentRun({
       streamWriter,
       toolRegistry,
     });
+    const validatedMessages = await validateUIMessages({
+      messages,
+      tools: tools as RuntimeValidationTools,
+      dataSchemas: runtimeDataSchemas,
+      metadataSchema: runtimeMetadataSchema,
+    });
+    const modelMessages = await convertToModelMessages(
+      [
+        ...validatedMessages,
+        {
+          id: `canvas-${runNodeId}`,
+          role: "user",
+          parts: [
+            {
+              type: "text",
+              text: buildAiSdkAgentPrompt({
+                canvasContext,
+                modelProvider,
+                publicSkills,
+                toolRegistry,
+              }),
+            },
+          ],
+        },
+      ],
+      { tools }
+    );
     const result = streamText({
       model: getLanguageModelForProvider(modelProvider),
       system: AGENT_RUN_TEXT_SYSTEM_PROMPT,
-      prompt: buildAiSdkAgentPrompt({
-        canvasContext,
-        modelProvider,
-        publicSkills,
-        toolRegistry,
-      }),
+      messages: modelMessages,
       tools,
       stopWhen: stepCountIs(12),
-      maxOutputTokens: 1_200,
+      maxOutputTokens: 3_200,
       prepareStep({ stepNumber }) {
-        if (stepNumber === 0) {
+        if (stepNumber === 0 && shouldUsePlanner) {
           return {
             activeTools: [planAgentRunToolName],
             toolChoice: { type: "tool", toolName: planAgentRunToolName },
           };
         }
 
-        const plannedToolNames = state.plan
-          .map((step) => step.toolId && state.toolNamesById.get(step.toolId))
-          .filter((toolName): toolName is string => Boolean(toolName));
-
         return {
-          activeTools: plannedToolNames.length
-            ? plannedToolNames
-            : Array.from(state.toolNamesById.values()),
+          activeTools: routedToolNames,
           toolChoice: "auto",
         };
+      },
+      async onStepFinish(step) {
+        await appendEvent(store, run.id, eventWriter, {
+          projectId,
+          runNodeId,
+          stepId: `ai-sdk-step-${step.stepNumber}`,
+          type: "step.finished",
+          payload: compactObject({
+            runtime: "vercel-ai-sdk",
+            stepNumber: step.stepNumber,
+            finishReason: step.finishReason,
+            rawFinishReason: step.rawFinishReason,
+            text: step.text,
+            toolCalls: step.toolCalls.map(summarizeAiSdkToolCall),
+            toolResults: step.toolResults.map(summarizeAiSdkToolResult),
+            usage: compactObject(step.usage),
+            model: step.model,
+            warningCount: step.warnings?.length ?? 0,
+          }),
+        });
+      },
+      async experimental_onToolCallStart(event) {
+        await appendEvent(store, run.id, eventWriter, {
+          projectId,
+          runNodeId,
+          stepId: getLifecycleStepId(event.toolCall.toolName, state),
+          type: "tool.execution.started",
+          payload: compactObject({
+            runtime: "vercel-ai-sdk",
+            stepNumber: event.stepNumber,
+            model: event.model,
+            toolCall: summarizeAiSdkToolCall(event.toolCall),
+          }),
+        });
+      },
+      async experimental_onToolCallFinish(event) {
+        await appendEvent(store, run.id, eventWriter, {
+          projectId,
+          runNodeId,
+          stepId: getLifecycleStepId(event.toolCall.toolName, state),
+          type: "tool.execution.finished",
+          payload: compactObject({
+            runtime: "vercel-ai-sdk",
+            stepNumber: event.stepNumber,
+            model: event.model,
+            toolCall: summarizeAiSdkToolCall(event.toolCall),
+            durationMs: event.durationMs,
+            success: event.success,
+            output: event.success ? summarizeToolOutput(event.output) : undefined,
+            errorText: event.success ? undefined : getErrorMessage(event.error),
+          }),
+          errorText: event.success ? undefined : getErrorMessage(event.error),
+        });
       },
       async onFinish() {
         await finalizeRun({
@@ -211,9 +302,11 @@ export async function executeAiSdkAgentRun({
       },
     });
 
-    for await (const chunk of result.toUIMessageStream<UIMessage>()) {
-      streamWriter.write(chunk);
-    }
+    streamWriter.merge(
+      result.toUIMessageStream({
+        sendStart: false,
+      })
+    );
   } catch (error) {
     const agentError = toAgentError(error);
     console.error("[agent-run]", error);
@@ -821,7 +914,8 @@ function buildAiSdkAgentPrompt({
       "After planning, call tools by aiSdkToolName.",
       "For image generation, plan and call expand_prompt before generate_image. If upstream images are relevant, call analyze_reference_images before expand_prompt.",
       "For current web information, plan and call web_search before write_document.",
-      "For document/report/answer tasks, use write_document so the result appears as a canvas artifact.",
+      "For document/report/answer tasks, compose the final Markdown yourself as write_document input so the result appears as a canvas artifact.",
+      "write_document is an artifactizer: provide title, complete markdown, summary, and sourcesUsed when source links informed the document. Do not pass a prompt, outline, or placeholder markdown.",
       "When the user asks to generate a page, component, landing page, website, or HTML, plan html.generate and call generate_html. The HTML must be a complete standalone single-file document, with CSS in <style>, JS in <script>, and no external dependencies.",
       "Never invent artifacts or canvas changes. Only returned tool results count.",
     ].join("\n"),
@@ -848,6 +942,110 @@ function validateAiSdkPlan(plan: PlanStep[], toolRegistry: ToolRegistry) {
   }
 
   return { ok: errors.length === 0, errors };
+}
+
+function getLifecycleStepId(toolName: string, state: MutableAiRunState) {
+  if (toolName === planAgentRunToolName) {
+    return "planner";
+  }
+
+  const runtimeToolId = Array.from(state.toolNamesById.entries()).find(
+    ([, aiSdkToolName]) => aiSdkToolName === toolName
+  )?.[0];
+  return (
+    state.plan.find((step) => step.toolId === runtimeToolId)?.id ??
+    runtimeToolId ??
+    toolName
+  );
+}
+
+function summarizeAiSdkToolCall(toolCall: {
+  toolCallId: string;
+  toolName: string;
+  input: unknown;
+  dynamic?: boolean;
+  invalid?: boolean;
+  providerExecuted?: boolean;
+  title?: string;
+}) {
+  return compactObject({
+    toolCallId: toolCall.toolCallId,
+    toolName: toolCall.toolName,
+    input: toolCall.input,
+    dynamic: toolCall.dynamic,
+    invalid: toolCall.invalid,
+    providerExecuted: toolCall.providerExecuted,
+    title: toolCall.title,
+  });
+}
+
+function summarizeAiSdkToolResult(toolResult: {
+  toolCallId: string;
+  toolName: string;
+  input: unknown;
+  output: unknown;
+  dynamic?: boolean;
+  preliminary?: boolean;
+  providerExecuted?: boolean;
+  title?: string;
+}) {
+  return compactObject({
+    toolCallId: toolResult.toolCallId,
+    toolName: toolResult.toolName,
+    input: toolResult.input,
+    output: summarizeToolOutput(toolResult.output),
+    dynamic: toolResult.dynamic,
+    preliminary: toolResult.preliminary,
+    providerExecuted: toolResult.providerExecuted,
+    title: toolResult.title,
+  });
+}
+
+function summarizeToolOutput(output: unknown) {
+  if (!output || typeof output !== "object") {
+    return output;
+  }
+
+  const record = output as Partial<ToolResult> & Record<string, unknown>;
+  const data = record.data;
+  const dataRecord = data && typeof data === "object"
+    ? (data as Record<string, unknown>)
+    : undefined;
+
+  return compactObject({
+    ok: record.ok,
+    artifactCount: Array.isArray(record.artifacts) ? record.artifacts.length : undefined,
+    canvasOperationCount: Array.isArray(record.canvasOperations)
+      ? record.canvasOperations.length
+      : undefined,
+    logCount: Array.isArray(record.logs) ? record.logs.length : undefined,
+    errorText:
+      record.error && typeof record.error === "object"
+        ? (record.error as { message?: unknown }).message
+        : undefined,
+    dataKind: dataRecord ? readString(dataRecord.kind) : undefined,
+    dataKeys: dataRecord ? Object.keys(dataRecord).slice(0, 12) : undefined,
+  });
+}
+
+function compactObject<T extends Record<string, unknown>>(value: T) {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, item]) => item !== undefined)
+  );
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  return "Tool execution failed.";
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : undefined;
 }
 
 function findPlanStepForTool(

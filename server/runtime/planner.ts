@@ -207,7 +207,7 @@ export function validatePlanAgainstRegistry(
 function validateStepInput(step: PlanStep, tool: RuntimeToolDefinition) {
   const errors: string[] = [];
   if (step.input === undefined) {
-    if (tool.id === toolIds.generateHtml) {
+    if (tool.id === toolIds.generateHtml || tool.id === toolIds.writeDocument) {
       return errors;
     }
     if (tool.prepareInput) {

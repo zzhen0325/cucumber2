@@ -143,7 +143,7 @@ export function buildToolRegistry({
       projectId,
       runNodeId,
     }),
-    createDocumentWriteTool({ modelProvider }),
+    createDocumentWriteTool(),
     createSearchWebTool(),
     createReadWebpageTool(),
     createAnalyzeAssetsTool(),

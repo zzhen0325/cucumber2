@@ -396,6 +396,14 @@ export const runtimeEventSchema: z.ZodType<RuntimeEvent> = z.object({
   createdAt: z.string().datetime(),
 });
 
+export const runtimeMetadataSchema = z
+  .record(z.string(), z.unknown())
+  .optional();
+
+export const runtimeDataSchemas = {
+  "runtime-event": runtimeEventSchema,
+};
+
 export const evaluationResultSchema = z.object({
   passed: z.boolean(),
   issues: z.array(

@@ -13,7 +13,7 @@ import type {
   CanvasOperation,
   ToolResult,
 } from "../src/types/runtime.ts";
-import { fromLegacyRunStatus } from "../src/types/runtime.ts";
+import { fromLegacyRunStatus, runtimeEventTypes } from "../src/types/runtime.ts";
 import {
   generateSeedreamImage,
   isSeedreamConfigured,
@@ -65,29 +65,7 @@ import {
 
 export const runStatusSchema = z.enum(["queued", "running", "success", "error"]);
 export const runStepStatusSchema = z.enum(["queued", "running", "success", "error"]);
-export const runStepEventTypeSchema = z.enum([
-  "run.created",
-  "input.normalized",
-  "intent.routed",
-  "context.built",
-  "plan.created",
-  "step.started",
-  "tool.input",
-  "tool.output",
-  "tool.error",
-  "retry.attempt",
-  "approval.requested",
-  "approval.responded",
-  "artifact.created",
-  "canvas.operation.proposed",
-  "canvas.operation.applied",
-  "canvas.operation.rejected",
-  "graph.patch.proposed",
-  "graph.patch.applied",
-  "evaluation.completed",
-  "run.completed",
-  "run.failed",
-]);
+export const runStepEventTypeSchema = z.enum(runtimeEventTypes);
 export const artifactTypeSchema = z.enum([
   "image",
   "file",

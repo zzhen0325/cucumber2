@@ -1,3 +1,9 @@
+import {
+  convertToModelMessages,
+  tool as aiTool,
+  validateUIMessages,
+  type UIMessage,
+} from "ai";
 import { z } from "zod";
 import { describe, expect, it } from "vitest";
 
@@ -23,7 +29,9 @@ import {
 import {
   agentRunSchema,
   intentResultSchema,
+  runtimeDataSchemas,
   runtimeEventTypeSchema,
+  runtimeMetadataSchema,
 } from "./schemas";
 import { runtimeEventTypes } from "../../src/types/runtime";
 import type {
@@ -54,6 +62,82 @@ describe("runtime core", () => {
     for (const eventType of runtimeEventTypes) {
       expect(runtimeEventTypeSchema.parse(eventType)).toBe(eventType);
     }
+  });
+
+  it("validates UI runtime parts before converting history into model messages", async () => {
+    const tools = {
+      inspect_canvas: aiTool({
+        description: "Inspect canvas context.",
+        inputSchema: z.object({ nodeId: z.string() }),
+      }),
+    };
+    const runtimeEvent = {
+      projectId: "project-1",
+      runNodeId: "run-1",
+      stepId: "inspect",
+      type: "tool.output",
+      payload: { ok: true },
+      createdAt: "2026-06-08T00:00:00.000Z",
+    };
+    const messages: UIMessage[] = [
+      {
+        id: "message-user-1",
+        role: "user",
+        metadata: { source: "canvas" },
+        parts: [{ type: "text", text: "历史需求" }],
+      },
+      {
+        id: "message-assistant-1",
+        role: "assistant",
+        parts: [
+          {
+            type: "data-runtime-event",
+            id: "event-1",
+            data: runtimeEvent,
+          },
+          {
+            type: "tool-inspect_canvas",
+            toolCallId: "tool-call-1",
+            state: "output-available",
+            input: { nodeId: "node-1" },
+            output: { ok: true },
+          },
+        ],
+      },
+    ];
+
+    const validatedMessages = await validateUIMessages({
+      messages,
+      tools: tools as unknown as Parameters<
+        typeof validateUIMessages<UIMessage>
+      >[0]["tools"],
+      dataSchemas: runtimeDataSchemas,
+      metadataSchema: runtimeMetadataSchema,
+    });
+    const modelMessages = await convertToModelMessages(
+      [
+        ...validatedMessages,
+        {
+          id: "canvas-run-1",
+          role: "user",
+          parts: [{ type: "text", text: "CURRENT_CANVAS_PROMPT" }],
+        },
+      ],
+      { tools }
+    );
+
+    expect(modelMessages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "user",
+          content: [expect.objectContaining({ text: "历史需求" })],
+        }),
+        expect.objectContaining({
+          role: "user",
+          content: [expect.objectContaining({ text: "CURRENT_CANVAS_PROMPT" })],
+        }),
+      ])
+    );
   });
 
   it("normalizes canvas input into a first-class AgentInput", () => {

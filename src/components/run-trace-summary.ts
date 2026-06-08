@@ -68,7 +68,9 @@ export function summarizeRunTrace(events: RunStepTraceEvent[]) {
       (event) =>
         event.type === "tool.input" ||
         event.type === "tool.output" ||
-        event.type === "tool.error"
+        event.type === "tool.error" ||
+        event.type === "tool.execution.started" ||
+        event.type === "tool.execution.finished"
     ),
   };
 }
@@ -93,6 +95,9 @@ export function getEventLabel(event: RunStepTraceEvent) {
     "run.created": "Run created",
     "run.failed": "Run failed",
     "step.started": "Step",
+    "step.finished": "Step finished",
+    "tool.execution.finished": "Tool lifecycle finished",
+    "tool.execution.started": "Tool lifecycle started",
     "tool.error": "Tool error",
     "tool.input": "Tool input",
     "tool.output": "Tool output",
