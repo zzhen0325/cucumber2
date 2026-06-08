@@ -15,6 +15,15 @@
 - 备注：风险、后续项或未完成事项。
 ```
 
+## 2026-06-09
+
+### 画布节点支持调整大小
+
+- 变更：所有基于 AI Elements `Node` 的画布节点接入 React Flow `NodeResizer`，选中态显示绿色缩放手柄；Prompt、Run、图片结果、Artifact、Markdown 和 HTML 页面节点均可调整宽高。
+- 变更：节点内容区域改为跟随外层尺寸伸缩，图片结果使用 `object-fit: cover` 填充新尺寸；图布局和文件上传避让逻辑优先读取节点已保存/测量尺寸。
+- 文件：`src/components/ai-elements/node.tsx`、`src/components/CanvasWorkspace.tsx`、`src/components/RunNodeView.tsx`、`src/App.css`、`src/lib/graph.ts`、`src/lib/file-upload.ts`、`design.md`、`process.md`。
+- 验证：`pnpm build` 通过；`pnpm dev:web` 打开 `http://localhost:5174/` 项目列表页无 console error。完整 `pnpm dev` 因本机已有 API 占用 `127.0.0.1:8787` 被跳过。
+
 ## 2026-06-08
 
 ### 修复画布刷新前未落库导致的节点丢失

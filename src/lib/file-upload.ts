@@ -398,14 +398,36 @@ function summarizeInlineText(text: string) {
 }
 
 function getNodeSize(node: AgentCanvasNode) {
-  if (node.data.kind === "markdown") {
-    return { width: MARKDOWN_NODE_WIDTH, height: MARKDOWN_NODE_HEIGHT };
-  }
-  if (node.data.kind === "imageResult") {
-    return { width: NODE_WIDTH, height: IMAGE_NODE_HEIGHT };
+  const width = getStoredNodeDimension(node, "width");
+  const height = getStoredNodeDimension(node, "height");
+  if (width && height) {
+    return { width, height };
   }
 
-  return { width: NODE_WIDTH, height: ARTIFACT_NODE_HEIGHT };
+  if (node.data.kind === "markdown") {
+    return {
+      width: width ?? MARKDOWN_NODE_WIDTH,
+      height: height ?? MARKDOWN_NODE_HEIGHT,
+    };
+  }
+  if (node.data.kind === "imageResult") {
+    return {
+      width: width ?? NODE_WIDTH,
+      height: height ?? IMAGE_NODE_HEIGHT,
+    };
+  }
+
+  return { width: width ?? NODE_WIDTH, height: height ?? ARTIFACT_NODE_HEIGHT };
+}
+
+function getStoredNodeDimension(
+  node: AgentCanvasNode,
+  dimension: "height" | "width"
+) {
+  const value = node[dimension] ?? node.measured?.[dimension];
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : null;
 }
 
 function resolveNonOverlappingPosition(

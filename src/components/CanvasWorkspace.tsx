@@ -48,7 +48,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { FormEvent } from "react";
+import type { CSSProperties, FormEvent } from "react";
 
 import { Canvas } from "@/components/ai-elements/canvas";
 import { Edge } from "@/components/ai-elements/edge";
@@ -1584,6 +1584,8 @@ function getClientError(error: unknown) {
 function PromptNode({
   data,
   selected,
+  width,
+  height,
 }: NodeProps<FlowNode<PromptNodeData, "promptNode">>) {
   return (
     <Node
@@ -1591,6 +1593,10 @@ function PromptNode({
         selected ? "canvas-node selected prompt-card" : "canvas-node prompt-card"
       }
       handles={{ source: true, target: true }}
+      minHeight={64}
+      minWidth={180}
+      selected={selected}
+      style={getResizableNodeStyle(width, height)}
     >
       <NodeContent className="prompt-content">
         <p title={data.contextLabel}>{data.prompt}</p>
@@ -1615,7 +1621,7 @@ type ArtifactLikeNodeData = Extract<
 >;
 type ArtifactLikeNodeProps = NodeProps<FlowNode<ArtifactLikeNodeData, string>>;
 
-function ArtifactLikeNode({ data, selected }: ArtifactLikeNodeProps) {
+function ArtifactLikeNode({ data, selected, width, height }: ArtifactLikeNodeProps) {
   const label = getArtifactNodeLabel(data);
   const summary = getArtifactNodeSummary(data);
 
@@ -1627,6 +1633,10 @@ function ArtifactLikeNode({ data, selected }: ArtifactLikeNodeProps) {
           : `canvas-node artifact-card ${data.kind}`
       }
       handles={{ source: true, target: true }}
+      minHeight={96}
+      minWidth={180}
+      selected={selected}
+      style={getResizableNodeStyle(width, height)}
     >
       <NodeContent className="artifact-content">
         <div className="artifact-heading">
@@ -1645,6 +1655,8 @@ function ArtifactLikeNode({ data, selected }: ArtifactLikeNodeProps) {
 function HtmlPageNode({
   data,
   selected,
+  width,
+  height,
 }: NodeProps<FlowNode<WebpageNodeData, "webpageNode">>) {
   const previewUrl = data.previewUrl ?? data.artifact.contentRef ?? data.artifact.uri;
   const frameTitle = `${data.title} preview`;
@@ -1657,6 +1669,10 @@ function HtmlPageNode({
           : "canvas-node html-page-card"
       }
       handles={{ source: true, target: true }}
+      minHeight={220}
+      minWidth={280}
+      selected={selected}
+      style={getResizableNodeStyle(width, height)}
     >
       <NodeContent className="html-page-content">
         <div className="html-page-heading">
@@ -1762,6 +1778,8 @@ function MarkdownNode({
   id,
   data,
   selected,
+  width,
+  height,
 }: NodeProps<FlowNode<MarkdownNodeData, "markdownNode">>) {
   const { readOnly, onChange } = useContext(MarkdownNodeEditingContext);
 
@@ -1773,6 +1791,10 @@ function MarkdownNode({
           : "canvas-node markdown-card"
       }
       handles={{ source: true, target: true }}
+      minHeight={220}
+      minWidth={280}
+      selected={selected}
+      style={getResizableNodeStyle(width, height)}
     >
       <NodeContent className="markdown-content">
         <div className="markdown-heading">
@@ -1818,6 +1840,8 @@ function summarizeMarkdownForCanvasNode(content: string) {
 function ImageResultNode({
   data,
   selected,
+  width,
+  height,
 }: NodeProps<FlowNode<ImageResultNodeData, "imageResultNode">>) {
   const status = data.status ?? (data.image.url ? "ready" : "loading");
   const requestLabel = formatImageRequestLabel(data.request);
@@ -1828,6 +1852,10 @@ function ImageResultNode({
         selected ? "canvas-node selected result-card" : "canvas-node result-card"
       }
       handles={{ source: true, target: true }}
+      minHeight={120}
+      minWidth={120}
+      selected={selected}
+      style={getResizableNodeStyle(width, height)}
     >
       <div className={`result-image-frame ${status}`}>
         {data.image.url ? (
@@ -1842,6 +1870,20 @@ function ImageResultNode({
       {selected && status === "ready" && <NodeFooterLike image={data.image} />}
     </Node>
   );
+}
+
+function getResizableNodeStyle(
+  width?: number,
+  height?: number
+): CSSProperties | undefined {
+  if (!width && !height) {
+    return undefined;
+  }
+
+  return {
+    height,
+    width,
+  };
 }
 
 function formatImageRequestLabel(request: ImageResultNodeData["request"]) {

@@ -11,7 +11,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useState } from "react";
 
 import { Node, NodeContent } from "@/components/ai-elements/node";
@@ -34,6 +34,8 @@ export function RunNodeView({
   id,
   data,
   selected,
+  width,
+  height,
 }: NodeProps<FlowNode<RunNodeData, "runNode">>) {
   const [expanded, setExpanded] = useState(true);
   const toolParts = data.toolParts?.length
@@ -67,7 +69,15 @@ export function RunNodeView({
     .join(" ");
 
   return (
-    <Node className={nodeClassName} handles={{ source: true, target: true }}>
+    <Node
+      className={nodeClassName}
+      handles={{ source: true, target: true }}
+      minHeight={36}
+      minWidth={220}
+      selected={selected}
+      style={getResizableNodeStyle(width, height)}
+      data-resized={height ? "true" : undefined}
+    >
       <NodeContent className="run-content">
         <div className="run-heading">
           <span className={`run-status-dot ${data.status}`}>
@@ -156,6 +166,20 @@ export function RunNodeView({
       </NodeContent>
     </Node>
   );
+}
+
+function getResizableNodeStyle(
+  width?: number,
+  height?: number
+): CSSProperties | undefined {
+  if (!width && !height) {
+    return undefined;
+  }
+
+  return {
+    height,
+    width,
+  };
 }
 
 function RunStreamGroup({

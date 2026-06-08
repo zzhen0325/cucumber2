@@ -646,6 +646,11 @@ function getNodeRect(node: AgentCanvasNode): CanvasRect {
 }
 
 function getNodeWidth(node: AgentCanvasNode) {
+  const measuredWidth = getStoredNodeDimension(node, "width");
+  if (measuredWidth) {
+    return measuredWidth;
+  }
+
   if (node.data.kind === "markdown") {
     return MARKDOWN_NODE_WIDTH;
   }
@@ -657,6 +662,11 @@ function getNodeWidth(node: AgentCanvasNode) {
 }
 
 function getNodeHeight(node: AgentCanvasNode) {
+  const measuredHeight = getStoredNodeDimension(node, "height");
+  if (measuredHeight) {
+    return measuredHeight;
+  }
+
   if (node.data.kind === "prompt") {
     return PROMPT_NODE_HEIGHT;
   }
@@ -685,6 +695,16 @@ function getNodeHeight(node: AgentCanvasNode) {
   }
 
   return RUN_NODE_HEIGHT;
+}
+
+function getStoredNodeDimension(
+  node: AgentCanvasNode,
+  dimension: "height" | "width"
+) {
+  const value = node[dimension] ?? node.measured?.[dimension];
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : null;
 }
 
 function getRevisionAnchorPriority(node: AgentCanvasNode) {
