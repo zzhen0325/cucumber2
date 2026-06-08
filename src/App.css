@@ -862,6 +862,97 @@
   pointer-events: none;
 }
 
+.file-drop-overlay {
+  position: absolute;
+  z-index: 35;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.file-drop-overlay.active {
+  background: rgba(41, 191, 78, 0.06);
+}
+
+.file-drop-overlay.active::before {
+  position: absolute;
+  inset: 14px;
+  border: 1px dashed rgba(41, 191, 78, 0.52);
+  border-radius: 28px;
+  content: "";
+}
+
+.file-drop-overlay.error {
+  align-items: start;
+  padding-top: 66px;
+}
+
+.file-drop-card {
+  position: relative;
+  display: inline-flex;
+  max-width: min(360px, calc(100vw - 32px));
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  padding: 0 12px;
+  border: 1px solid rgba(41, 191, 78, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #174222;
+  font-size: 12px;
+  line-height: 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.05);
+  pointer-events: none;
+}
+
+.file-drop-overlay.error .file-drop-card {
+  border-color: rgba(229, 72, 77, 0.22);
+  background: rgba(255, 255, 255, 0.98);
+  color: #cc2e33;
+  pointer-events: auto;
+}
+
+.file-drop-icon {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: #f8ffbf;
+  color: #174222;
+}
+
+.file-drop-overlay.error .file-drop-icon {
+  background: rgba(229, 72, 77, 0.08);
+  color: #cc2e33;
+}
+
+.file-drop-card > span:last-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-drop-card button {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: currentColor;
+  cursor: pointer;
+}
+
+.file-drop-card button:hover {
+  background: #f6f6f3;
+}
+
 .composer-wrap {
   position: absolute;
   left: 50%;
@@ -1394,6 +1485,17 @@
   background: transparent;
   color: inherit;
   padding: 0;
+}
+
+.markdown-plain-preview {
+  margin: 0;
+  overflow: visible;
+  background: transparent;
+  color: #111111;
+  font: inherit;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .result-card {

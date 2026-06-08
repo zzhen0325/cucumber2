@@ -62,6 +62,7 @@
 - 画布节点应继续基于 `Node` / `NodeContent` 等 AI Elements 包装组件。
 - 表单输入优先复用 Prompt Input / Input Group 的圆角、边框和轻阴影语言。
 - 浮层、弹窗和菜单保持轻量，不遮挡核心画布操作。
+- 文件拖拽上传只在拖拽悬停或错误时显示轻量提示层；使用浅绿色虚线边界、白色胶囊提示和现有错误色，不作为默认信息层常驻。
 
 ## Project And Auth Pages
 

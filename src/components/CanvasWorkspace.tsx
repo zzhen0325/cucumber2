@@ -43,10 +43,12 @@ import type { FormEvent } from "react";
 
 import { Canvas } from "@/components/ai-elements/canvas";
 import { Edge } from "@/components/ai-elements/edge";
-import { MessageResponse } from "@/components/ai-elements/message";
+import { FileUploadOverlay } from "@/components/FileUploadOverlay";
+import { MarkdownPreview } from "@/components/MarkdownPreview";
 import { Node, NodeContent } from "@/components/ai-elements/node";
 import { ReplayBanner, RunTracePanel } from "@/components/RunTracePanel";
 import { SkillPanel } from "@/components/SkillPanel";
+import { useCanvasFileDrop } from "@/components/useCanvasFileDrop";
 import {
   PromptInput,
   PromptInputBody,
@@ -338,6 +340,16 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     !storageError &&
     !hasPendingApproval &&
     !isReplayMode;
+  const canUploadFiles =
+    Boolean(loadedProjectId) &&
+    storageStatus !== "loading" &&
+    !storageError &&
+    !isReplayMode;
+  const fileDrop = useCanvasFileDrop({
+    canUploadFiles,
+    nodes,
+    setNodes,
+  });
 
   useEffect(() => {
     let ignore = false;
@@ -717,7 +729,13 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   }, []);
 
   return (
-    <main className="app-shell">
+    <main
+      className="app-shell"
+      onDragEnter={fileDrop.handleFileDragEnter}
+      onDragLeave={fileDrop.handleFileDragLeave}
+      onDragOver={fileDrop.handleFileDragOver}
+      onDrop={fileDrop.handleFileDrop}
+    >
       <Canvas<AgentCanvasNode, AgentCanvasEdge>
         className="agent-canvas"
         colorMode="light"
@@ -728,6 +746,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         nodeTypes={nodeTypes}
         nodes={canvasNodes}
         edges={canvasEdges}
+        onInit={fileDrop.handleCanvasInit}
         onEdgesChange={isReplayMode ? undefined : onEdgesChange}
         onNodesChange={isReplayMode ? undefined : onNodesChange}
         onPaneClick={() => {
@@ -784,6 +803,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       <ReplayBanner
         activeRunId={replaySnapshot?.runNodeId ?? null}
         onExit={handleExitReplay}
+      />
+      <FileUploadOverlay
+        active={fileDrop.uploadDragActive && canUploadFiles}
+        error={fileDrop.uploadError}
+        onDismiss={fileDrop.clearUploadError}
       />
       <EmptyState visible={!nodes.length && !isReplayMode} />
 
@@ -1166,7 +1190,7 @@ type ArtifactLikeNodeData = Extract<
 type ArtifactLikeNodeProps = NodeProps<FlowNode<ArtifactLikeNodeData, string>>;
 
 function ArtifactLikeNode({ data, selected }: ArtifactLikeNodeProps) {
-  const label = getArtifactNodeLabel(data.kind);
+  const label = getArtifactNodeLabel(data);
   const summary = getArtifactNodeSummary(data);
 
   return (
@@ -1339,7 +1363,7 @@ function ArtifactNodeIcon({ kind }: { kind: ArtifactLikeNodeProps["data"]["kind"
   return <FileText size={14} />;
 }
 
-function getArtifactNodeLabel(kind: ArtifactLikeNodeProps["data"]["kind"]) {
+function getArtifactNodeLabel(data: ArtifactLikeNodeProps["data"]) {
   const labels: Record<ArtifactLikeNodeProps["data"]["kind"], string> = {
     artifact: "Artifact",
     code: "Code",
@@ -1351,7 +1375,14 @@ function getArtifactNodeLabel(kind: ArtifactLikeNodeProps["data"]["kind"]) {
     webpage: "Webpage",
   };
 
-  return labels[kind];
+  if (data.kind === "artifact" && data.artifact.type === "dataset") {
+    return "Dataset";
+  }
+  if (data.kind === "artifact" && data.artifact.type === "file") {
+    return "File";
+  }
+
+  return labels[data.kind];
 }
 
 function getArtifactNodeSummary(data: ArtifactLikeNodeProps["data"]) {
@@ -1392,7 +1423,7 @@ function MarkdownNode({
           </div>
         </div>
         <div className="markdown-body nodrag nopan">
-          <MessageResponse>{data.content}</MessageResponse>
+          <MarkdownPreview content={data.content} />
         </div>
       </NodeContent>
     </Node>

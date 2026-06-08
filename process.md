@@ -17,6 +17,15 @@
 
 ## 2026-06-08
 
+### 增加画布拖拽上传预览
+
+- 变更：支持将文件直接拖拽到画布，按现有节点类型生成可预览节点；图片生成 `imageResultNode` data URL 预览，Markdown 生成可滚动 `markdownNode`，代码/文档/网页/数据集/通用文件生成 artifact-backed 预览卡片。
+- 变更：Markdown 预览新增局部 Error Boundary，渲染器或插件遇到异常内容时降级为纯文本预览，不让单个 `.md` 节点导致整个画布白屏。
+- 变更：上传节点会写入当前项目节点列表、自动选中并进入现有保存流；单个上传图片或 artifact 选中后可作为 follow-up branch 引用。
+- 文件：`src/lib/file-upload.ts`、`src/lib/file-upload.test.ts`、`src/components/MarkdownPreview.tsx`、`src/components/MarkdownPreview.test.tsx`、`src/components/useCanvasFileDrop.ts`、`src/components/CanvasWorkspace.tsx`、`src/components/FileUploadOverlay.tsx`、`src/App.css`、`README.md`、`design.md`。
+- 验证：`pnpm test -- src/components/MarkdownPreview.test.tsx src/lib/file-upload.test.ts src/lib/graph.test.ts`、`pnpm exec tsc -p tsconfig.app.json`、`pnpm lint`、`pnpm build` 通过；`/api/health` 返回 ok；Playwright 直连本地页面拖入含异常 mermaid 的 `test.md`，画布未白屏并生成 1 个 Markdown 节点；拖入 `/Users/bytedance/Downloads/plan.md` 时命中 Vite `Outdated Optimize Dep` / Streamdown 高亮动态 import 失败路径，Error Boundary 接住异常并降级为纯文本预览，页面未白屏。
+- 备注：当前上传预览存储在项目快照中，未新增独立对象存储；大文件只保留适合预览的文本片段，非图片二进制显示文件元数据卡片。本轮 Browser 打开 `http://localhost:5174/` 被插件 URL policy 阻断，视觉检查改用 Playwright 直连完成，截图保存到 `/tmp/cucumber-plan-md-upload.png`。
+
 ### 增加 Markdown 画布容器
 
 - 变更：新增 `markdownNode`，当 Agent/tool 输出 `{ markdown }`、`documents[]` 或带 `format: "markdown"` / `mimeType: "text/markdown"` 的 `doc` artifact 时，自动投影成独立 Markdown 文档容器；容器复用 Streamdown 渲染，支持标题、列表、代码块和内部滚动。
