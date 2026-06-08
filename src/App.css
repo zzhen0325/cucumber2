@@ -994,7 +994,6 @@
 }
 
 .composer {
-  height: 48px;
   min-height: 48px;
   border: 1px solid #ebebeb;
   border-radius: 24px;
@@ -1004,9 +1003,8 @@
 
 .composer [data-slot="input-group"] {
   display: grid;
-  height: 48px;
   min-height: 48px;
-  grid-template-columns: 1fr 44px;
+  grid-template-columns: 1fr 72px;
   align-items: center;
   overflow: hidden;
   border: 0;
@@ -1032,24 +1030,88 @@
 
 .composer-footer {
   order: unset;
-  width: 44px;
+  width: 72px;
   height: 48px;
-  justify-content: center;
+  justify-content: flex-end;
+  gap: 4px;
   padding: 0 8px 0 0;
   border: 0;
 }
 
-.composer-footer > span {
+.composer-footer > span:not(.composer-footer-status),
+.composer-footer-status > span {
   display: none;
 }
 
-.composer-footer button {
+.composer-footer button,
+.composer-attachment-button {
   width: 24px;
   height: 24px;
   min-width: 24px;
   border-radius: 50%;
+}
+
+.composer-footer button {
   background: #29bf4e;
   color: #07130a;
+}
+
+.composer-footer-status {
+  display: inline-flex;
+  align-items: center;
+}
+
+.composer-attachment-button {
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: #f3f1ee;
+  color: #174222;
+  cursor: pointer;
+}
+
+.composer-attachments {
+  display: flex;
+  grid-column: 1 / -1;
+  max-width: 100%;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 7px 10px 0;
+  border: 0;
+}
+
+.composer-attachment-chip {
+  display: inline-flex;
+  max-width: 168px;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  padding: 3px 4px 3px 8px;
+  border: 1px solid #e8e7e4;
+  border-radius: 999px;
+  background: #f6f6f3;
+  color: #174222;
+  font-size: 11px;
+  line-height: 13px;
+}
+
+.composer-attachment-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-attachment-chip button {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #555555;
+  cursor: pointer;
 }
 
 .canvas-node {
@@ -1177,18 +1239,53 @@
 .run-stream {
   display: grid;
   gap: 8px;
-  overflow: visible;
+  max-height: 260px;
+  overflow: auto;
   padding: 0 12px 12px;
 }
 
 .agent-text-output {
-  overflow: visible;
+  display: -webkit-box;
+  overflow: hidden;
   margin: 0;
   color: #174222;
   font-size: 11px;
   line-height: 15px;
   overflow-wrap: anywhere;
-  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.run-summary-list {
+  display: grid;
+  gap: 5px;
+}
+
+.run-summary-item {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border: 1px solid rgba(235, 235, 235, 0.7);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.48);
+  color: #111111;
+  font-size: 11px;
+  line-height: 13px;
+}
+
+.run-summary-item span {
+  color: #555555;
+  white-space: nowrap;
+}
+
+.run-summary-item strong {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .run-step-timeline {
@@ -1216,6 +1313,73 @@
 
 .run-step-chip.error {
   color: #cc2e33;
+}
+
+.run-evaluation {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid rgba(235, 235, 235, 0.7);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.54);
+  color: #111111;
+  font-size: 11px;
+  line-height: 13px;
+}
+
+.run-evaluation.passed {
+  border-color: rgba(41, 191, 78, 0.2);
+  background: rgba(41, 191, 78, 0.08);
+}
+
+.run-evaluation.failed {
+  border-color: rgba(204, 46, 51, 0.2);
+  background: rgba(204, 46, 51, 0.08);
+}
+
+.run-evaluation-label {
+  overflow: hidden;
+  color: #174222;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-evaluation.failed .run-evaluation-label {
+  color: #9d2025;
+}
+
+.run-evaluation small {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #555555;
+  font-size: 11px;
+  line-height: 13px;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.run-evaluation-action {
+  display: inline-flex;
+  width: fit-content;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #174222;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 13px;
+}
+
+.run-evaluation-action:hover {
+  background: rgba(255, 255, 255, 0.78);
 }
 
 .tool-call-row {
@@ -1283,12 +1447,14 @@
 }
 
 .tool-detail-line {
-  overflow: visible;
+  display: -webkit-box;
+  overflow: hidden;
   color: #555555;
   font-size: 11px;
   line-height: 13px;
   overflow-wrap: anywhere;
-  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .tool-approval-actions {

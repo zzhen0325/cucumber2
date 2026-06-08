@@ -17,6 +17,252 @@
 
 ## 2026-06-08
 
+### 完成 1.8 非图片 Evaluator 专项检查
+
+- 变更：Evaluator 增加 webpage/doc/code artifact completeness 检查，要求有 `uri`、`contentRef` 或 inline content/html metadata；code artifact 如果标记 `testStatus: failed` 或 `typecheckStatus: failed` 会生成专项质量问题。
+- 变更：Evaluator 对带 `expectedCanvasOperations: createNode` 的任务检查 canvas visibility signal，来源包括已接受的 `createNode` canvas operation 和 `artifact.created` event 上的 `canvasNodeId`。
+- 变更：质量失败的 `needsRegeneration` 覆盖网页/文档/代码内容缺失和画布可见性缺失，不自动重试，仍交给用户确认 revise/regenerate。
+- 文件：`server/runtime/evaluator.ts`、`server/runtime/evaluator.test.ts`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm test server/runtime/evaluator.test.ts server/runtime/runtime.test.ts`、`pnpm exec tsc -p tsconfig.node.json --noEmit` 通过。
+- 备注：document writing 和 code modification 的 executor 还未接入，属于后续非图片工具扩展。
+
+### 完成 1.6 复杂落地页 Planner
+
+- 变更：Tool Registry 新增 `web.read`、`asset.analyzeContext`、`page.generate` 三个真实工具；`web.read` 会读取用户提供的 URL 并生成网页 source artifact，`asset.analyzeContext` 汇总已选图片/产物上下文，`page.generate` 生成 HTML webpage artifact。
+- 变更：Intent Router 对“根据网页和图片生成落地页并放到画布里”改为可执行 `multi_step.landing_page`，required tools 为 `web.read`、`asset.analyzeContext`、`page.generate`、`canvas.createNode`，不再 route_missing。
+- 变更：Planner deterministic fixture 支持复杂落地页 DAG：reasoning -> web read / asset analysis -> page artifact generation -> canvas node creation -> evaluation；planner validation 会通过真实 registry 校验。
+- 变更：`canvas.createNode` 增加 `prepareInput`，可从前序非图片 artifact 生成节点 proposal；artifact event 的 `canvasNodeId` 改为按 artifact type 生成，避免 webpage/doc/code 被写成 `image-*`。
+- 文件：`server/runtime/tools/web-page-tools.ts`、`server/runtime/tools/ids.ts`、`server/runtime/tool-registry.ts`、`server/runtime/intent-router.ts`、`server/runtime/planner.ts`、`server/runtime/executor.ts`、`server/runtime/runtime.test.ts`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm test server/runtime/runtime.test.ts` 通过。
+- 备注：document writing、code modification executor 和 UI/page evaluator 专项检查仍是后续项。
+
+### 打通实时 Runtime Event Projection
+
+- 变更：`RuntimeEventWriter.writeEvent` 现在在写入数据库事件后，同步向 AI SDK UI stream 写出 `data-runtime-event` data part，实时流不再只能依赖 tool input/output chunk。
+- 变更：`runtime-event-renderer` 新增 `runtimeEventsFromMessageParts` / `runtimeEventsFromMessages`，前端会从 AI SDK message parts 中提取 runtime events、按 run 过滤和时间排序，再调用 `projectRuntimeEventsToCanvas`。
+- 变更：`CanvasWorkspace` 的实时 message effect 现在只使用 runtime event projection 合并节点/边；旧 AI SDK tool part 兼容路径会先在 `runtime-event-renderer` 中转换为 runtime events，再进入同一个 projection。历史 trace replay 和项目刷新恢复继续使用同一个 projection 入口。
+- 变更：移除 `CanvasWorkspace` 对 Run 节点 `status/toolParts/artifacts/agentText` 的手工业务拼装，Run 节点实时状态改由 `run.created`、`tool.*`、`artifact.created`、`evaluation.completed`、`run.completed/run.failed` 等事件投影得到。
+- 文件：`server/runtime/events.ts`、`src/lib/runtime-event-renderer.ts`、`src/lib/runtime-event-renderer.test.ts`、`src/components/CanvasWorkspace.tsx`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm test src/lib/runtime-event-renderer.test.ts src/lib/graph-projection.test.ts server/runtime/runtime.test.ts`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec tsc -p tsconfig.app.json --noEmit` 通过。
+- 备注：网络级 `useChat.onError` 仍会本地标记当前 Run 错误，避免请求未进入 runtime 时画布无反馈。
+
+### 推进 2.1/2.2 刷新后 Runtime Event 重建
+
+- 变更：`CanvasWorkspace` 加载项目时，如果项目存在 `lastRunId`，会调用 `/api/projects/:projectId/runs/:runNodeId/trace` 拉取数据库 runtime events，并通过 `projectRuntimeEventsToCanvas` 合并现有项目快照，恢复最新 Run 链；trace 拉取失败时保留项目快照，不阻塞项目打开。
+- 变更：Trace replay 也改为调用 `projectRuntimeEventsToCanvas`，而不是直接使用底层 `projectRunTraceToCanvas`，让刷新恢复和 replay 共用同一个 runtime-event renderer wrapper。
+- 文件：`src/components/CanvasWorkspace.tsx`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm lint` 通过。
+- 备注：实时流仍有 AI SDK tool part 兼容投影路径，尚未完全迁移为 runtime events 驱动，因此 2.1/2.2 总项仍未标记完成。
+
+### 补齐 1.7 Approval Denial 执行语义
+
+- 变更：`AgentInput` 新增 `approvalResponses`，`normalizeAgentInput` 从 AI SDK UI message tool part 的 `approval` 对象中提取 approved/reason，作为 runtime 输入的一等字段。
+- 变更：generic executor 的 approval step 现在会按 `approval-${runNodeId}-${stepId}` 匹配响应；未响应时写 `approval.requested` 并暂停，批准时写 `approval.responded` 并继续执行后续 step，拒绝时写 `approval.responded`、记录 `PERMISSION_DENIED`，并将后续 plan step 标记为 `skipped`。
+- 变更：补充 input normalizer 与 executor 测试，覆盖 approval response 提取、approval accepted 继续、approval denied 不继续。
+- 文件：`src/types/runtime.ts`、`server/runtime/schemas.ts`、`server/runtime/input-normalizer.ts`、`server/runtime/executor.ts`、`server/runtime/input-normalizer.test.ts`、`server/runtime/executor.test.ts`、`server/runtime/evaluator.test.ts`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm test server/runtime/executor.test.ts server/runtime/input-normalizer.test.ts server/runtime/evaluator.test.ts server/runtime/runtime.test.ts`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec tsc -p tsconfig.app.json --noEmit` 通过。
+
+### 完成 2.4 Composer 附件与引用提示
+
+- 变更：Composer 内新增本地附件条，使用 `usePromptInputAttachments` 展示待提交附件 chip，并提供移除按钮；footer 增加附件图标按钮触发文件选择，paste/drop 附件仍会进入同一 PromptInput attachment controller。
+- 变更：Composer 单选可引用节点时显示引用摘要和当前 upstream context count；多选时明确提示“仅单个节点会作为引用 / 多选不会进入上下文”，避免用户误以为多选都会提交。
+- 变更：Composer 提交仍先用 `createRunDraft` 创建 Prompt Node 和 queued Run Node，再把 `projectId`、`promptNodeId`、`runNodeId`、`selectedNodeId`、`upstreamContext`、`attachments` metadata 发送到 `/api/agent-run`；prompt 中的 `http/https` 链接会用 `URL` 解析后作为 `InputAttachment(kind: "webpage")` 一并提交。
+- 文件：`src/components/CanvasWorkspace.tsx`、`src/App.css`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm lint` 通过。
+
+### 标记 Part 2 已满足的 Done Criteria
+
+- 变更：基于 Run 节点拆分、Composer 附件/引用提示、Trace/Replay/Policy/Evaluation 已有实现，以及本轮桌面和移动首屏 smoke，标记 Part 2 中 AI Elements/本地等价组件、当前图片/follow-up 不回退、视觉检查三项完成。
+- 文件：`agent-os-plan.md`、`process.md`。
+- 验证：桌面 `1440x900` 与移动 `390x844` Playwright smoke 打开 `http://localhost:5173/`，登录首屏非空，无 pageerror；受当前未登录状态限制，未在浏览器中直接验证 Run 节点展开态。
+- 备注：`ReactFlow 画布由 Runtime events 驱动，实时和 replay 共用 projection` 仍未标记完成，当前实时流仍保留兼容投影路径。
+
+### 完成 2.3 Run Node UI 拆分
+
+- 变更：从 `CanvasWorkspace.tsx` 拆出 `src/components/RunNodeView.tsx`，包含 `RunNodeView`、`PlanSummaryView`、`StepTimelineView`、`ToolPartView` 和 Run 节点相关纯 helper；`CanvasWorkspace` 只保留 nodeTypes wiring。
+- 变更：对照 `design.md` 保持现有浅暖灰/淡黄绿色 Run 节点视觉，不新增视觉语言；Run Trace、展开、审批、质量修正按钮继续用图标/短文案和原 className。
+- 变更：`App.css` 为 Run 节点展开内容增加最大高度和滚动，agent 文本、evaluation 建议、tool detail 行做 2-3 行截断，避免长 prompt/tool output/error 撑破节点。
+- 文件：`src/components/CanvasWorkspace.tsx`、`src/components/RunNodeView.tsx`、`src/App.css`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm lint` 通过。
+
+### 推进 Runtime Event Protocol 共享类型
+
+- 变更：`src/types/runtime.ts` 新增 `runtimeEventTypes` 作为 runtime event type 的单一来源，`server/runtime/schemas.ts` 的 Zod enum 改为复用该列表，`src/lib/graph-projection.ts` 的 `RunStepTraceEvent` 改为直接别名 `RuntimeEvent`。
+- 变更：补充 runtime core 测试，遍历 `runtimeEventTypes` 确认 schema 能 parse 每个事件类型；`runtime-event-renderer.ts` 不再需要把 `RuntimeEvent[]` 强转为本地重复类型。
+- 变更：`agent-os-plan.md` 标记 2.1 的共享 event schema 和 2.2 的基础 renderer/reducer 项完成；`CanvasWorkspace` 手工 run-node 拼装和实时/历史完全共用 projection 仍保留为未完成项。
+- 文件：`src/types/runtime.ts`、`server/runtime/schemas.ts`、`src/lib/graph-projection.ts`、`src/lib/runtime-event-renderer.ts`、`server/runtime/runtime.test.ts`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm test server/runtime/runtime.test.ts src/lib/runtime-event-renderer.test.ts src/lib/graph-projection.test.ts`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm lint` 通过。
+
+### 标记 Runtime Part 1 Done Criteria
+
+- 变更：基于当前主入口 `/api/agent-run -> executeAgentRun`、runtime persistence/event trace、结构化 intent/context/plan/step、Tool Registry 和本轮最小验证，标记 `agent-os-plan.md` 的 Part 1 Done Criteria 完成。
+- 文件：`agent-os-plan.md`、`process.md`。
+- 验证：沿用本轮已通过的 runtime/run-kernel 测试、node/app typecheck 与 lint。
+- 备注：复杂网页落地页 planner、approval 拒绝恢复、文档/代码/UI evaluator 专项检查仍作为各自章节的后续能力保留，不在 Part 1 Done Criteria 中伪装完成。
+
+### 收敛 Legacy Image Run Adapter
+
+- 变更：`server/run-kernel.ts` 中旧图片专用 orchestration 不再以 `executeImageAgentRun` 名义导出，改为 `executeLegacyImageAgentRunForTests`，并标记 deprecated；`/api/agent-run` 主路径继续只使用 `server/runtime/executor.ts` 的 generic runtime。
+- 变更：`agent-os-plan.md` 标记 Legacy image run adapter cleanup 完成，`README.md` 说明旧 run-kernel 仅保留 compatibility contract / test fixture。
+- 文件：`server/run-kernel.ts`、`README.md`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm test server/run-kernel.test.ts server/runtime/runtime.test.ts server/runtime/executor.test.ts server/runtime/evaluator.test.ts server/runtime/canvas-operation-policy.test.ts server/runtime/retry.test.ts`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm lint` 通过。
+
+### 补强 Runtime 1.8 Evaluator 质量失败语义
+
+- 变更：补充 evaluator/store 测试，确认质量检查失败会写入 `AgentRun.evaluation` 并把 run 状态置为 `failed`，但不会追加系统级 `AgentError`；retry/regenerate 只作为 `recommendedActions` 暴露，仍需要用户确认后重新提交。
+- 文件：`server/runtime/evaluator.test.ts`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm test server/runtime/evaluator.test.ts` 通过。
+- 备注：文档/代码/UI task 的专项 evaluator 检查仍未标记完成，需等待对应 executor tools 和 artifact/canvas 类型接入。
+
+### 推进 Runtime 1.7 Generic Executor DAG 控制
+
+- 变更：新增 `executePlanSteps`，按 `PlanStep.dependsOn` 排序执行，依赖未成功的 step 会标记 `skipped`，approval step 会暂停 plan 并保持 run 为 `waiting_approval`。
+- 变更：`runStep` 的 `canvas` kind 不再被当成 skipped，而是通过 Tool Registry 执行 canvas proposal tool，返回的 `CanvasOperation` 继续走 reducer/policy 校验后写入 trace。
+- 变更：fatal step error 会终止当前 plan 执行，并把后续 step 标记为 `skipped`；补充 approval pause、fatal skip、canvas step proposal 的 executor 测试。
+- 文件：`server/runtime/executor.ts`、`server/runtime/executor.test.ts`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm test server/runtime/executor.test.ts`、`pnpm test server/runtime/runtime.test.ts server/runtime/executor.test.ts server/runtime/canvas-operation-policy.test.ts server/runtime/retry.test.ts`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm lint` 通过。
+- 备注：`executeImageAgentRun` 的 legacy 收敛/删除仍未完成，继续留在计划清单中。
+
+### 推进 Runtime 1.6 LLM Planner 验证
+
+- 变更：`validatePlanAgainstRegistry` 增加工具输入 schema 校验，显式输入不匹配会拒绝；没有 `prepareInput` 且空对象不能通过 schema 的工具 step 会被判为缺少必需输入。
+- 变更：planner validation 增加 canvas operation 授权检查，`createNode`、`createEdge`、`updateNode`、`setNodeStatus`、`attachArtifact` 必须能由当前 context 暴露的 producer tool 产生；canvas step 不能引用没有项目修改权限的工具。
+- 变更：补充 planner fixture 测试，覆盖简单图片 plan 的 `attachArtifact` 预期 canvas operation，以及未知工具、循环依赖、缺必需输入、越权 canvas operation 拒绝。
+- 文件：`server/runtime/planner.ts`、`server/runtime/runtime.test.ts`、`README.md`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm test server/runtime/runtime.test.ts`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm lint` 通过。
+- 备注：`1.6` 的复杂网页落地页完整 plan 仍未标记完成；当前 registry 尚未提供 web read/analyze、UI generation、artifact/page creation 等真实工具，planner 不应伪造未注册工具链。
+
+### 完成 Runtime 1.3 Intent Router 验收
+
+- 变更：`routeIntentDeterministically` 增加 multi-step unsupported route，`根据网页和图片生成落地页并放到画布里` 会输出 `task.kind: "multi_step"`，包含 web search、image analysis、page generation 和 canvas node operation，而不是单一路由到 image 或 web。
+- 变更：新增 canvas operation deterministic route，画布/节点类请求输出 `canvas_operation` 并要求 `canvas.createNode` proposal tool。
+- 变更：补齐常见 intent schema fixtures：image_generation、image_editing、page_generation、document_writing、web_research、file_analysis、code_modification、canvas_operation、multi_step。
+- 文件：`server/runtime/intent-router.ts`、`server/runtime/runtime.test.ts`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm test server/runtime/runtime.test.ts server/agent-router.test.ts`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm lint` 通过。
+
+### 完成 Runtime 1.4 Context Builder PromptParts 迁移
+
+- 变更：`image-tools.ts` 的 reference-image analysis 和 prompt expansion 不再调用旧 prompt assembly 重新拼 upstream context；两者都基于 `ToolExecutionContext.context.promptParts` 渲染 prompt，并叠加工具自己的 reference image / skill section。
+- 变更：`server/prompts.ts` 新增 `renderRuntimePromptAssembly` 纯渲染 helper；Context Builder 成为新 runtime 的 intent、user message、selected/omitted context、allowed tools、injected skills prompt parts 来源。
+- 变更：补充测试覆盖图片工具 promptTrace 包含 `runtime.selected-context`，复杂 route-missing task 不暴露全部工具。
+- 文件：`server/runtime/tools/image-tools.ts`、`server/prompts.ts`、`server/runtime/runtime.test.ts`、`README.md`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm test server/runtime/runtime.test.ts src/components/RunTracePanel.test.tsx server/prompts.test.ts`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm lint` 通过。
+
+### 推进 Runtime 1.4 PromptParts 消费链路
+
+- 变更：Context Builder 抽出 runtime prompt parts 组装，包含 intent、user message、selected context、omitted context、allowed tools 和 injected skills。
+- 变更：Planner prompt 现在携带 `context.promptParts`；Run reasoning step 不再重新从 canvasContext 拼 upstream prompt，而是渲染 `BuiltContext.promptParts`。
+- 文件：`server/runtime/context-builder.ts`、`server/runtime/planner.ts`、`server/runtime/executor.ts`、`server/prompts.ts`、`server/runtime/runtime.test.ts`、`README.md`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm test server/runtime/runtime.test.ts src/components/RunTracePanel.test.tsx server/prompts.test.ts`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm lint` 通过。
+- 备注：`server/prompts.ts` 仍保留 legacy run-kernel 与 image-tool prompt assembly helper，1.4 对应清单暂不整体标记完成。
+
+### 推进 Runtime 1.4 Context Builder 来源覆盖
+
+- 变更：`buildContext` 不再只处理 upstream graph；新增 attachment、conversation history summary 和 project refs 作为 ContextItem 参与 selection/ranking/budget，并写入 promptParts、selected/omitted trace。
+- 变更：补充测试证明选中图片 context 不会被预算裁剪，低优先级大文档会进入 omitted，附件、历史摘要和 project refs 能进入 selected context，工具暴露仍来自 intent allowlist。
+- 文件：`server/runtime/context-builder.ts`、`server/runtime/runtime.test.ts`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm test server/runtime/runtime.test.ts src/components/RunTracePanel.test.tsx`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm lint` 通过。
+- 备注：`PromptPart` 彻底从 `server/prompts.ts` 迁到 Context Builder，以及复杂非图片工具的精确暴露仍未完成。
+
+### 补齐 Runtime 1.5 Tool Registry 验收
+
+- 变更：新增 `server/runtime/tools/` 领域目录，图片工具迁到 `image-tools.ts`，canvas proposal tools 迁到 `canvas-tools.ts`，共享 tool ids/version 迁到 `ids.ts`；`tool-registry.ts` 保持注册、摘要、allowlist 和 trace metadata 职责。
+- 变更：`ToolRegistry.requireTool` 对未注册工具返回 typed `AgentError` code `TOOL_NOT_REGISTERED`；executor 测试覆盖未注册工具、schema 错误和权限拒绝，retry 测试覆盖 tool timeout。
+- 文件：`server/runtime/tool-registry.ts`、`server/runtime/tools/image-tools.ts`、`server/runtime/tools/canvas-tools.ts`、`server/runtime/tools/ids.ts`、`server/runtime/errors.ts`、`server/runtime/executor.test.ts`、`README.md`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm test server/runtime/runtime.test.ts server/runtime/executor.test.ts server/runtime/canvas-operation-policy.test.ts server/runtime/retry.test.ts`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm lint` 通过。
+
+### 补齐 Runtime 1.2 Input Layer 验收
+
+- 变更：`CanvasWorkspace` 将 PromptInput pasted/dropped files 转成 `AgentInput.attachments` metadata 发送给 `/api/agent-run`；data URL 只记录 `contentRef` 和短 preview summary，不直接进入 prompt。
+- 变更：`normalizeAgentInput` 写入 project refs，并基于 user-owned project snapshot 校验 selected node、upstream context node 和 artifact id，伪造上下文会返回 typed `AgentError`，不进入 planner。
+- 文件：`src/components/CanvasWorkspace.tsx`、`server/api.ts`、`server/runtime/executor.ts`、`server/runtime/input-normalizer.ts`、`server/runtime/input-normalizer.test.ts`、`README.md`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm test server/runtime/input-normalizer.test.ts server/runtime/runtime.test.ts src/lib/graph.test.ts`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm lint` 通过。
+
+### 补齐 Runtime 1.1 Legacy Adapter 验收
+
+- 变更：`server/run-kernel.ts` 新增 `adaptKernelRunToAgentRun`，将旧 kernel `Run` 只读适配为一等 `AgentRun`，保留 `promptNodeId`、`runNodeId`、tool call、artifact refs、canvas patch proposal 和 error text。
+- 变更：补充 `success/error` 与 `completed/failed` 的双向状态映射测试，以及 legacy adapter 结果通过 `agentRunSchema` parse 的单元测试。
+- 文件：`server/run-kernel.ts`、`server/run-kernel.test.ts`、`README.md`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm test server/run-kernel.test.ts server/runtime/runtime.test.ts`、`pnpm test server/run-kernel.test.ts server/runtime/runtime.test.ts server/runtime/executor.test.ts`、`pnpm test src/lib/graph-projection.test.ts src/lib/runtime-event-renderer.test.ts`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec tsc -p tsconfig.app.json --noEmit` 通过。
+
+### Unsupported Intent 不再静默走图片链路
+
+- 变更：`routeIntentDeterministically` 对文档写作、网页调研、页面生成、代码修改、文件分析等未注册执行器的请求返回 `primaryIntent: "capability.route_missing"`，并带 `requiredCapabilities` 与 high-severity ambiguity。
+- 变更：`validateIntentAgainstRegistry` 允许 route-missing intent 携带尚未注册的 required capability；planner 会生成 `clarify_or_stop` approval step，而不是继续进入图片生成计划。
+- 文件：`server/runtime/intent-router.ts`、`server/runtime/runtime.test.ts`、`README.md`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm test -- server/runtime/runtime.test.ts` 通过。
+- 备注：复杂落地页的完整 multi-step plan 仍未实现；当前只是明确缺少 `page.generate` executor，避免误走图片链路。
+
+### Run 节点补齐用户级 Runtime 摘要
+
+- 变更：`projectRunTraceToCanvas` 从 `intent.routed`、`context.built`、`plan.created`、`artifact.created` 提取短摘要，写入 `RunNodeData.summaryItems`。
+- 变更：Run 节点展开区显示意图、上下文、计划和产物摘要；默认画布继续隐藏 raw id、toolCallId、完整 plan/prompt，完整审计仍在 Trace Panel。
+- 文件：`src/types/canvas.ts`、`src/lib/graph-projection.ts`、`src/lib/graph-projection.test.ts`、`src/components/CanvasWorkspace.tsx`、`src/App.css`、`README.md`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm test -- src/lib/graph-projection.test.ts src/components/RunTracePanel.test.tsx`、`pnpm lint`、`pnpm build` 通过；Playwright 最小夹具验证长 plan 摘要在 240px Run 节点内省略且不溢出，截图 `/tmp/cucumber-run-summary-items.png`。
+- 备注：`RunNodeView` / `PlanSummaryView` / `StepTimelineView` / `ToolPartView` 组件拆分尚未做；当前先保持在 `CanvasWorkspace.tsx` 内，避免扩大改动面。
+
+### Run 节点显示 Evaluator 摘要
+
+- 变更：`projectRunTraceToCanvas` 从最新 `evaluation.completed` event 提取用户级 summary，并写入 `RunNodeData.evaluation`。
+- 变更：Run 节点展开区显示质量检查通过/失败、issue 数量和第一条 recommended action；完整 evaluator detail 仍保留在 Trace Panel。
+- 变更：失败 evaluator 显示“准备重试/准备修正”操作；点击后只会选择旧产物或旧 prompt 作为引用并把建议填入 composer，用户再次提交才创建新的 follow-up branch，不覆盖旧 artifact。
+- 变更：质量失败的 Run 标题显示“质量检查未通过”，不再伪装成工具生成失败；工具错误仍由 Tool row 显示。
+- 变更：Evaluator 新增 typed quality issue：图片数量不足、artifact 缺失、image URL 缺失、canvas operation rejected；artifact 失败建议保留上下文重试，canvas operation rejected 建议先查 Trace。
+- 文件：`server/runtime/evaluator.ts`、`server/runtime/evaluator.test.ts`、`src/types/canvas.ts`、`src/lib/graph.ts`、`src/lib/graph.test.ts`、`src/lib/graph-projection.ts`、`src/lib/graph-projection.test.ts`、`src/components/CanvasWorkspace.tsx`、`src/App.css`、`README.md`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm test -- server/runtime/evaluator.test.ts server/runtime/executor.test.ts server/runtime/runtime.test.ts`、`pnpm test -- src/lib/graph.test.ts src/lib/graph-projection.test.ts`、`pnpm lint`、`pnpm build` 通过；Browser 打开现有 `http://localhost:5173/` 项目页正常渲染；另用真实 `App.css` 的 Playwright 最小夹具验证 evaluator 摘要、标题和准备重试按钮无横向溢出，截图 `/tmp/cucumber-run-evaluation-revision.png`。
+- 备注：Run 节点的 intent、context、plan、artifact 用户级摘要仍在 `agent-os-plan.md` 后续项中。
+
+### 补齐 Canvas Operation Policy 闭环
+
+- 变更：新增 `server/runtime/canvas-operation-policy.ts`，服务端在写 `canvas.operation.applied` 前校验 project id、node kind、edge endpoint、target-node permission、同批 createNode、produced artifact ownership 和 duplicate operation。
+- 变更：executor 不再把 tool 返回的 canvas operation 全部直接 applied；通过 policy 的 operation 才写 `canvas.operation.applied` / `graph.patch.applied` 并进入 run snapshot，被拒绝的 operation 写 `canvas.operation.rejected` 和 `CANVAS_PATCH_REJECTED` run error。
+- 变更：Tool Registry 新增 `canvas.createNode`、`canvas.updateNode`、`canvas.createEdge` proposal tools，并与 `canvas.attachArtifact` 一起具备 tool policy、timeout、risk 和 `canvas_operation` render hint。
+- 文件：`server/runtime/canvas-operation-policy.ts`、`server/runtime/canvas-operation-policy.test.ts`、`server/runtime/executor.ts`、`server/runtime/executor.test.ts`、`server/runtime/tool-registry.ts`、`server/runtime/runtime.test.ts`、`src/types/runtime.ts`、`README.md`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm test -- server/runtime/canvas-operation-policy.test.ts server/runtime/executor.test.ts server/runtime/runtime.test.ts src/lib/runtime-event-renderer.test.ts src/lib/graph-projection.test.ts` 通过。
+- 备注：当前图片默认链路仍只使用 `canvas.attachArtifact`；新增 canvas tools 只有在 router/planner 暴露对应 toolId 时才会进入计划。
+
+### 补充 Tool Trace Schema Digest
+
+- 变更：`ToolDefinition` 和 `ToolSummary` 增加 `version`，Tool Registry 统一生成 `toolDefinitionVersion`、input/output schema digest、risk 和 render kind trace metadata。
+- 变更：`tool.input`、`tool.output`、`tool.error` 和 `retry.attempt` event payload 都会写入 tool trace metadata；`tool.output` / `tool.error` 额外记录 duration 和 logs，便于 Trace 面板审计具体工具定义版本、schema 和执行结果。
+- 文件：`src/types/runtime.ts`、`server/runtime/tool-registry.ts`、`server/runtime/events.ts`、`server/runtime/executor.ts`、`server/runtime/schemas.ts`、`server/runtime/runtime.test.ts`、`src/components/RunTracePanel.test.tsx`、`README.md`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm test -- server/runtime/runtime.test.ts server/runtime/retry.test.ts` 通过。
+- 备注：context selected reason 和 skill injection detail 仍未完整展示，继续保留在 Trace UI 后续项中。
+
+### 细化 Run Trace 面板分区
+
+- 变更：`RunTracePanel` 从单纯事件列表扩展为按 runtime 语义分区展示 run snapshot、intent、context、plan、step timeline、prompt parts、capabilities、tool IO、retry、artifacts、canvas operations、evaluation、errors 和 graph patches；Context 区会显示 selected/omitted reason、token estimate、tool exposure reason 和 skill injection reason，Plan 区会显示 raw plan、normalized plan 和 validation detail。
+- 变更：新增 `summarizeRunTrace` 纯摘要测试，覆盖 intent/context/plan validation/retry/canvas operation/evaluation 的前端提取逻辑。
+- 文件：`src/components/RunTracePanel.tsx`、`src/components/run-trace-summary.ts`、`src/components/RunTracePanel.test.tsx`、`README.md`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm test -- server/runtime/retry.test.ts server/model-providers.test.ts server/runtime/runtime.test.ts server/agent-router.test.ts server/capabilities.test.ts src/components/RunTracePanel.test.tsx src/lib/runtime-event-renderer.test.ts src/lib/graph-projection.test.ts`、`pnpm lint`、`pnpm build` 通过。
+- 备注：tool schema digest、tool duration/logs、context selected reason 和 skill injection detail 仍未完整展示，继续保留在 `agent-os-plan.md` 的未完成项。
+
+### 补齐 Tool Retry 与 Timeout 执行层
+
+- 变更：新增 `server/runtime/retry.ts`，工具执行通过 `runWithRetry` 包装，支持 timeout、max retries、backoff、retryable filter，并把重试写成 `retry.attempt` runtime event。
+- 变更：`runStep` 在执行 tool 后校验 tool output schema；tool timeout 会转成 `TOOL_TIMEOUT`，retryable error 才会重试。
+- 变更：扩展 runtime event 类型、前端 trace event union、RunTracePanel label 和 Supabase event check constraint，确保 Trace 能看到 retry attempt。
+- 文件：`server/runtime/retry.ts`、`server/runtime/retry.test.ts`、`server/runtime/executor.ts`、`src/types/runtime.ts`、`server/runtime/schemas.ts`、`server/run-kernel.ts`、`src/lib/graph-projection.ts`、`src/components/RunTracePanel.tsx`、`supabase/migrations/20260608005000_agent_runtime_core.sql`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm test -- server/runtime/retry.test.ts server/runtime/runtime.test.ts` 通过。
+
+### 接入 LLM Structured Router 与 Planner
+
+- 变更：新增 `generateStructuredObjectWithProvider`，DeepSeek 路径使用 AI SDK `Output.object({ schema })`，Ark 路径使用 JSON prompt 后继续通过 Zod schema parse；模型输出不符合 schema 时直接抛错。
+- 变更：`server/runtime/intent-router.ts` 的 `routeIntent` 改为 LLM structured output 主路径，prompt 只包含 normalized input、capability/tool allowlist、选中节点摘要和安全策略；deterministic router 仅保留为测试 fixture。
+- 变更：`server/runtime/planner.ts` 的 `createPlan` 改为 LLM structured output 主路径，prompt 注入 `IntentResult`、`BuiltContext` 和 allowed tool summaries，继续通过 `normalizePlan` 与 `validatePlanAgainstRegistry` 做确定性 gate。
+- 文件：`server/model-providers.ts`、`server/model-providers.test.ts`、`server/runtime/intent-router.ts`、`server/runtime/planner.ts`、`server/runtime/executor.ts`、`server/runtime/runtime.test.ts`、`README.md`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm test -- server/model-providers.test.ts server/runtime/runtime.test.ts server/agent-router.test.ts server/capabilities.test.ts` 通过。
+- 备注：当前仍未完成 tool timeout 执行控制、复杂非图片 executor、完整 canvas operation policy validation 和更细 Trace UI 分区。
+
+### 开发 Agent Runtime Core 第一版
+
+- 变更：将 `/api/agent-run` 主入口切到 `server/runtime/executor.ts`，新增一等 `AgentRun` runtime core：input normalizer、structured intent router、context builder、tool registry、schema-validated planner、generic `runStep` executor、runtime event writer、run store 和 evaluator。
+- 变更：当前图片链路通过 Tool Registry 执行 `vision.analyzeReferenceImages`、`prompt.expand`、`seedream.generateImage`、`canvas.attachArtifact`，继续向 AI SDK UI stream 写 `tool-input-available`、`tool-output-available`、`tool-output-error`，并写兼容的 `artifact.created` / `graph.patch.*` trace event。
+- 变更：新增 `src/types/runtime.ts`、`server/runtime/schemas.ts` 和 `src/lib/runtime-event-renderer.ts`；新增 Supabase migration `20260608005000_agent_runtime_core.sql`，创建 `agent_runs` / `agent_run_steps` 并扩展 `agent_run_step_events` 事件类型约束。
+- 文件：`server/api.ts`、`server/runtime/*`、`src/types/runtime.ts`、`src/lib/runtime-event-renderer.ts`、`src/lib/graph-projection.ts`、`src/components/RunTracePanel.tsx`、`server/supabase.ts`、`server/run-kernel.ts`、`supabase/migrations/20260608005000_agent_runtime_core.sql`、`server/runtime/runtime.test.ts`、`src/lib/runtime-event-renderer.test.ts`、`README.md`、`agent-os-plan.md`、`process.md`。
+- 验证：`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm test -- server/runtime/runtime.test.ts server/agent-router.test.ts server/capabilities.test.ts server/run-kernel.test.ts src/lib/graph-projection.test.ts src/lib/runtime-event-renderer.test.ts` 通过。
+- 备注：当前 planner/router 是 schema-validated deterministic adapter，还不是最终 LLM structured-output planner；非图片工具 executor、完整 Run node UI 拆分和更细 Trace 分区仍按 `agent-os-plan.md` 继续推进。
+
 ### 重写一等 Agent Runtime 开发文档
 
 - 变更：将 `agent-os-plan.md` 从三阶段 MVP 演进记录重写为两部分完整开发手册：Part 1 聚焦一等 Runtime Core，覆盖 `AgentRun` 数据结构、Input Layer、结构化 Intent Router、Context Builder、完整 Tool Registry、LLM Planner、通用 `executor.runStep`、错误/重试/Evaluator；Part 2 聚焦 ReactFlow Event Renderer 和产品集成，覆盖 Runtime event protocol、画布投影、节点 taxonomy、AI Elements 映射、trace/replay、canvas operation policy 和评估修正流。

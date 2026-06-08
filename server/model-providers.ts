@@ -1,10 +1,12 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import {
+  Output,
   generateText,
   streamText,
   type InferUIMessageChunk,
   type UIMessage,
 } from "ai";
+import type { z } from "zod";
 
 export const modelProviderIds = ["deepseek", "ark"] as const;
 export type ModelProviderId = (typeof modelProviderIds)[number];
@@ -25,6 +27,15 @@ type TextGenerationInput = {
   prompt: string;
   maxOutputTokens?: number;
   imageUrls?: string[];
+};
+
+type StructuredGenerationInput<T> = {
+  system: string;
+  prompt: string;
+  schema: z.ZodType<T>;
+  schemaName?: string;
+  schemaDescription?: string;
+  maxOutputTokens?: number;
 };
 
 type ArkResponsesRequestInput = {
@@ -106,6 +117,41 @@ export async function generateTextWithProvider(
   }
 
   return generateArkText(input);
+}
+
+export async function generateStructuredObjectWithProvider<T>(
+  providerId: ModelProviderId,
+  input: StructuredGenerationInput<T>
+): Promise<T> {
+  assertTextProviderConfigured(providerId);
+
+  if (providerId === "deepseek") {
+    const result = await generateText({
+      model: getDeepSeekModel(),
+      system: input.system,
+      prompt: input.prompt,
+      maxOutputTokens: input.maxOutputTokens,
+      output: Output.object({
+        schema: input.schema,
+        name: input.schemaName,
+        description: input.schemaDescription,
+      }),
+    });
+
+    return input.schema.parse(result.output);
+  }
+
+  const text = await generateArkText({
+    system: input.system,
+    prompt: [
+      input.prompt,
+      "",
+      "Return only a JSON object matching the requested schema. Do not wrap it in Markdown.",
+    ].join("\n"),
+    maxOutputTokens: input.maxOutputTokens,
+  });
+
+  return input.schema.parse(parseJsonObjectText(text));
 }
 
 export async function* streamTextWithProvider(
@@ -275,6 +321,23 @@ function formatArkInputText(input: TextGenerationInput) {
     "USER",
     input.prompt,
   ].join("\n");
+}
+
+function parseJsonObjectText(text: string) {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  const candidate = fenced?.[1]?.trim() ?? trimmed;
+
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      return JSON.parse(candidate.slice(start, end + 1));
+    }
+    throw new Error("Structured model output was not valid JSON.");
+  }
 }
 
 function collectTextFields(value: unknown): string[] {

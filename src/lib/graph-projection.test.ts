@@ -130,6 +130,109 @@ describe("graph projection", () => {
     });
   });
 
+  it("projects evaluator results into a user-level run node summary", () => {
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      events: [
+        event("run.created", "run-1", "run", {
+          prompt: "生成图片",
+          selectedNodeId: null,
+        }),
+        event("evaluation.completed", "run-1", "evaluation", {
+          evaluation: {
+            passed: false,
+            issues: [
+              {
+                code: "missing_artifact",
+                message: "没有生成可见结果",
+                severity: "error",
+              },
+              {
+                code: "weak_match",
+                message: "风格与需求不一致",
+                severity: "warning",
+              },
+            ],
+            recommendedActions: ["重新生成，并保留原始 prompt 上下文"],
+            needsRegeneration: true,
+          },
+        }),
+        event("run.failed", "run-1", "run", { status: "failed" }),
+      ],
+    });
+
+    const run = projection.nodes.find((node) => node.id === "run-1");
+    expect(run?.data.kind).toBe("run");
+    if (run?.data.kind !== "run") {
+      throw new Error("Expected run node");
+    }
+
+    expect(run.data.evaluation).toEqual({
+      passed: false,
+      issueCount: 2,
+      recommendedActions: ["重新生成，并保留原始 prompt 上下文"],
+      needsRegeneration: true,
+    });
+  });
+
+  it("projects intent, context, plan, and artifact into run summary items", () => {
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      events: [
+        event("run.created", "run-1", "run", {
+          prompt: "生成图片",
+          selectedNodeId: null,
+        }),
+        event("intent.routed", "run-1", "intent", {
+          intent: {
+            primaryIntent: "image_generation",
+            task: { kind: "image_generation" },
+          },
+        }),
+        event("context.built", "run-1", "context", {
+          context: {
+            selectedItems: [{ nodeId: "image-1" }, { nodeId: "prompt-1" }],
+            omittedItems: [{ nodeId: "doc-1" }],
+            trace: {
+              selectedCount: 2,
+              omittedCount: 1,
+            },
+          },
+        }),
+        event("plan.created", "run-1", "plan", {
+          normalizedPlan: [
+            { id: "expand", title: "Expand prompt" },
+            { id: "generate", title: "Generate image" },
+          ],
+        }),
+        event("artifact.created", "run-1", "generate", {
+          artifact: {
+            id: "image-1",
+            type: "image",
+            uri: "https://cdn.example/1.png",
+          },
+        }),
+      ],
+    });
+
+    const run = projection.nodes.find((node) => node.id === "run-1");
+    expect(run?.data.kind).toBe("run");
+    if (run?.data.kind !== "run") {
+      throw new Error("Expected run node");
+    }
+
+    expect(run.data.summaryItems).toEqual([
+      { kind: "intent", label: "意图", detail: "image generation" },
+      { kind: "context", label: "上下文", detail: "2 项，省略 1 项" },
+      {
+        kind: "plan",
+        label: "计划",
+        detail: "2 步：Expand prompt / Generate image",
+      },
+      { kind: "artifact", label: "产物", detail: "1 image" },
+    ]);
+  });
+
   it("rejects duplicate nodes, dangling edges, illegal kinds, and project mismatch", () => {
     const state = {
       projectId: "project-1",

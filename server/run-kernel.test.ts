@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  fromLegacyRunStatus,
+  toLegacyRunStatus,
+} from "../src/types/runtime";
+import { normalizeAgentInput } from "./runtime/input-normalizer";
+import { agentRunSchema } from "./runtime/schemas";
+import {
+  adaptKernelRunToAgentRun,
   completeKernelStep,
   createKernelRun,
   failKernelStep,
@@ -80,5 +87,114 @@ describe("run kernel contracts", () => {
 
     expect(event.type).toBe("tool.error");
     expect(event.payload.failedStepId).toBe("expand_prompt");
+  });
+
+  it("maps legacy and first-class run statuses both ways", () => {
+    expect(fromLegacyRunStatus("queued")).toBe("queued");
+    expect(fromLegacyRunStatus("running")).toBe("running");
+    expect(fromLegacyRunStatus("success")).toBe("completed");
+    expect(fromLegacyRunStatus("error")).toBe("failed");
+
+    expect(toLegacyRunStatus("queued")).toBe("queued");
+    expect(toLegacyRunStatus("routing")).toBe("running");
+    expect(toLegacyRunStatus("building_context")).toBe("running");
+    expect(toLegacyRunStatus("planning")).toBe("running");
+    expect(toLegacyRunStatus("running")).toBe("running");
+    expect(toLegacyRunStatus("waiting_approval")).toBe("running");
+    expect(toLegacyRunStatus("evaluating")).toBe("running");
+    expect(toLegacyRunStatus("completed")).toBe("success");
+    expect(toLegacyRunStatus("failed")).toBe("error");
+    expect(toLegacyRunStatus("cancelled")).toBe("error");
+  });
+
+  it("adapts a legacy kernel run into a schema-valid AgentRun", () => {
+    const run = createKernelRun({
+      id: "run-1",
+      projectId: "project-1",
+      runNodeId: "run-node-1",
+      steps: [
+        {
+          id: "generate_image",
+          label: "Generate image",
+          toolName: "generate_image",
+        },
+      ],
+      createdAt: "2026-06-08T00:00:00.000Z",
+    });
+    run.artifacts.push({
+      id: "artifact-1",
+      type: "image",
+      uri: "https://cdn.example/image.png",
+      title: "Generated image",
+    });
+    run.graphPatchProposals.push({
+      id: "patch-1",
+      type: "attachArtifact",
+      payload: {
+        nodeId: "run-node-1",
+        artifactId: "artifact-1",
+      },
+      status: "applied",
+    });
+
+    startKernelStep(run, "generate_image", "2026-06-08T00:00:01.000Z");
+    failKernelStep(
+      run,
+      "generate_image",
+      "Seedream returned no image URL.",
+      "2026-06-08T00:00:02.000Z"
+    );
+
+    const input = normalizeAgentInput({
+      userId: "user-1",
+      projectId: "project-1",
+      runNodeId: "run-node-1",
+      modelProvider: "deepseek",
+      messages: [],
+      canvasContext: {
+        prompt: "生成图片",
+        promptNodeId: "prompt-1",
+        selectedNodeId: null,
+        upstreamContext: [],
+      },
+    });
+    const adapted = agentRunSchema.parse(
+      adaptKernelRunToAgentRun({ run, agentInput: input })
+    );
+
+    expect(adapted.status).toBe("failed");
+    expect(adapted.input.canvasContext.promptNodeId).toBe("prompt-1");
+    expect(adapted.input.canvasContext.runNodeId).toBe("run-node-1");
+    expect(adapted.artifacts).toHaveLength(1);
+    expect(adapted.canvasOperations).toEqual([
+      {
+        id: "patch-1",
+        type: "attachArtifact",
+        payload: {
+          nodeId: "run-node-1",
+          artifactId: "artifact-1",
+        },
+      },
+    ]);
+    expect(adapted.steps[0]).toMatchObject({
+      id: "generate_image",
+      planStepId: "generate_image",
+      status: "failed",
+      error: {
+        code: "legacy.run_step_error",
+        message: "Seedream returned no image URL.",
+        toolId: "generate_image",
+      },
+      output: {
+        ok: false,
+        data: {
+          legacyToolCall: {
+            name: "generate_image",
+            errorText: "Seedream returned no image URL.",
+          },
+        },
+      },
+    });
+    expect(adapted.errors[0].message).toBe("Seedream returned no image URL.");
   });
 });

@@ -102,6 +102,13 @@ export type PromptAssembly = {
   trace: PromptAssemblyTrace;
 };
 
+type RuntimePromptPart = {
+  id: string;
+  category: string;
+  content: string;
+  tokenEstimate: number;
+};
+
 type PromptAssemblyOptions = {
   tokenBudget?: number;
 };
@@ -570,6 +577,46 @@ export function assemblePromptParts(
       tokenEstimate: selected.reduce((total, part) => total + part.tokenEstimate, 0),
     },
   };
+}
+
+export function renderRuntimePromptParts(parts: RuntimePromptPart[]) {
+  return parts
+    .map((part) =>
+      formatSection(
+        getRuntimePromptPartSection(part),
+        [
+          `id: ${part.id}`,
+          `category: ${part.category}`,
+          "",
+          part.content,
+        ].join("\n")
+      )
+    )
+    .join("\n\n");
+}
+
+export function renderRuntimePromptAssembly(parts: RuntimePromptPart[]) {
+  const prompt = renderRuntimePromptParts(parts);
+
+  return {
+    prompt,
+    trace: {
+      promptDigest: createHash("sha256").update(prompt).digest("hex"),
+      selectedPromptPartIds: parts.map((part) => part.id),
+      omittedPromptPartIds: [],
+      tokenEstimate: parts.reduce(
+        (total, part) => total + part.tokenEstimate,
+        0
+      ),
+    },
+  };
+}
+
+function getRuntimePromptPartSection(part: RuntimePromptPart) {
+  return part.category
+    .replace(/[^a-z0-9]+/gi, "_")
+    .replace(/^_+|_+$/g, "")
+    .toUpperCase() || part.id.replace(/[^a-z0-9]+/gi, "_").toUpperCase();
 }
 
 function formatSection(name: string, content: string) {

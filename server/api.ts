@@ -47,7 +47,7 @@ import {
   type AppUser,
 } from "./supabase.ts";
 import { parseSkillZip } from "./skill-parser.ts";
-import { executeImageAgentRun } from "./run-kernel.ts";
+import { executeAgentRun } from "./runtime/executor.ts";
 
 loadServerEnv();
 
@@ -407,6 +407,7 @@ app.post("/api/agent-run", async (c) => {
   const body = await c.req.json();
   const messages = (body.messages ?? []) as UIMessage[];
   const canvasContext = canvasContextSchema.parse(body.canvasContext ?? {});
+  const attachments = z.array(z.unknown()).default([]).parse(body.attachments);
   const modelProvider = modelProviderSchema
     .default(getDefaultModelProviderId())
     .parse(body.modelProvider);
@@ -421,12 +422,15 @@ app.post("/api/agent-run", async (c) => {
   const stream = createUIMessageStream({
     originalMessages: messages,
     execute: async ({ writer }) => {
-      await executeImageAgentRun({
+      await executeAgentRun({
         canvasContext,
+        attachments,
         messages,
         modelProvider,
         projectId,
+        projectSnapshot: project,
         runNodeId,
+        userId: user.id,
         writer,
       });
     },
@@ -546,6 +550,19 @@ function getApiError(error: unknown) {
     return {
       message:
         "Run step event 存储表未创建，请先应用 supabase/migrations/20260608003000_agent_run_step_events.sql。",
+    };
+  }
+
+  if (
+    (combined.includes("agent_runs") || combined.includes("agent_run_steps")) &&
+    (combined.includes("Could not find the table") ||
+      combined.includes("schema cache") ||
+      combined.includes("relation") ||
+      combined.includes("does not exist"))
+  ) {
+    return {
+      message:
+        "Agent Runtime 存储表未创建，请先应用 supabase/migrations/20260608005000_agent_runtime_core.sql。",
     };
   }
 

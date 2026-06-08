@@ -9,6 +9,7 @@ import type {
   AgentCanvasNode,
   AgentRunStatus,
 } from "../src/types/canvas.ts";
+import type { AgentRun, AgentStep } from "../src/types/runtime.ts";
 
 export type AppUser = {
   id: string;
@@ -118,6 +119,16 @@ type CreateArtifactInput = {
   contentRef?: string | null;
   toolCallId?: string | null;
   sourceNodeId?: string | null;
+};
+
+type UpsertAgentRunSnapshotInput = {
+  run: AgentRun;
+};
+
+type UpsertAgentRunStepsInput = {
+  projectId: string;
+  runNodeId: string;
+  steps: AgentStep[];
 };
 
 type UpdateSkillInput = {
@@ -477,6 +488,64 @@ export async function recordRunStepEvent(input: RunStepEventInput) {
   }
 }
 
+export async function upsertAgentRunSnapshot({
+  run,
+}: UpsertAgentRunSnapshotInput) {
+  const client = getSupabaseClient();
+  const { error } = await client.from("agent_runs").upsert({
+    id: run.id,
+    user_id: run.userId,
+    project_id: run.projectId,
+    run_node_id: run.input.metadata.runNodeId,
+    status: run.status,
+    input: run.input,
+    intent: run.intent ?? null,
+    built_context: run.context ?? null,
+    plan: run.plan ?? null,
+    artifacts: run.artifacts,
+    canvas_operations: run.canvasOperations,
+    errors: run.errors,
+    evaluation: run.evaluation ?? null,
+    trace: run.trace,
+    created_at: run.createdAt,
+    updated_at: run.updatedAt,
+  });
+
+  if (error) {
+    throw error;
+  }
+}
+
+export async function upsertAgentRunSteps({
+  projectId,
+  runNodeId,
+  steps,
+}: UpsertAgentRunStepsInput) {
+  if (!steps.length) {
+    return;
+  }
+
+  const client = getSupabaseClient();
+  const { error } = await client.from("agent_run_steps").upsert(
+    steps.map((step) => ({
+      id: step.id,
+      project_id: projectId,
+      run_node_id: runNodeId,
+      plan_step_id: step.planStepId,
+      status: step.status,
+      input: summarizeJson(step.input),
+      output: summarizeJson(step.output),
+      error: step.error ?? null,
+      started_at: step.startedAt ?? null,
+      completed_at: step.completedAt ?? null,
+    }))
+  );
+
+  if (error) {
+    throw error;
+  }
+}
+
 export async function listRunStepEventsForUser({
   projectId,
   runNodeId,
@@ -730,6 +799,23 @@ function getSupabaseSecretKey() {
     process.env.SUPABASE_SECRET_KEY?.trim() ??
     process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
   );
+}
+
+function summarizeJson(value: unknown) {
+  if (value === undefined) {
+    return null;
+  }
+
+  const json = JSON.stringify(value);
+  if (json.length <= 16_000) {
+    return value;
+  }
+
+  return {
+    truncated: true,
+    originalBytes: Buffer.byteLength(json),
+    preview: json.slice(0, 16_000),
+  };
 }
 
 function mapUserRow(row: UserRow): AppUser {

@@ -1,6 +1,19 @@
 import { type UIMessage, type UIMessageStreamWriter } from "ai";
 import { z } from "zod";
 
+import type {
+  AgentCanvasEdge,
+  AgentCanvasNode,
+} from "../src/types/canvas.ts";
+import type {
+  AgentError,
+  AgentInput,
+  AgentRun,
+  AgentStep,
+  CanvasOperation,
+  ToolResult,
+} from "../src/types/runtime.ts";
+import { fromLegacyRunStatus } from "../src/types/runtime.ts";
 import {
   generateSeedreamImage,
   isSeedreamConfigured,
@@ -54,13 +67,24 @@ export const runStatusSchema = z.enum(["queued", "running", "success", "error"])
 export const runStepStatusSchema = z.enum(["queued", "running", "success", "error"]);
 export const runStepEventTypeSchema = z.enum([
   "run.created",
+  "input.normalized",
+  "intent.routed",
+  "context.built",
+  "plan.created",
   "step.started",
   "tool.input",
   "tool.output",
   "tool.error",
+  "retry.attempt",
+  "approval.requested",
+  "approval.responded",
   "artifact.created",
+  "canvas.operation.proposed",
+  "canvas.operation.applied",
+  "canvas.operation.rejected",
   "graph.patch.proposed",
   "graph.patch.applied",
+  "evaluation.completed",
   "run.completed",
   "run.failed",
 ]);
@@ -160,7 +184,7 @@ type RunStepDefinition = {
   toolName?: "analyze_reference_images" | "expand_prompt" | "generate_image";
 };
 
-type ImageAgentRunInput = {
+type LegacyImageAgentRunFixtureInput = {
   projectId: string;
   runNodeId: string;
   canvasContext: PromptCanvasContext;
@@ -272,14 +296,198 @@ export function completeKernelRun(run: Run, now = new Date().toISOString()) {
   return run;
 }
 
-export async function executeImageAgentRun({
+export function adaptKernelRunToAgentRun(input: {
+  run: Run;
+  agentInput: AgentInput;
+  userId?: string;
+}): AgentRun {
+  const errors = input.run.steps
+    .map((step) => legacyStepErrorToAgentError(step, input.run))
+    .filter((error): error is AgentError => Boolean(error));
+
+  return {
+    id: input.run.id,
+    userId: input.userId ?? input.agentInput.metadata.userId,
+    projectId: input.run.projectId,
+    status: fromLegacyRunStatus(input.run.status),
+    input: input.agentInput,
+    steps: input.run.steps.map((step) => adaptKernelStepToAgentStep(step, input.run)),
+    artifacts: input.run.artifacts,
+    canvasOperations: input.run.graphPatchProposals
+      .map(adaptGraphPatchProposalToCanvasOperation)
+      .filter((operation): operation is CanvasOperation => Boolean(operation)),
+    errors,
+    trace: {
+      events: [],
+      validation: {
+        adapter: "server/run-kernel.adaptKernelRunToAgentRun",
+        legacyStatus: input.run.status,
+      },
+    },
+    createdAt: input.run.createdAt,
+    updatedAt: input.run.updatedAt,
+  };
+}
+
+function adaptKernelStepToAgentStep(step: RunStep, run: Run): AgentStep {
+  const error = legacyStepErrorToAgentError(step, run);
+  const output = legacyStepToolResult(step, run, error);
+
+  return {
+    id: step.id,
+    planStepId: step.id,
+    status: legacyStepStatusToAgentStepStatus(step.status),
+    input: step.toolCall?.input,
+    output,
+    error,
+    startedAt: step.startedAt,
+    completedAt: step.completedAt,
+  };
+}
+
+function legacyStepStatusToAgentStepStatus(
+  status: RunStepStatus
+): AgentStep["status"] {
+  if (status === "error") {
+    return "failed";
+  }
+  return status;
+}
+
+function legacyStepErrorToAgentError(
+  step: RunStep,
+  run: Run
+): AgentError | undefined {
+  const message = step.errorText ?? step.toolCall?.errorText;
+  if (!message) {
+    return undefined;
+  }
+
+  return {
+    id: `legacy-error-${run.id}-${step.id}`,
+    code: "legacy.run_step_error",
+    message,
+    retryable: false,
+    severity: "error",
+    stepId: step.id,
+    toolId: step.toolCall?.name,
+    details: {
+      legacyRunId: run.id,
+      legacyRunStatus: run.status,
+      legacyStepStatus: step.status,
+    },
+    createdAt: step.completedAt ?? run.updatedAt,
+  };
+}
+
+function legacyStepToolResult(
+  step: RunStep,
+  run: Run,
+  error?: AgentError
+): ToolResult | undefined {
+  if (!step.toolCall && !error) {
+    return undefined;
+  }
+
+  return {
+    ok: !error,
+    data: step.toolCall ? { legacyToolCall: step.toolCall } : undefined,
+    artifacts: run.artifacts,
+    canvasOperations: [],
+    logs: [],
+    error,
+  };
+}
+
+function adaptGraphPatchProposalToCanvasOperation(
+  patch: GraphPatchProposal
+): CanvasOperation | undefined {
+  if (patch.status === "rejected") {
+    return undefined;
+  }
+
+  if (patch.type === "createNode" && isRecord(patch.payload.node)) {
+    return {
+      id: patch.id,
+      type: "createNode",
+      payload: { node: patch.payload.node as AgentCanvasNode },
+    };
+  }
+
+  if (
+    patch.type === "updateNode" &&
+    typeof patch.payload.nodeId === "string" &&
+    isRecord(patch.payload.patch)
+  ) {
+    return {
+      id: patch.id,
+      type: "updateNode",
+      payload: {
+        nodeId: patch.payload.nodeId,
+        data: patch.payload.patch,
+      },
+    } as CanvasOperation;
+  }
+
+  if (patch.type === "createEdge" && isRecord(patch.payload.edge)) {
+    return {
+      id: patch.id,
+      type: "createEdge",
+      payload: { edge: patch.payload.edge as AgentCanvasEdge },
+    };
+  }
+
+  if (
+    patch.type === "setNodeStatus" &&
+    typeof patch.payload.nodeId === "string" &&
+    typeof patch.payload.status === "string"
+  ) {
+    return {
+      id: patch.id,
+      type: "setNodeStatus",
+      payload: {
+        nodeId: patch.payload.nodeId,
+        status: patch.payload.status,
+        error:
+          typeof patch.payload.error === "string" ? patch.payload.error : undefined,
+      },
+    };
+  }
+
+  if (
+    patch.type === "attachArtifact" &&
+    typeof patch.payload.nodeId === "string" &&
+    typeof patch.payload.artifactId === "string"
+  ) {
+    return {
+      id: patch.id,
+      type: "attachArtifact",
+      payload: {
+        nodeId: patch.payload.nodeId,
+        artifactId: patch.payload.artifactId,
+      },
+    };
+  }
+
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+/**
+ * @deprecated Legacy image-only orchestration kept as a compatibility fixture.
+ * The `/api/agent-run` endpoint uses `server/runtime/executor.ts` instead.
+ */
+export async function executeLegacyImageAgentRunForTests({
   canvasContext,
   messages,
   modelProvider,
   projectId,
   runNodeId,
   writer,
-}: ImageAgentRunInput) {
+}: LegacyImageAgentRunFixtureInput) {
   const requestedResultCount = safeInferSeedreamResultCount(canvasContext.prompt);
   const referenceImages = selectReferenceImages(
     canvasContext,

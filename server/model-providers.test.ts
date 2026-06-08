@@ -1,8 +1,10 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildArkResponsesRequest,
   extractArkResponseText,
+  generateStructuredObjectWithProvider,
   getDefaultModelProviderId,
   getModelProviderSummaries,
   readArkMaxReferenceImagesFromEnv,
@@ -12,6 +14,7 @@ const originalEnv = { ...process.env };
 
 afterEach(() => {
   process.env = { ...originalEnv };
+  vi.restoreAllMocks();
 });
 
 describe("model providers", () => {
@@ -81,5 +84,29 @@ describe("model providers", () => {
 
     process.env.ARK_MAX_REFERENCE_IMAGES = "2";
     expect(readArkMaxReferenceImagesFromEnv()).toBe(2);
+  });
+
+  it("generates structured objects through the Ark JSON parse path", async () => {
+    process.env.ARK_API_KEY = "ark-secret";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        output_text: '```json\n{"kind":"image_generation","confidence":0.91}\n```',
+      }),
+    } as Response);
+
+    const output = await generateStructuredObjectWithProvider("ark", {
+      system: "Return JSON.",
+      prompt: "Route this request.",
+      schema: z.object({
+        kind: z.literal("image_generation"),
+        confidence: z.number(),
+      }),
+    });
+
+    expect(output).toEqual({
+      kind: "image_generation",
+      confidence: 0.91,
+    });
   });
 });

@@ -91,6 +91,19 @@ export type RunStepTimelineItem = {
   errorText?: string;
 };
 
+export type RunEvaluationSummary = {
+  passed: boolean;
+  issueCount: number;
+  recommendedActions: string[];
+  needsRegeneration: boolean;
+};
+
+export type RunSummaryItem = {
+  kind: "intent" | "context" | "plan" | "artifact";
+  label: string;
+  detail?: string;
+};
+
 export type PromptNodeData = {
   kind: "prompt";
   prompt: string;
@@ -108,6 +121,8 @@ export type RunNodeData = {
   error?: string;
   stepTimeline?: RunStepTimelineItem[];
   decision?: string;
+  evaluation?: RunEvaluationSummary;
+  summaryItems?: RunSummaryItem[];
   traceAvailable?: boolean;
 };
 

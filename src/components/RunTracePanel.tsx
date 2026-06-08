@@ -10,6 +10,12 @@ import { useMemo } from "react";
 import type { ReactNode } from "react";
 
 import type { RunStepTraceEvent } from "@/lib/graph-projection";
+import {
+  getEventLabel,
+  shortId,
+  summarizeRunTrace,
+  summarizeUnknown,
+} from "./run-trace-summary";
 
 type RunTracePanelProps = {
   error: string | null;
@@ -102,6 +108,78 @@ export function RunTracePanel({
 
       {!loading && !error && events.length > 0 && (
         <div className="trace-sections">
+          <TraceSection title="Run Snapshot">
+            <TraceKeyValue label="Status" value={summary.runStatus} />
+            <TraceKeyValue label="Prompt" value={summary.prompt} />
+            <TraceKeyValue label="Events" value={String(events.length)} />
+          </TraceSection>
+
+          <TraceSection title="Intent">
+            <TraceKeyValue label="Primary" value={summary.intent.primaryIntent} />
+            <TraceKeyValue label="Task" value={summary.intent.taskKind} />
+            <TraceKeyValue label="Reason" value={summary.intent.routingReason} />
+            <div className="trace-chip-row">
+              {summary.intent.requiredTools.map((toolId) => (
+                <span className="trace-chip" key={toolId}>
+                  {toolId}
+                </span>
+              ))}
+              {!summary.intent.requiredTools.length && (
+                <span className="trace-muted">无</span>
+              )}
+            </div>
+          </TraceSection>
+
+          <TraceSection title="Context">
+            <TraceKeyValue
+              label="Selected"
+              value={summary.context.selectedCount}
+            />
+            <TraceKeyValue label="Omitted" value={summary.context.omittedCount} />
+            <TraceKeyValue label="Budget" value={summary.context.budget} />
+            <TraceKeyValue label="Tools" value={summary.context.availableTools} />
+            <TraceKeyValue
+              label="Tool Reason"
+              value={summary.context.toolExposureReason}
+            />
+            <TraceKeyValue
+              label="Skill Reason"
+              value={summary.context.skillInjectionReason}
+            />
+            <TraceKeyValue
+              label="Selected Detail"
+              value={summary.context.selectedReasons}
+            />
+            <TraceKeyValue
+              label="Omitted Detail"
+              value={summary.context.omittedReasons}
+            />
+          </TraceSection>
+
+          <TraceSection title="Plan">
+            <TraceKeyValue label="Steps" value={summary.plan.stepCount} />
+            <TraceKeyValue label="Validation" value={summary.plan.validation} />
+            <TraceKeyValue label="Raw" value={summary.plan.rawPlan} />
+            <TraceKeyValue
+              label="Normalized"
+              value={summary.plan.normalizedPlan}
+            />
+            <TraceKeyValue
+              label="Validation Detail"
+              value={summary.plan.validationDetail}
+            />
+            <div className="trace-chip-row">
+              {summary.plan.toolIds.map((toolId) => (
+                <span className="trace-chip" key={toolId}>
+                  {toolId}
+                </span>
+              ))}
+              {!summary.plan.toolIds.length && (
+                <span className="trace-muted">无</span>
+              )}
+            </div>
+          </TraceSection>
+
           <TraceSection title="Step Timeline">
             <div className="trace-step-list">
               {summary.steps.map((step) => (
@@ -162,6 +240,15 @@ export function RunTracePanel({
             </div>
           </TraceSection>
 
+          <TraceSection title="Retry">
+            <div className="trace-event-list">
+              {summary.retryEvents.map((event) => (
+                <TraceEventRow event={event} key={event.id ?? event.createdAt} />
+              ))}
+              {!summary.retryEvents.length && <span className="trace-muted">无</span>}
+            </div>
+          </TraceSection>
+
           <TraceSection title="Artifacts">
             <div className="trace-chip-row">
               {summary.artifacts.map((artifact) => (
@@ -170,6 +257,35 @@ export function RunTracePanel({
                 </span>
               ))}
               {!summary.artifacts.length && <span className="trace-muted">无</span>}
+            </div>
+          </TraceSection>
+
+          <TraceSection title="Canvas Operations">
+            <div className="trace-event-list">
+              {summary.canvasOperationEvents.map((event) => (
+                <TraceEventRow event={event} key={event.id ?? event.createdAt} />
+              ))}
+              {!summary.canvasOperationEvents.length && (
+                <span className="trace-muted">无</span>
+              )}
+            </div>
+          </TraceSection>
+
+          <TraceSection title="Evaluation">
+            <TraceKeyValue label="Passed" value={summary.evaluation.passed} />
+            <TraceKeyValue label="Issues" value={summary.evaluation.issues} />
+            <TraceKeyValue
+              label="Actions"
+              value={summary.evaluation.recommendedActions}
+            />
+          </TraceSection>
+
+          <TraceSection title="Errors">
+            <div className="trace-event-list">
+              {summary.errorEvents.map((event) => (
+                <TraceEventRow event={event} key={event.id ?? event.createdAt} />
+              ))}
+              {!summary.errorEvents.length && <span className="trace-muted">无</span>}
             </div>
           </TraceSection>
 
@@ -247,183 +363,4 @@ function TraceEventRow({ event }: { event: RunStepTraceEvent }) {
       </small>
     </div>
   );
-}
-
-function summarizeRunTrace(events: RunStepTraceEvent[]) {
-  const completion =
-    events.find((event) => event.type === "run.completed") ??
-    events.find((event) => event.type === "run.failed") ??
-    events.find((event) => event.type === "run.created");
-  const promptTrace = findPromptTrace(completion?.payload.promptTrace);
-  const runCreated = events.find((event) => event.type === "run.created");
-
-  return {
-    artifacts: events.flatMap((event) => {
-      const artifact = event.payload.artifact;
-      return event.type === "artifact.created" && isTraceArtifact(artifact)
-        ? [artifact]
-        : [];
-    }),
-    contextTrace:
-      runCreated?.payload.contextTrace &&
-      typeof runCreated.payload.contextTrace === "object"
-        ? runCreated.payload.contextTrace
-        : null,
-    graphPatchEvents: events.filter(
-      (event) =>
-        event.type === "graph.patch.proposed" ||
-        event.type === "graph.patch.applied"
-    ),
-    omittedPromptPartIds: promptTrace.omittedPromptPartIds,
-    promptDigest: promptTrace.promptDigest,
-    selectedCapabilityIds: readStringArray(
-      runCreated?.payload.selectedCapabilityIds
-    ),
-    selectedPromptPartIds: promptTrace.selectedPromptPartIds,
-    steps: buildTraceSteps(events),
-    toolEvents: events.filter(
-      (event) =>
-        event.type === "tool.input" ||
-        event.type === "tool.output" ||
-        event.type === "tool.error"
-    ),
-  };
-}
-
-function buildTraceSteps(events: RunStepTraceEvent[]) {
-  const steps = new Map<
-    string,
-    {
-      id: string;
-      label: string;
-      status: "queued" | "running" | "success" | "error";
-      toolName?: string;
-    }
-  >();
-  const completed = events.some((event) => event.type === "run.completed");
-
-  for (const event of events) {
-    if (event.type === "step.started") {
-      steps.set(event.stepId, {
-        id: event.stepId,
-        label: readString(event.payload.label) ?? event.stepId,
-        status: "running",
-      });
-    }
-    if (event.type === "tool.input" || event.type === "tool.output") {
-      const previous = steps.get(event.stepId);
-      steps.set(event.stepId, {
-        id: event.stepId,
-        label: previous?.label ?? event.stepId,
-        status: event.type === "tool.output" ? "success" : "running",
-        toolName: readString(event.payload.toolName) ?? previous?.toolName,
-      });
-    }
-    if (event.type === "tool.error") {
-      const previous = steps.get(event.stepId);
-      steps.set(event.stepId, {
-        id: event.stepId,
-        label: previous?.label ?? event.stepId,
-        status: "error",
-        toolName: readString(event.payload.toolName) ?? previous?.toolName,
-      });
-    }
-  }
-
-  return Array.from(steps.values()).map((step) =>
-    completed && step.status === "running" ? { ...step, status: "success" } : step
-  );
-}
-
-function findPromptTrace(value: unknown): {
-  promptDigest?: string;
-  selectedPromptPartIds: string[];
-  omittedPromptPartIds: string[];
-} {
-  if (!value || typeof value !== "object") {
-    return {
-      selectedPromptPartIds: [],
-      omittedPromptPartIds: [],
-    };
-  }
-
-  const traces = Object.values(value as Record<string, unknown>);
-  const trace = traces.find(
-    (item) =>
-      item &&
-      typeof item === "object" &&
-      Array.isArray((item as { selectedPromptPartIds?: unknown }).selectedPromptPartIds)
-  ) as
-    | {
-        promptDigest?: unknown;
-        selectedPromptPartIds?: unknown;
-        omittedPromptPartIds?: unknown;
-      }
-    | undefined;
-
-  return {
-    promptDigest: readString(trace?.promptDigest),
-    selectedPromptPartIds: readStringArray(trace?.selectedPromptPartIds),
-    omittedPromptPartIds: readStringArray(trace?.omittedPromptPartIds),
-  };
-}
-
-function getEventLabel(event: RunStepTraceEvent) {
-  const labels: Record<RunStepTraceEvent["type"], string> = {
-    "artifact.created": "Artifact",
-    "graph.patch.applied": "Patch applied",
-    "graph.patch.proposed": "Patch proposed",
-    "run.completed": "Run completed",
-    "run.created": "Run created",
-    "run.failed": "Run failed",
-    "step.started": "Step",
-    "tool.error": "Tool error",
-    "tool.input": "Tool input",
-    "tool.output": "Tool output",
-  };
-
-  return labels[event.type];
-}
-
-function isTraceArtifact(value: unknown): value is {
-  id: string;
-  type: string;
-  title?: string;
-} {
-  return (
-    Boolean(value) &&
-    typeof value === "object" &&
-    typeof (value as { id?: unknown }).id === "string" &&
-    typeof (value as { type?: unknown }).type === "string"
-  );
-}
-
-function summarizeUnknown(value: unknown) {
-  if (value === null || value === undefined) {
-    return "无";
-  }
-  if (typeof value === "string") {
-    return value.length > 180 ? `${value.slice(0, 180)}...` : value;
-  }
-
-  try {
-    const text = JSON.stringify(value);
-    return text.length > 180 ? `${text.slice(0, 180)}...` : text;
-  } catch {
-    return String(value);
-  }
-}
-
-function readString(value: unknown) {
-  return typeof value === "string" && value.trim() ? value : undefined;
-}
-
-function readStringArray(value: unknown) {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string")
-    : [];
-}
-
-function shortId(value: string) {
-  return value.length > 18 ? `${value.slice(0, 8)}...${value.slice(-5)}` : value;
 }

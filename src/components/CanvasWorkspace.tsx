@@ -16,8 +16,6 @@ import {
   ArrowUpRight,
   Box,
   Check,
-  ChevronDown,
-  CircleAlert,
   CircleDot,
   Cpu,
   Database,
@@ -26,8 +24,8 @@ import {
   Globe2,
   Image,
   Layers,
-  ListTree,
   MousePointer2,
+  Paperclip,
   Palette,
   PenLine,
   Plus,
@@ -47,14 +45,18 @@ import { FileUploadOverlay } from "@/components/FileUploadOverlay";
 import { MarkdownPreview } from "@/components/MarkdownPreview";
 import { Node, NodeContent } from "@/components/ai-elements/node";
 import { ReplayBanner, RunTracePanel } from "@/components/RunTracePanel";
+import { RunNodeView } from "@/components/RunNodeView";
 import { SkillPanel } from "@/components/SkillPanel";
 import { useCanvasFileDrop } from "@/components/useCanvasFileDrop";
 import {
   PromptInput,
   PromptInputBody,
   PromptInputFooter,
+  PromptInputHeader,
   PromptInputSubmit,
   PromptInputTextarea,
+  usePromptInputAttachments,
+  type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import {
   Select,
@@ -75,20 +77,20 @@ import {
   loadProject,
   loadRunTrace,
   updateProject,
+  type PersistedProject,
 } from "@/lib/project-storage";
 import {
+  buildRunRevisionPrompt,
+  collectUpstreamContext,
   createRunDraft,
-  extractImagesFromToolOutput,
-  shouldCreateMarkdownFromAgentText,
+  getRunRevisionAnchorNodeId,
   getRunReferenceNodeId,
-  textFromMessageParts,
-  toolPartsFromMessageParts,
 } from "@/lib/graph";
+import type { RunStepTraceEvent } from "@/lib/graph-projection";
 import {
-  projectRunTraceToCanvas,
-  projectToolOutputToCanvas,
-  type RunStepTraceEvent,
-} from "@/lib/graph-projection";
+  projectRuntimeEventsToCanvas,
+  runtimeEventsFromMessages,
+} from "@/lib/runtime-event-renderer";
 import type {
   AgentCanvasEdge,
   AgentCanvasNode,
@@ -97,8 +99,8 @@ import type {
   ImageResultNodeData,
   MarkdownNodeData,
   PromptNodeData,
-  RunNodeData,
 } from "@/types/canvas";
+import type { InputAttachment } from "@/types/runtime";
 
 const nodeTypes = {
   artifactNode: memo(ArtifactLikeNode),
@@ -107,7 +109,7 @@ const nodeTypes = {
   documentNode: memo(ArtifactLikeNode),
   memoryNode: memo(ArtifactLikeNode),
   promptNode: memo(PromptNode),
-  runNode: memo(RunNode),
+  runNode: memo(RunNodeView),
   imageResultNode: memo(ImageResultNode),
   markdownNode: memo(MarkdownNode),
   toolResultNode: memo(ArtifactLikeNode),
@@ -126,6 +128,7 @@ type AgentRunRequestBody = {
   projectId: string;
   runNodeId: string;
   modelProvider: ModelProviderId;
+  attachments: InputAttachment[];
   canvasContext: {
     prompt: string;
     promptNodeId: string;
@@ -167,10 +170,20 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const activeRunId = useRef<string | null>(null);
   const activeRunRequest = useRef<AgentRunRequestBody | null>(null);
   const hasLoadedProject = useRef(false);
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
   const saveTimer = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const isReplayMode = Boolean(replaySnapshot);
   const canvasNodes = replaySnapshot?.nodes ?? nodes;
   const canvasEdges = replaySnapshot?.edges ?? edges;
+
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+
+  useEffect(() => {
+    edgesRef.current = edges;
+  }, [edges]);
 
   const markRunError = useCallback(
     (runId: string | null, message: string) => {
@@ -214,84 +227,6 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     [setNodes]
   );
 
-  const updateRun = useCallback(
-    (
-      runId: string,
-      patch: Partial<Extract<AgentCanvasNode["data"], { kind: "run" }>>
-    ) => {
-      setNodes((current) =>
-        current.map((node) => {
-          if (node.id !== runId || node.data.kind !== "run") {
-            return node;
-          }
-
-          return {
-            ...node,
-            data: {
-              ...node.data,
-              ...patch,
-            },
-          };
-        })
-      );
-    },
-    [setNodes]
-  );
-
-  const addResultsForRun = useCallback(
-    (runId: string, output: unknown) => {
-      setNodes((currentNodes) => {
-        const runNode = currentNodes.find((node) => node.id === runId);
-        if (!runNode) {
-          return currentNodes;
-        }
-
-        const { resultNodes, resultEdges } = projectToolOutputToCanvas(
-          runNode,
-          output,
-          currentNodes
-        );
-
-        if (!resultNodes.length) {
-          return currentNodes;
-        }
-
-        setEdges((currentEdges) => [...currentEdges, ...resultEdges]);
-        return [...currentNodes, ...resultNodes];
-      });
-    },
-    [setEdges, setNodes]
-  );
-
-  const addMarkdownForRun = useCallback(
-    (runId: string, content: string) => {
-      setNodes((currentNodes) => {
-        const runNode = currentNodes.find((node) => node.id === runId);
-        if (!runNode || runNode.data.kind !== "run") {
-          return currentNodes;
-        }
-
-        const { resultNodes, resultEdges } = projectToolOutputToCanvas(
-          runNode,
-          {
-            markdown: content,
-            id: `${runId}-agent-text`,
-            title: "分析文档",
-          },
-          currentNodes
-        );
-
-        if (!resultNodes.length) {
-          return currentNodes;
-        }
-
-        setEdges((currentEdges) => [...currentEdges, ...resultEdges]);
-        return [...currentNodes, ...resultNodes];
-      });
-    },
-    [setEdges, setNodes]
-  );
-
   const {
     addToolApprovalResponse,
     messages,
@@ -319,6 +254,13 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   }, [nodes, selectedNodeIds]);
   const referenceNodeId = getRunReferenceNodeId(selectedNode);
   const referenceNode = referenceNodeId ? selectedNode : undefined;
+  const referenceContextCount = useMemo(
+    () =>
+      referenceNodeId
+        ? collectUpstreamContext(referenceNodeId, nodes, edges).length
+        : 0,
+    [edges, nodes, referenceNodeId]
+  );
   const persistedSelectedNodeId = referenceNodeId ?? null;
   const isBusy = status === "submitted" || status === "streaming";
   const hasPendingApproval = useMemo(
@@ -396,6 +338,49 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   }, []);
 
   useEffect(() => {
+    const handlePrepareRunRevision = (event: Event) => {
+      if (isReplayMode || isBusy) {
+        return;
+      }
+
+      const detail = (
+        event as CustomEvent<{ runNodeId?: unknown }>
+      ).detail;
+      if (typeof detail?.runNodeId !== "string") {
+        return;
+      }
+
+      const runNode = nodes.find(
+        (node) => node.id === detail.runNodeId && node.data.kind === "run"
+      );
+      if (!runNode || runNode.data.kind !== "run" || runNode.data.evaluation?.passed) {
+        return;
+      }
+
+      const anchorNodeId = getRunRevisionAnchorNodeId(runNode.id, nodes, edges);
+      setPrompt(buildRunRevisionPrompt(runNode.data));
+      setNodes((current) =>
+        applySelectedNodeIds(current, anchorNodeId ? [anchorNodeId] : [])
+      );
+      window.requestAnimationFrame(() => {
+        document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus();
+      });
+    };
+
+    window.addEventListener(
+      "cucumber:prepare-run-revision",
+      handlePrepareRunRevision
+    );
+
+    return () => {
+      window.removeEventListener(
+        "cucumber:prepare-run-revision",
+        handlePrepareRunRevision
+      );
+    };
+  }, [edges, isBusy, isReplayMode, nodes, setNodes]);
+
+  useEffect(() => {
     let ignore = false;
 
     hasLoadedProject.current = false;
@@ -403,7 +388,12 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     activeRunRequest.current = null;
 
     loadProject(projectId)
-      .then(({ project }) => {
+      .then(async ({ project }) => {
+        if (ignore) {
+          return;
+        }
+
+        const hydratedSnapshot = await hydrateProjectSnapshotFromLastRun(project);
         if (ignore) {
           return;
         }
@@ -416,11 +406,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         setTraceLoading(false);
         setReplaySnapshot(null);
         const nextSelectedNodeIds = getInitialSelectedNodeIds(
-          project.nodes,
+          hydratedSnapshot.nodes,
           project.selectedNodeId
         );
-        setNodes(applySelectedNodeIds(project.nodes, nextSelectedNodeIds));
-        setEdges(project.edges);
+        setNodes(applySelectedNodeIds(hydratedSnapshot.nodes, nextSelectedNodeIds));
+        setEdges(hydratedSnapshot.edges);
         activeRunId.current = project.lastRunId;
         hasLoadedProject.current = true;
         setStorageStatus("saved");
@@ -575,59 +565,44 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       return;
     }
 
-    const assistantMessage = [...messages]
-      .reverse()
-      .find((message) => message.role === "assistant");
-    const toolParts = toolPartsFromMessageParts(assistantMessage?.parts);
-    const toolPart = toolParts.find((part) => part.type === "tool-generate_image")
-      ?? toolParts.at(-1);
-    const agentText = textFromMessageParts(assistantMessage?.parts);
+    const runtimeEvents = runtimeEventsFromMessages(messages, {
+      runNodeId: runId,
+      projectId: loadedProjectId ?? undefined,
+      prompt: activeRunRequest.current?.canvasContext.prompt,
+      promptNodeId: activeRunRequest.current?.canvasContext.promptNodeId,
+      selectedNodeId: activeRunRequest.current?.canvasContext.selectedNodeId,
+      includeLegacyToolParts: true,
+    });
+    if (runtimeEvents.length) {
+      const projection = projectRuntimeEventsToCanvas({
+        projectId: loadedProjectId ?? undefined,
+        runNodeId: runId,
+        events: runtimeEvents,
+        existingSnapshot: {
+          nodes: nodesRef.current,
+          edges: edgesRef.current,
+        },
+      });
 
-    if (!toolPart) {
-      if (status === "submitted" || status === "streaming") {
-        updateRun(runId, { status: "running", agentText });
-      } else if (
-        shouldCreateMarkdownFromAgentText(
-          activeRunRequest.current?.canvasContext.prompt ?? "",
-          agentText
-        )
-      ) {
-        updateRun(runId, { status: "success", agentText });
-        addMarkdownForRun(runId, agentText);
-      }
+      setNodes((current) => mergeProjectedNodes(current, projection.nodes));
+      setEdges((current) => mergeProjectedEdges(current, projection.edges));
       return;
     }
-
-    updateRun(runId, {
-      status:
-        toolParts.some(
-          (part) => part.state === "output-error" || part.state === "output-denied"
-        )
-          ? "error"
-          : toolParts.some(
-                (part) =>
-                  part.type === "tool-generate_image" &&
-                  part.state === "output-available"
-              )
-            ? "success"
-            : "running",
-      agentText,
-      toolPart,
-      toolParts,
-      error: toolPart.errorText,
-    });
-
-    for (const outputToolPart of toolParts.filter(
-      (part) => part.state === "output-available"
-    )) {
-      addResultsForRun(runId, outputToolPart.output);
-    }
-  }, [addMarkdownForRun, addResultsForRun, messages, status, updateRun]);
+  }, [
+    loadedProjectId,
+    messages,
+    setEdges,
+    setNodes,
+    status,
+  ]);
 
   const handleSubmit = useCallback(
-    async (event?: FormEvent<HTMLFormElement>) => {
+    async (
+      message: PromptInputMessage = { files: [], text: prompt },
+      event?: FormEvent<HTMLFormElement>
+    ) => {
       event?.preventDefault();
-      const value = prompt.trim();
+      const value = (message.text || prompt).trim();
       if (!value || isBusy || hasPendingApproval) {
         return;
       }
@@ -648,6 +623,10 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         projectId: loadedProjectId,
         runNodeId: draft.runNode.id,
         modelProvider,
+        attachments: [
+          ...getAttachmentMetadata(message.files),
+          ...getWebpageLinkAttachments(value),
+        ],
         canvasContext: {
           prompt: value,
           promptNodeId: draft.promptNode.id,
@@ -703,12 +682,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       return;
     }
 
-    const projection = projectRunTraceToCanvas({
+    const projection = projectRuntimeEventsToCanvas({
       projectId: loadedProjectId,
       runNodeId: traceRunId,
       events: traceEvents,
-      existingNodes: nodes,
-      existingEdges: edges,
+      existingSnapshot: { nodes, edges },
     });
 
     setReplaySnapshot({
@@ -817,6 +795,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         approvalPending={hasPendingApproval}
         contextCount={contextCount}
         prompt={prompt}
+        referenceContextCount={referenceContextCount}
         referenceNode={referenceNode}
         replayActive={isReplayMode}
         selectionCount={selectedNodeIds.length}
@@ -872,6 +851,60 @@ function applySelectedNodeIds(
     const selected = selectedNodeIdSet.has(node.id);
     return node.selected === selected ? node : { ...node, selected };
   });
+}
+
+function mergeProjectedNodes(
+  current: AgentCanvasNode[],
+  projected: AgentCanvasNode[]
+) {
+  const projectedIds = new Set(projected.map((node) => node.id));
+  return [
+    ...current.filter((node) => !projectedIds.has(node.id)),
+    ...projected,
+  ];
+}
+
+function mergeProjectedEdges(
+  current: AgentCanvasEdge[],
+  projected: AgentCanvasEdge[]
+) {
+  const projectedIds = new Set(projected.map((edge) => edge.id));
+  return [
+    ...current.filter((edge) => !projectedIds.has(edge.id)),
+    ...projected,
+  ];
+}
+
+async function hydrateProjectSnapshotFromLastRun(project: PersistedProject) {
+  const snapshot = {
+    nodes: project.nodes,
+    edges: project.edges,
+  };
+
+  if (!project.lastRunId) {
+    return snapshot;
+  }
+
+  try {
+    const { events } = await loadRunTrace(project.id, project.lastRunId);
+    if (!events.length) {
+      return snapshot;
+    }
+
+    const projection = projectRuntimeEventsToCanvas({
+      projectId: project.id,
+      runNodeId: project.lastRunId,
+      events,
+      existingSnapshot: snapshot,
+    });
+
+    return {
+      nodes: projection.nodes,
+      edges: projection.edges,
+    };
+  } catch {
+    return snapshot;
+  }
 }
 
 function TopBar({
@@ -1050,6 +1083,7 @@ function Composer({
   approvalPending,
   contextCount,
   prompt,
+  referenceContextCount,
   referenceNode,
   replayActive,
   selectionCount,
@@ -1062,28 +1096,37 @@ function Composer({
   approvalPending: boolean;
   contextCount: number;
   prompt: string;
+  referenceContextCount: number;
   referenceNode?: AgentCanvasNode;
   replayActive: boolean;
   selectionCount: number;
   setPrompt: (value: string) => void;
   stop: () => void;
-  onSubmit: (event?: FormEvent<HTMLFormElement>) => void;
+  onSubmit: (
+    message: PromptInputMessage,
+    event?: FormEvent<HTMLFormElement>
+  ) => void;
 }) {
   const hasReference = Boolean(referenceNode);
   const hasMultiSelection = selectionCount > 1;
+  const footerContextLabel = hasReference
+    ? `${referenceContextCount} upstream items`
+    : hasMultiSelection
+      ? "多选不会进入上下文"
+      : `${contextCount} upstream items`;
 
   return (
     <div className="composer-wrap">
-      <div className="context-pill" data-active={hasReference}>
+      <div className="context-pill" data-active={hasReference || hasMultiSelection}>
         {hasReference
           ? `引用节点: ${getReferenceNodeLabel(referenceNode)}`
           : hasMultiSelection
-            ? `已选中 ${selectionCount} 个节点`
+            ? `已选中 ${selectionCount} 个节点，仅单个节点会作为引用`
           : "未引用节点"}
       </div>
       <PromptInput
         className="composer"
-        onSubmit={(_, event) => onSubmit(event)}
+        onSubmit={(message, event) => onSubmit(message, event)}
       >
         <PromptInputBody>
           <PromptInputTextarea
@@ -1103,12 +1146,11 @@ function Composer({
             onChange={(event) => setPrompt(event.currentTarget.value)}
           />
         </PromptInputBody>
+        <ComposerAttachmentStrip />
         <PromptInputFooter className="composer-footer">
-          <span>
-            {hasReference
-              ? "继续基于引用节点生成分支"
-              : `${contextCount} upstream items`}
-          </span>
+          <ComposerFooterStatus
+            label={hasReference ? "继续基于引用节点生成分支" : footerContextLabel}
+          />
           <PromptInputSubmit
             disabled={!prompt.trim() || !canSubmit}
             onStop={stop}
@@ -1117,6 +1159,62 @@ function Composer({
         </PromptInputFooter>
       </PromptInput>
     </div>
+  );
+}
+
+function ComposerAttachmentStrip() {
+  const attachments = usePromptInputAttachments();
+
+  if (!attachments.files.length) {
+    return null;
+  }
+
+  return (
+    <PromptInputHeader className="composer-attachments">
+      {attachments.files.map((file) => (
+        <span className="composer-attachment-chip" key={file.id} title={file.filename}>
+          <span>{file.filename ?? "Attachment"}</span>
+          <button
+            aria-label={`移除附件 ${file.filename ?? ""}`.trim()}
+            className="nodrag nopan"
+            onClick={(event) => {
+              event.stopPropagation();
+              attachments.remove(file.id);
+            }}
+            title="移除附件"
+            type="button"
+          >
+            <X size={11} />
+          </button>
+        </span>
+      ))}
+    </PromptInputHeader>
+  );
+}
+
+function ComposerFooterStatus({
+  label,
+}: {
+  label: string;
+}) {
+  const attachments = usePromptInputAttachments();
+
+  return (
+    <span className="composer-footer-status">
+      <button
+        aria-label="添加附件"
+        className="composer-attachment-button nodrag nopan"
+        onClick={(event) => {
+          event.stopPropagation();
+          attachments.openFileDialog();
+        }}
+        title="添加附件"
+        type="button"
+      >
+        <Paperclip size={12} />
+      </button>
+      <span>{label}</span>
+    </span>
   );
 }
 
@@ -1138,6 +1236,112 @@ function getReferenceNodeLabel(node?: AgentCanvasNode) {
   }
 
   return "";
+}
+
+function getAttachmentMetadata(files: PromptInputMessage["files"]): InputAttachment[] {
+  return files.map((file, index) => {
+    const name = file.filename?.trim() || `attachment-${index + 1}`;
+    const mimeType = file.mediaType || "application/octet-stream";
+    const isDataUrl = file.url.startsWith("data:");
+
+    return {
+      id: `composer-attachment-${index + 1}-${safeAttachmentId(name)}`,
+      kind: getAttachmentKind(mimeType, name),
+      name,
+      mimeType,
+      sizeBytes: isDataUrl ? estimateDataUrlSize(file.url) : undefined,
+      uri: isDataUrl ? undefined : file.url,
+      contentRef: isDataUrl
+        ? `composer-attachment://${encodeURIComponent(name)}`
+        : undefined,
+      preview: isDataUrl
+        ? `${mimeType} attachment captured as metadata`
+        : file.url,
+    };
+  });
+}
+
+function getWebpageLinkAttachments(promptText: string): InputAttachment[] {
+  const seen = new Set<string>();
+  const links: InputAttachment[] = [];
+
+  for (const token of promptText.split(/\s+/)) {
+    const normalized = parseWebpageUrl(token);
+    if (!normalized || seen.has(normalized.href)) {
+      continue;
+    }
+
+    seen.add(normalized.href);
+    links.push({
+      id: `webpage-${safeAttachmentId(normalized.href)}`,
+      kind: "webpage",
+      name: normalized.hostname,
+      uri: normalized.href,
+      contentRef: normalized.href,
+      preview: normalized.href,
+    });
+  }
+
+  return links;
+}
+
+function parseWebpageUrl(value: string) {
+  const trimmed = value.trim().replace(/[),.;，。；）]+$/u, "");
+  if (!/^https?:\/\//i.test(trimmed)) {
+    return null;
+  }
+
+  try {
+    return new URL(trimmed);
+  } catch {
+    return null;
+  }
+}
+
+function getAttachmentKind(
+  mimeType: string,
+  name: string
+): InputAttachment["kind"] {
+  const normalizedMime = mimeType.toLowerCase();
+  const extension = name.toLowerCase().split(".").at(-1) ?? "";
+
+  if (normalizedMime.startsWith("image/")) {
+    return "image";
+  }
+  if (
+    normalizedMime.includes("markdown") ||
+    normalizedMime.includes("document") ||
+    extension === "md"
+  ) {
+    return "doc";
+  }
+  if (
+    normalizedMime.includes("javascript") ||
+    normalizedMime.includes("typescript") ||
+    ["js", "jsx", "ts", "tsx", "css", "html", "json"].includes(extension)
+  ) {
+    return "code";
+  }
+  if (normalizedMime.includes("csv") || extension === "csv") {
+    return "dataset";
+  }
+  return "file";
+}
+
+function estimateDataUrlSize(url: string) {
+  const payload = url.split(",", 2)[1];
+  if (!payload) {
+    return undefined;
+  }
+  return Math.max(0, Math.floor((payload.length * 3) / 4));
+}
+
+function safeAttachmentId(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "file";
 }
 
 function getStorageStatusLabel(status: StorageStatus) {
@@ -1211,133 +1415,6 @@ function ArtifactLikeNode({ data, selected }: ArtifactLikeNodeProps) {
         </div>
         <strong title={data.title}>{data.title}</strong>
         {summary && <p title={summary}>{summary}</p>}
-      </NodeContent>
-    </Node>
-  );
-}
-
-function RunNode({
-  id,
-  data,
-  selected,
-}: NodeProps<FlowNode<RunNodeData, "runNode">>) {
-  const [expanded, setExpanded] = useState(true);
-  const toolParts = data.toolParts?.length
-    ? data.toolParts
-    : [
-        data.toolPart ?? {
-          type: "tool-expand_prompt",
-          state: "input-streaming",
-          input: { prompt: data.prompt },
-        } satisfies CanvasToolPart,
-      ];
-  const latestToolPart = toolParts.at(-1) ?? toolParts[0];
-
-  const statusIcon =
-    data.status === "success" ? (
-      <Check size={14} />
-    ) : data.status === "error" ? (
-      <CircleAlert size={14} />
-    ) : (
-      <Sparkles size={14} />
-    );
-
-  const hasToolDetail =
-    data.status !== "queued" ||
-    toolParts.some((part) => part.state !== "input-streaming");
-  const agentText = data.agentText?.trim() ?? "";
-  const hasRunOutput = Boolean(agentText) || hasToolDetail;
-  const title = getRunTitle(data.status, latestToolPart.state);
-  const toggleLabel = expanded ? "收起输出" : "展开输出";
-  const stepTimeline = data.stepTimeline?.length
-    ? data.stepTimeline
-    : toolParts.map((part, index) => ({
-        id: `${part.type}-${index}`,
-        label: getToolName(part),
-        status:
-          part.state === "output-error" || part.state === "output-denied"
-            ? "error"
-            : part.state === "output-available"
-              ? "success"
-              : "running",
-        toolName: getToolName(part),
-        errorText: part.errorText,
-      }));
-  const openTrace = () => {
-    window.dispatchEvent(
-      new CustomEvent("cucumber:open-run-trace", {
-        detail: { runNodeId: id },
-      })
-    );
-  };
-
-  return (
-    <Node
-      className={selected ? "canvas-node selected run-card" : "canvas-node run-card"}
-      handles={{ source: true, target: true }}
-    >
-      <NodeContent className="run-content">
-        <div className="run-heading">
-          <span className={`run-status-dot ${data.status}`}>{statusIcon}</span>
-          <span className="run-title">{title}</span>
-          <button
-            aria-label="查看 Run Trace"
-            className="run-trace-button nodrag nopan"
-            onClick={(event) => {
-              event.stopPropagation();
-              openTrace();
-            }}
-            title="查看 Trace"
-            type="button"
-          >
-            <ListTree size={12} />
-          </button>
-          <button
-            aria-expanded={expanded}
-            aria-label={toggleLabel}
-            className="run-toggle nodrag nopan"
-            data-expanded={expanded}
-            disabled={!hasRunOutput}
-            onClick={(event) => {
-              event.stopPropagation();
-              setExpanded((current) => !current);
-            }}
-            title={toggleLabel}
-            type="button"
-          >
-            <ChevronDown size={12} />
-          </button>
-        </div>
-        {hasRunOutput && expanded && (
-          <div className="run-stream">
-            {agentText && (
-              <p className="agent-text-output" title={agentText}>
-                {agentText}
-              </p>
-            )}
-            {stepTimeline.length > 0 && (
-              <div className="run-step-timeline" aria-label="Run step timeline">
-                {stepTimeline.map((step) => (
-                  <span
-                    className={`run-step-chip ${step.status}`}
-                    key={step.id}
-                    title={step.errorText ?? step.label}
-                  >
-                    {step.label}
-                  </span>
-                ))}
-              </div>
-            )}
-            {hasToolDetail &&
-              toolParts.map((part, index) => (
-                <ToolCallRow
-                  error={data.error}
-                  key={`${part.type}-${index}`}
-                  toolPart={part}
-                />
-              ))}
-          </div>
-        )}
       </NodeContent>
     </Node>
   );
@@ -1428,247 +1505,6 @@ function MarkdownNode({
       </NodeContent>
     </Node>
   );
-}
-
-function ToolCallRow({
-  error,
-  toolPart,
-}: {
-  error?: string;
-  toolPart: CanvasToolPart;
-}) {
-  const toolName = getToolName(toolPart);
-  const stateLabel = getToolStateLabel(toolPart.state);
-  const detailLines = getToolDetailLines(toolPart, error);
-  const isError = toolPart.state === "output-error";
-  const approvalId =
-    toolPart.state === "approval-requested" ? toolPart.approval?.id : undefined;
-
-  return (
-    <div className={isError ? "tool-call-row error" : "tool-call-row"}>
-      <div className="tool-call-main">
-        <span className="tool-call-action">
-          {toolPart.state === "output-available"
-            ? "完成"
-            : toolPart.state === "output-denied"
-              ? "拒绝"
-              : "调用"}
-        </span>
-        <strong title={toolName}>{toolName}</strong>
-        <span className={`tool-state ${toolPart.state}`}>
-          {getToolStateIcon(toolPart.state)}
-          {stateLabel}
-        </span>
-      </div>
-      <div className="tool-call-detail">
-        {detailLines.map((line) => (
-          <small className="tool-detail-line" key={line} title={line}>
-            {line}
-          </small>
-        ))}
-      </div>
-      {approvalId && (
-        <div className="tool-approval-actions">
-          <button
-            className="nodrag nopan"
-            onClick={(event) => {
-              event.stopPropagation();
-              dispatchToolApprovalResponse(approvalId, true);
-            }}
-            type="button"
-          >
-            <Check size={11} />
-            确认
-          </button>
-          <button
-            className="nodrag nopan secondary"
-            onClick={(event) => {
-              event.stopPropagation();
-              dispatchToolApprovalResponse(approvalId, false);
-            }}
-            type="button"
-          >
-            <X size={11} />
-            拒绝
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function dispatchToolApprovalResponse(approvalId: string, approved: boolean) {
-  window.dispatchEvent(
-    new CustomEvent("cucumber:respond-tool-approval", {
-      detail: { approvalId, approved },
-    })
-  );
-}
-
-function getRunTitle(status: RunNodeData["status"], state: CanvasToolPart["state"]) {
-  if (status === "error" || state === "output-error") {
-    return "生成失败";
-  }
-
-  if (status === "success") {
-    return "生成完成";
-  }
-
-  if (state === "input-available" || state === "output-available") {
-    return "调用工具";
-  }
-
-  if (state === "approval-requested") {
-    return "等待确认";
-  }
-
-  if (state === "approval-responded") {
-    return "继续执行";
-  }
-
-  return "Thinking...";
-}
-
-function getToolName(toolPart: CanvasToolPart) {
-  const names: Record<CanvasToolPart["type"], string> = {
-    "tool-analyze_reference_images": "参考图分析",
-    "tool-expand_prompt": "提示词扩写",
-    "tool-generate_image": "生成图片",
-  };
-
-  return names[toolPart.type];
-}
-
-function getToolStateIcon(state: CanvasToolPart["state"]) {
-  if (state === "output-available" || state === "approval-responded") {
-    return <Check size={11} />;
-  }
-
-  if (state === "output-error" || state === "output-denied") {
-    return <CircleAlert size={11} />;
-  }
-
-  return <Sparkles size={11} />;
-}
-
-function getToolStateLabel(state: CanvasToolPart["state"]) {
-  const labels: Record<CanvasToolPart["state"], string> = {
-    "approval-requested": "等待确认",
-    "approval-responded": "已确认",
-    "input-available": "运行中",
-    "input-streaming": "准备参数",
-    "output-available": "输出完成",
-    "output-denied": "已拒绝",
-    "output-error": "失败",
-  };
-
-  return labels[state];
-}
-
-function getToolDetailLines(toolPart: CanvasToolPart, error?: string) {
-  if (toolPart.state === "output-error") {
-    return [error ?? toolPart.errorText ?? "工具调用失败"];
-  }
-
-  if (toolPart.state === "output-available") {
-    return [...getToolOutputLines(toolPart), ...getToolInputLines(toolPart.input)];
-  }
-
-  if (toolPart.state === "output-denied") {
-    return ["工具调用被拒绝"];
-  }
-
-  if (toolPart.state === "approval-requested") {
-    return ["需要确认后继续执行"];
-  }
-
-  if (toolPart.state === "approval-responded") {
-    return [
-      toolPart.approval?.approved === false ? "已拒绝执行" : "已确认执行",
-    ];
-  }
-
-  return getToolInputLines(toolPart.input);
-}
-
-function getToolOutputLines(toolPart: CanvasToolPart) {
-  if (toolPart.type === "tool-analyze_reference_images") {
-    const output = toolPart.output as {
-      analysis?: unknown;
-      imageCount?: unknown;
-    };
-    const lines = [
-      typeof output?.imageCount === "number"
-        ? `参考图: ${output.imageCount} 张`
-        : "参考图分析完成",
-    ];
-
-    if (typeof output?.analysis === "string" && output.analysis.trim()) {
-      lines.push(`视觉摘要: ${output.analysis.trim()}`);
-    }
-
-    return lines;
-  }
-
-  if (toolPart.type === "tool-expand_prompt") {
-    const output = toolPart.output as { expandedPrompt?: unknown };
-    if (typeof output?.expandedPrompt === "string" && output.expandedPrompt.trim()) {
-      return [`扩写: ${output.expandedPrompt.trim()}`];
-    }
-
-    return ["扩写完成"];
-  }
-
-  const images = extractImagesFromToolOutput(toolPart.output);
-  return [images.length ? `输出 ${images.length} 张图片` : "输出已返回"];
-}
-
-function getToolInputLines(input: unknown) {
-  if (!input || typeof input !== "object") {
-    return ["等待工具参数"];
-  }
-
-  const candidate = input as {
-    prompt?: unknown;
-    imageCount?: unknown;
-    modelProvider?: unknown;
-    skillSlug?: unknown;
-    resultCount?: unknown;
-    upstreamContext?: unknown;
-  };
-  const lines: string[] = [];
-
-  if (typeof candidate.prompt === "string" && candidate.prompt.trim()) {
-    lines.push(`输入: ${candidate.prompt.trim()}`);
-  }
-
-  if (typeof candidate.modelProvider === "string" && candidate.modelProvider.trim()) {
-    lines.push(`模型: ${candidate.modelProvider.trim()}`);
-  }
-
-  if (typeof candidate.skillSlug === "string" && candidate.skillSlug.trim()) {
-    lines.push(`Skill: ${candidate.skillSlug.trim()}`);
-  }
-
-  if (
-    typeof candidate.resultCount === "number" &&
-    Number.isInteger(candidate.resultCount)
-  ) {
-    lines.push(`目标: ${candidate.resultCount} 张图片`);
-  }
-
-  if (
-    typeof candidate.imageCount === "number" &&
-    Number.isInteger(candidate.imageCount)
-  ) {
-    lines.push(`参考图: ${candidate.imageCount} 张`);
-  }
-
-  if (Array.isArray(candidate.upstreamContext)) {
-    lines.push(`上游上下文: ${candidate.upstreamContext.length} 项`);
-  }
-
-  return lines.length ? lines : ["工具参数已就绪"];
 }
 
 function ImageResultNode({

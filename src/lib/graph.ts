@@ -5,6 +5,7 @@ import type {
   CanvasToolPart,
   GeneratedImage,
   RunDraft,
+  RunNodeData,
   UpstreamContextItem,
   UpstreamContextType,
 } from "@/types/canvas";
@@ -68,6 +69,44 @@ export function getRunReferenceNodeId(node?: AgentCanvasNode) {
   }
 
   return node.id;
+}
+
+export function getRunRevisionAnchorNodeId(
+  runNodeId: string,
+  nodes: AgentCanvasNode[],
+  edges: AgentCanvasEdge[]
+) {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const resultCandidates = edges
+    .filter((edge) => edge.source === runNodeId)
+    .map((edge) => nodeById.get(edge.target))
+    .filter((node): node is AgentCanvasNode => Boolean(getRunReferenceNodeId(node)))
+    .sort((left, right) => getRevisionAnchorPriority(right) - getRevisionAnchorPriority(left));
+
+  if (resultCandidates[0]) {
+    return resultCandidates[0].id;
+  }
+
+  return (
+    edges
+      .filter((edge) => edge.target === runNodeId)
+      .map((edge) => nodeById.get(edge.source))
+      .find((node): node is AgentCanvasNode => Boolean(getRunReferenceNodeId(node)))
+      ?.id ?? null
+  );
+}
+
+export function buildRunRevisionPrompt(run: RunNodeData) {
+  const recommendation = run.evaluation?.recommendedActions[0]?.trim();
+  const action = run.evaluation?.needsRegeneration ? "重新生成" : "修正";
+
+  return [
+    `根据质量检查建议${action}。`,
+    recommendation ? `建议：${recommendation}` : null,
+    `原始需求：${run.prompt}`,
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n");
 }
 
 export function collectUpstreamContext(
@@ -484,6 +523,23 @@ function getNodeHeight(node: AgentCanvasNode) {
   }
 
   return RUN_NODE_HEIGHT;
+}
+
+function getRevisionAnchorPriority(node: AgentCanvasNode) {
+  if (node.data.kind === "imageResult") {
+    return 100;
+  }
+  if (node.data.kind === "markdown") {
+    return 90;
+  }
+  if (isArtifactBackedNode(node)) {
+    return 80;
+  }
+  if (node.data.kind === "prompt") {
+    return 60;
+  }
+
+  return 0;
 }
 
 function expandRect(rect: CanvasRect, padding: number): CanvasRect {

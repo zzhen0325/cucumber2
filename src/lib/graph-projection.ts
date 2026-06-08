@@ -12,34 +12,18 @@ import type {
   ArtifactRef,
   CanvasToolPart,
   GeneratedImage,
+  RunEvaluationSummary,
   RunStepTimelineItem,
+  RunSummaryItem,
 } from "@/types/canvas";
+import type { RuntimeEvent } from "@/types/runtime";
 
 const DEFAULT_PROMPT_POSITION = { x: 260, y: 210 };
 const RUN_OFFSET_Y = 124;
 const ARTIFACT_NODE_GAP_Y = 162;
 const ARTIFACT_NODE_GAP_X = 257;
 
-export type RunStepTraceEvent = {
-  id?: string;
-  projectId: string;
-  runNodeId: string;
-  stepId: string;
-  type:
-    | "run.created"
-    | "step.started"
-    | "tool.input"
-    | "tool.output"
-    | "tool.error"
-    | "artifact.created"
-    | "graph.patch.proposed"
-    | "graph.patch.applied"
-    | "run.completed"
-    | "run.failed";
-  payload: Record<string, unknown>;
-  errorText?: string | null;
-  createdAt: string;
-};
+export type RunStepTraceEvent = RuntimeEvent;
 
 export type GraphProjectionState = {
   projectId?: string;
@@ -330,6 +314,8 @@ export function projectRunTraceToCanvas({
         toolPart: toolParts.at(-1),
         toolParts,
         stepTimeline: buildStepTimeline(orderedEvents),
+        evaluation: readEvaluationSummary(orderedEvents),
+        summaryItems: buildRunSummaryItems(orderedEvents),
         traceAvailable: true,
         error: readRunError(orderedEvents),
       },
@@ -599,6 +585,153 @@ function buildStepTimeline(events: RunStepTraceEvent[]): RunStepTimelineItem[] {
 
     return step;
   });
+}
+
+function readEvaluationSummary(
+  events: RunStepTraceEvent[]
+): RunEvaluationSummary | undefined {
+  const event = events.findLast(
+    (candidate) => candidate.type === "evaluation.completed"
+  );
+  const evaluation = readRecord(event?.payload.evaluation);
+  if (!evaluation) {
+    return undefined;
+  }
+
+  const issues = Array.isArray(evaluation.issues) ? evaluation.issues : [];
+  const recommendedActions = Array.isArray(evaluation.recommendedActions)
+    ? evaluation.recommendedActions.filter(
+        (action): action is string => typeof action === "string" && action.length > 0
+      )
+    : [];
+
+  return {
+    passed: evaluation.passed === true,
+    issueCount: issues.length,
+    recommendedActions,
+    needsRegeneration: evaluation.needsRegeneration === true,
+  };
+}
+
+function buildRunSummaryItems(events: RunStepTraceEvent[]): RunSummaryItem[] {
+  const items: RunSummaryItem[] = [];
+  const intent = readIntentSummary(events);
+  const context = readContextSummary(events);
+  const plan = readPlanSummary(events);
+  const artifact = readArtifactSummary(events);
+
+  if (intent) {
+    items.push(intent);
+  }
+  if (context) {
+    items.push(context);
+  }
+  if (plan) {
+    items.push(plan);
+  }
+  if (artifact) {
+    items.push(artifact);
+  }
+
+  return items;
+}
+
+function readIntentSummary(events: RunStepTraceEvent[]): RunSummaryItem | undefined {
+  const event = events.find((candidate) => candidate.type === "intent.routed");
+  const intent = readRecord(event?.payload.intent);
+  const task = readRecord(intent?.task);
+  const taskKind = readString(task?.kind);
+  const primaryIntent = readString(intent?.primaryIntent);
+  const label = humanizeRuntimeLabel(taskKind ?? primaryIntent);
+  if (!label) {
+    return undefined;
+  }
+
+  return {
+    kind: "intent",
+    label: "意图",
+    detail: label,
+  };
+}
+
+function readContextSummary(events: RunStepTraceEvent[]): RunSummaryItem | undefined {
+  const event = events.find((candidate) => candidate.type === "context.built");
+  const context = readRecord(event?.payload.context);
+  const trace = readRecord(context?.trace);
+  const selectedItems = Array.isArray(context?.selectedItems)
+    ? context.selectedItems
+    : [];
+  const omittedItems = Array.isArray(context?.omittedItems)
+    ? context.omittedItems
+    : [];
+  const selectedCount = readNumber(trace?.selectedCount) ?? selectedItems.length;
+  const omittedCount = readNumber(trace?.omittedCount) ?? omittedItems.length;
+  if (!selectedCount && !omittedCount) {
+    return undefined;
+  }
+
+  return {
+    kind: "context",
+    label: "上下文",
+    detail: omittedCount
+      ? `${selectedCount} 项，省略 ${omittedCount} 项`
+      : `${selectedCount} 项`,
+  };
+}
+
+function readPlanSummary(events: RunStepTraceEvent[]): RunSummaryItem | undefined {
+  const event = events.find((candidate) => candidate.type === "plan.created");
+  const rawPlan = Array.isArray(event?.payload.rawPlan) ? event.payload.rawPlan : [];
+  const normalizedPlan = Array.isArray(event?.payload.normalizedPlan)
+    ? event.payload.normalizedPlan
+    : [];
+  const steps = normalizedPlan.length ? normalizedPlan : rawPlan;
+  if (!steps.length) {
+    return undefined;
+  }
+
+  const stepTitles = steps
+    .map((step) => readString(readRecord(step)?.title))
+    .filter((title): title is string => Boolean(title))
+    .slice(0, 2)
+    .map(humanizeRuntimeLabel)
+    .filter((title): title is string => Boolean(title));
+
+  return {
+    kind: "plan",
+    label: "计划",
+    detail: stepTitles.length
+      ? `${steps.length} 步：${stepTitles.join(" / ")}`
+      : `${steps.length} 步`,
+  };
+}
+
+function readArtifactSummary(events: RunStepTraceEvent[]): RunSummaryItem | undefined {
+  const artifactTypes = events.flatMap((event) => {
+    if (event.type !== "artifact.created") {
+      return [];
+    }
+    const artifact = readRecord(event.payload.artifact);
+    const type = readString(artifact?.type);
+    return type ? [type] : [];
+  });
+  if (!artifactTypes.length) {
+    return undefined;
+  }
+
+  const counts = new Map<string, number>();
+  for (const type of artifactTypes) {
+    counts.set(type, (counts.get(type) ?? 0) + 1);
+  }
+  const detail = Array.from(counts.entries())
+    .map(([type, count]) => `${count} ${humanizeRuntimeLabel(type)}`)
+    .join("，");
+
+  return {
+    kind: "artifact",
+    label: "产物",
+    detail,
+  };
 }
 
 function createArtifactCanvasNode({
@@ -932,6 +1065,23 @@ function readGraphPatch(
 
 function readString(value: unknown) {
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function readNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readRecord(value: unknown) {
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function humanizeRuntimeLabel(value: string | undefined) {
+  return value
+    ?.replace(/[_:.-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function readNullableString(value: unknown) {

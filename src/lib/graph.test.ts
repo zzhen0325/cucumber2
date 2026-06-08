@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildRunRevisionPrompt,
   collectUpstreamContext,
   collectUpstreamContextWithTrace,
   createImageResultNodes,
@@ -9,6 +10,7 @@ import {
   extractImagesFromToolOutput,
   extractMarkdownDocumentsFromToolOutput,
   getRunReferenceNodeId,
+  getRunRevisionAnchorNodeId,
   shouldCreateMarkdownFromAgentText,
   textFromMessageParts,
   toolPartFromMessagePart,
@@ -164,6 +166,60 @@ describe("agent canvas graph", () => {
         priority: 100,
       },
     ]);
+  });
+
+  it("prepares revision branches from a run result without overwriting artifacts", () => {
+    const nodes: AgentCanvasNode[] = [
+      promptNode("prompt-1", "初始需求"),
+      runNode("run-1", "初始需求"),
+      imageNode("image-1", "https://cdn.example/1.png", "初始需求"),
+    ];
+    const edges: AgentCanvasEdge[] = [
+      edge("prompt-1", "run-1"),
+      edge("run-1", "image-1"),
+    ];
+
+    const anchorNodeId = getRunRevisionAnchorNodeId("run-1", nodes, edges);
+    const draft = createRunDraft("重新生成", anchorNodeId, nodes, edges);
+
+    expect(anchorNodeId).toBe("image-1");
+    expect(draft.edges[0]).toMatchObject({
+      source: "image-1",
+      target: draft.promptNode.id,
+    });
+    expect(nodes.map((node) => node.id)).toContain("image-1");
+  });
+
+  it("falls back to the run prompt when a revision has no result artifact", () => {
+    const nodes: AgentCanvasNode[] = [
+      promptNode("prompt-1", "初始需求"),
+      runNode("run-1", "初始需求"),
+    ];
+    const edges: AgentCanvasEdge[] = [edge("prompt-1", "run-1")];
+
+    expect(getRunRevisionAnchorNodeId("run-1", nodes, edges)).toBe("prompt-1");
+  });
+
+  it("builds a revision prompt from evaluator recommendations", () => {
+    expect(
+      buildRunRevisionPrompt({
+        kind: "run",
+        prompt: "生成黄瓜海报",
+        status: "error",
+        evaluation: {
+          passed: false,
+          issueCount: 1,
+          recommendedActions: ["补足图片结果，并保留上游参考图"],
+          needsRegeneration: true,
+        },
+      })
+    ).toBe(
+      [
+        "根据质量检查建议重新生成。",
+        "建议：补足图片结果，并保留上游参考图",
+        "原始需求：生成黄瓜海报",
+      ].join("\n")
+    );
   });
 
   it("collects artifact-backed doc, code, webpage, decision, and memory context", () => {
