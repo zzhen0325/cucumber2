@@ -22,13 +22,29 @@ export type ArtifactRef = {
   contentRef?: string;
 };
 
+export type UpstreamContextType =
+  | "prompt"
+  | "image"
+  | "artifact"
+  | "decision"
+  | "memory"
+  | "tool_result"
+  | "doc"
+  | "code"
+  | "webpage"
+  | "dataset";
+
 export type UpstreamContextItem = {
   nodeId: string;
-  type: "prompt" | "image";
+  type: UpstreamContextType;
   prompt?: string;
   imageUrl?: string;
   summary?: string;
   artifact?: ArtifactRef;
+  title?: string;
+  contentRef?: string;
+  priority?: number;
+  omittedReason?: string;
 };
 
 export type GeneratedImage = {
@@ -59,6 +75,16 @@ export type CanvasToolPart = {
   errorText?: string;
 };
 
+export type RunStepTimelineItem = {
+  id: string;
+  label: string;
+  status: AgentRunStatus;
+  toolName?: string;
+  startedAt?: string;
+  completedAt?: string;
+  errorText?: string;
+};
+
 export type PromptNodeData = {
   kind: "prompt";
   prompt: string;
@@ -74,6 +100,9 @@ export type RunNodeData = {
   toolParts?: CanvasToolPart[];
   toolPart?: CanvasToolPart;
   error?: string;
+  stepTimeline?: RunStepTimelineItem[];
+  decision?: string;
+  traceAvailable?: boolean;
 };
 
 export type ImageResultNodeData = {
@@ -84,10 +113,58 @@ export type ImageResultNodeData = {
   runId: string;
 };
 
+export type ArtifactBackedNodeData = {
+  artifact: ArtifactRef;
+  title: string;
+  summary?: string;
+  prompt?: string;
+  runId?: string;
+  createdAt?: string;
+};
+
+export type ArtifactNodeData = ArtifactBackedNodeData & {
+  kind: "artifact";
+};
+
+export type DecisionNodeData = ArtifactBackedNodeData & {
+  kind: "decision";
+  decision: string;
+};
+
+export type MemoryNodeData = ArtifactBackedNodeData & {
+  kind: "memory";
+  memory: string;
+};
+
+export type ToolResultNodeData = ArtifactBackedNodeData & {
+  kind: "toolResult";
+  toolName?: string;
+};
+
+export type DocumentNodeData = ArtifactBackedNodeData & {
+  kind: "document";
+};
+
+export type CodeNodeData = ArtifactBackedNodeData & {
+  kind: "code";
+  language?: string;
+};
+
+export type WebpageNodeData = ArtifactBackedNodeData & {
+  kind: "webpage";
+};
+
 export type AgentCanvasNodeData =
   | PromptNodeData
   | RunNodeData
-  | ImageResultNodeData;
+  | ImageResultNodeData
+  | ArtifactNodeData
+  | DecisionNodeData
+  | MemoryNodeData
+  | ToolResultNodeData
+  | DocumentNodeData
+  | CodeNodeData
+  | WebpageNodeData;
 
 export type AgentCanvasNode = Node<AgentCanvasNodeData>;
 export type AgentCanvasEdge = Edge<{ active?: boolean }>;
@@ -97,4 +174,11 @@ export type RunDraft = {
   runNode: AgentCanvasNode;
   edges: AgentCanvasEdge[];
   upstreamContext: UpstreamContextItem[];
+  omittedContext: UpstreamContextItem[];
+  contextTrace?: {
+    selectedNodeId: string | null;
+    budget?: number;
+    omittedContextReason?: string;
+    omittedNodeIds: string[];
+  };
 };

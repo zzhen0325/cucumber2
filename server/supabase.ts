@@ -3,7 +3,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { canEditSkill } from "./skill-access.ts";
 import { canAccessProject } from "./project-access.ts";
 import { getProjectSummaryStats } from "../src/lib/project-summary.ts";
-import type { RunStepEventInput } from "./run-kernel.ts";
+import type { RunStepEventInput, RunStepEventType } from "./run-kernel.ts";
 import type {
   AgentCanvasEdge,
   AgentCanvasNode,
@@ -34,6 +34,17 @@ export type AgentProject = {
   lastRunId: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type AgentRunStepEvent = {
+  id: string;
+  projectId: string;
+  runNodeId: string;
+  stepId: string;
+  type: RunStepEventType;
+  payload: Record<string, unknown>;
+  errorText: string | null;
+  createdAt: string;
 };
 
 export type AgentSkill = {
@@ -172,6 +183,17 @@ type ArtifactRow = {
   content_ref: string | null;
   tool_call_id: string | null;
   source_node_id: string | null;
+  created_at: string;
+};
+
+type RunStepEventRow = {
+  id: string;
+  project_id: string;
+  run_node_id: string;
+  step_id: string;
+  type: RunStepEventType;
+  payload: Record<string, unknown> | null;
+  error_text: string | null;
   created_at: string;
 };
 
@@ -453,6 +475,36 @@ export async function recordRunStepEvent(input: RunStepEventInput) {
   if (error) {
     throw error;
   }
+}
+
+export async function listRunStepEventsForUser({
+  projectId,
+  runNodeId,
+  userId,
+}: {
+  projectId: string;
+  runNodeId: string;
+  userId: string;
+}) {
+  const existing = await getProjectRow(projectId);
+  if (!canAccessProject(userId, mapProjectAccess(existing))) {
+    return null;
+  }
+
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("agent_run_step_events")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("run_node_id", runNodeId)
+    .order("created_at", { ascending: true })
+    .returns<RunStepEventRow[]>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data.map(mapRunStepEventRow);
 }
 
 export async function createArtifact(input: CreateArtifactInput) {
@@ -778,6 +830,19 @@ function mapArtifactRow(row: ArtifactRow) {
     contentRef: row.content_ref ?? undefined,
     toolCallId: row.tool_call_id ?? undefined,
     sourceNodeId: row.source_node_id ?? undefined,
+    createdAt: row.created_at,
+  };
+}
+
+function mapRunStepEventRow(row: RunStepEventRow): AgentRunStepEvent {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    runNodeId: row.run_node_id,
+    stepId: row.step_id,
+    type: row.type,
+    payload: row.payload ?? {},
+    errorText: row.error_text,
     createdAt: row.created_at,
   };
 }

@@ -17,6 +17,16 @@
 
 ## 2026-06-08
 
+### 开发 Agent OS Part 3 Canvas OS、Memory 与 Replay
+
+- 变更：新增 `src/lib/graph-projection.ts`，将 run step events、artifact refs 和 graph patch proposal 投影为 `AgentCanvasNode` / `AgentCanvasEdge`；patch reducer 校验重复节点、断边、非法 node kind、非 Run 状态修改和 project id mismatch。
+- 变更：扩展画布节点 taxonomy，支持 Artifact、Decision、Memory、Tool Result、Document、Code、Webpage；Run 节点新增 step timeline 和 trace 按钮，详细 prompt parts、capability、tool IO、artifact refs、graph patches 移入高级 trace 面板。
+- 变更：`collectUpstreamContext` 扩展为 artifact-aware context collector，保留图结构顺序，给选中节点、上游 artifact、run decision、memory 等 context item 设置优先级，并在预算裁剪时记录 `contextTrace`。
+- 变更：新增 `GET /api/projects/:projectId/runs/:runNodeId/trace` 和 `listRunStepEventsForUser`，trace 面板支持读取历史 run events 并回放到只读画布状态；回放复用项目快照中的手动节点位置，不写回项目。
+- 文件：`src/types/canvas.ts`、`src/lib/graph.ts`、`src/lib/graph-projection.ts`、`src/lib/graph-projection.test.ts`、`src/components/CanvasWorkspace.tsx`、`src/components/RunTracePanel.tsx`、`src/components/SkillPanel.tsx`、`src/App.css`、`src/lib/project-storage.ts`、`server/api.ts`、`server/supabase.ts`、`server/prompts.ts`、`server/run-kernel.ts`、`server/capabilities.test.ts`、`README.md`、`agent-os-plan.md`。
+- 验证：`pnpm test -- src/lib/graph.test.ts src/lib/graph-projection.test.ts server/run-kernel.test.ts server/prompts.test.ts server/agent-router.test.ts server/capabilities.test.ts`、`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm lint`、`pnpm build`；Browser 打开 `http://localhost:5173/` 确认登录首屏非空、无 console error/warn，名称输入交互正常。
+- 备注：Memory 节点只来自显式 artifact/event 投影，当前没有自动长期记忆写入；只读 replay 不触发真实外部工具。Browser 截图命令 `Page.captureScreenshot` 在本轮验证中超时，未取得截图证据。
+
 ### 开发 Agent OS Part 2 Capability、Artifact 与 Policy 基础
 
 - 变更：新增 `server/capabilities.ts` 和 `server/agent-router.ts`，将旧 `prompt-expand` 兼容注册为 `prompt.expand` capability，并以内建 `image.generate` capability 驱动当前图片 run；router 输出 Zod 校验的 step graph，不直接输出 React Flow 节点。

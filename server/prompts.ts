@@ -2,10 +2,23 @@ import { createHash } from "node:crypto";
 
 export type PromptUpstreamContextItem = {
   nodeId: string;
-  type: "prompt" | "image";
+  type:
+    | "prompt"
+    | "image"
+    | "artifact"
+    | "decision"
+    | "memory"
+    | "tool_result"
+    | "doc"
+    | "code"
+    | "webpage"
+    | "dataset";
   prompt?: string;
   imageUrl?: string;
   summary?: string;
+  title?: string;
+  contentRef?: string;
+  priority?: number;
   artifact?: {
     id: string;
     type: string;
@@ -20,6 +33,12 @@ export type PromptCanvasContext = {
   prompt: string;
   selectedNodeId?: string | null;
   upstreamContext: PromptUpstreamContextItem[];
+  contextTrace?: {
+    selectedNodeId?: string | null;
+    budget?: number;
+    omittedContextReason?: string;
+    omittedNodeIds?: string[];
+  };
 };
 
 export type PromptSkill = {
@@ -138,11 +157,26 @@ export function formatUpstreamContext(items: PromptUpstreamContextItem[]) {
       if (summary) {
         lines.push(`summary: ${summary}`);
       }
+      if (item.title?.trim()) {
+        lines.push(`title: ${item.title.trim()}`);
+      }
       if (item.prompt?.trim()) {
         lines.push(`prompt: ${item.prompt.trim()}`);
       }
-      if (item.type === "image" && item.imageUrl?.trim()) {
+      if (item.imageUrl?.trim()) {
         lines.push(`imageUrl: ${item.imageUrl.trim()}`);
+      }
+      if (item.contentRef?.trim()) {
+        lines.push(`contentRef: ${item.contentRef.trim()}`);
+      }
+      if (item.artifact) {
+        lines.push(`artifactType: ${item.artifact.type}`);
+        if (item.artifact.uri?.trim()) {
+          lines.push(`artifactUri: ${item.artifact.uri.trim()}`);
+        }
+        if (item.artifact.contentRef?.trim()) {
+          lines.push(`artifactContentRef: ${item.artifact.contentRef.trim()}`);
+        }
       }
 
       return lines.join("\n");
@@ -436,9 +470,7 @@ export function selectPromptExpandMode(
     return "event";
   }
 
-  const imageCount = canvasContext.upstreamContext.filter(
-    (item) => item.type === "image" && Boolean(item.imageUrl)
-  ).length;
+  const imageCount = canvasContext.upstreamContext.filter(hasReferenceImage).length;
 
   if (imageCount >= 2) {
     return "multi-image";
@@ -479,14 +511,15 @@ export function selectReferenceImages(
   const images: ReferenceImageInput[] = [];
 
   for (const item of [...canvasContext.upstreamContext].reverse()) {
-    if (item.type !== "image" || !item.imageUrl || seen.has(item.imageUrl)) {
+    const imageUrl = getReferenceImageUrl(item);
+    if (!imageUrl || seen.has(imageUrl)) {
       continue;
     }
 
-    seen.add(item.imageUrl);
+    seen.add(imageUrl);
     images.push({
       nodeId: item.nodeId,
-      imageUrl: item.imageUrl,
+      imageUrl,
       prompt: item.prompt,
       summary: item.summary,
     });
@@ -598,7 +631,40 @@ function getContextSummary(item: PromptUpstreamContextItem) {
     return summary;
   }
 
-  return item.prompt?.trim() || (item.type === "image" ? "图片结果" : "提示词");
+  if (item.prompt?.trim()) {
+    return item.prompt.trim();
+  }
+
+  const labels: Record<PromptUpstreamContextItem["type"], string> = {
+    artifact: "Artifact",
+    code: "代码结果",
+    dataset: "数据集",
+    decision: "决策",
+    doc: "文档",
+    image: "图片结果",
+    memory: "记忆",
+    prompt: "提示词",
+    tool_result: "工具结果",
+    webpage: "网页",
+  };
+
+  return labels[item.type];
+}
+
+function hasReferenceImage(item: PromptUpstreamContextItem) {
+  return Boolean(getReferenceImageUrl(item));
+}
+
+function getReferenceImageUrl(item: PromptUpstreamContextItem) {
+  if (item.type === "image" && item.imageUrl?.trim()) {
+    return item.imageUrl.trim();
+  }
+
+  if (item.artifact?.type === "image" && item.artifact.uri?.trim()) {
+    return item.artifact.uri.trim();
+  }
+
+  return null;
 }
 
 function slimSkillConfig(config: unknown) {

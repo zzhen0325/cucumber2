@@ -1,10 +1,12 @@
 import type {
   AgentCanvasEdge,
   AgentCanvasNode,
+  ArtifactRef,
   CanvasToolPart,
   GeneratedImage,
   RunDraft,
   UpstreamContextItem,
+  UpstreamContextType,
 } from "@/types/canvas";
 
 const NODE_WIDTH = 240;
@@ -12,6 +14,7 @@ const PROMPT_NODE_HEIGHT = 84;
 const COMPACT_RUN_NODE_HEIGHT = 36;
 const RUN_NODE_HEIGHT = 300;
 const RESULT_NODE_HEIGHT = 240;
+const ARTIFACT_NODE_HEIGHT = 132;
 const RESULT_GAP = 17;
 const NODE_CLEARANCE = 24;
 const ROOT_START_X = 260;
@@ -33,6 +36,19 @@ type CanvasRect = {
   height: number;
 };
 
+export type ContextCollectionTrace = {
+  selectedNodeId: string | null;
+  budget?: number;
+  omittedContextReason?: string;
+  omittedNodeIds: string[];
+};
+
+export type UpstreamContextCollection = {
+  items: UpstreamContextItem[];
+  omittedItems: UpstreamContextItem[];
+  trace: ContextCollectionTrace;
+};
+
 export const isImageResultNode = (node?: AgentCanvasNode) =>
   node?.data.kind === "imageResult";
 
@@ -47,10 +63,33 @@ export function getRunReferenceNodeId(node?: AgentCanvasNode) {
 export function collectUpstreamContext(
   selectedNodeId: string | null,
   nodes: AgentCanvasNode[],
-  edges: AgentCanvasEdge[]
+  edges: AgentCanvasEdge[],
+  options: { budget?: number } = {}
 ): UpstreamContextItem[] {
+  return collectUpstreamContextWithTrace(
+    selectedNodeId,
+    nodes,
+    edges,
+    options
+  ).items;
+}
+
+export function collectUpstreamContextWithTrace(
+  selectedNodeId: string | null,
+  nodes: AgentCanvasNode[],
+  edges: AgentCanvasEdge[],
+  options: { budget?: number } = {}
+): UpstreamContextCollection {
   if (!selectedNodeId) {
-    return [];
+    return {
+      items: [],
+      omittedItems: [],
+      trace: {
+        selectedNodeId: null,
+        budget: options.budget,
+        omittedNodeIds: [],
+      },
+    };
   }
 
   const byId = new Map(nodes.map((node) => [node.id, node]));
@@ -83,29 +122,25 @@ export function collectUpstreamContext(
 
   visit(selectedNodeId);
 
-  return ordered.flatMap((node) => {
-    if (node.data.kind === "prompt") {
-      return {
-        nodeId: node.id,
-        type: "prompt" as const,
-        prompt: node.data.prompt,
-        summary: node.data.prompt,
-      };
-    }
+  const collected = ordered.flatMap((node) =>
+    contextItemsFromNode(node, node.id === selectedNodeId)
+  );
+  const { selected, omitted } = selectContextWithinBudget(
+    collected,
+    options.budget,
+    selectedNodeId
+  );
 
-    if (node.data.kind === "imageResult") {
-      return {
-        nodeId: node.id,
-        type: "image" as const,
-        prompt: node.data.prompt,
-        imageUrl: node.data.image.url,
-        summary: node.data.image.title ?? "Generated image",
-        artifact: node.data.artifact ?? node.data.image.artifact,
-      };
-    }
-
-    return [];
-  });
+  return {
+    items: selected,
+    omittedItems: omitted,
+    trace: {
+      selectedNodeId,
+      budget: options.budget,
+      omittedContextReason: omitted.length ? "context_budget_exceeded" : undefined,
+      omittedNodeIds: omitted.map((item) => item.nodeId),
+    },
+  };
 }
 
 export function createRunDraft(
@@ -121,7 +156,12 @@ export function createRunDraft(
     ? edges.filter((edge) => edge.source === referenceNodeId).length
     : nodes.filter((node) => node.data.kind === "prompt").length;
 
-  const upstreamContext = collectUpstreamContext(referenceNodeId, nodes, edges);
+  const contextCollection = collectUpstreamContextWithTrace(
+    referenceNodeId,
+    nodes,
+    edges
+  );
+  const upstreamContext = contextCollection.items;
   const preferredBaseX = referenceNode
     ? referenceNode.position.x + siblings * FOLLOW_UP_GAP_X
     : ROOT_START_X + siblings * ROOT_CHAIN_GAP;
@@ -163,6 +203,7 @@ export function createRunDraft(
       kind: "run",
       prompt,
       status: "queued",
+      traceAvailable: true,
       toolPart: getInitialRunToolPart(prompt, upstreamContext),
       toolParts: [getInitialRunToolPart(prompt, upstreamContext)],
     },
@@ -187,7 +228,14 @@ export function createRunDraft(
     });
   }
 
-  return { promptNode, runNode, edges: draftEdges, upstreamContext };
+  return {
+    promptNode,
+    runNode,
+    edges: draftEdges,
+    upstreamContext,
+    omittedContext: contextCollection.omittedItems,
+    contextTrace: contextCollection.trace,
+  };
 }
 
 export function createImageResultNodes(
@@ -329,7 +377,12 @@ function getNodeHeight(node: AgentCanvasNode) {
     return RESULT_NODE_HEIGHT;
   }
 
+  if (isArtifactBackedKind(node.data.kind)) {
+    return ARTIFACT_NODE_HEIGHT;
+  }
+
   if (
+    node.data.kind === "run" &&
     node.data.status === "queued" &&
     node.data.toolPart?.state === "input-streaming"
   ) {
@@ -359,6 +412,240 @@ function rectsOverlap(a: CanvasRect, b: CanvasRect) {
 
 function overlapsVertically(a: CanvasRect, b: CanvasRect) {
   return a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
+function contextItemsFromNode(
+  node: AgentCanvasNode,
+  isSelectedNode: boolean
+): UpstreamContextItem[] {
+  if (node.data.kind === "prompt") {
+    return [
+      {
+        nodeId: node.id,
+        type: "prompt",
+        prompt: node.data.prompt,
+        summary: node.data.prompt,
+        priority: getContextPriority("prompt", isSelectedNode),
+      },
+    ];
+  }
+
+  if (node.data.kind === "imageResult") {
+    const artifact = node.data.artifact ?? node.data.image.artifact;
+    return [
+      {
+        nodeId: node.id,
+        type: "image",
+        prompt: node.data.prompt,
+        imageUrl: node.data.image.url,
+        summary: node.data.image.title ?? "Generated image",
+        artifact,
+        title: node.data.image.title,
+        contentRef: artifact?.contentRef,
+        priority: getContextPriority("image", isSelectedNode),
+      },
+    ];
+  }
+
+  if (node.data.kind === "run" && node.data.decision?.trim()) {
+    return [
+      {
+        nodeId: node.id,
+        type: "decision",
+        summary: node.data.decision.trim(),
+        title: "Run decision",
+        priority: getContextPriority("decision", isSelectedNode),
+      },
+    ];
+  }
+
+  if (isArtifactBackedNode(node)) {
+    const type = getArtifactContextType(node.data.artifact);
+    const summary = getArtifactNodeSummary(node);
+
+    return [
+      {
+        nodeId: node.id,
+        type,
+        prompt: node.data.prompt,
+        summary,
+        artifact: node.data.artifact,
+        title: node.data.title,
+        contentRef: node.data.artifact.contentRef,
+        imageUrl:
+          node.data.artifact.type === "image" ? node.data.artifact.uri : undefined,
+        priority: getContextPriority(type, isSelectedNode),
+      },
+    ];
+  }
+
+  return [];
+}
+
+type ArtifactBackedCanvasNode = AgentCanvasNode & {
+  data: Extract<
+    AgentCanvasNode["data"],
+    {
+      kind:
+        | "artifact"
+        | "decision"
+        | "memory"
+        | "toolResult"
+        | "document"
+        | "code"
+        | "webpage";
+    }
+  >;
+};
+
+function getArtifactNodeSummary(node: ArtifactBackedCanvasNode) {
+  if (node.data.kind === "decision") {
+    return node.data.decision;
+  }
+
+  if (node.data.kind === "memory") {
+    return node.data.memory;
+  }
+
+  return node.data.summary ?? node.data.title;
+}
+
+function selectContextWithinBudget(
+  items: UpstreamContextItem[],
+  budget: number | undefined,
+  selectedNodeId: string | null
+) {
+  if (!Number.isFinite(budget)) {
+    return { selected: items, omitted: [] };
+  }
+
+  const maxBudget = Math.max(0, budget ?? 0);
+  const selected = [...items];
+  const omitted: UpstreamContextItem[] = [];
+
+  while (getContextTokenEstimate(selected) > maxBudget) {
+    const dropCandidate = selected
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => item.nodeId !== selectedNodeId)
+      .sort(
+        (left, right) =>
+          (left.item.priority ?? 0) - (right.item.priority ?? 0) ||
+          right.index - left.index
+      )[0];
+
+    if (!dropCandidate) {
+      break;
+    }
+
+    const [dropped] = selected.splice(dropCandidate.index, 1);
+    omitted.push({
+      ...dropped,
+      omittedReason: "context_budget_exceeded",
+    });
+  }
+
+  return { selected, omitted };
+}
+
+function getContextTokenEstimate(items: UpstreamContextItem[]) {
+  return items.reduce(
+    (total, item) =>
+      total +
+      Math.max(
+        1,
+        Math.ceil(
+          [
+            item.title,
+            item.summary,
+            item.prompt,
+            item.imageUrl,
+            item.contentRef,
+            item.artifact?.uri,
+            item.artifact?.contentRef,
+          ]
+            .filter(Boolean)
+            .join("\n").length / 4
+        )
+      ),
+    0
+  );
+}
+
+function getArtifactContextType(artifact: ArtifactRef): UpstreamContextType {
+  if (artifact.type === "doc") {
+    return "doc";
+  }
+  if (artifact.type === "code") {
+    return "code";
+  }
+  if (artifact.type === "webpage") {
+    return "webpage";
+  }
+  if (artifact.type === "decision") {
+    return "decision";
+  }
+  if (artifact.type === "memory") {
+    return "memory";
+  }
+  if (artifact.type === "tool_result") {
+    return "tool_result";
+  }
+  if (artifact.type === "dataset") {
+    return "dataset";
+  }
+  if (artifact.type === "image") {
+    return "image";
+  }
+
+  return "artifact";
+}
+
+function getContextPriority(type: UpstreamContextType, isSelectedNode: boolean) {
+  if (isSelectedNode) {
+    return 100;
+  }
+
+  const priorities: Record<UpstreamContextType, number> = {
+    prompt: 90,
+    image: 82,
+    artifact: 70,
+    doc: 72,
+    code: 72,
+    webpage: 68,
+    dataset: 62,
+    decision: 58,
+    tool_result: 54,
+    memory: 34,
+  };
+
+  return priorities[type];
+}
+
+function isArtifactBackedKind(
+  kind: AgentCanvasNode["data"]["kind"]
+): kind is
+  | "artifact"
+  | "decision"
+  | "memory"
+  | "toolResult"
+  | "document"
+  | "code"
+  | "webpage" {
+  return (
+    kind === "artifact" ||
+    kind === "decision" ||
+    kind === "memory" ||
+    kind === "toolResult" ||
+    kind === "document" ||
+    kind === "code" ||
+    kind === "webpage"
+  );
+}
+
+function isArtifactBackedNode(
+  node: AgentCanvasNode
+): node is ArtifactBackedCanvasNode {
+  return isArtifactBackedKind(node.data.kind);
 }
 
 export function extractImagesFromToolOutput(output: unknown): GeneratedImage[] {

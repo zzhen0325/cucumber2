@@ -2,7 +2,7 @@
 
 Infinite-canvas Agent Run MVP: type a requirement, stream an Agent Run node, call a real `generate_image` tool, render image result nodes, then select a non-Run canvas node to create a contextual follow-up branch.
 
-Agent Run nodes display both the assistant's streamed text output and the `generate_image` tool state. Tool errors remain visible in the Run node and do not create placeholder image results.
+Agent Run nodes display streamed text, a step timeline, tool state, and an advanced trace entry. Tool errors remain visible in the Run node and do not create placeholder image results.
 
 ## Stack
 
@@ -16,6 +16,7 @@ Agent Run nodes display both the assistant's streamed text output and the `gener
 - AI Elements registry components for Canvas, Node, Edge, Tool, Message, and Prompt Input
 - React Flow under the AI Elements canvas
 - Hono Node server for `/api/agent-run`, backed by a service-side Run Kernel, capability router, policy gate, and artifact metadata store
+- Graph projection reducer for replaying run events, artifacts, and graph patch proposals back into canvas nodes and edges
 
 ## Run Locally
 
@@ -91,6 +92,7 @@ The migration files live in `supabase/migrations`. Apply them before uploading s
 - `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`
 - `GET /api/projects`, `POST /api/projects`
 - `GET /api/projects/:projectId`, `PATCH /api/projects/:projectId`, `DELETE /api/projects/:projectId`
+- `GET /api/projects/:projectId/runs/:runNodeId/trace`
 - `GET /api/skills`, `POST /api/skills`
 - `PATCH /api/skills/:skillId`, `DELETE /api/skills/:skillId`
 - `GET /api/model-providers`
@@ -101,13 +103,17 @@ Uploaded skills are public and visible to every logged-in user. Only the uploade
 
 ## Canvas Branching
 
-Submitting from the bottom composer with no referenced node creates a new root `prompt -> run` chain. Selecting a single Prompt or Image Result node makes it the reference for the next submission and creates `selected node -> prompt -> run`. Dragging on the empty canvas marquee-selects multiple nodes for group movement or deletion; multi-selection does not create a branch anchor. Agent Run nodes are status views only; selecting one does not create a branch anchor.
+Submitting from the bottom composer with no referenced node creates a new root `prompt -> run` chain. Selecting a single non-Run node makes it the reference for the next submission and creates `selected node -> prompt -> run`, including image, document, code, webpage, memory, decision, tool-result, and generic artifact nodes. Dragging on the empty canvas marquee-selects multiple nodes for group movement or deletion; multi-selection does not create a branch anchor. Agent Run nodes are status views only; selecting one does not create a branch anchor.
+
+Run nodes include a trace button. The advanced trace panel reads `agent_run_step_events` through `/api/projects/:projectId/runs/:runNodeId/trace` and shows step timeline, prompt parts, capability selection, tool IO, artifact refs, and graph patches. The replay action projects the event log into a read-only canvas view; manually saved node positions from the project snapshot are reused when node ids match, so dragging nodes in the normal canvas is not overwritten by replay.
 
 ## Skill And Seedream Tool Contract
 
 Every `/api/agent-run` delegates to `server/run-kernel.ts`. The kernel loads public skill manifests, builds a capability registry, and asks `server/agent-router.ts` for a validated step graph. The current rule planner routes image requests to `prompt.expand + image.generate`, then the kernel uses the selected text model provider for the streamed Run explanation and `prompt-expand` stage. If the upstream context contains image result nodes, the server first runs a visible `analyze_reference_images` stage with Ark Responses API, then passes the visual summary into `expand_prompt`. The latest compatible public skill with `slug === "prompt-expand"` is used when no explicit `prompt.expand` manifest exists. If no such skill exists, model credentials are missing, routing fails, policy denies execution, or any tool stage fails, the Run node shows the error and the kernel does not continue to later steps.
 
 The kernel records both the compatible `agent_run_events` row and finer `agent_run_step_events` trace rows. Trace payloads include `selectedCapabilityIds`, capability summaries, router result, prompt trace, tool IO, artifact refs, and expected image canvas node ids. Prompt construction is assembled from `PromptPart` metadata with a `promptDigest`, selected part ids, omitted part ids, and deterministic low-priority pruning when a token budget is provided.
+
+The frontend graph projection layer lives in `src/lib/graph-projection.ts`. It accepts only validated graph patch proposals (`createNode`, `updateNode`, `createEdge`, `setNodeStatus`, `attachArtifact`) and rejects duplicate nodes, dangling edges, illegal node kinds, and project-id mismatches. `collectUpstreamContext` is artifact-aware and keeps selected context highest priority while recording omitted context in `contextTrace` when a budget is applied.
 
 Capability manifests can be supplied in `SKILL.md` frontmatter or as `manifest.json`, `capability.json`, `config/manifest.json`, or `config/capability.json` inside the uploaded zip. Supported manifest fields are `capabilityId`, `version`, `description`, `triggers`, `inputSchema`, `outputSchema`, `toolIds`, `tokenBudget`, `requiresApproval`, and optional `policy`. Policy records whether a capability can use the network, write files, modify the project, require approval, or create external cost. The built-in `image.generate` capability is marked as networked and potentially external-costing, but does not require approval by default.
 

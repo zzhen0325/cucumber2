@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   collectUpstreamContext,
+  collectUpstreamContextWithTrace,
   createImageResultNodes,
   createRunDraft,
   extractImagesFromToolOutput,
@@ -10,7 +11,11 @@ import {
   toolPartFromMessagePart,
   toolPartsFromMessageParts,
 } from "./graph";
-import type { AgentCanvasEdge, AgentCanvasNode } from "@/types/canvas";
+import type {
+  AgentCanvasEdge,
+  AgentCanvasNode,
+  ArtifactRef,
+} from "@/types/canvas";
 
 describe("agent canvas graph", () => {
   it("creates a root run when no node is selected", () => {
@@ -54,6 +59,7 @@ describe("agent canvas graph", () => {
         type: "prompt",
         prompt: "初始需求",
         summary: "初始需求",
+        priority: 90,
       },
       {
         nodeId: "image-1",
@@ -61,6 +67,7 @@ describe("agent canvas graph", () => {
         prompt: "初始需求",
         imageUrl: "https://cdn.example/1.png",
         summary: "Generated image",
+        priority: 100,
       },
     ]);
   });
@@ -91,6 +98,9 @@ describe("agent canvas graph", () => {
         prompt: "初始需求",
         imageUrl: "https://cdn.example/1.png",
         summary: "Generated image",
+        title: undefined,
+        contentRef: undefined,
+        priority: 100,
         artifact: {
           id: "artifact-1",
           type: "image",
@@ -148,8 +158,80 @@ describe("agent canvas graph", () => {
         type: "prompt",
         prompt: "初始需求",
         summary: "初始需求",
+        priority: 100,
       },
     ]);
+  });
+
+  it("collects artifact-backed doc, code, webpage, decision, and memory context", () => {
+    const nodes: AgentCanvasNode[] = [
+      artifactNode("doc-1", "document", {
+        id: "artifact-doc-1",
+        type: "doc",
+        title: "PRD",
+        contentRef: "storage://docs/prd.md",
+      }),
+      artifactNode("code-1", "code", {
+        id: "artifact-code-1",
+        type: "code",
+        title: "Patch",
+        contentRef: "storage://code/patch.ts",
+        metadata: { language: "ts" },
+      }),
+      artifactNode("web-1", "webpage", {
+        id: "artifact-web-1",
+        type: "webpage",
+        title: "参考网页",
+        uri: "https://example.com",
+      }),
+      artifactNode("memory-1", "memory", {
+        id: "artifact-memory-1",
+        type: "memory",
+        title: "用户偏好",
+      }),
+      {
+        ...runNode("run-1", "选择方向"),
+        data: {
+          kind: "run" as const,
+          prompt: "选择方向",
+          status: "success" as const,
+          decision: "采用清爽绿色方向",
+        },
+      },
+    ];
+    const edges: AgentCanvasEdge[] = [
+      edge("doc-1", "code-1"),
+      edge("code-1", "web-1"),
+      edge("web-1", "memory-1"),
+      edge("memory-1", "run-1"),
+    ];
+
+    expect(collectUpstreamContext("run-1", nodes, edges).map((item) => item.type))
+      .toEqual(["doc", "code", "webpage", "memory", "decision"]);
+  });
+
+  it("applies context budget without dropping the selected node", () => {
+    const nodes: AgentCanvasNode[] = [
+      promptNode("prompt-1", "很长的早期需求 ".repeat(20)),
+      imageNode("image-1", "https://cdn.example/1.png", "选中的参考图"),
+    ];
+    const edges: AgentCanvasEdge[] = [edge("prompt-1", "image-1")];
+
+    const collection = collectUpstreamContextWithTrace(
+      "image-1",
+      nodes,
+      edges,
+      { budget: 8 }
+    );
+
+    expect(collection.items.map((item) => item.nodeId)).toEqual(["image-1"]);
+    expect(collection.omittedItems.map((item) => item.nodeId)).toEqual([
+      "prompt-1",
+    ]);
+    expect(collection.trace).toMatchObject({
+      omittedContextReason: "context_budget_exceeded",
+      omittedNodeIds: ["prompt-1"],
+    });
   });
 
   it("creates a root run when a run node is selected", () => {
@@ -484,6 +566,48 @@ function imageNode(id: string, url: string, prompt: string): AgentCanvasNode {
       },
     },
   };
+}
+
+function artifactNode(
+  id: string,
+  kind: "artifact" | "document" | "code" | "webpage" | "memory",
+  artifact: ArtifactRef
+): AgentCanvasNode {
+  type ArtifactTestKind = "artifact" | "document" | "code" | "webpage" | "memory";
+  const typeByKind = {
+    artifact: "artifactNode",
+    code: "codeNode",
+    document: "documentNode",
+    memory: "memoryNode",
+    webpage: "webpageNode",
+  } satisfies Record<ArtifactTestKind, string>;
+
+  const base = {
+    id,
+    type: typeByKind[kind],
+    position: { x: 0, y: 0 },
+  };
+
+  if (kind === "memory") {
+    return {
+      ...base,
+      data: {
+        kind,
+        artifact,
+        title: artifact.title ?? "Memory",
+        memory: artifact.title ?? "Memory",
+      },
+    };
+  }
+
+  return {
+    ...base,
+    data: {
+      kind,
+      artifact,
+      title: artifact.title ?? "Artifact",
+    },
+  } as AgentCanvasNode;
 }
 
 function edge(source: string, target: string): AgentCanvasEdge {

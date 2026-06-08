@@ -1,4 +1,5 @@
 import { getResponseError } from "@/lib/api-client";
+import type { RunStepTraceEvent } from "@/lib/graph-projection";
 import type { AgentCanvasEdge, AgentCanvasNode } from "@/types/canvas";
 
 export type ProjectSummary = {
@@ -87,6 +88,21 @@ export async function updateProject(input: UpdateProjectInput) {
   }
 
   return (await response.json()) as { project: PersistedProject };
+}
+
+export async function loadRunTrace(projectId: string, runNodeId: string) {
+  const response = await fetch(
+    `/api/projects/${projectId}/runs/${encodeURIComponent(runNodeId)}/trace`,
+    {
+      credentials: "include",
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(await getResponseError(response));
+  }
+
+  return (await response.json()) as { events: RunStepTraceEvent[] };
 }
 
 export async function deleteProject(projectId: string) {

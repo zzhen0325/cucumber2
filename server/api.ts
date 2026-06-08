@@ -37,6 +37,7 @@ import {
   getUserByUsername,
   getUserCount,
   isSupabaseConfigured,
+  listRunStepEventsForUser,
   listPublicSkillsForUser,
   listProjects,
   softDeleteSkillForUser,
@@ -60,10 +61,24 @@ const authInputSchema = z.object({
 
 const upstreamContextSchema = z.object({
   nodeId: z.string(),
-  type: z.enum(["prompt", "image"]),
+  type: z.enum([
+    "prompt",
+    "image",
+    "artifact",
+    "decision",
+    "memory",
+    "tool_result",
+    "doc",
+    "code",
+    "webpage",
+    "dataset",
+  ]),
   prompt: z.string().optional(),
   imageUrl: z.string().optional(),
   summary: z.string().optional(),
+  title: z.string().optional(),
+  contentRef: z.string().optional(),
+  priority: z.number().optional(),
   artifact: z
     .object({
       id: z.string(),
@@ -80,6 +95,14 @@ const canvasContextSchema = z.object({
   prompt: z.string(),
   selectedNodeId: z.string().nullable().optional(),
   upstreamContext: z.array(upstreamContextSchema).default([]),
+  contextTrace: z
+    .object({
+      selectedNodeId: z.string().nullable().optional(),
+      budget: z.number().optional(),
+      omittedContextReason: z.string().optional(),
+      omittedNodeIds: z.array(z.string()).optional(),
+    })
+    .optional(),
 });
 const modelProviderSchema = z.enum(modelProviderIds);
 
@@ -268,6 +291,27 @@ app.delete("/api/projects/:projectId", async (c) => {
   }
 
   return c.json({ ok: true });
+});
+
+app.get("/api/projects/:projectId/runs/:runNodeId/trace", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const projectId = z.string().uuid().parse(c.req.param("projectId"));
+  const runNodeId = z.string().min(1).parse(c.req.param("runNodeId"));
+  const events = await listRunStepEventsForUser({
+    projectId,
+    runNodeId,
+    userId: user.id,
+  });
+
+  if (!events) {
+    return notFound(c);
+  }
+
+  return c.json({ events });
 });
 
 app.get("/api/skills", async (c) => {

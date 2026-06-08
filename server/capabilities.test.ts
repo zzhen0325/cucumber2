@@ -5,6 +5,7 @@ import {
   assertCapabilityMayExecute,
   buildCapabilityRegistry,
   parseCapabilityManifest,
+  toTypedCapabilityError,
 } from "./capabilities";
 
 describe("capability registry", () => {
@@ -54,5 +55,14 @@ describe("capability registry", () => {
         source: "skill-manifest",
       })
     ).toThrow("需要用户确认");
+  });
+
+  it("maps missing provider keys to typed environment errors", () => {
+    const error = toTypedCapabilityError(
+      new Error("SEEDREAM_ACCESS_KEY_ID is not configured.")
+    );
+
+    expect(error.code).toBe("env.missing");
+    expect(error.message).toContain("SEEDREAM_ACCESS_KEY_ID");
   });
 });

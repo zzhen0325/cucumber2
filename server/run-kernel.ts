@@ -8,6 +8,7 @@ import {
   readSeedreamMaxOutputImagesFromEnv,
   type SeedreamGenerateInput,
   type SeedreamGeneratedImage,
+  type SeedreamUpstreamContext,
 } from "../seedream.ts";
 import {
   IMAGE_GENERATE_CAPABILITY_ID,
@@ -147,6 +148,8 @@ export type GenerateImageToolInput = SeedreamGenerateInput & {
   originalPrompt: string;
   promptSkill: ReturnType<typeof getSkillToolSummary>;
   capabilityIds: string[];
+  contextTrace?: PromptCanvasContext["contextTrace"];
+  sourceContextCount?: number;
 };
 
 type RunStepDefinition = {
@@ -310,6 +313,7 @@ export async function executeImageAgentRun({
     prompt: canvasContext.prompt,
     selectedNodeId: canvasContext.selectedNodeId ?? null,
     upstreamContext: canvasContext.upstreamContext,
+    contextTrace: canvasContext.contextTrace,
     skillSlug: "prompt-expand",
     modelProvider,
     promptTrace,
@@ -334,6 +338,7 @@ export async function executeImageAgentRun({
       prompt: canvasContext.prompt,
       selectedNodeId: canvasContext.selectedNodeId ?? null,
       upstreamContext: canvasContext.upstreamContext,
+      contextTrace: canvasContext.contextTrace,
       promptTrace,
       selectedCapabilityIds,
       selectedCapabilities: selectedCapabilitySummaries,
@@ -558,23 +563,26 @@ export async function executeImageAgentRun({
       type: "step.started",
       payload: { label: "Generate image" },
     });
-    toolInput = {
+    const imageToolInput: GenerateImageToolInput = {
       prompt: expandedPrompt,
       originalPrompt: canvasContext.prompt,
       selectedNodeId: canvasContext.selectedNodeId ?? null,
-      upstreamContext: canvasContext.upstreamContext,
+      upstreamContext: toSeedreamUpstreamContext(canvasContext.upstreamContext),
       resultCount: inferSeedreamResultCount(
         canvasContext.prompt,
         readSeedreamMaxOutputImagesFromEnv()
       ),
       promptSkill: getSkillToolSummary(promptSkill),
       capabilityIds: selectedCapabilityIds,
+      contextTrace: canvasContext.contextTrace,
+      sourceContextCount: canvasContext.upstreamContext.length,
     };
+    toolInput = imageToolInput;
     activeTool = {
       stepId: activeStepId,
       toolCallId: toolCallIds.generate_image,
       toolName: "generate_image",
-      input: toolInput,
+      input: imageToolInput,
       inputWritten: false,
     };
     await writeToolInput(writer, activeTool);
@@ -586,7 +594,7 @@ export async function executeImageAgentRun({
       payload: {
         toolCallId: activeTool.toolCallId,
         toolName: activeTool.toolName,
-        input: toolInput,
+        input: imageToolInput,
       },
     });
     await assertToolCanExecute({
@@ -598,7 +606,7 @@ export async function executeImageAgentRun({
     });
     assertImageCapabilityEnvironment(imageCapability);
 
-    const output = await generateSeedreamImage(toolInput);
+    const output = await generateSeedreamImage(imageToolInput);
     const outputWithArtifacts = await createImageArtifacts({
       images: output.images,
       projectId,
@@ -783,6 +791,36 @@ async function createImageArtifacts({
     images: imagesWithArtifacts,
     artifacts,
   };
+}
+
+function toSeedreamUpstreamContext(
+  upstreamContext: PromptCanvasContext["upstreamContext"]
+): SeedreamUpstreamContext[] {
+  return upstreamContext.flatMap((item) => {
+    if (item.type === "prompt") {
+      return {
+        nodeId: item.nodeId,
+        type: "prompt" as const,
+        prompt: item.prompt,
+        summary: item.summary,
+      };
+    }
+
+    const imageUrl =
+      item.imageUrl ??
+      (item.artifact?.type === "image" ? item.artifact.uri : undefined);
+    if (!imageUrl) {
+      return [];
+    }
+
+    return {
+      nodeId: item.nodeId,
+      type: "image" as const,
+      prompt: item.prompt,
+      imageUrl,
+      summary: item.summary,
+    };
+  });
 }
 
 async function assertToolCanExecute({

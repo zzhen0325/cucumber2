@@ -21,21 +21,19 @@ import {
   CircleDot,
   Cpu,
   Database,
+  FileText,
   Frame,
+  Globe2,
   Image,
   Layers,
-  Loader2,
+  ListTree,
   MousePointer2,
   Palette,
   PenLine,
   Plus,
   Sparkles,
-  Pencil,
-  Trash2,
   Type,
-  Upload,
   WandSparkles,
-  X,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -45,6 +43,8 @@ import type { FormEvent } from "react";
 import { Canvas } from "@/components/ai-elements/canvas";
 import { Edge } from "@/components/ai-elements/edge";
 import { Node, NodeContent } from "@/components/ai-elements/node";
+import { ReplayBanner, RunTracePanel } from "@/components/RunTracePanel";
+import { SkillPanel } from "@/components/SkillPanel";
 import {
   PromptInput,
   PromptInputBody,
@@ -67,22 +67,23 @@ import {
   type ModelProviderId,
   type ModelProviderSummary,
 } from "@/lib/model-providers";
-import { loadProject, updateProject } from "@/lib/project-storage";
 import {
-  deleteSkill,
-  loadSkills,
-  updateSkill,
-  uploadSkill,
-  type SkillSummary,
-} from "@/lib/skill-storage";
+  loadProject,
+  loadRunTrace,
+  updateProject,
+} from "@/lib/project-storage";
 import {
-  createImageResultNodes,
   createRunDraft,
   extractImagesFromToolOutput,
   getRunReferenceNodeId,
   textFromMessageParts,
   toolPartsFromMessageParts,
 } from "@/lib/graph";
+import {
+  projectRunTraceToCanvas,
+  projectToolOutputToCanvas,
+  type RunStepTraceEvent,
+} from "@/lib/graph-projection";
 import type {
   AgentCanvasEdge,
   AgentCanvasNode,
@@ -94,9 +95,16 @@ import type {
 } from "@/types/canvas";
 
 const nodeTypes = {
+  artifactNode: memo(ArtifactLikeNode),
+  codeNode: memo(ArtifactLikeNode),
+  decisionNode: memo(ArtifactLikeNode),
+  documentNode: memo(ArtifactLikeNode),
+  memoryNode: memo(ArtifactLikeNode),
   promptNode: memo(PromptNode),
   runNode: memo(RunNode),
   imageResultNode: memo(ImageResultNode),
+  toolResultNode: memo(ArtifactLikeNode),
+  webpageNode: memo(ArtifactLikeNode),
 } as NodeTypes;
 
 const edgeTypes = {
@@ -123,6 +131,15 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const [storageStatus, setStorageStatus] = useState<StorageStatus>("loading");
   const [storageError, setStorageError] = useState<string | null>(null);
   const [skillPanelOpen, setSkillPanelOpen] = useState(false);
+  const [traceRunId, setTraceRunId] = useState<string | null>(null);
+  const [traceEvents, setTraceEvents] = useState<RunStepTraceEvent[]>([]);
+  const [traceLoading, setTraceLoading] = useState(false);
+  const [traceError, setTraceError] = useState<string | null>(null);
+  const [replaySnapshot, setReplaySnapshot] = useState<{
+    runNodeId: string;
+    nodes: AgentCanvasNode[];
+    edges: AgentCanvasEdge[];
+  } | null>(null);
   const [modelProvider, setModelProvider] = useState<ModelProviderId>(
     () => readStoredModelProvider() ?? "deepseek"
   );
@@ -131,6 +148,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const activeRunId = useRef<string | null>(null);
   const hasLoadedProject = useRef(false);
   const saveTimer = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const isReplayMode = Boolean(replaySnapshot);
+  const canvasNodes = replaySnapshot?.nodes ?? nodes;
+  const canvasEdges = replaySnapshot?.edges ?? edges;
 
   const markRunError = useCallback(
     (runId: string | null, message: string) => {
@@ -199,16 +219,16 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   );
 
   const addResultsForRun = useCallback(
-    (runId: string, images: GeneratedImage[]) => {
+    (runId: string, output: unknown) => {
       setNodes((currentNodes) => {
         const runNode = currentNodes.find((node) => node.id === runId);
         if (!runNode) {
           return currentNodes;
         }
 
-        const { resultNodes, resultEdges } = createImageResultNodes(
+        const { resultNodes, resultEdges } = projectToolOutputToCanvas(
           runNode,
-          images,
+          output,
           currentNodes
         );
 
@@ -246,7 +266,10 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const persistedSelectedNodeId = referenceNodeId ?? null;
   const isBusy = status === "submitted" || status === "streaming";
   const canSubmit =
-    Boolean(loadedProjectId) && storageStatus !== "loading" && !storageError;
+    Boolean(loadedProjectId) &&
+    storageStatus !== "loading" &&
+    !storageError &&
+    !isReplayMode;
 
   useEffect(() => {
     let ignore = false;
@@ -275,6 +298,24 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   }, []);
 
   useEffect(() => {
+    const handleOpenTrace = (event: Event) => {
+      const detail = (event as CustomEvent<{ runNodeId?: unknown }>).detail;
+      if (typeof detail?.runNodeId === "string") {
+        setTraceEvents([]);
+        setTraceError(null);
+        setTraceLoading(true);
+        setTraceRunId(detail.runNodeId);
+      }
+    };
+
+    window.addEventListener("cucumber:open-run-trace", handleOpenTrace);
+
+    return () => {
+      window.removeEventListener("cucumber:open-run-trace", handleOpenTrace);
+    };
+  }, []);
+
+  useEffect(() => {
     let ignore = false;
 
     hasLoadedProject.current = false;
@@ -288,6 +329,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
         setLoadedProjectId(project.id);
         setProjectTitle(project.title);
+        setTraceRunId(null);
+        setTraceEvents([]);
+        setTraceError(null);
+        setTraceLoading(false);
+        setReplaySnapshot(null);
         const nextSelectedNodeIds = getInitialSelectedNodeIds(
           project.nodes,
           project.selectedNodeId
@@ -314,7 +360,37 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   }, [projectId, setEdges, setNodes]);
 
   useEffect(() => {
-    if (!hasLoadedProject.current || !loadedProjectId) {
+    if (!traceRunId || !loadedProjectId) {
+      return;
+    }
+
+    let ignore = false;
+
+    loadRunTrace(loadedProjectId, traceRunId)
+      .then(({ events }) => {
+        if (!ignore) {
+          setTraceEvents(events);
+        }
+      })
+      .catch((nextError: unknown) => {
+        if (!ignore) {
+          setTraceError(getClientError(nextError));
+          setTraceEvents([]);
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setTraceLoading(false);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [loadedProjectId, traceRunId]);
+
+  useEffect(() => {
+    if (!hasLoadedProject.current || !loadedProjectId || isReplayMode) {
       return;
     }
 
@@ -348,7 +424,14 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         window.clearTimeout(saveTimer.current);
       }
     };
-  }, [edges, loadedProjectId, nodes, persistedSelectedNodeId, projectTitle]);
+  }, [
+    edges,
+    isReplayMode,
+    loadedProjectId,
+    nodes,
+    persistedSelectedNodeId,
+    projectTitle,
+  ]);
 
   useEffect(() => {
     if (error) {
@@ -401,10 +484,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         part.type === "tool-generate_image" && part.state === "output-available"
     );
     if (imageToolPart) {
-      const images = extractImagesFromToolOutput(imageToolPart.output);
-      if (images.length) {
-        addResultsForRun(runId, images);
-      }
+      addResultsForRun(runId, imageToolPart.output);
     }
   }, [addResultsForRun, messages, status, updateRun]);
 
@@ -448,6 +528,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
               prompt: value,
               selectedNodeId: anchorId,
               upstreamContext: draft.upstreamContext,
+              contextTrace: draft.contextTrace,
             },
           },
         }
@@ -477,6 +558,36 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     storeModelProvider(nextProvider);
   }, []);
 
+  const handleReplayTrace = useCallback(() => {
+    if (!traceRunId || !loadedProjectId || !traceEvents.length) {
+      return;
+    }
+
+    const projection = projectRunTraceToCanvas({
+      projectId: loadedProjectId,
+      runNodeId: traceRunId,
+      events: traceEvents,
+      existingNodes: nodes,
+      existingEdges: edges,
+    });
+
+    setReplaySnapshot({
+      runNodeId: traceRunId,
+      nodes: projection.nodes,
+      edges: projection.edges,
+    });
+  }, [edges, loadedProjectId, nodes, traceEvents, traceRunId]);
+
+  const handleExitReplay = useCallback(() => {
+    setReplaySnapshot(null);
+  }, []);
+
+  const handleCloseTrace = useCallback(() => {
+    setTraceRunId(null);
+    setTraceEvents([]);
+    setTraceError(null);
+  }, []);
+
   return (
     <main className="app-shell">
       <Canvas<AgentCanvasNode, AgentCanvasEdge>
@@ -487,18 +598,22 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         maxZoom={1.5}
         minZoom={0.28}
         nodeTypes={nodeTypes}
-        nodes={nodes}
-        edges={edges}
-        onEdgesChange={onEdgesChange}
-        onNodesChange={onNodesChange}
-        onPaneClick={() => setNodes((current) => applySelectedNodeIds(current, []))}
+        nodes={canvasNodes}
+        edges={canvasEdges}
+        onEdgesChange={isReplayMode ? undefined : onEdgesChange}
+        onNodesChange={isReplayMode ? undefined : onNodesChange}
+        onPaneClick={() => {
+          if (!isReplayMode) {
+            setNodes((current) => applySelectedNodeIds(current, []));
+          }
+        }}
         selectionMode={SelectionMode.Partial}
-        nodesDraggable
+        nodesDraggable={!isReplayMode}
         nodesConnectable={false}
         panOnDrag={false}
         proOptions={{ hideAttribution: true }}
       >
-        <CanvasAutoFit nodeCount={nodes.length} />
+        <CanvasAutoFit nodeCount={canvasNodes.length} />
         <Controls position="bottom-right" showInteractive={false} />
         <MiniMap
           pannable
@@ -527,7 +642,22 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         open={skillPanelOpen}
         onClose={() => setSkillPanelOpen(false)}
       />
-      <EmptyState visible={!nodes.length} />
+      <RunTracePanel
+        error={traceError}
+        events={traceEvents}
+        loading={traceLoading}
+        open={Boolean(traceRunId)}
+        replayActive={isReplayMode}
+        runNodeId={traceRunId}
+        onClose={handleCloseTrace}
+        onExitReplay={handleExitReplay}
+        onReplay={handleReplayTrace}
+      />
+      <ReplayBanner
+        activeRunId={replaySnapshot?.runNodeId ?? null}
+        onExit={handleExitReplay}
+      />
+      <EmptyState visible={!nodes.length && !isReplayMode} />
 
       <Composer
         busy={isBusy}
@@ -535,6 +665,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         contextCount={contextCount}
         prompt={prompt}
         referenceNode={referenceNode}
+        replayActive={isReplayMode}
         selectionCount={selectedNodeIds.length}
         setPrompt={setPrompt}
         stop={stop}
@@ -746,277 +877,6 @@ function ViewportControls({
   );
 }
 
-function SkillPanel({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
-  const [skills, setSkills] = useState<SkillSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busyAction, setBusyAction] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [editingSkillId, setEditingSkillId] = useState<string | null>(null);
-  const [editingName, setEditingName] = useState("");
-  const [editingDescription, setEditingDescription] = useState("");
-  const [editingInstructions, setEditingInstructions] = useState("");
-  const hasPromptExpand = skills.some((skill) => skill.slug === "prompt-expand");
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    let ignore = false;
-
-    loadSkills()
-      .then(({ skills: nextSkills }) => {
-        if (!ignore) {
-          setSkills(nextSkills);
-        }
-      })
-      .catch((nextError: unknown) => {
-        if (!ignore) {
-          setError(getClientError(nextError));
-        }
-      })
-      .finally(() => {
-        if (!ignore) {
-          setLoading(false);
-        }
-      });
-
-    return () => {
-      ignore = true;
-    };
-  }, [open]);
-
-  const handleUpload = async (file: File | null) => {
-    if (!file) {
-      return;
-    }
-
-    setBusyAction("upload");
-    setError(null);
-
-    try {
-      const { skill } = await uploadSkill(file);
-      setSkills((current) => [skill, ...current]);
-    } catch (nextError) {
-      setError(getClientError(nextError));
-    } finally {
-      setBusyAction(null);
-    }
-  };
-
-  const startEditing = (skill: SkillSummary) => {
-    setEditingSkillId(skill.id);
-    setEditingName(skill.name);
-    setEditingDescription(skill.description);
-    setEditingInstructions(skill.instructions);
-  };
-
-  const cancelEditing = () => {
-    setEditingSkillId(null);
-    setEditingName("");
-    setEditingDescription("");
-    setEditingInstructions("");
-  };
-
-  const handleSave = async (event: FormEvent<HTMLFormElement>, skillId: string) => {
-    event.preventDefault();
-    if (!editingName.trim() || !editingInstructions.trim()) {
-      return;
-    }
-
-    setBusyAction(`save:${skillId}`);
-    setError(null);
-
-    try {
-      const { skill } = await updateSkill({
-        skillId,
-        name: editingName,
-        description: editingDescription,
-        instructions: editingInstructions,
-      });
-      setSkills((current) =>
-        current.map((item) => (item.id === skill.id ? skill : item))
-      );
-      cancelEditing();
-    } catch (nextError) {
-      setError(getClientError(nextError));
-    } finally {
-      setBusyAction(null);
-    }
-  };
-
-  const handleDelete = async (skill: SkillSummary) => {
-    if (!window.confirm(`删除「${skill.name}」？`)) {
-      return;
-    }
-
-    setBusyAction(`delete:${skill.id}`);
-    setError(null);
-
-    try {
-      await deleteSkill(skill.id);
-      setSkills((current) => current.filter((item) => item.id !== skill.id));
-    } catch (nextError) {
-      setError(getClientError(nextError));
-    } finally {
-      setBusyAction(null);
-    }
-  };
-
-  if (!open) {
-    return null;
-  }
-
-  return (
-    <aside className="skill-panel" aria-label="Skill 面板">
-      <header className="skill-panel-header">
-        <div>
-          <strong>Skills</strong>
-          <span>{hasPromptExpand ? "prompt-expand 默认启用" : "需要上传 prompt-expand"}</span>
-        </div>
-        <button
-          aria-label="关闭 Skill 面板"
-          onClick={onClose}
-          title="关闭"
-          type="button"
-        >
-          <X size={14} />
-        </button>
-      </header>
-
-      <label className="skill-upload">
-        <input
-          accept=".zip,application/zip"
-          disabled={busyAction === "upload"}
-          type="file"
-          onChange={(event) => {
-            void handleUpload(event.currentTarget.files?.[0] ?? null);
-            event.currentTarget.value = "";
-          }}
-        />
-        {busyAction === "upload" ? <Loader2 size={14} /> : <Upload size={14} />}
-        <span>上传 zip</span>
-      </label>
-
-      {error && <div className="skill-error">{error}</div>}
-
-      <div className="skill-list">
-        {loading && (
-          <div className="skill-empty">
-            <Loader2 size={15} />
-            <span>加载中</span>
-          </div>
-        )}
-
-        {!loading && !skills.length && (
-          <div className="skill-empty">
-            <WandSparkles size={15} />
-            <span>暂无公开 skill</span>
-          </div>
-        )}
-
-        {!loading &&
-          skills.map((skill) => {
-            const isEditing = editingSkillId === skill.id;
-            const isSaving = busyAction === `save:${skill.id}`;
-            const isDeleting = busyAction === `delete:${skill.id}`;
-
-            return (
-              <section className="skill-row" key={skill.id}>
-                {isEditing ? (
-                  <form
-                    className="skill-edit-form"
-                    onSubmit={(event) => handleSave(event, skill.id)}
-                  >
-                    <input
-                      maxLength={80}
-                      value={editingName}
-                      onChange={(event) => setEditingName(event.currentTarget.value)}
-                    />
-                    <input
-                      maxLength={500}
-                      placeholder="描述"
-                      value={editingDescription}
-                      onChange={(event) =>
-                        setEditingDescription(event.currentTarget.value)
-                      }
-                    />
-                    <textarea
-                      value={editingInstructions}
-                      onChange={(event) =>
-                        setEditingInstructions(event.currentTarget.value)
-                      }
-                    />
-                    <div className="skill-edit-actions">
-                      <button
-                        aria-label="保存 skill"
-                        disabled={
-                          isSaving ||
-                          !editingName.trim() ||
-                          !editingInstructions.trim()
-                        }
-                        title="保存"
-                        type="submit"
-                      >
-                        {isSaving ? <Loader2 size={14} /> : <Check size={14} />}
-                      </button>
-                      <button
-                        aria-label="取消编辑"
-                        onClick={cancelEditing}
-                        title="取消"
-                        type="button"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                  </form>
-                ) : (
-                  <>
-                    <div className="skill-row-main">
-                      <div>
-                        <strong title={skill.name}>{skill.name}</strong>
-                        {skill.slug === "prompt-expand" && <span>默认启用</span>}
-                      </div>
-                      <p title={skill.description || skill.instructions}>
-                        {skill.description || skill.instructions}
-                      </p>
-                    </div>
-                    <div className="skill-row-actions">
-                      <button
-                        aria-label="编辑 skill"
-                        disabled={!skill.canEdit || isDeleting}
-                        onClick={() => startEditing(skill)}
-                        title={skill.canEdit ? "编辑" : "只有上传者可编辑"}
-                        type="button"
-                      >
-                        <Pencil size={14} />
-                      </button>
-                      <button
-                        aria-label="删除 skill"
-                        disabled={!skill.canEdit || isDeleting}
-                        onClick={() => void handleDelete(skill)}
-                        title={skill.canEdit ? "删除" : "只有上传者可删除"}
-                        type="button"
-                      >
-                        {isDeleting ? <Loader2 size={14} /> : <Trash2 size={14} />}
-                      </button>
-                    </div>
-                  </>
-                )}
-              </section>
-            );
-          })}
-      </div>
-    </aside>
-  );
-}
-
 function EmptyState({ visible }: { visible: boolean }) {
   if (!visible) {
     return null;
@@ -1036,6 +896,7 @@ function Composer({
   contextCount,
   prompt,
   referenceNode,
+  replayActive,
   selectionCount,
   setPrompt,
   stop,
@@ -1046,6 +907,7 @@ function Composer({
   contextCount: number;
   prompt: string;
   referenceNode?: AgentCanvasNode;
+  replayActive: boolean;
   selectionCount: number;
   setPrompt: (value: string) => void;
   stop: () => void;
@@ -1071,7 +933,9 @@ function Composer({
           <PromptInputTextarea
             disabled={!canSubmit && !busy}
             placeholder={
-              !canSubmit
+              replayActive
+                ? "Run 回放模式为只读..."
+                : !canSubmit
                 ? "项目连接失败，无法提交..."
                 : hasReference
                   ? "基于引用节点继续生成..."
@@ -1111,6 +975,10 @@ function getReferenceNodeLabel(node?: AgentCanvasNode) {
     return node.data.image.title ?? "Generated image";
   }
 
+  if ("artifact" in node.data) {
+    return node.data.title;
+  }
+
   return "";
 }
 
@@ -1147,7 +1015,50 @@ function PromptNode({
   );
 }
 
+type ArtifactLikeNodeData = Extract<
+  AgentCanvasNode["data"],
+  {
+    kind:
+      | "artifact"
+      | "decision"
+      | "memory"
+      | "toolResult"
+      | "document"
+      | "code"
+      | "webpage";
+  }
+>;
+type ArtifactLikeNodeProps = NodeProps<FlowNode<ArtifactLikeNodeData, string>>;
+
+function ArtifactLikeNode({ data, selected }: ArtifactLikeNodeProps) {
+  const label = getArtifactNodeLabel(data.kind);
+  const summary = getArtifactNodeSummary(data);
+
+  return (
+    <Node
+      className={
+        selected
+          ? `canvas-node selected artifact-card ${data.kind}`
+          : `canvas-node artifact-card ${data.kind}`
+      }
+      handles={{ source: true, target: true }}
+    >
+      <NodeContent className="artifact-content">
+        <div className="artifact-heading">
+          <span className="artifact-icon">
+            <ArtifactNodeIcon kind={data.kind} />
+          </span>
+          <span>{label}</span>
+        </div>
+        <strong title={data.title}>{data.title}</strong>
+        {summary && <p title={summary}>{summary}</p>}
+      </NodeContent>
+    </Node>
+  );
+}
+
 function RunNode({
+  id,
   data,
   selected,
 }: NodeProps<FlowNode<RunNodeData, "runNode">>) {
@@ -1179,6 +1090,27 @@ function RunNode({
   const hasRunOutput = Boolean(agentText) || hasToolDetail;
   const title = getRunTitle(data.status, latestToolPart.state);
   const toggleLabel = expanded ? "收起输出" : "展开输出";
+  const stepTimeline = data.stepTimeline?.length
+    ? data.stepTimeline
+    : toolParts.map((part, index) => ({
+        id: `${part.type}-${index}`,
+        label: getToolName(part),
+        status:
+          part.state === "output-error" || part.state === "output-denied"
+            ? "error"
+            : part.state === "output-available"
+              ? "success"
+              : "running",
+        toolName: getToolName(part),
+        errorText: part.errorText,
+      }));
+  const openTrace = () => {
+    window.dispatchEvent(
+      new CustomEvent("cucumber:open-run-trace", {
+        detail: { runNodeId: id },
+      })
+    );
+  };
 
   return (
     <Node
@@ -1189,6 +1121,18 @@ function RunNode({
         <div className="run-heading">
           <span className={`run-status-dot ${data.status}`}>{statusIcon}</span>
           <span className="run-title">{title}</span>
+          <button
+            aria-label="查看 Run Trace"
+            className="run-trace-button nodrag nopan"
+            onClick={(event) => {
+              event.stopPropagation();
+              openTrace();
+            }}
+            title="查看 Trace"
+            type="button"
+          >
+            <ListTree size={12} />
+          </button>
           <button
             aria-expanded={expanded}
             aria-label={toggleLabel}
@@ -1212,6 +1156,19 @@ function RunNode({
                 {agentText}
               </p>
             )}
+            {stepTimeline.length > 0 && (
+              <div className="run-step-timeline" aria-label="Run step timeline">
+                {stepTimeline.map((step) => (
+                  <span
+                    className={`run-step-chip ${step.status}`}
+                    key={step.id}
+                    title={step.errorText ?? step.label}
+                  >
+                    {step.label}
+                  </span>
+                ))}
+              </div>
+            )}
             {hasToolDetail &&
               toolParts.map((part, index) => (
                 <ToolCallRow
@@ -1225,6 +1182,48 @@ function RunNode({
       </NodeContent>
     </Node>
   );
+}
+
+function ArtifactNodeIcon({ kind }: { kind: ArtifactLikeNodeProps["data"]["kind"] }) {
+  if (kind === "webpage") {
+    return <Globe2 size={14} />;
+  }
+  if (kind === "code") {
+    return <Type size={14} />;
+  }
+  if (kind === "memory") {
+    return <Database size={14} />;
+  }
+  if (kind === "decision") {
+    return <Check size={14} />;
+  }
+
+  return <FileText size={14} />;
+}
+
+function getArtifactNodeLabel(kind: ArtifactLikeNodeProps["data"]["kind"]) {
+  const labels: Record<ArtifactLikeNodeProps["data"]["kind"], string> = {
+    artifact: "Artifact",
+    code: "Code",
+    decision: "Decision",
+    document: "Document",
+    memory: "Memory",
+    toolResult: "Tool Result",
+    webpage: "Webpage",
+  };
+
+  return labels[kind];
+}
+
+function getArtifactNodeSummary(data: ArtifactLikeNodeProps["data"]) {
+  if (data.kind === "decision") {
+    return data.decision;
+  }
+  if (data.kind === "memory") {
+    return data.memory;
+  }
+
+  return data.summary ?? data.artifact.contentRef ?? data.artifact.uri;
 }
 
 function ToolCallRow({

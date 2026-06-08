@@ -148,11 +148,11 @@ Canvas UI
 
 ### 3.1 Graph Projection Layer
 
-- [ ] 新增 `src/lib/graph-projection.ts` 或相邻模块。
-- [ ] 将 event log / artifacts / run steps 投影成 `AgentCanvasNode` 和 `AgentCanvasEdge`。
-- [ ] 模型返回的 graph patch 只能作为 proposal，由 reducer 校验后应用。
-- [ ] Patch 类型包括 `createNode`、`updateNode`、`createEdge`、`setNodeStatus`、`attachArtifact`。
-- [ ] Patch reducer 要防止重复节点、断边、非法 node kind、越权修改其他项目。
+- [x] 新增 `src/lib/graph-projection.ts` 或相邻模块。
+- [x] 将 event log / artifacts / run steps 投影成 `AgentCanvasNode` 和 `AgentCanvasEdge`。
+- [x] 模型返回的 graph patch 只能作为 proposal，由 reducer 校验后应用。
+- [x] Patch 类型包括 `createNode`、`updateNode`、`createEdge`、`setNodeStatus`、`attachArtifact`。
+- [x] Patch reducer 要防止重复节点、断边、非法 node kind、越权修改其他项目。
 
 验收标准：
 
@@ -162,11 +162,11 @@ Canvas UI
 
 ### 3.2 Node Taxonomy
 
-- [ ] 扩展节点类型：Prompt、Run、Artifact、Decision、Memory、Tool Result、Document、Code、Webpage。
-- [ ] 每类节点只展示用户需要扫读的信息，详细 trace 放入高级入口。
-- [ ] Run 节点显示 step timeline，而不只显示最后一个 tool part。
-- [ ] Artifact 节点支持从一个结果继续 follow-up。
-- [ ] 节点 UI 变更前先对照 `design.md`，保持当前画布语言。
+- [x] 扩展节点类型：Prompt、Run、Artifact、Decision、Memory、Tool Result、Document、Code、Webpage。
+- [x] 每类节点只展示用户需要扫读的信息，详细 trace 放入高级入口。
+- [x] Run 节点显示 step timeline，而不只显示最后一个 tool part。
+- [x] Artifact 节点支持从一个结果继续 follow-up。
+- [x] 节点 UI 变更前先对照 `design.md`，保持当前画布语言。
 
 验收标准：
 
@@ -176,11 +176,11 @@ Canvas UI
 
 ### 3.3 Context And Memory
 
-- [ ] 将 `collectUpstreamContext` 扩展为 artifact-aware context collector。
-- [ ] 定义 context item 优先级：用户当前输入、选中节点、上游 artifact、最近 run decision、长期 memory。
-- [ ] 引入 context budget，低优先级内容使用 summary 或 content ref。
-- [ ] Memory 写入必须来自明确事件或用户确认，不能让模型静默写长期记忆。
-- [ ] 记录被裁剪上下文，供 trace 查看。
+- [x] 将 `collectUpstreamContext` 扩展为 artifact-aware context collector。
+- [x] 定义 context item 优先级：用户当前输入、选中节点、上游 artifact、最近 run decision、长期 memory。
+- [x] 引入 context budget，低优先级内容使用 summary 或 content ref。
+- [x] Memory 写入必须来自明确事件或用户确认，不能让模型静默写长期记忆。
+- [x] 记录被裁剪上下文，供 trace 查看。
 
 验收标准：
 
@@ -190,11 +190,11 @@ Canvas UI
 
 ### 3.4 Replay, Debug, And Evaluation
 
-- [ ] 新增 Run detail / advanced trace 入口。
-- [ ] 支持查看 step timeline、prompt parts、capability selection、tool IO、artifact refs、graph patches。
-- [ ] 支持从 event log replay 到只读画布状态。
-- [ ] 为关键 capability 建立 eval fixtures：输入、上游上下文、期望 step plan、期望 artifact。
-- [ ] 增加失败样例：缺 skill、缺 key、tool error、invalid patch、approval denied。
+- [x] 新增 Run detail / advanced trace 入口。
+- [x] 支持查看 step timeline、prompt parts、capability selection、tool IO、artifact refs、graph patches。
+- [x] 支持从 event log replay 到只读画布状态。
+- [x] 为关键 capability 建立 eval fixtures：输入、上游上下文、期望 step plan、期望 artifact。
+- [x] 增加失败样例：缺 skill、缺 key、tool error、invalid patch、approval denied。
 
 验收标准：
 
@@ -234,10 +234,10 @@ Canvas UI
 
 第三轮做 OS 体验：
 
-- [ ] Graph projection reducer。
-- [ ] 多类型节点。
-- [ ] Memory-aware upstream context。
-- [ ] Run replay 和 advanced trace。
+- [x] Graph projection reducer。
+- [x] 多类型节点。
+- [x] Memory-aware upstream context。
+- [x] Run replay 和 advanced trace。
 
 ## Non-Goals For Now
 
