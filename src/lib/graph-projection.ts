@@ -1158,11 +1158,22 @@ function getExistingOrProjectedEdge(
   target: string,
   projected: AgentCanvasEdge
 ) {
-  return (
-    existingEdges.find(
-      (edge) => edge.source === source && edge.target === target
-    ) ?? projected
+  const existing = existingEdges.find(
+    (edge) => edge.source === source && edge.target === target
   );
+  if (!existing) {
+    return projected;
+  }
+
+  return {
+    ...existing,
+    ...projected,
+    id: existing.id,
+    data: {
+      ...existing.data,
+      ...projected.data,
+    },
+  };
 }
 
 function getArtifactNodeKind(
@@ -1360,9 +1371,9 @@ function readToolName(value: unknown) {
     value === "analyze_reference_images" ||
     value === "expand_prompt" ||
     value === "generate_image" ||
+    value === "generate_html" ||
     value === "web.read" ||
     value === "asset.analyze_context" ||
-    value === "page.generate" ||
     value === "web_search" ||
     value === "write_document"
   ) {

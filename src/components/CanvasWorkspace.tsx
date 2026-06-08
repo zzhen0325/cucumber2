@@ -105,7 +105,6 @@ import {
 import type {
   AgentCanvasEdge,
   AgentCanvasNode,
-  CanvasToolPart,
   GeneratedImage,
   ImageResultNodeData,
   MarkdownNodeData,
@@ -281,6 +280,19 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           if (node.id !== runId || node.data.kind !== "run") {
             return node;
           }
+          const existingToolParts =
+            node.data.toolParts ?? (node.data.toolPart ? [node.data.toolPart] : []);
+          const latestToolPart = existingToolParts.at(-1);
+          const erroredToolParts = latestToolPart
+            ? [
+                ...existingToolParts.slice(0, -1),
+                {
+                  ...latestToolPart,
+                  state: "output-error" as const,
+                  errorText: message,
+                },
+              ]
+            : undefined;
 
           return {
             ...node,
@@ -288,29 +300,57 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
               ...node.data,
               status: "error",
               error: message,
-              toolPart: {
-                ...(node.data.toolPart ?? {
-                  type: "tool-expand_prompt",
-                  input: { prompt: node.data.prompt },
-                }),
-                state: "output-error",
-                errorText: message,
-              } satisfies CanvasToolPart,
-              toolParts: [
-                ...(node.data.toolParts ?? []),
-                {
-                  type: "tool-expand_prompt",
-                  state: "output-error",
-                  input: { prompt: node.data.prompt },
-                  errorText: message,
-                },
-              ],
+              toolPart: erroredToolParts?.at(-1),
+              toolParts: erroredToolParts,
             },
           };
         })
       );
     },
     [setNodes]
+  );
+
+  const settleRunIfOutputReady = useCallback(
+    (runId: string | null) => {
+      if (!runId) {
+        return;
+      }
+
+      setNodes((current) => {
+        if (!hasReadyRunOutput(current, runId)) {
+          return current;
+        }
+
+        return current.map((node) => {
+          if (
+            node.id !== runId ||
+            node.data.kind !== "run" ||
+            node.data.status === "success" ||
+            node.data.status === "error"
+          ) {
+            return node;
+          }
+
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              status: "success",
+              error: undefined,
+            },
+          };
+        });
+      });
+
+      setEdges((current) =>
+        current.map((edge) =>
+          edge.target === runId && edge.data?.active
+            ? { ...edge, data: { ...edge.data, active: false } }
+            : edge
+        )
+      );
+    },
+    [setEdges, setNodes]
   );
 
   const {
@@ -327,6 +367,31 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     }),
     onData: (dataPart) => {
       projectStreamedRuntimeEvents(runtimeEventsFromMessageParts([dataPart]));
+    },
+    onFinish: ({ messages: finalMessages, isAbort, isDisconnect, isError }) => {
+      const runId = activeRunId.current;
+      if (!runId) {
+        return;
+      }
+
+      projectStreamedRuntimeEvents(
+        runtimeEventsFromMessages(finalMessages, {
+          runNodeId: runId,
+          projectId: loadedProjectIdRef.current ?? undefined,
+          prompt: activeRunRequest.current?.canvasContext.prompt,
+          promptNodeId: activeRunRequest.current?.canvasContext.promptNodeId,
+          selectedNodeId: activeRunRequest.current?.canvasContext.selectedNodeId,
+          includeLegacyToolParts: true,
+        }),
+        { replace: true }
+      );
+
+      if (!isAbort && !isDisconnect && !isError) {
+        settleRunIfOutputReady(runId);
+        window.requestAnimationFrame(() => {
+          settleRunIfOutputReady(runId);
+        });
+      }
     },
     onError: (nextError) => {
       markRunError(activeRunId.current, nextError.message);
@@ -1076,6 +1141,41 @@ function mergeProjectedEdges(
     ...current.filter((edge) => !projectedIds.has(edge.id)),
     ...projected,
   ];
+}
+
+function hasReadyRunOutput(nodes: AgentCanvasNode[], runId: string) {
+  const runNode = nodes.find(
+    (node) => node.id === runId && node.data.kind === "run"
+  );
+  const hasReadyResultNode = nodes.some((node) => {
+    if (node.data.kind === "imageResult") {
+      return node.data.runId === runId && (node.data.status ?? "ready") === "ready";
+    }
+
+    if ("runId" in node.data) {
+      return node.data.runId === runId;
+    }
+
+    return false;
+  });
+
+  if (hasReadyResultNode) {
+    return true;
+  }
+  if (!runNode || runNode.data.kind !== "run") {
+    return false;
+  }
+
+  const toolParts = runNode.data.toolParts?.length
+    ? runNode.data.toolParts
+    : runNode.data.toolPart
+      ? [runNode.data.toolPart]
+      : [];
+
+  return (
+    toolParts.length > 0 &&
+    toolParts.every((part) => part.state === "output-available")
+  );
 }
 
 function dedupeRuntimeEvents(events: StreamedRuntimeEvents): StreamedRuntimeEvents {

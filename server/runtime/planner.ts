@@ -112,7 +112,7 @@ function planBeforeModel(intent: IntentResult): PlanStep[] | undefined {
     return buildPlanFromIntentDeterministically(intent);
   }
 
-  if (intent.requiredTools.includes(toolIds.generatePage)) {
+  if (intent.requiredTools.includes(toolIds.generateHtml)) {
     return buildPlanFromIntentDeterministically(intent);
   }
 
@@ -207,6 +207,9 @@ export function validatePlanAgainstRegistry(
 function validateStepInput(step: PlanStep, tool: RuntimeToolDefinition) {
   const errors: string[] = [];
   if (step.input === undefined) {
+    if (tool.id === toolIds.generateHtml) {
+      return errors;
+    }
     if (tool.prepareInput) {
       return errors;
     }
@@ -268,7 +271,7 @@ export function buildPlanFromIntentDeterministically(intent: IntentResult): Plan
     return buildWebResearchPlan();
   }
 
-  if (intent.requiredTools.includes(toolIds.generatePage)) {
+  if (intent.requiredTools.includes(toolIds.generateHtml)) {
     return buildLandingPagePlan(intent);
   }
 
@@ -444,7 +447,7 @@ function buildLandingPagePlan(intent: IntentResult): PlanStep[] {
     },
   ];
   const generationDependencies = ["agent_text"];
-  const generatePageExpectedCanvasOperations = intent.requiredTools.includes(
+  const generateHtmlExpectedCanvasOperations = intent.requiredTools.includes(
     toolIds.createCanvasNode
   )
     ? [
@@ -516,15 +519,15 @@ function buildLandingPagePlan(intent: IntentResult): PlanStep[] {
   }
 
   steps.push({
-    id: "generate_page",
-    title: "Generate page artifact",
-    goal: "Create the HTML page artifact from the task brief and previous tool results.",
+    id: "generate_html",
+    title: "Generate HTML artifact",
+    goal: "Create the complete standalone HTML page artifact from the task brief and previous tool results.",
     kind: "tool",
-    toolId: toolIds.generatePage,
-    capabilityId: "page.generate",
+    toolId: toolIds.generateHtml,
+    capabilityId: "html.generate",
     dependsOn: generationDependencies,
     expectedArtifacts: [{ type: "webpage", description: "Generated landing page artifact" }],
-    expectedCanvasOperations: generatePageExpectedCanvasOperations,
+    expectedCanvasOperations: generateHtmlExpectedCanvasOperations,
     risk: "low",
     approvalRequired: false,
     retryPolicy: defaultRetryPolicy,
@@ -538,7 +541,7 @@ function buildLandingPagePlan(intent: IntentResult): PlanStep[] {
       kind: "canvas",
       toolId: toolIds.createCanvasNode,
       capabilityId: "canvas.mutate",
-      dependsOn: ["generate_page"],
+      dependsOn: ["generate_html"],
       expectedArtifacts: [],
       expectedCanvasOperations: [
         {
@@ -557,7 +560,7 @@ function buildLandingPagePlan(intent: IntentResult): PlanStep[] {
     title: "Evaluate result",
     goal: "Check generated page artifact completeness and canvas visibility.",
     kind: "evaluation",
-    dependsOn: [intent.requiredTools.includes(toolIds.createCanvasNode) ? "create_page_node" : "generate_page"],
+    dependsOn: [intent.requiredTools.includes(toolIds.createCanvasNode) ? "create_page_node" : "generate_html"],
     expectedArtifacts: [],
     expectedCanvasOperations: [],
     risk: "low",
@@ -618,7 +621,7 @@ function buildPlannerPrompt({
       `For web research, current information, or source-grounded answers, use ${toolIds.searchWeb} before ${toolIds.writeDocument}.`,
       `For text-first analysis, summaries, reports, plans, answers, or capability reports, use ${toolIds.writeDocument} to create a Markdown document artifact.`,
       `For simple image generation, include ${toolIds.expandPrompt} and ${toolIds.generateImage}.`,
-      `For landing page work, use ${toolIds.readWebpage} when webpage sources are present, ${toolIds.analyzeAssets} for image or artifact context, ${toolIds.generatePage} to create the page artifact, and ${toolIds.createCanvasNode} when the page must appear on canvas.`,
+      `For page, component, landing page, website, or HTML work, use ${toolIds.readWebpage} when webpage sources are present, ${toolIds.analyzeAssets} for image or artifact context, ${toolIds.generateHtml} through the generate_html tool to create the complete standalone HTML artifact, and ${toolIds.createCanvasNode} when the page must appear on canvas.`,
       `Use ${toolIds.analyzeReferenceImages} before prompt expansion when selected/upstream images need visual analysis.`,
       "Canvas changes must be expectedCanvasOperations or tool-returned CanvasOperation proposals, never direct node mutation.",
       "If no executable tool is exposed for the task, create an approval step asking for clarification instead of inventing a tool.",

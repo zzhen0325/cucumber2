@@ -137,9 +137,8 @@ describe("agent canvas graph", () => {
       target: draft.promptNode.id,
     });
     expect(draft.promptNode.position).toEqual({ x: 262, y: 510 });
-    expect(draft.runNode.data.kind === "run" && draft.runNode.data.toolPart).toMatchObject({
-      type: "tool-analyze_reference_images",
-    });
+    expect(draft.runNode.data.kind === "run" && draft.runNode.data.toolPart).toBeUndefined();
+    expect(draft.runNode.data.kind === "run" && draft.runNode.data.toolParts).toBeUndefined();
   });
 
   it("creates a branch from a selected prompt node", () => {

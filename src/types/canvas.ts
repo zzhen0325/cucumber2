@@ -89,9 +89,9 @@ export type CanvasToolPart = {
     | "tool-analyze_reference_images"
     | "tool-expand_prompt"
     | "tool-generate_image"
+    | "tool-generate_html"
     | "tool-web.read"
     | "tool-asset.analyze_context"
-    | "tool-page.generate"
     | "tool-web_search"
     | "tool-write_document"
     | "tool-runtime";

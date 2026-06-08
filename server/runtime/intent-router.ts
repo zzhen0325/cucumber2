@@ -636,14 +636,14 @@ function inferComplexRoute(
     ...(wantsWeb ? ["web.research"] : []),
     ...(wantsAssetContext ? ["asset.analyze"] : []),
     ...(wantsReportFirst ? ["document.write"] : []),
-    "page.generate",
+    "html.generate",
     ...(wantsCanvas ? ["canvas.mutate"] : []),
   ];
   const requiredTools = [
     ...(wantsWeb ? [toolIds.readWebpage] : []),
     ...(wantsAssetContext ? [toolIds.analyzeAssets] : []),
     ...(wantsReportFirst ? [toolIds.writeDocument] : []),
-    toolIds.generatePage,
+    toolIds.generateHtml,
     ...(wantsCanvas ? [toolIds.createCanvasNode] : []),
   ];
 
@@ -719,7 +719,7 @@ function inferComplexRoute(
         {
           kind: "write",
           target: wantsReportFirst ? "html_page_from_report" : "landing_page",
-          toolHint: toolIds.generatePage,
+          toolHint: toolIds.generateHtml,
         },
         ...(wantsCanvas
           ? [
@@ -741,9 +741,9 @@ function getMissingComplexRouteTask(
 ): StructuredTask {
   if (
     complexRoute.requiredTools.length === 1 &&
-    complexRoute.requiredTools[0] === toolIds.generatePage
+    complexRoute.requiredTools[0] === toolIds.generateHtml
   ) {
-    return createUnsupportedTask(input, "page.generate", "page_generation");
+    return createUnsupportedTask(input, "html.generate", "page_generation");
   }
 
   return complexRoute.task;
@@ -1034,7 +1034,7 @@ function inferMissingCapability(text: string):
     return { capabilityId: "document.write", taskKind: "document_writing" };
   }
   if (isPageRequest(text)) {
-    return { capabilityId: "page.generate", taskKind: "page_generation" };
+    return { capabilityId: "html.generate", taskKind: "page_generation" };
   }
   if (/(网页|调研|搜索|research|search|web)/i.test(text)) {
     return { capabilityId: "web.research", taskKind: "web_research" };

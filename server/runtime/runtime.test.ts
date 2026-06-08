@@ -750,13 +750,13 @@ describe("runtime core", () => {
       requiredCapabilities: [
         "web.research",
         "asset.analyze",
-        "page.generate",
+        "html.generate",
         "canvas.mutate",
       ],
       requiredTools: [
         toolIds.readWebpage,
         toolIds.analyzeAssets,
-        toolIds.generatePage,
+        toolIds.generateHtml,
         toolIds.createCanvasNode,
       ],
       task: { kind: "multi_step" },
@@ -794,12 +794,12 @@ describe("runtime core", () => {
       "agent_text",
       "read_webpage",
       "analyze_assets",
-      "generate_page",
+      "generate_html",
       "create_page_node",
       "evaluate_result",
     ]);
-    expect(plan.find((step) => step.id === "generate_page")).toMatchObject({
-      toolId: toolIds.generatePage,
+    expect(plan.find((step) => step.id === "generate_html")).toMatchObject({
+      toolId: toolIds.generateHtml,
       expectedArtifacts: [{ type: "webpage" }],
       expectedCanvasOperations: [{ type: "createNode" }],
     });
@@ -854,8 +854,8 @@ describe("runtime core", () => {
     expect(modelPlannerCalled).toBe(false);
     expect(intent).toMatchObject({
       primaryIntent: "multi_step.landing_page",
-      requiredCapabilities: ["document.write", "page.generate"],
-      requiredTools: [toolIds.writeDocument, toolIds.generatePage],
+      requiredCapabilities: ["document.write", "html.generate"],
+      requiredTools: [toolIds.writeDocument, toolIds.generateHtml],
       task: {
         kind: "multi_step",
         deliverables: [{ kind: "document" }, { kind: "webpage" }],
@@ -863,12 +863,12 @@ describe("runtime core", () => {
     });
     expect(context.availableTools.map((tool) => tool.id)).toEqual([
       toolIds.writeDocument,
-      toolIds.generatePage,
+      toolIds.generateHtml,
     ]);
     expect(plan.normalizedPlan.map((step) => step.id)).toEqual([
       "agent_text",
       "write_report",
-      "generate_page",
+      "generate_html",
       "evaluate_result",
     ]);
     expect(plan.normalizedPlan.find((step) => step.id === "write_report"))
@@ -877,9 +877,9 @@ describe("runtime core", () => {
         dependsOn: ["agent_text"],
         expectedArtifacts: [{ type: "doc", count: 1 }],
       });
-    expect(plan.normalizedPlan.find((step) => step.id === "generate_page"))
+    expect(plan.normalizedPlan.find((step) => step.id === "generate_html"))
       .toMatchObject({
-        toolId: toolIds.generatePage,
+        toolId: toolIds.generateHtml,
         dependsOn: ["write_report"],
         expectedArtifacts: [{ type: "webpage" }],
         expectedCanvasOperations: [],

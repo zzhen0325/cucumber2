@@ -822,7 +822,7 @@ function buildAiSdkAgentPrompt({
       "For image generation, plan and call expand_prompt before generate_image. If upstream images are relevant, call analyze_reference_images before expand_prompt.",
       "For current web information, plan and call web_search before write_document.",
       "For document/report/answer tasks, use write_document so the result appears as a canvas artifact.",
-      "For page tasks, use page_generate and create a canvas node when the user asks for canvas visibility.",
+      "When the user asks to generate a page, component, landing page, website, or HTML, plan html.generate and call generate_html. The HTML must be a complete standalone single-file document, with CSS in <style>, JS in <script>, and no external dependencies.",
       "Never invent artifacts or canvas changes. Only returned tool results count.",
     ].join("\n"),
   ].join("\n");

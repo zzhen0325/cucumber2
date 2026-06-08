@@ -129,6 +129,48 @@ describe("graph projection", () => {
     ]);
   });
 
+  it("updates an existing running run node when the trace completes", () => {
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      existingNodes: [
+        promptNode("prompt-1"),
+        {
+          ...runNode("run-1"),
+          position: { x: 120, y: 260 },
+          selected: true,
+        },
+      ],
+      existingEdges: [
+        {
+          id: "edge-prompt-1-run-1",
+          source: "prompt-1",
+          target: "run-1",
+          type: "animated",
+          data: { active: true },
+        },
+      ],
+      events: [
+        event("run.created", "run-1", "run", {
+          prompt: "生成图片",
+          promptNodeId: "prompt-1",
+          selectedNodeId: null,
+        }),
+        event("run.completed", "run-1", "run", { status: "success" }),
+      ],
+    });
+
+    const run = projection.nodes.find((node) => node.id === "run-1");
+    expect(run?.data.kind).toBe("run");
+    if (run?.data.kind !== "run") {
+      throw new Error("Expected run node");
+    }
+
+    expect(run.data.status).toBe("success");
+    expect(run.position).toEqual({ x: 120, y: 260 });
+    expect(run.selected).toBe(true);
+    expect(projection.edges[0]?.data?.active).toBe(false);
+  });
+
   it("projects generated webpage artifacts into iframe preview nodes", () => {
     const html = "<!doctype html><html><head><title>页面节点</title></head><body><h1>OK</h1></body></html>";
     const projection = projectRunTraceToCanvas({
@@ -138,7 +180,7 @@ describe("graph projection", () => {
           prompt: "生成一个 HTML 页面",
           selectedNodeId: null,
         }),
-        event("artifact.created", "run-1", "generate_page", {
+        event("artifact.created", "run-1", "generate_html", {
           artifact: {
             id: "page-1",
             type: "webpage",
@@ -151,7 +193,7 @@ describe("graph projection", () => {
             },
           },
           canvasNodeId: "webpage-page-1",
-          toolName: "page.generate",
+          toolName: "generate_html",
         }),
       ],
     });

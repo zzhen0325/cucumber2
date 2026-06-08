@@ -65,7 +65,7 @@ describe("runtime evaluator", () => {
         ],
         plan: [
           planStep(
-            "generate_page",
+            "generate_html",
             [{ type: "webpage", count: 1 }],
             [{ type: "createNode", description: "Place page on canvas." }]
           ),
@@ -91,7 +91,7 @@ describe("runtime evaluator", () => {
         artifacts: [{ id: "page-1", type: "webpage" }],
         plan: [
           planStep(
-            "generate_page",
+            "generate_html",
             [{ type: "webpage", count: 1 }],
             [{ type: "createNode", description: "Place page on canvas." }]
           ),

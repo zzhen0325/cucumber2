@@ -17,6 +17,21 @@
 
 ## 2026-06-09
 
+### 新增 generate_html 页面工具
+
+- 变更：移除旧页面模板生成路径，页面、组件、落地页、网站和 HTML 请求统一暴露 `html.generate` / AI SDK `generate_html` 工具。
+- 变更：`generate_html` 输入为 `title`、完整单文件 `html` 和 `summary`；工具校验 `<!doctype html>`、`html/head/body/style`、无外部脚本或样式依赖，然后生成 `webpage` artifact 并投影为可预览节点。
+- 文件：`server/runtime/tools/web-page-tools.ts`、`server/runtime/tool-registry.ts`、`server/runtime/planner.ts`、`server/runtime/intent-router.ts`、`server/runtime/ai-sdk-runner.ts`、`src/lib/graph.ts`、`src/lib/graph-projection.ts`、`src/components/RunNodeView.tsx`、`README.md`、`process.md`。
+- 验证：`pnpm test -- server/runtime/runtime.test.ts server/runtime/evaluator.test.ts src/lib/graph.test.ts src/lib/graph-projection.test.ts server/runtime/tools/web-page-tools.test.ts`、`pnpm build`、`curl -sS http://127.0.0.1:8787/api/health` 通过。
+
+### 移除 Run 节点工具调用占位
+
+- 变更：新建 Run 节点不再预置 `tool-expand_prompt` / `tool-analyze_reference_images`；Run 节点只有收到真实 `toolPart`、runtime tool event 或已有工具错误时才展示“工具调用”分组。
+- 变更：前端 stream 失败时不再补一个假的“提示词扩写”错误工具；如果已有真实工具，则把错误挂到最后一个工具，否则只标记 Run 失败。
+- 文件：`src/components/RunNodeView.tsx`、`src/components/CanvasWorkspace.tsx`、`src/lib/graph.ts`、`src/lib/graph.test.ts`、`process.md`。
+- 验证：`pnpm test -- src/lib/graph.test.ts src/lib/graph-projection.test.ts src/lib/runtime-event-renderer.test.ts`、`pnpm build`、`pnpm exec eslint src/components/RunNodeView.tsx src/components/CanvasWorkspace.tsx src/lib/graph.ts src/lib/graph.test.ts` 通过。
+- 备注：完整 `pnpm lint` 仍因既有 `src/components/BlockNoteMarkdownEditor.tsx` 的 `react-hooks/refs` 问题失败，本次未改该文件。
+
 ### 画布节点支持调整大小
 
 - 变更：所有基于 AI Elements `Node` 的画布节点接入 React Flow `NodeResizer`，选中态显示绿色缩放手柄；Prompt、Run、图片结果、Artifact、Markdown 和 HTML 页面节点均可调整宽高。
@@ -74,16 +89,16 @@
 
 ### 补强复合页面任务 Router/Planner
 
-- 变更：页面/HTML 请求如果同时包含分析、报告、总结等文本产物目标，会作为通用 multi-step 任务暴露 `document.write -> page.generate` 工具链，而不是落到模型 planner schema 输出。
-- 变更：Planner 对包含 `page.generate` 的复合任务按已暴露工具组合生成 DAG；前序 `document.write` 的 Markdown 会作为页面生成素材传给 `page.generate`。只有用户明确要求画布/节点 mutation 时才加入 `canvas.createNode` 和对应 expected canvas operation。
+- 变更：页面/HTML 请求如果同时包含分析、报告、总结等文本产物目标，会作为通用 multi-step 任务暴露 `document.write -> html.generate` 工具链，而不是落到模型 planner schema 输出。
+- 变更：Planner 对包含 `html.generate` 的复合任务按已暴露工具组合生成 DAG；前序 `document.write` 的 Markdown 会作为页面生成素材传给 `html.generate`。只有用户明确要求画布/节点 mutation 时才加入 `canvas.createNode` 和对应 expected canvas operation。
 - 变更：对照 AI SDK 官方 multi-step/tool-calling、ToolLoopAgent、loop control 和 structured-output-with-tools 文档，继续用本仓库的 `IntentResult -> PlanStep[] -> generic executor` 映射多步工具循环。
 - 文件：`server/runtime/intent-router.ts`、`server/runtime/planner.ts`、`server/runtime/tools/web-page-tools.ts`、`server/runtime/runtime.test.ts`、`README.md`、`process.md`。
 - 验证：`pnpm test -- server/runtime/runtime.test.ts`、`pnpm exec tsc -p tsconfig.node.json --noEmit` 通过。
 
 ### 页面类需求输出 HTML 预览节点
 
-- 变更：页面/网页/HTML/站点等页面产物意图会路由到 `page.generate`，生成的 `webpage` artifact 会投影为可预览的 `webpageNode`；节点使用 iframe 渲染 `srcDoc`/`data:text/html`，并保留打开预览入口。
-- 变更：graph projection、legacy tool part fallback 和 Run 节点工具状态都支持 `web.read`、`asset.analyze_context`、`page.generate`，避免页面生成过程只停留在聊天文本或普通 artifact 卡片里。
+- 变更：页面/网页/HTML/站点等页面产物意图会路由到 `html.generate`，生成的 `webpage` artifact 会投影为可预览的 `webpageNode`；节点使用 iframe 渲染 `srcDoc`/`data:text/html`，并保留打开预览入口。
+- 变更：graph projection、legacy tool part fallback 和 Run 节点工具状态都支持 `web.read`、`asset.analyze_context`、`html.generate`，避免页面生成过程只停留在聊天文本或普通 artifact 卡片里。
 - 文件：`server/runtime/intent-router.ts`、`src/types/canvas.ts`、`src/lib/graph.ts`、`src/lib/graph-projection.ts`、`src/lib/runtime-event-renderer.ts`、`src/components/CanvasWorkspace.tsx`、`src/components/RunNodeView.tsx`、`src/App.css`、`src/lib/graph.test.ts`、`src/lib/graph-projection.test.ts`、`process.md`。
 - 验证：已对照 AI SDK UI `createUIMessageStream` / streaming data 文档确认沿用 message parts/runtime event 流；`pnpm test src/lib/graph.test.ts src/lib/graph-projection.test.ts server/runtime/runtime.test.ts`、`pnpm build` 通过；Browser 打开 `http://localhost:5174/` 创建空项目，画布、输入器和存储状态正常且无 console error/warn。
 - 备注：未提交真实页面生成请求，避免触发模型调用；HTML 节点数据落点由 graph/projection 单元测试覆盖。
@@ -171,8 +186,8 @@
 
 ### 完成 1.6 复杂落地页 Planner
 
-- 变更：Tool Registry 新增 `web.read`、`asset.analyzeContext`、`page.generate` 三个真实工具；`web.read` 会读取用户提供的 URL 并生成网页 source artifact，`asset.analyzeContext` 汇总已选图片/产物上下文，`page.generate` 生成 HTML webpage artifact。
-- 变更：Intent Router 对“根据网页和图片生成落地页并放到画布里”改为可执行 `multi_step.landing_page`，required tools 为 `web.read`、`asset.analyzeContext`、`page.generate`、`canvas.createNode`，不再 route_missing。
+- 变更：Tool Registry 新增 `web.read`、`asset.analyzeContext`、`html.generate` 三个真实工具；`web.read` 会读取用户提供的 URL 并生成网页 source artifact，`asset.analyzeContext` 汇总已选图片/产物上下文，`html.generate` 生成 HTML webpage artifact。
+- 变更：Intent Router 对“根据网页和图片生成落地页并放到画布里”改为可执行 `multi_step.landing_page`，required tools 为 `web.read`、`asset.analyzeContext`、`html.generate`、`canvas.createNode`，不再 route_missing。
 - 变更：Planner deterministic fixture 支持复杂落地页 DAG：reasoning -> web read / asset analysis -> page artifact generation -> canvas node creation -> evaluation；planner validation 会通过真实 registry 校验。
 - 变更：`canvas.createNode` 增加 `prepareInput`，可从前序非图片 artifact 生成节点 proposal；artifact event 的 `canvasNodeId` 改为按 artifact type 生成，避免 webpage/doc/code 被写成 `image-*`。
 - 文件：`server/runtime/tools/web-page-tools.ts`、`server/runtime/tools/ids.ts`、`server/runtime/tool-registry.ts`、`server/runtime/intent-router.ts`、`server/runtime/planner.ts`、`server/runtime/executor.ts`、`server/runtime/runtime.test.ts`、`agent-os-plan.md`、`process.md`。
@@ -334,7 +349,7 @@
 - 变更：`validateIntentAgainstRegistry` 允许 route-missing intent 携带尚未注册的 required capability；planner 会生成 `clarify_or_stop` approval step，而不是继续进入图片生成计划。
 - 文件：`server/runtime/intent-router.ts`、`server/runtime/runtime.test.ts`、`README.md`、`agent-os-plan.md`、`process.md`。
 - 验证：`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm test -- server/runtime/runtime.test.ts` 通过。
-- 备注：复杂落地页的完整 multi-step plan 仍未实现；当前只是明确缺少 `page.generate` executor，避免误走图片链路。
+- 备注：复杂落地页的完整 multi-step plan 仍未实现；当前只是明确缺少 `html.generate` executor，避免误走图片链路。
 
 ### Run 节点补齐用户级 Runtime 摘要
 

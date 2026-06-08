@@ -266,8 +266,6 @@ export function createRunDraft(
       prompt,
       status: "queued",
       traceAvailable: true,
-      toolPart: getInitialRunToolPart(prompt, upstreamContext),
-      toolParts: [getInitialRunToolPart(prompt, upstreamContext)],
     },
   };
 
@@ -376,7 +374,7 @@ function createAlignedImageResultNodes(
   const resultOffset =
     runNode.data.kind === "run" &&
     (runNode.data.status !== "queued" ||
-      runNode.data.toolPart?.state !== "input-streaming")
+      hasVisibleRunOutput(runNode.data))
       ? EXPANDED_RESULT_OFFSET_FROM_PROMPT_Y
       : RESULT_OFFSET_FROM_PROMPT_Y;
   const preferredStartX =
@@ -689,12 +687,28 @@ function getNodeHeight(node: AgentCanvasNode) {
   if (
     node.data.kind === "run" &&
     node.data.status === "queued" &&
-    node.data.toolPart?.state === "input-streaming"
+    !hasVisibleRunOutput(node.data)
   ) {
     return COMPACT_RUN_NODE_HEIGHT;
   }
 
   return RUN_NODE_HEIGHT;
+}
+
+function hasVisibleRunOutput(data: RunNodeData) {
+  const toolParts = data.toolParts ?? (data.toolPart ? [data.toolPart] : []);
+  const hasVisibleToolPart = toolParts.some(
+    (part) => part.state !== "input-streaming" || Boolean(part.toolCallId)
+  );
+
+  return Boolean(
+    data.agentText?.trim() ||
+      hasVisibleToolPart ||
+      data.stepTimeline?.length ||
+      data.summaryItems?.length ||
+      data.evaluation ||
+      data.error
+  );
 }
 
 function getStoredNodeDimension(
@@ -1178,10 +1192,10 @@ export function toolPartFromMessagePart(part: unknown): CanvasToolPart | null {
   if (
     toolName !== "analyze_reference_images" &&
     toolName !== "generate_image" &&
+    toolName !== "generate_html" &&
     toolName !== "expand_prompt" &&
     toolName !== "web.read" &&
     toolName !== "asset.analyze_context" &&
-    toolName !== "page.generate" &&
     toolName !== "web_search" &&
     toolName !== "write_document"
   ) {
@@ -1213,29 +1227,6 @@ function readToolApproval(approval: {
     approved:
       typeof approval.approved === "boolean" ? approval.approved : undefined,
     reason: typeof approval.reason === "string" ? approval.reason : undefined,
-  };
-}
-
-function getInitialRunToolPart(
-  prompt: string,
-  upstreamContext: UpstreamContextItem[]
-): CanvasToolPart {
-  const imageCount = upstreamContext.filter(
-    (item) => item.type === "image" && Boolean(item.imageUrl)
-  ).length;
-
-  if (imageCount) {
-    return {
-      type: "tool-analyze_reference_images",
-      state: "input-streaming",
-      input: { prompt, upstreamContext, imageCount, modelProvider: "ark" },
-    };
-  }
-
-  return {
-    type: "tool-expand_prompt",
-    state: "input-streaming",
-    input: { prompt, upstreamContext, skillSlug: "prompt-expand" },
   };
 }
 

@@ -36,7 +36,7 @@ import { createDocumentWriteTool } from "./tools/document-tools.ts";
 import { toolIds } from "./tools/ids.ts";
 import {
   createAnalyzeAssetsTool,
-  createGeneratePageTool,
+  createGenerateHtmlTool,
   createReadWebpageTool,
   createSearchWebTool,
 } from "./tools/web-page-tools.ts";
@@ -147,7 +147,7 @@ export function buildToolRegistry({
     createSearchWebTool(),
     createReadWebpageTool(),
     createAnalyzeAssetsTool(),
-    createGeneratePageTool(),
+    createGenerateHtmlTool(),
     createCanvasNodeTool({ imageCapability, projectId }),
     createCanvasEdgeTool({ imageCapability, projectId }),
     createUpdateCanvasNodeTool({ imageCapability, projectId }),

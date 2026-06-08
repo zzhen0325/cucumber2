@@ -40,15 +40,11 @@ export function RunNodeView({
   const [expanded, setExpanded] = useState(true);
   const toolParts = data.toolParts?.length
     ? data.toolParts
-    : [
-        data.toolPart ?? {
-          type: "tool-expand_prompt",
-          state: "input-streaming",
-          input: { prompt: data.prompt },
-        } satisfies CanvasToolPart,
-      ];
+    : data.toolPart
+      ? [data.toolPart]
+      : [];
   const latestToolPart = toolParts.at(-1) ?? toolParts[0];
-  const title = getRunTitle(data.status, latestToolPart.state, data.evaluation);
+  const title = getRunTitle(data.status, latestToolPart?.state, data.evaluation);
   const toggleLabel = expanded ? "收起输出" : "展开输出";
   const summaryItems = data.summaryItems ?? [];
   const stepTimeline = getStepTimeline(data.stepTimeline, toolParts);
@@ -67,6 +63,10 @@ export function RunNodeView({
   ]
     .filter(Boolean)
     .join(" ");
+  const nodeStyle = getResizableNodeStyle(width, height, {
+    expanded,
+    hasRunOutput,
+  });
 
   return (
     <Node
@@ -75,8 +75,8 @@ export function RunNodeView({
       minHeight={36}
       minWidth={220}
       selected={selected}
-      style={getResizableNodeStyle(width, height)}
-      data-resized={height ? "true" : undefined}
+      style={nodeStyle}
+      data-resized={nodeStyle?.height ? "true" : undefined}
     >
       <NodeContent className="run-content">
         <div className="run-heading">
@@ -170,14 +170,21 @@ export function RunNodeView({
 
 function getResizableNodeStyle(
   width?: number,
-  height?: number
+  height?: number,
+  options: { expanded: boolean; hasRunOutput: boolean } = {
+    expanded: false,
+    hasRunOutput: false,
+  }
 ): CSSProperties | undefined {
   if (!width && !height) {
     return undefined;
   }
 
+  const shouldReleaseCompactHeight =
+    options.expanded && options.hasRunOutput && height !== undefined && height <= 48;
+
   return {
-    height,
+    height: shouldReleaseCompactHeight ? undefined : height,
     width,
   };
 }
@@ -446,7 +453,7 @@ function dispatchRunRevisionRequest(runNodeId: string) {
 
 function getRunTitle(
   status: RunNodeData["status"],
-  state: CanvasToolPart["state"],
+  state?: CanvasToolPart["state"],
   evaluation?: RunNodeData["evaluation"]
 ) {
   if (evaluation && !evaluation.passed) {
@@ -487,9 +494,8 @@ function getToolName(toolPart: CanvasToolPart) {
     "tool-asset_analyze_context": "素材分析",
     "tool-asset.analyze_context": "素材分析",
     "tool-expand_prompt": "提示词扩写",
+    "tool-generate_html": "生成 HTML",
     "tool-generate_image": "生成图片",
-    "tool-page_generate": "生成页面",
-    "tool-page.generate": "生成页面",
     "tool-plan_agent_run": "规划运行",
     "tool-runtime": "运行错误",
     "tool-web_read": "读取网页",
@@ -591,14 +597,18 @@ function getToolOutputLines(toolPart: CanvasToolPart) {
     return ["文档已生成"];
   }
 
-  if (toolPart.type === "tool-page.generate") {
+  if (toolPart.type === "tool-generate_html") {
     const output = toolPart.output as {
       title?: unknown;
       html?: unknown;
       artifactId?: unknown;
+      summary?: unknown;
     };
     if (typeof output?.title === "string" && output.title.trim()) {
-      return [`页面: ${output.title.trim()}`];
+      return [`HTML: ${output.title.trim()}`];
+    }
+    if (typeof output?.summary === "string" && output.summary.trim()) {
+      return [`摘要: ${output.summary.trim()}`];
     }
     if (typeof output?.html === "string" && output.html.trim()) {
       return ["HTML 页面已生成"];
@@ -667,6 +677,7 @@ function getToolInputLines(input: unknown) {
   const candidate = input as {
     prompt?: unknown;
     brief?: unknown;
+    title?: unknown;
     query?: unknown;
     imageCount?: unknown;
     modelProvider?: unknown;
@@ -681,6 +692,9 @@ function getToolInputLines(input: unknown) {
   }
   if (typeof candidate.brief === "string" && candidate.brief.trim()) {
     lines.push(`输入: ${candidate.brief.trim()}`);
+  }
+  if (typeof candidate.title === "string" && candidate.title.trim()) {
+    lines.push(`标题: ${candidate.title.trim()}`);
   }
   if (typeof candidate.query === "string" && candidate.query.trim()) {
     lines.push(`查询: ${candidate.query.trim()}`);

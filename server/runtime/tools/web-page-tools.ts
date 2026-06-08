@@ -35,12 +35,10 @@ const analyzeAssetsInputSchema = z.object({
   ).optional(),
 });
 
-const generatePageInputSchema = z.object({
-  brief: z.string().min(1),
-  sourceUrls: z.array(z.string().url()).optional(),
-  assetSummary: z.string().optional(),
-  reportMarkdown: z.string().optional(),
-  title: z.string().min(1).optional(),
+const generateHtmlInputSchema = z.object({
+  title: z.string().min(1).max(120).describe("Page title"),
+  html: z.string().min(1).describe("Complete standalone HTML document"),
+  summary: z.string().min(1).max(500).describe("Short summary of what was generated"),
 });
 
 const searchWebOutputSchema = z.object({
@@ -262,19 +260,22 @@ export function createAnalyzeAssetsTool(): RuntimeToolDefinition {
   };
 }
 
-export function createGeneratePageTool(): RuntimeToolDefinition {
+export function createGenerateHtmlTool(): RuntimeToolDefinition {
   return {
-    id: toolIds.generatePage,
+    id: toolIds.generateHtml,
     version: TOOL_DEFINITION_VERSION,
-    toPlannerToolName: "page.generate",
-    capabilityId: "page.generate",
-    name: "Generate page artifact",
-    description: "Create a lightweight HTML webpage artifact from the task brief and gathered context.",
-    inputSchema: generatePageInputSchema,
+    toPlannerToolName: "generate_html",
+    capabilityId: "html.generate",
+    name: "Generate HTML artifact",
+    description:
+      "Generate a complete standalone HTML page. Use this when the user asks for a page, component, landing page, website, or HTML.",
+    inputSchema: generateHtmlInputSchema,
     outputSchema: z.object({
       artifactId: z.string(),
+      type: z.literal("html_artifact"),
       html: z.string(),
       title: z.string(),
+      summary: z.string(),
     }),
     policy: {
       canUseNetwork: false,
@@ -286,59 +287,37 @@ export function createGeneratePageTool(): RuntimeToolDefinition {
     timeoutMs: 5_000,
     retryPolicy: noRetry,
     risk: "low",
-    renderHint: { kind: "artifact", label: "Generate page" },
-    prepareInput({ context, previousSteps }) {
-      const webSources = previousSteps.flatMap((step) =>
-        readSources(step.output?.data)
-      );
-      const assetSummary = previousSteps
-        .map((step) => readStringFromRecord(step.output?.data, "summary"))
-        .find((summary) => summary.length > 0);
-      const reportMarkdown = previousSteps
-        .map((step) => readStringFromRecord(step.output?.data, "markdown"))
-        .find((markdown) => markdown.trim().length > 0);
-      const brief =
-        context.promptParts.find((part) => part.id === "runtime.user-message")
-          ?.content ?? context.taskContext;
-
-      return {
-        brief,
-        sourceUrls: webSources.map((source) => source.url),
-        assetSummary,
-        reportMarkdown,
-        title: inferPageTitle(brief),
-      };
-    },
+    renderHint: { kind: "artifact", label: "Generate HTML" },
     async execute(input) {
-      const parsed = generatePageInputSchema.parse(input);
-      const title = parsed.title ?? inferPageTitle(parsed.brief);
-      const html = renderLandingPageHtml({
-        assetSummary: parsed.assetSummary,
-        brief: parsed.brief,
-        reportMarkdown: parsed.reportMarkdown,
-        sourceUrls: parsed.sourceUrls ?? [],
-        title,
-      });
-      const artifactId = `page-${stableId(`${title}:${parsed.brief}`)}`;
+      const parsed = generateHtmlInputSchema.parse(input);
+      assertStandaloneHtml(parsed.html, toolIds.generateHtml);
+      const artifactId = `html-${stableId(`${parsed.title}:${parsed.html}`)}`;
       const artifact: ArtifactRef = {
         id: artifactId,
         type: "webpage",
-        title,
-        contentRef: `data:text/html;charset=utf-8,${encodeURIComponent(html)}`,
+        title: parsed.title,
+        contentRef: `data:text/html;charset=utf-8,${encodeURIComponent(parsed.html)}`,
         metadata: {
           format: "html",
           mimeType: "text/html",
-          sourceUrls: parsed.sourceUrls ?? [],
-          summary: parsed.brief.slice(0, 220),
+          html: parsed.html,
+          generatedBy: "generate_html",
+          summary: parsed.summary,
         },
       };
 
       return toolResultSchema.parse({
         ok: true,
-        data: { artifactId, html, title },
+        data: {
+          artifactId,
+          type: "html_artifact",
+          html: parsed.html,
+          title: parsed.title,
+          summary: parsed.summary,
+        },
         artifacts: [artifact],
         canvasOperations: [],
-        logs: [toolLog("Generated webpage artifact.")],
+        logs: [toolLog("Generated HTML webpage artifact.")],
       });
     },
   };
@@ -420,22 +399,6 @@ function readImageContext(item: UpstreamContextItem) {
   };
 }
 
-function readSources(value: unknown) {
-  if (!value || typeof value !== "object" || !Array.isArray((value as { sources?: unknown }).sources)) {
-    return [];
-  }
-
-  return (value as { sources: unknown[] }).sources.flatMap((source) => {
-    if (!source || typeof source !== "object") {
-      return [];
-    }
-    const candidate = source as { url?: unknown; title?: unknown };
-    return typeof candidate.url === "string"
-      ? [{ url: candidate.url, title: String(candidate.title ?? candidate.url) }]
-      : [];
-  });
-}
-
 function readStringFromRecord(value: unknown, key: string) {
   if (!value || typeof value !== "object") {
     return "";
@@ -452,102 +415,37 @@ function readNumberFromRecord(value: unknown, key: string) {
   return typeof candidate === "number" ? candidate : undefined;
 }
 
-function renderLandingPageHtml({
-  assetSummary,
-  brief,
-  reportMarkdown,
-  sourceUrls,
-  title,
-}: {
-  assetSummary?: string;
-  brief: string;
-  reportMarkdown?: string;
-  sourceUrls: string[];
-  title: string;
-}) {
-  const sources = sourceUrls.length
-    ? sourceUrls.map((url) => `<li><a href="${escapeHtml(url)}">${escapeHtml(url)}</a></li>`).join("")
-    : "<li>No external source URL was provided.</li>";
+function assertStandaloneHtml(html: string, toolId: string) {
+  const checks = [
+    [/<!doctype\s+html/i, "HTML must include <!doctype html>."],
+    [/<html[\s>]/i, "HTML must include an <html> root element."],
+    [/<head[\s>]/i, "HTML must include a <head> element."],
+    [/<body[\s>]/i, "HTML must include a <body> element."],
+    [/<style[\s>]/i, "CSS must be written inline in a <style> tag."],
+  ] as const;
 
-  return [
-    "<!doctype html>",
-    '<html lang="zh-CN">',
-    "<head>",
-    '<meta charset="utf-8" />',
-    '<meta name="viewport" content="width=device-width, initial-scale=1" />',
-    `<title>${escapeHtml(title)}</title>`,
-    "<style>body{font-family:Inter,system-ui,sans-serif;margin:0;color:#20201d;background:#faf8f1}main{max-width:960px;margin:auto;padding:48px 24px}section{margin-top:32px}h1{font-size:44px;line-height:1.08;margin:0 0 16px}p,li{font-size:17px;line-height:1.7}.panel{border:1px solid #ded8c7;background:#fffdf7;border-radius:8px;padding:24px}</style>",
-    "</head>",
-    "<body>",
-    "<main>",
-    `<h1>${escapeHtml(title)}</h1>`,
-    `<p>${escapeHtml(brief)}</p>`,
-    reportMarkdown?.trim()
-      ? [
-          '<section class="panel">',
-          "<h2>分析报告</h2>",
-          renderMarkdownFragment(reportMarkdown),
-          "</section>",
-        ].join("")
-      : "",
-    '<section class="panel">',
-    "<h2>视觉与素材方向</h2>",
-    `<p>${escapeHtml(assetSummary ?? "Use the selected canvas context as the primary visual reference.")}</p>`,
-    "</section>",
-    '<section class="panel">',
-    "<h2>参考来源</h2>",
-    `<ul>${sources}</ul>`,
-    "</section>",
-    "</main>",
-    "</body>",
-    "</html>",
-  ].join("");
-}
+  const missing = checks
+    .filter(([pattern]) => !pattern.test(html))
+    .map(([, message]) => message);
+  const hasExternalDependency =
+    /<script\b[^>]*\bsrc\s*=/i.test(html) ||
+    /<link\b[^>]*\brel=["']?stylesheet["']?[^>]*>/i.test(html) ||
+    /@import\s+url/i.test(html);
 
-function renderMarkdownFragment(markdown: string) {
-  const blocks: string[] = [];
-  let listItems: string[] = [];
-
-  function flushList() {
-    if (!listItems.length) {
-      return;
-    }
-    blocks.push(`<ul>${listItems.join("")}</ul>`);
-    listItems = [];
+  if (missing.length || hasExternalDependency) {
+    throwAgentError({
+      code: runtimeErrorCodes.TOOL_ERROR,
+      message: [
+        ...missing,
+        hasExternalDependency
+          ? "HTML must not use external scripts, stylesheets, or CSS imports."
+          : "",
+      ].filter(Boolean).join(" "),
+      retryable: true,
+      severity: "error",
+      toolId,
+    });
   }
-
-  for (const rawLine of markdown.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) {
-      flushList();
-      continue;
-    }
-
-    const heading = line.match(/^(#{1,3})\s+(.+)$/);
-    if (heading) {
-      flushList();
-      const level = Math.min(heading[1].length + 1, 4);
-      blocks.push(`<h${level}>${escapeHtml(heading[2])}</h${level}>`);
-      continue;
-    }
-
-    const listItem = line.match(/^[-*]\s+(.+)$/);
-    if (listItem) {
-      listItems.push(`<li>${escapeHtml(listItem[1])}</li>`);
-      continue;
-    }
-
-    flushList();
-    blocks.push(`<p>${escapeHtml(line)}</p>`);
-  }
-
-  flushList();
-  return blocks.join("");
-}
-
-function inferPageTitle(brief: string) {
-  const compact = brief.replace(/\s+/g, " ").trim();
-  return compact.length > 28 ? `${compact.slice(0, 28)}...` : compact || "Landing Page";
 }
 
 function isHttpUrl(value: unknown): value is string {
@@ -573,14 +471,6 @@ function stableId(value: string) {
     hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
   }
   return hash.toString(36);
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }
 
 function toolLog(message: string) {

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentRuntimeError, runtimeErrorCodes } from "../errors";
-import { createSearchWebTool } from "./web-page-tools";
+import { createGenerateHtmlTool, createSearchWebTool } from "./web-page-tools";
 import { toolIds } from "./ids";
 
 const mocks = vi.hoisted(() => ({
@@ -127,6 +127,82 @@ describe("web page tools", () => {
     ).toEqual({
       query: "搜索 AI SDK 最新工具调用文档",
       searchDepth: "fast",
+    });
+  });
+
+  it("generates a webpage artifact from complete standalone HTML", async () => {
+    const html = [
+      "<!doctype html>",
+      '<html lang="zh-CN">',
+      "<head>",
+      '<meta charset="utf-8" />',
+      "<title>黄瓜页面</title>",
+      "<style>body{font-family:system-ui;margin:0}</style>",
+      "</head>",
+      "<body><main>黄瓜页面</main><script>console.log('ready')</script></body>",
+      "</html>",
+    ].join("");
+
+    const result = await createGenerateHtmlTool().execute(
+      {
+        title: "黄瓜页面",
+        html,
+        summary: "一个完整的黄瓜主题页面。",
+      },
+      {} as never
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        type: "html_artifact",
+        title: "黄瓜页面",
+        html,
+        summary: "一个完整的黄瓜主题页面。",
+      },
+      artifacts: [
+        {
+          type: "webpage",
+          title: "黄瓜页面",
+          metadata: {
+            format: "html",
+            generatedBy: "generate_html",
+            html,
+            mimeType: "text/html",
+            summary: "一个完整的黄瓜主题页面。",
+          },
+        },
+      ],
+      canvasOperations: [],
+    });
+    expect(result.artifacts[0]?.id).toMatch(/^html-/);
+    expect(result.artifacts[0]?.contentRef).toMatch(/^data:text\/html/);
+  });
+
+  it("rejects generated HTML that depends on external scripts or styles", async () => {
+    const html = [
+      "<!doctype html>",
+      "<html>",
+      "<head>",
+      "<title>Bad</title>",
+      '<link rel="stylesheet" href="https://cdn.example/app.css" />',
+      "<style>body{margin:0}</style>",
+      "</head>",
+      "<body><script src=\"https://cdn.example/app.js\"></script></body>",
+      "</html>",
+    ].join("");
+
+    await expect(
+      createGenerateHtmlTool().execute(
+        { title: "Bad", html, summary: "Uses external dependencies." },
+        {} as never
+      )
+    ).rejects.toMatchObject({
+      agentError: {
+        code: runtimeErrorCodes.TOOL_ERROR,
+        toolId: toolIds.generateHtml,
+        retryable: true,
+      },
     });
   });
 
