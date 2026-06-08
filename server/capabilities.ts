@@ -310,7 +310,7 @@ export function toTypedCapabilityError(error: unknown): CapabilityRuntimeError {
     return error;
   }
 
-  const message = error instanceof Error ? error.message : String(error);
+  const message = getReadableErrorMessage(error);
 
   if (
     /\b(API_KEY|SECRET|TOKEN|SUPABASE_|SEEDREAM_|ARK_|DEEPSEEK_)/.test(
@@ -326,6 +326,42 @@ export function toTypedCapabilityError(error: unknown): CapabilityRuntimeError {
   }
 
   return new CapabilityRuntimeError("tool.error", message);
+}
+
+function getReadableErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (error && typeof error === "object") {
+    const candidate = error as { message?: unknown; error?: unknown };
+    if (typeof candidate.message === "string" && candidate.message.trim()) {
+      return candidate.message;
+    }
+    if (candidate.message !== undefined) {
+      return safeStringify(candidate.message);
+    }
+    if (candidate.error !== undefined) {
+      return safeStringify(candidate.error);
+    }
+  }
+
+  return safeStringify(error);
+}
+
+function safeStringify(value: unknown) {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value === undefined) {
+    return "Unknown error.";
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function dedupeCapabilities(capabilities: RegisteredCapability[]) {

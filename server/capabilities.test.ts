@@ -65,4 +65,19 @@ describe("capability registry", () => {
     expect(error.code).toBe("env.missing");
     expect(error.message).toContain("SEEDREAM_ACCESS_KEY_ID");
   });
+
+  it("preserves object-shaped runtime errors as readable JSON", () => {
+    const error = toTypedCapabilityError({
+      code: "InvalidParameter",
+      message: {
+        error: "prompt is too long",
+        request_id: "req-1",
+      },
+    });
+
+    expect(error.code).toBe("tool.error");
+    expect(error.message).toBe(
+      '{"error":"prompt is too long","request_id":"req-1"}'
+    );
+  });
 });

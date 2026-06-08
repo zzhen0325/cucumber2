@@ -271,17 +271,27 @@ export async function generateSeedreamImage(
 }
 
 export function inferSeedreamResultCount(prompt: string, maxOutputImages = 4) {
-  const normalized = normalizeSeedreamPrompt(prompt);
-  const explicitCount = findExplicitImageCount(normalized);
+  return inferSeedreamResultCountFromPrompts([prompt], maxOutputImages);
+}
 
-  if (!explicitCount) {
-    return 1;
-  }
-  if (explicitCount > maxOutputImages) {
-    throw new Error(`一次最多生成 ${maxOutputImages} 张图片。`);
-  }
+export function inferSeedreamResultCountFromPrompts(
+  prompts: readonly string[],
+  maxOutputImages = 4
+) {
+  for (const prompt of prompts) {
+    const normalized = normalizeSeedreamPrompt(prompt);
+    const explicitCount = findExplicitImageCount(normalized);
 
-  return explicitCount;
+    if (!explicitCount) {
+      continue;
+    }
+    if (explicitCount > maxOutputImages) {
+      throw new Error(`一次最多生成 ${maxOutputImages} 张图片。`);
+    }
+
+    return explicitCount;
+  }
+  return 1;
 }
 
 function resolveSeedreamResultCount(
@@ -304,6 +314,20 @@ function resolveSeedreamResultCount(
 }
 
 function findExplicitImageCount(prompt: string) {
+  const groupedArabicMatch = prompt.match(
+    /(?:一|1)\s*组\s*(\d{1,2})\s*(?:张|幅|个|款|版|images?|imgs?|pictures?|results?)/i
+  );
+  if (groupedArabicMatch) {
+    return Number(groupedArabicMatch[1]);
+  }
+
+  const groupedChineseMatch = prompt.match(
+    /(?:一|1)\s*组\s*([一二两三四五六七八九十])\s*(?:张|幅|个|款|版|图片|图|结果)/
+  );
+  if (groupedChineseMatch) {
+    return chineseImageCountToNumber(groupedChineseMatch[1]);
+  }
+
   const arabicMatch = prompt.match(
     /(?:生成|出|要|做|给我|create|generate|make)?\s*(\d{1,2})\s*(?:张|幅|个|款|版|组|images?|imgs?|pictures?|results?)/i
   );
@@ -404,8 +428,7 @@ function normalizeSeedreamPrompt(prompt: string) {
   })
     .join("")
     .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 800);
+    .trim();
 }
 
 function readRequiredEnv(primary: string, fallback?: string) {

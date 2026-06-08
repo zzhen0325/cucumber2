@@ -5,6 +5,7 @@ import {
   generateSeedreamImage,
   isSeedreamConfigured,
   inferSeedreamResultCount,
+  inferSeedreamResultCountFromPrompts,
   readSeedreamMaxOutputImagesFromEnv,
   type SeedreamGenerateInput,
   type SeedreamGeneratedImage,
@@ -586,8 +587,8 @@ export async function executeImageAgentRun({
       originalPrompt: canvasContext.prompt,
       selectedNodeId: canvasContext.selectedNodeId ?? null,
       upstreamContext: toSeedreamUpstreamContext(canvasContext.upstreamContext),
-      resultCount: inferSeedreamResultCount(
-        canvasContext.prompt,
+      resultCount: inferSeedreamResultCountFromPrompts(
+        [canvasContext.prompt, expandedPrompt],
         readSeedreamMaxOutputImagesFromEnv()
       ),
       promptSkill: getSkillToolSummary(promptSkill),
@@ -1082,9 +1083,6 @@ async function expandPromptWithSkill({
   ).trim();
   if (!expandedPrompt) {
     throw new Error("prompt-expand skill returned an empty prompt.");
-  }
-  if (Array.from(expandedPrompt).length > 800) {
-    throw new Error("prompt-expand skill returned more than 800 characters.");
   }
 
   return expandedPrompt;

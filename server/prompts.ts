@@ -364,7 +364,7 @@ export function buildSkillPromptParts({
       id: "prompt-expand.instruction",
       category: "instruction",
       content:
-        "请根据以上 section 输出一段可直接用于图像生成的自然语言 prompt，保持用户原意，优先吸收参考图视觉摘要和相关上游上下文，目标不超过 800 字符。",
+        "请根据以上 section 输出一段可直接用于图像生成的自然语言 prompt，保持用户原意，优先吸收参考图视觉摘要和相关上游上下文。若用户要求生成多张/多个结果，这只是输出数量要求，不要改写为一组、拼图、四宫格、合集或单张图内的多图构图，除非用户明确要求单张图内包含组合画面。",
       stable: true,
       priority: 100,
       droppable: false,
