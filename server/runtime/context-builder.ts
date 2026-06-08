@@ -1,4 +1,5 @@
 import type { AgentSkill } from "../supabase.ts";
+import { PROMPT_EXPAND_CAPABILITY_ID } from "../capabilities.ts";
 import type {
   AgentInput,
   BuiltContext,
@@ -251,8 +252,9 @@ export function selectSkillsForIntent(
   return publicSkills
     .filter(
       (skill) =>
-        skill.slug === "prompt-expand" ||
-        required.has(readCapabilityId(skill.sourceManifest))
+        required.has(readCapabilityId(skill.sourceManifest)) ||
+        (skill.slug === "prompt-expand" &&
+          required.has(PROMPT_EXPAND_CAPABILITY_ID))
     )
     .map((skill) => ({
       id: skill.id,

@@ -306,6 +306,78 @@ describe("runtime core", () => {
     });
   });
 
+  it("keeps visual style analysis out of the image prompt expansion flow", async () => {
+    const capabilities = buildCapabilityRegistry([promptExpandSkill]);
+    const toolRegistry = createTestToolRegistry();
+    const input = normalizeAgentInput({
+      userId: "user-1",
+      projectId: "project-1",
+      runNodeId: "run-1",
+      modelProvider: "deepseek",
+      messages: [],
+      canvasContext: {
+        prompt: "分析Gemini的视觉风格",
+        selectedNodeId: null,
+        upstreamContext: [],
+      },
+    });
+    const intent = await routeIntent({
+      capabilities,
+      input,
+      modelProvider: "deepseek",
+      toolRegistry,
+      async generateIntentResult() {
+        return {
+          primaryIntent: "image_generation",
+          confidence: 0.91,
+          task: {
+            kind: "image_generation",
+            goals: [input.userMessage],
+            targets: [],
+            constraints: [],
+            deliverables: [
+              { kind: "image", description: "Incorrect image artifact." },
+            ],
+            operations: [
+              { kind: "generate", target: "expanded_prompt", toolHint: toolIds.generateImage },
+            ],
+          },
+          requiredCapabilities: ["prompt.expand", "image.generate"],
+          requiredTools: [toolIds.expandPrompt, toolIds.generateImage],
+          needsPlanning: true,
+          ambiguity: [],
+          routingReason: "Misrouted image generation fixture.",
+        };
+      },
+    });
+    const context = buildContext({
+      input,
+      intent,
+      publicSkills: [promptExpandSkill],
+      runId: "agent-run-1",
+      toolRegistry,
+    });
+    const deterministicIntent = routeIntentDeterministically({
+      capabilities,
+      input,
+      toolRegistry,
+    });
+
+    expect(intent).toMatchObject({
+      primaryIntent: "capability.route_missing",
+      requiredCapabilities: ["asset.analyze"],
+      requiredTools: [],
+      task: { kind: "file_analysis" },
+    });
+    expect(context.availableTools).toEqual([]);
+    expect(context.injectedSkills).toEqual([]);
+    expect(deterministicIntent).toMatchObject({
+      primaryIntent: "capability.route_missing",
+      requiredTools: [],
+      task: { kind: "file_analysis" },
+    });
+  });
+
   it("routes landing page generation as an executable multi-step task", async () => {
     const capabilities = buildCapabilityRegistry([promptExpandSkill]);
     const toolRegistry = createRuntimeToolRegistry();
@@ -417,6 +489,16 @@ describe("runtime core", () => {
         ],
         selectedNodeId: "image-1",
         expected: { primaryIntent: "image_generation", taskKind: "image_editing" },
+      },
+      {
+        name: "visual_style_analysis",
+        prompt: "分析Gemini的视觉风格",
+        registry: baseRegistry,
+        upstreamContext: [],
+        expected: {
+          primaryIntent: "capability.route_missing",
+          taskKind: "file_analysis",
+        },
       },
       {
         name: "page_generation",

@@ -55,6 +55,13 @@ export function createRuntimeEventWriter({
         createdAt: input.createdAt ?? new Date().toISOString(),
       });
 
+      writer.write({
+        type: "data-runtime-event",
+        id: event.id ?? `${event.runNodeId}-${event.stepId}-${event.type}-${event.createdAt}`,
+        data: event,
+        transient: false,
+      });
+
       await recordRunStepEvent({
         projectId: event.projectId,
         runNodeId: event.runNodeId,
@@ -63,13 +70,6 @@ export function createRuntimeEventWriter({
         payload: event.payload,
         errorText: event.errorText,
         createdAt: event.createdAt,
-      });
-
-      writer.write({
-        type: "data-runtime-event",
-        id: event.id ?? `${event.runNodeId}-${event.stepId}-${event.type}-${event.createdAt}`,
-        data: event,
-        transient: false,
       });
 
       return event;

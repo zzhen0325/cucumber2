@@ -262,6 +262,9 @@ export function projectRunTraceToCanvas({
   const runCreated = orderedEvents.find(
     (event) => event.type === "run.created"
   );
+  const runFailed = orderedEvents.findLast(
+    (event) => event.type === "run.failed"
+  );
   const targetRunNodeId = runNodeId ?? runCreated?.runNodeId ?? events[0]?.runNodeId;
   if (!targetRunNodeId) {
     return {
@@ -271,10 +274,19 @@ export function projectRunTraceToCanvas({
     };
   }
 
-  const prompt = readString(runCreated?.payload.prompt) ?? "";
-  const selectedNodeId = readNullableString(runCreated?.payload.selectedNodeId);
   const promptNodeId =
-    readString(runCreated?.payload.promptNodeId) ?? `prompt-${targetRunNodeId}`;
+    readString(runCreated?.payload.promptNodeId) ??
+    readString(runFailed?.payload.promptNodeId) ??
+    getExistingPromptNodeId(existingEdges, existingNodes, targetRunNodeId) ??
+    `prompt-${targetRunNodeId}`;
+  const prompt =
+    readString(runCreated?.payload.prompt) ??
+    readString(runFailed?.payload.prompt) ??
+    getExistingPrompt(existingNodes, promptNodeId, targetRunNodeId) ??
+    "";
+  const selectedNodeId =
+    readNullableString(runCreated?.payload.selectedNodeId) ??
+    readNullableString(runFailed?.payload.selectedNodeId);
   const promptPosition = getExistingPosition(existingNodes, promptNodeId) ??
     getProjectedPromptPosition(existingNodes, selectedNodeId);
   const runPosition =
@@ -284,7 +296,7 @@ export function projectRunTraceToCanvas({
       y: promptPosition.y + RUN_OFFSET_Y,
     };
   const runStatus = getProjectedRunStatus(orderedEvents);
-  const toolParts = buildToolParts(orderedEvents);
+  const toolParts = buildToolParts(orderedEvents, prompt);
   const promptNode: AgentCanvasNode = getExistingOrProjectedNode(
     existingNodes,
     promptNodeId,
@@ -469,7 +481,10 @@ function attachArtifactToNode(
   return node;
 }
 
-function buildToolParts(events: RunStepTraceEvent[]): CanvasToolPart[] {
+function buildToolParts(
+  events: RunStepTraceEvent[],
+  prompt: string
+): CanvasToolPart[] {
   const toolParts = new Map<string, CanvasToolPart>();
 
   for (const event of events) {
@@ -523,6 +538,17 @@ function buildToolParts(events: RunStepTraceEvent[]): CanvasToolPart[] {
         errorText: event.errorText ?? readString(event.payload.errorText),
       });
     }
+  }
+
+  const failure = events.findLast((event) => event.type === "run.failed");
+  const errorText = readString(failure?.payload.errorText) ?? failure?.errorText;
+  if (!toolParts.size && errorText) {
+    toolParts.set("run-failed", {
+      type: "tool-expand_prompt",
+      state: "output-error",
+      input: { prompt },
+      errorText,
+    });
   }
 
   return Array.from(toolParts.values());
@@ -959,6 +985,40 @@ function getProjectedPromptPosition(
 
 function getExistingPosition(nodes: AgentCanvasNode[], nodeId: string) {
   return nodes.find((node) => node.id === nodeId)?.position;
+}
+
+function getExistingPromptNodeId(
+  edges: AgentCanvasEdge[],
+  nodes: AgentCanvasNode[],
+  runNodeId: string
+) {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  return edges
+    .filter((edge) => edge.target === runNodeId)
+    .map((edge) => nodeById.get(edge.source))
+    .find((node) => node?.data.kind === "prompt")?.id;
+}
+
+function getExistingPrompt(
+  nodes: AgentCanvasNode[],
+  promptNodeId: string,
+  runNodeId: string
+) {
+  const promptNode = nodes.find(
+    (node) => node.id === promptNodeId && node.data.kind === "prompt"
+  );
+  if (promptNode?.data.kind === "prompt" && promptNode.data.prompt.trim()) {
+    return promptNode.data.prompt;
+  }
+
+  const runNode = nodes.find(
+    (node) => node.id === runNodeId && node.data.kind === "run"
+  );
+  if (runNode?.data.kind === "run" && runNode.data.prompt.trim()) {
+    return runNode.data.prompt;
+  }
+
+  return undefined;
 }
 
 function getProjectedRunStatus(events: RunStepTraceEvent[]): AgentRunStatus {

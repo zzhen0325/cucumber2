@@ -5,6 +5,7 @@ import {
   IMAGE_GENERATE_CAPABILITY_ID,
   PROMPT_EXPAND_CAPABILITY_ID,
   getCapabilitySummary,
+  getCapability,
   requireCapability,
   type RegisteredCapability,
 } from "../capabilities.ts";
@@ -102,7 +103,7 @@ export function buildToolRegistry({
   projectId: string;
   runNodeId: string;
 }) {
-  const promptExpandCapability = requireCapability(
+  const promptExpandCapability = getCapability(
     capabilities,
     PROMPT_EXPAND_CAPABILITY_ID
   );
@@ -110,25 +111,29 @@ export function buildToolRegistry({
     capabilities,
     IMAGE_GENERATE_CAPABILITY_ID
   );
-  const promptSkill = promptExpandCapability.skill as AgentSkill | undefined;
-  if (!promptSkill) {
-    throw new Error("请先在 Skill 面板上传 prompt-expand skill。");
-  }
+  const promptSkill = promptExpandCapability?.skill as AgentSkill | undefined;
 
   const referenceImages = selectRuntimeReferenceImages(canvasContext);
-
-  return new ToolRegistry([
+  const tools: RuntimeToolDefinition[] = [
     createReferenceImageTool({
       imageCapability,
       canvasContext,
       referenceImages,
     }),
-    createPromptExpandTool({
-      canvasContext,
-      modelProvider,
-      promptSkill,
-      promptExpandCapability,
-    }),
+  ];
+
+  if (promptExpandCapability && promptSkill) {
+    tools.push(
+      createPromptExpandTool({
+        canvasContext,
+        modelProvider,
+        promptSkill,
+        promptExpandCapability,
+      })
+    );
+  }
+
+  tools.push(
     createGenerateImageTool({
       canvasContext,
       capabilities,
@@ -142,8 +147,10 @@ export function buildToolRegistry({
     createCanvasNodeTool({ imageCapability, projectId }),
     createCanvasEdgeTool({ imageCapability, projectId }),
     createUpdateCanvasNodeTool({ imageCapability, projectId }),
-    createAttachArtifactTool({ imageCapability, projectId }),
-  ]);
+    createAttachArtifactTool({ imageCapability, projectId })
+  );
+
+  return new ToolRegistry(tools);
 }
 
 export function summarizeTool(tool: RuntimeToolDefinition): ToolSummary {

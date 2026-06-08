@@ -50,9 +50,10 @@ export async function routeIntent({
           maxOutputTokens: 1_400,
         })
   );
+  const intent = guardImageRoute({ input, routed, toolRegistry });
   const validation = validateIntentAgainstRegistry({
     capabilities,
-    intent: routed,
+    intent,
     toolRegistry,
   });
 
@@ -62,11 +63,11 @@ export async function routeIntent({
       message: validation.errors.join("; "),
       retryable: false,
       severity: "error",
-      details: { validation, intent: routed },
+      details: { validation, intent },
     });
   }
 
-  return routed;
+  return intent;
 }
 
 export function routeIntentDeterministically({
@@ -177,6 +178,33 @@ export function routeIntentDeterministically({
     });
   }
 
+  if (!isExplicitImageGenerationRequest(input)) {
+    const missingCapability =
+      inferMissingCapability(text) ?? inferAnalysisCapability(text);
+    const capabilityId = missingCapability?.capabilityId ?? "capability.unsupported";
+    return intentResultSchema.parse({
+      primaryIntent: ROUTE_MISSING_INTENT,
+      confidence: 0.66,
+      task: createUnsupportedTask(
+        input,
+        capabilityId,
+        missingCapability?.taskKind ?? "multi_step"
+      ),
+      requiredCapabilities: [capabilityId],
+      requiredTools: [],
+      needsPlanning: true,
+      ambiguity: [
+        {
+          id: ROUTE_MISSING_INTENT,
+          question: `Capability ${capabilityId} is required before this request can run.`,
+          severity: "high",
+        },
+      ],
+      routingReason:
+        "Request does not explicitly ask for an image artifact, so it is not routed to image generation.",
+    });
+  }
+
   const requiredTools = [
     ...(hasReferenceImage ? [toolIds.analyzeReferenceImages] : []),
     toolIds.expandPrompt,
@@ -245,6 +273,130 @@ export function validateIntentAgainstRegistry({
     ok: errors.length === 0,
     errors,
   };
+}
+
+function guardImageRoute({
+  input,
+  routed,
+  toolRegistry,
+}: {
+  input: AgentInput;
+  routed: IntentResult;
+  toolRegistry: ToolRegistry;
+}) {
+  if (!requiresImageGeneration(routed) || isExplicitImageGenerationRequest(input)) {
+    return routed;
+  }
+
+  const text = input.userMessage.toLowerCase();
+  const complexRoute = inferComplexRoute(text, input);
+  if (complexRoute) {
+    const missingTools = complexRoute.requiredTools.filter(
+      (toolId) => !toolRegistry.getTool(toolId)
+    );
+
+    if (!missingTools.length) {
+      return intentResultSchema.parse({
+        primaryIntent: "multi_step.landing_page",
+        confidence: 0.78,
+        task: complexRoute.task,
+        requiredCapabilities: complexRoute.requiredCapabilities,
+        requiredTools: complexRoute.requiredTools,
+        needsPlanning: true,
+        ambiguity: [],
+        routingReason:
+          "Image route rejected because the request has a non-image deliverable; routed to executable multi-step workflow.",
+      });
+    }
+
+    return intentResultSchema.parse({
+      primaryIntent: ROUTE_MISSING_INTENT,
+      confidence: 0.68,
+      task: complexRoute.task,
+      requiredCapabilities: complexRoute.requiredCapabilities,
+      requiredTools: [],
+      needsPlanning: true,
+      ambiguity: [
+        {
+          id: ROUTE_MISSING_INTENT,
+          question: `This multi-step request requires missing tools ${missingTools.join(", ")} before it can run end-to-end.`,
+          severity: "high",
+        },
+      ],
+      routingReason:
+        "Image route rejected because the request has a non-image deliverable and the required workflow tools are missing.",
+    });
+  }
+
+  const canvasOperation = inferCanvasOperation(text, input);
+  if (canvasOperation) {
+    return intentResultSchema.parse({
+      ...canvasOperation,
+      routingReason:
+        "Image route rejected because the request asks for canvas mutation, not an image artifact.",
+    });
+  }
+
+  const missingCapability =
+    inferMissingCapability(text) ?? inferAnalysisCapability(text);
+  const capabilityId = missingCapability?.capabilityId ?? "capability.unsupported";
+  return intentResultSchema.parse({
+    primaryIntent: ROUTE_MISSING_INTENT,
+    confidence: Math.min(routed.confidence, 0.68),
+    task: createUnsupportedTask(
+      input,
+      capabilityId,
+      missingCapability?.taskKind ?? "multi_step"
+    ),
+    requiredCapabilities: [capabilityId],
+    requiredTools: [],
+    needsPlanning: true,
+    ambiguity: [
+      {
+        id: ROUTE_MISSING_INTENT,
+        question: `Capability ${capabilityId} is required before this request can run.`,
+        severity: "high",
+      },
+    ],
+    routingReason:
+      "Image route rejected because the request does not explicitly ask for an image artifact.",
+  });
+}
+
+function requiresImageGeneration(intent: IntentResult) {
+  return (
+    intent.primaryIntent === "image_generation" ||
+    intent.task.kind === "image_generation" ||
+    intent.task.kind === "image_editing" ||
+    intent.requiredTools.includes(toolIds.generateImage)
+  );
+}
+
+function isExplicitImageGenerationRequest(input: AgentInput) {
+  const text = input.userMessage.toLowerCase();
+  const hasReferenceImage = input.canvasContext.upstreamContext.some(
+    (item) => item.type === "image" || item.artifact?.type === "image"
+  );
+  const asksForImageArtifact =
+    /(图片|图像|照片|海报|插画|一张图|出图|logo|image|picture|photo|poster|illustration|graphic)/i.test(
+      text
+    );
+  const asksToCreateOrEdit =
+    /(生成|绘制|画|做一张|创建|出图|改成|重绘|编辑|generate|create|make|draw|render|edit|modify)/i.test(
+      text
+    );
+
+  if (asksForImageArtifact && asksToCreateOrEdit) {
+    return true;
+  }
+
+  return (
+    hasReferenceImage &&
+    /(参考|基于|继续|改|编辑|变成|重绘|reference|based on|edit|modify)/i.test(
+      text
+    ) &&
+    asksToCreateOrEdit
+  );
 }
 
 function buildIntentRouterPrompt({
@@ -545,6 +697,19 @@ function inferMissingCapability(text: string):
   }
   if (/(文件|分析文件|file|analyze file)/i.test(text)) {
     return { capabilityId: "file.analyze", taskKind: "file_analysis" };
+  }
+
+  return undefined;
+}
+
+function inferAnalysisCapability(text: string):
+  | {
+      capabilityId: string;
+      taskKind: StructuredTask["kind"];
+    }
+  | undefined {
+  if (/(分析|视觉风格|风格|analyze|analysis|style)/i.test(text)) {
+    return { capabilityId: "asset.analyze", taskKind: "file_analysis" };
   }
 
   return undefined;

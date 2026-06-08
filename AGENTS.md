@@ -18,7 +18,7 @@
 - 不引入新的状态模型来绕开现有画布数据；优先沿用 `AgentCanvasNode`、`AgentCanvasEdge`、`RunDraft` 和 `UpstreamContextItem`。
 - Agent 执行过程应在画布中可见：prompt、run、tool state、image result 和 follow-up branch 都应对应清晰的可视节点或状态。
 - 工具错误要直接呈现在 Run 节点中，不生成假图或占位成功结果。
-- 后续 Agent 新增功能或调整 AI SDK UI 相关链路时，优先查看官方文档是否已有案例或推荐写法：`https://ai-sdk.dev/docs/reference/ai-sdk-ui`。
+- 后续 Agent 新增功能或调整 AI SDK UI 相关链路时，优先查看官方文档是否已有案例或推荐写法：https://ai-sdk.dev/docs/reference 和 https://ai-sdk.dev/docs/reference/ai-sdk-ui。
 - 新增能力后，同步更新 `README.md` 或 `process.md` 中对应的运行方式、环境变量、变更记录。
 - 新增或调整 UI 前必须先阅读 `design.md`，新增 UI 元素的设计风格必须与当前界面统一。
 - 当提出加入新功能时，要从用户真实体验交互的视角完善考虑，不要只是代码没问题，但是视觉上或者操作交互上缺出现点不到或者别的低级问题。

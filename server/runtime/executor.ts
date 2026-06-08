@@ -15,6 +15,7 @@ import {
   recordRunEvent,
 } from "../supabase.ts";
 import type {
+  AgentError,
   AgentRun,
   AgentStep,
   PlanStep,
@@ -84,29 +85,32 @@ export async function executeAgentRun({
     writer: streamWriter,
   });
   const store = new AgentRunStore();
-  const publicSkills = await listLatestPublicSkills();
-  const capabilities = buildCapabilityRegistry(publicSkills);
-  const toolRegistry = buildToolRegistry({
-    canvasContext,
-    capabilities,
-    modelProvider,
-    projectId,
-    runNodeId,
-  });
-  const input = normalizeAgentInput({
-    canvasContext,
-    messages,
-    modelProvider,
-    projectId,
-    attachments,
-    projectSnapshot,
-    runNodeId,
-    userId,
-  });
-  const run = await store.createRun({ input });
+  let input: ReturnType<typeof normalizeAgentInput> | null = null;
+  let run: AgentRun | null = null;
   const promptTrace: Record<string, unknown> = {};
 
   try {
+    const publicSkills = await listLatestPublicSkills();
+    const capabilities = buildCapabilityRegistry(publicSkills);
+    const toolRegistry = buildToolRegistry({
+      canvasContext,
+      capabilities,
+      modelProvider,
+      projectId,
+      runNodeId,
+    });
+    input = normalizeAgentInput({
+      canvasContext,
+      messages,
+      modelProvider,
+      projectId,
+      attachments,
+      projectSnapshot,
+      runNodeId,
+      userId,
+    });
+    run = await store.createRun({ input });
+
     await appendEvent(store, run.id, eventWriter, {
       projectId,
       runNodeId,
@@ -243,9 +247,19 @@ export async function executeAgentRun({
     });
   } catch (error) {
     const agentError = toAgentError(error);
-    const failedRun = await store.appendError(run.id, agentError);
-    await store.setStatus(run.id, "failed");
     console.error("[agent-run]", error);
+
+    await writeFailureEvent(eventWriter, {
+      agentError,
+      canvasContext,
+      projectId,
+      runNodeId,
+      storedErrors: run ? [...store.getRun(run.id).errors, agentError] : [agentError],
+    });
+
+    if (run) {
+      await persistFailureState(store, run.id, agentError);
+    }
 
     await recordRunEvent({
       projectId,
@@ -254,21 +268,7 @@ export async function executeAgentRun({
       selectedNodeId: canvasContext.selectedNodeId ?? null,
       upstreamContext: canvasContext.upstreamContext,
       status: "error",
-      skillInput: { input },
-      errorText: agentError.message,
-    });
-    await appendEvent(store, run.id, eventWriter, {
-      projectId,
-      runNodeId,
-      stepId: agentError.stepId ?? "run",
-      type: "run.failed",
-      payload: {
-        errorText: agentError.message,
-        errorCode: agentError.code,
-        errorDetails: agentError.details,
-        failedStepId: agentError.stepId,
-        errors: failedRun.errors,
-      },
+      skillInput: input ? { input } : undefined,
       errorText: agentError.message,
     });
   }
@@ -329,6 +329,60 @@ export async function executePlanSteps({
   }
 
   return store.getRun(run.id);
+}
+
+async function writeFailureEvent(
+  writer: RuntimeEventWriter,
+  {
+    agentError,
+    canvasContext,
+    projectId,
+    runNodeId,
+    storedErrors,
+  }: {
+    agentError: AgentError;
+    canvasContext: PromptCanvasContext;
+    projectId: string;
+    runNodeId: string;
+    storedErrors: AgentError[];
+  }
+) {
+  try {
+    await writer.writeEvent({
+      projectId,
+      runNodeId,
+      stepId: agentError.stepId ?? "run",
+      type: "run.failed",
+      payload: {
+        prompt: canvasContext.prompt,
+        promptNodeId: canvasContext.promptNodeId ?? null,
+        selectedNodeId: canvasContext.selectedNodeId ?? null,
+        upstreamContext: canvasContext.upstreamContext,
+        contextTrace: canvasContext.contextTrace,
+        errorText: agentError.message,
+        errorCode: agentError.code,
+        errorDetails: agentError.details,
+        failedStepId: agentError.stepId,
+        errors: storedErrors,
+      },
+      errorText: agentError.message,
+    });
+  } catch (failureEventError) {
+    console.error("[agent-run] failed to persist failure event", failureEventError);
+  }
+}
+
+async function persistFailureState(
+  store: AgentRunStore,
+  runId: string,
+  agentError: AgentError
+) {
+  try {
+    await store.appendError(runId, agentError);
+    await store.setStatus(runId, "failed");
+  } catch (persistenceError) {
+    console.error("[agent-run] failed to persist failure state", persistenceError);
+  }
 }
 
 export async function runStep({

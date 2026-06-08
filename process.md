@@ -17,6 +17,21 @@
 
 ## 2026-06-08
 
+### 修复非图片任务误进提示词扩写链路
+
+- 变更：Intent Router 增加图片产物硬判断，`分析Gemini的视觉风格` 这类分析任务即使被模型误判为 `image_generation`，也会被纠正为 `capability.route_missing` / `asset.analyze`，不再执行 `prompt.expand` 或 `seedream.generateImage`。
+- 变更：Tool Registry 不再在所有 Run 启动时强制要求 `prompt-expand` skill；Context Builder 也只在当前 intent 需要 `prompt.expand` 时注入该 skill，避免非图片任务 trace 被旧图片链路污染。
+- 文件：`server/runtime/intent-router.ts`、`server/runtime/tool-registry.ts`、`server/runtime/context-builder.ts`、`server/capabilities.ts`、`server/runtime/runtime.test.ts`、`process.md`。
+- 验证：`pnpm test server/runtime/runtime.test.ts`。
+
+### 修复 Agent Run 早期失败卡在 Thinking
+
+- 变更：Runtime event writer 现在先把 `data-runtime-event` 写入 AI SDK UI stream，再尝试持久化 event；`executeAgentRun` 将 skill/load、input normalize、run snapshot 创建都纳入同一错误路径，早期失败会流出带 prompt、promptNodeId 和错误详情的 `run.failed`。
+- 变更：Runtime event -> ReactFlow 投影在只有早期 `run.failed`、没有 `run.created` 时，会从失败 payload 或现有 prompt/run 节点保留 prompt，并补出可见 error tool row，避免提交后节点内容被空 payload 刷白。
+- 变更：通过 Supabase 对 `cucumber2` 项目应用幂等 `repair_agent_runtime_core_schema` migration，重新确认 `agent_runs`、`agent_run_steps`、`agent_run_step_events` 均可被 PostgREST schema cache 查询。
+- 文件：`server/runtime/events.ts`、`server/runtime/executor.ts`、`src/lib/graph-projection.ts`、`src/lib/graph-projection.test.ts`、`process.md`。
+- 验证：`pnpm test -- src/lib/graph-projection.test.ts src/lib/runtime-event-renderer.test.ts server/runtime/executor.test.ts`、`pnpm build`、`curl http://127.0.0.1:8787/api/health`、Supabase client head query 三张 runtime 表通过。
+
 ### 完成 1.8 非图片 Evaluator 专项检查
 
 - 变更：Evaluator 增加 webpage/doc/code artifact completeness 检查，要求有 `uri`、`contentRef` 或 inline content/html metadata；code artifact 如果标记 `testStatus: failed` 或 `typecheckStatus: failed` 会生成专项质量问题。

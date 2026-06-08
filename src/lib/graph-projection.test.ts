@@ -130,6 +130,44 @@ describe("graph projection", () => {
     });
   });
 
+  it("projects early run failures without blanking existing prompt content", () => {
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      existingNodes: [promptNode("prompt-1"), runNode("run-1")],
+      existingEdges: [
+        {
+          id: "edge-prompt-1-run-1",
+          source: "prompt-1",
+          target: "run-1",
+          type: "animated",
+        },
+      ],
+      events: [
+        event("run.failed", "run-1", "run", {
+          prompt: "生成图片",
+          promptNodeId: "prompt-1",
+          errorText: "Could not find the table 'public.agent_runs'",
+        }),
+      ],
+    });
+
+    const prompt = projection.nodes.find((node) => node.id === "prompt-1");
+    const run = projection.nodes.find((node) => node.id === "run-1");
+    expect(prompt?.data.kind).toBe("prompt");
+    expect(run?.data.kind).toBe("run");
+    if (prompt?.data.kind !== "prompt" || run?.data.kind !== "run") {
+      throw new Error("Expected prompt and run nodes");
+    }
+
+    expect(prompt.data.prompt).toBe("生成图片");
+    expect(run.data.prompt).toBe("生成图片");
+    expect(run.data.status).toBe("error");
+    expect(run.data.toolParts?.[0]).toMatchObject({
+      state: "output-error",
+      errorText: "Could not find the table 'public.agent_runs'",
+    });
+  });
+
   it("projects evaluator results into a user-level run node summary", () => {
     const projection = projectRunTraceToCanvas({
       projectId: "project-1",
