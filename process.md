@@ -17,6 +17,13 @@
 
 ## 2026-06-08
 
+### 重写一等 Agent Runtime 开发文档
+
+- 变更：将 `agent-os-plan.md` 从三阶段 MVP 演进记录重写为两部分完整开发手册：Part 1 聚焦一等 Runtime Core，覆盖 `AgentRun` 数据结构、Input Layer、结构化 Intent Router、Context Builder、完整 Tool Registry、LLM Planner、通用 `executor.runStep`、错误/重试/Evaluator；Part 2 聚焦 ReactFlow Event Renderer 和产品集成，覆盖 Runtime event protocol、画布投影、节点 taxonomy、AI Elements 映射、trace/replay、canvas operation policy 和评估修正流。
+- 变更：补充 `https://elements.ai-sdk.dev/` 调研结论，明确 Canvas、Node、Edge、Plan、Task、Tool、Confirmation、Context、Attachments、Agent、Artifact、Schema Display 在本项目中的可用位置，同时约束 AI Elements 只是组件参考，不作为新的状态源。
+- 文件：`agent-os-plan.md`、`process.md`。
+- 验证：文档基于当前 `server/api.ts`、`server/run-kernel.ts`、`server/agent-router.ts`、`server/capabilities.ts`、`server/prompts.ts`、`src/lib/graph.ts`、`src/lib/graph-projection.ts`、`src/components/CanvasWorkspace.tsx` 的实际代码事实重写；本次只改文档，未运行代码测试。
+
 ### 增加画布拖拽上传预览
 
 - 变更：支持将文件直接拖拽到画布，按现有节点类型生成可预览节点；图片生成 `imageResultNode` data URL 预览，Markdown 生成可滚动 `markdownNode`，代码/文档/网页/数据集/通用文件生成 artifact-backed 预览卡片。
