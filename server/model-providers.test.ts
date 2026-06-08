@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildArkResponsesRequest,
+  disableDeepSeekThinkingMode,
   extractArkResponseText,
   generateStructuredObjectWithProvider,
   generateTextWithProvider,
@@ -163,5 +164,19 @@ describe("model providers", () => {
 
     expect(input.system).toMatch(/\bJSON\b/i);
     expect(input.prompt).toMatch(/\bJSON\b/i);
+  });
+
+  it("disables DeepSeek thinking mode in OpenAI-compatible request bodies", () => {
+    expect(
+      disableDeepSeekThinkingMode({
+        model: "deepseek-v4-flash",
+        messages: [],
+        tools: [{ type: "function" }],
+      })
+    ).toMatchObject({
+      model: "deepseek-v4-flash",
+      thinking: { type: "disabled" },
+      tools: [{ type: "function" }],
+    });
   });
 });

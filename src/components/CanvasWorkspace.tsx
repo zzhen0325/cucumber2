@@ -36,13 +36,23 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  lazy,
+  memo,
+  Suspense,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { FormEvent } from "react";
 
 import { Canvas } from "@/components/ai-elements/canvas";
 import { Edge } from "@/components/ai-elements/edge";
 import { FileUploadOverlay } from "@/components/FileUploadOverlay";
-import { MarkdownPreview } from "@/components/MarkdownPreview";
 import { Node, NodeContent } from "@/components/ai-elements/node";
 import { ReplayBanner, RunTracePanel } from "@/components/RunTracePanel";
 import { RunNodeView } from "@/components/RunNodeView";
@@ -89,6 +99,7 @@ import {
 import type { RunStepTraceEvent } from "@/lib/graph-projection";
 import {
   projectRuntimeEventsToCanvas,
+  runtimeEventsFromMessageParts,
   runtimeEventsFromMessages,
 } from "@/lib/runtime-event-renderer";
 import type {
@@ -124,7 +135,21 @@ const edgeTypes = {
 
 const initialNodes: AgentCanvasNode[] = [];
 const initialEdges: AgentCanvasEdge[] = [];
+const BlockNoteMarkdownEditor = lazy(() =>
+  import("@/components/BlockNoteMarkdownEditor").then((module) => ({
+    default: module.BlockNoteMarkdownEditor,
+  }))
+);
+const MarkdownNodeEditingContext = createContext<{
+  readOnly: boolean;
+  onChange: (nodeId: string, content: string, blocks: unknown[]) => void;
+}>({
+  readOnly: true,
+  onChange: () => undefined,
+});
+
 type StorageStatus = "loading" | "saving" | "saved" | "error";
+type StreamedRuntimeEvents = ReturnType<typeof runtimeEventsFromMessages>;
 type AgentRunRequestBody = {
   projectId: string;
   runNodeId: string;
@@ -170,9 +195,14 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const [modelProviderError, setModelProviderError] = useState<string | null>(null);
   const activeRunId = useRef<string | null>(null);
   const activeRunRequest = useRef<AgentRunRequestBody | null>(null);
+  const loadedProjectIdRef = useRef<string | null>(null);
+  const streamedRuntimeEvents = useRef<StreamedRuntimeEvents>([]);
   const hasLoadedProject = useRef(false);
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
+  const projectTitleRef = useRef(projectTitle);
+  const persistedSelectedNodeIdRef = useRef<string | null>(null);
+  const isReplayModeRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const isReplayMode = Boolean(replaySnapshot);
   const canvasNodes = replaySnapshot?.nodes ?? nodes;
@@ -185,6 +215,61 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   useEffect(() => {
     edgesRef.current = edges;
   }, [edges]);
+
+  useEffect(() => {
+    projectTitleRef.current = projectTitle;
+  }, [projectTitle]);
+
+  useEffect(() => {
+    isReplayModeRef.current = isReplayMode;
+  }, [isReplayMode]);
+
+  useEffect(() => {
+    loadedProjectIdRef.current = loadedProjectId;
+  }, [loadedProjectId]);
+
+  const projectStreamedRuntimeEvents = useCallback(
+    (
+      events: StreamedRuntimeEvents,
+      options: { replace?: boolean } = {}
+    ) => {
+      const runId = activeRunId.current;
+      if (!runId) {
+        return;
+      }
+
+      const nextEvents = events.filter((event) => event.runNodeId === runId);
+      if (!nextEvents.length) {
+        return;
+      }
+      const previousEvents = options.replace
+        ? []
+        : streamedRuntimeEvents.current.filter((event) => event.runNodeId === runId);
+      const runtimeEvents = dedupeRuntimeEvents([
+        ...previousEvents,
+        ...nextEvents,
+      ]).sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+      streamedRuntimeEvents.current = [
+        ...streamedRuntimeEvents.current.filter((event) => event.runNodeId !== runId),
+        ...runtimeEvents,
+      ];
+
+      const projectId = loadedProjectIdRef.current ?? undefined;
+      const projection = projectRuntimeEventsToCanvas({
+        projectId,
+        runNodeId: runId,
+        events: runtimeEvents,
+        existingSnapshot: {
+          nodes: nodesRef.current,
+          edges: edgesRef.current,
+        },
+      });
+
+      setNodes((current) => mergeProjectedNodes(current, projection.nodes));
+      setEdges((current) => mergeProjectedEdges(current, projection.edges));
+    },
+    [setEdges, setNodes]
+  );
 
   const markRunError = useCallback(
     (runId: string | null, message: string) => {
@@ -236,7 +321,13 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     error,
     stop,
   } = useChat({
-    transport: new DefaultChatTransport({ api: "/api/agent-run" }),
+    transport: new DefaultChatTransport({
+      api: "/api/agent-run",
+      credentials: "same-origin",
+    }),
+    onData: (dataPart) => {
+      projectStreamedRuntimeEvents(runtimeEventsFromMessageParts([dataPart]));
+    },
     onError: (nextError) => {
       markRunError(activeRunId.current, nextError.message);
     },
@@ -263,6 +354,10 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     [edges, nodes, referenceNodeId]
   );
   const persistedSelectedNodeId = referenceNodeId ?? null;
+  useEffect(() => {
+    persistedSelectedNodeIdRef.current = persistedSelectedNodeId;
+  }, [persistedSelectedNodeId]);
+
   const isBusy = status === "submitted" || status === "streaming";
   const hasPendingApproval = useMemo(
     () =>
@@ -387,6 +482,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     hasLoadedProject.current = false;
     activeRunId.current = null;
     activeRunRequest.current = null;
+    streamedRuntimeEvents.current = [];
 
     loadProject(projectId)
       .then(async ({ project }) => {
@@ -461,6 +557,78 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     };
   }, [loadedProjectId, traceRunId]);
 
+  const saveProjectSnapshot = useCallback(
+    async (
+      options: { keepalive?: boolean; reportStatus?: boolean } = {}
+    ) => {
+      const currentProjectId = loadedProjectIdRef.current;
+      const shouldReportStatus = options.reportStatus ?? true;
+
+      if (
+        !hasLoadedProject.current ||
+        !currentProjectId ||
+        isReplayModeRef.current
+      ) {
+        return;
+      }
+
+      if (shouldReportStatus) {
+        setStorageStatus("saving");
+      }
+
+      try {
+        const { project } = await updateProject(
+          {
+            projectId: currentProjectId,
+            title: projectTitleRef.current,
+            nodes: nodesRef.current,
+            edges: edgesRef.current,
+            selectedNodeId: persistedSelectedNodeIdRef.current,
+            lastRunId: activeRunId.current,
+          },
+          options.keepalive ? { keepalive: true } : undefined
+        );
+
+        if (shouldReportStatus) {
+          setLoadedProjectId(project.id);
+          setStorageStatus("saved");
+          setStorageError(null);
+        }
+      } catch (nextError: unknown) {
+        if (shouldReportStatus) {
+          setStorageStatus("error");
+          setStorageError(getClientError(nextError));
+        }
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    const flushPendingSave = () => {
+      if (saveTimer.current) {
+        window.clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+
+      void saveProjectSnapshot({ keepalive: true, reportStatus: false });
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        flushPendingSave();
+      }
+    };
+
+    window.addEventListener("pagehide", flushPendingSave);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("pagehide", flushPendingSave);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      flushPendingSave();
+    };
+  }, [saveProjectSnapshot]);
+
   useEffect(() => {
     if (!hasLoadedProject.current || !loadedProjectId || isReplayMode) {
       return;
@@ -472,28 +640,14 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
     setStorageStatus("saving");
     saveTimer.current = window.setTimeout(() => {
-      updateProject({
-        projectId: loadedProjectId,
-        title: projectTitle,
-        nodes,
-        edges,
-        selectedNodeId: persistedSelectedNodeId,
-        lastRunId: activeRunId.current,
-      })
-        .then(({ project }) => {
-          setLoadedProjectId(project.id);
-          setStorageStatus("saved");
-          setStorageError(null);
-        })
-        .catch((nextError: unknown) => {
-          setStorageStatus("error");
-          setStorageError(getClientError(nextError));
-        });
+      saveTimer.current = null;
+      void saveProjectSnapshot();
     }, 420);
 
     return () => {
       if (saveTimer.current) {
         window.clearTimeout(saveTimer.current);
+        saveTimer.current = null;
       }
     };
   }, [
@@ -503,6 +657,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     nodes,
     persistedSelectedNodeId,
     projectTitle,
+    saveProjectSnapshot,
   ]);
 
   useEffect(() => {
@@ -574,26 +729,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       selectedNodeId: activeRunRequest.current?.canvasContext.selectedNodeId,
       includeLegacyToolParts: true,
     });
-    if (runtimeEvents.length) {
-      const projection = projectRuntimeEventsToCanvas({
-        projectId: loadedProjectId ?? undefined,
-        runNodeId: runId,
-        events: runtimeEvents,
-        existingSnapshot: {
-          nodes: nodesRef.current,
-          edges: edgesRef.current,
-        },
-      });
-
-      setNodes((current) => mergeProjectedNodes(current, projection.nodes));
-      setEdges((current) => mergeProjectedEdges(current, projection.edges));
-      return;
-    }
+    projectStreamedRuntimeEvents(runtimeEvents, { replace: true });
   }, [
     loadedProjectId,
     messages,
-    setEdges,
-    setNodes,
+    projectStreamedRuntimeEvents,
     status,
   ]);
 
@@ -619,6 +759,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       const anchorId = referenceNodeId;
       const draft = createRunDraft(value, anchorId, nodes, edges);
       activeRunId.current = draft.runNode.id;
+      streamedRuntimeEvents.current = streamedRuntimeEvents.current.filter(
+        (event) => event.runNodeId !== draft.runNode.id
+      );
       setContextCount(draft.upstreamContext.length);
       const requestBody: AgentRunRequestBody = {
         projectId: loadedProjectId,
@@ -707,6 +850,58 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     setTraceError(null);
   }, []);
 
+  const handleMarkdownNodeChange = useCallback(
+    (nodeId: string, content: string, blocks: unknown[]) => {
+      if (isReplayMode) {
+        return;
+      }
+
+      const normalizedContent = content.trim();
+      const nextBlocksJson = JSON.stringify(blocks);
+      setNodes((current) =>
+        current.map((node) => {
+          if (node.id !== nodeId || node.data.kind !== "markdown") {
+            return node;
+          }
+
+          const currentBlocks =
+            node.data.blockNoteBlocks ??
+            node.data.artifact.metadata?.blockNoteBlocks;
+          const currentBlocksJson = currentBlocks
+            ? JSON.stringify(currentBlocks)
+            : "";
+          if (
+            node.data.content === normalizedContent &&
+            currentBlocksJson === nextBlocksJson
+          ) {
+            return node;
+          }
+
+          const summary = summarizeMarkdownForCanvasNode(normalizedContent);
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              artifact: {
+                ...node.data.artifact,
+                metadata: {
+                  ...node.data.artifact.metadata,
+                  blockNoteBlocks: blocks,
+                  markdown: normalizedContent,
+                  preview: summary,
+                },
+              },
+              blockNoteBlocks: blocks,
+              content: normalizedContent,
+              summary,
+            },
+          };
+        })
+      );
+    },
+    [isReplayMode, setNodes]
+  );
+
   return (
     <main
       className="app-shell"
@@ -715,39 +910,46 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       onDragOver={fileDrop.handleFileDragOver}
       onDrop={fileDrop.handleFileDrop}
     >
-      <Canvas<AgentCanvasNode, AgentCanvasEdge>
-        className="agent-canvas"
-        colorMode="light"
-        edgeTypes={edgeTypes}
-        fitViewOptions={{ maxZoom: 1, padding: 0.32 }}
-        maxZoom={1.5}
-        minZoom={0.28}
-        nodeTypes={nodeTypes}
-        nodes={canvasNodes}
-        edges={canvasEdges}
-        onInit={fileDrop.handleCanvasInit}
-        onEdgesChange={isReplayMode ? undefined : onEdgesChange}
-        onNodesChange={isReplayMode ? undefined : onNodesChange}
-        onPaneClick={() => {
-          if (!isReplayMode) {
-            setNodes((current) => applySelectedNodeIds(current, []));
-          }
+      <MarkdownNodeEditingContext.Provider
+        value={{
+          readOnly: isReplayMode,
+          onChange: handleMarkdownNodeChange,
         }}
-        selectionMode={SelectionMode.Partial}
-        nodesDraggable={!isReplayMode}
-        nodesConnectable={false}
-        panOnDrag={false}
-        proOptions={{ hideAttribution: true }}
       >
-        <CanvasAutoFit nodeCount={canvasNodes.length} />
-        <Controls position="bottom-right" showInteractive={false} />
-        <MiniMap
-          pannable
-          zoomable
-          position="top-right"
-          className="canvas-minimap"
-        />
-      </Canvas>
+        <Canvas<AgentCanvasNode, AgentCanvasEdge>
+          className="agent-canvas"
+          colorMode="light"
+          edgeTypes={edgeTypes}
+          fitViewOptions={{ maxZoom: 1, padding: 0.32 }}
+          maxZoom={1.5}
+          minZoom={0.28}
+          nodeTypes={nodeTypes}
+          nodes={canvasNodes}
+          edges={canvasEdges}
+          onInit={fileDrop.handleCanvasInit}
+          onEdgesChange={isReplayMode ? undefined : onEdgesChange}
+          onNodesChange={isReplayMode ? undefined : onNodesChange}
+          onPaneClick={() => {
+            if (!isReplayMode) {
+              setNodes((current) => applySelectedNodeIds(current, []));
+            }
+          }}
+          selectionMode={SelectionMode.Partial}
+          nodesDraggable={!isReplayMode}
+          nodesConnectable={false}
+          panOnDrag={false}
+          proOptions={{ hideAttribution: true }}
+        >
+          <CanvasAutoFit nodeCount={canvasNodes.length} />
+          <Controls position="bottom-right" showInteractive={false} />
+          <MiniMap
+            pannable
+            zoomable
+            position="top-right"
+            className="canvas-minimap"
+          />
+        </Canvas>
+      </MarkdownNodeEditingContext.Provider>
 
       <TopBar
         modelProvider={modelProvider}
@@ -874,6 +1076,25 @@ function mergeProjectedEdges(
     ...current.filter((edge) => !projectedIds.has(edge.id)),
     ...projected,
   ];
+}
+
+function dedupeRuntimeEvents(events: StreamedRuntimeEvents): StreamedRuntimeEvents {
+  const seen = new Set<string>();
+  const deduped: StreamedRuntimeEvents = [];
+
+  for (const event of events) {
+    const key =
+      event.id ??
+      `${event.projectId}:${event.runNodeId}:${event.stepId}:${event.type}:${event.createdAt}`;
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push(event);
+  }
+
+  return deduped;
 }
 
 async function hydrateProjectSnapshotFromLastRun(project: PersistedProject) {
@@ -1538,9 +1759,12 @@ function getArtifactNodeSummary(data: ArtifactLikeNodeProps["data"]) {
 }
 
 function MarkdownNode({
+  id,
   data,
   selected,
 }: NodeProps<FlowNode<MarkdownNodeData, "markdownNode">>) {
+  const { readOnly, onChange } = useContext(MarkdownNodeEditingContext);
+
   return (
     <Node
       className={
@@ -1560,11 +1784,34 @@ function MarkdownNode({
             <strong title={data.title}>{data.title}</strong>
           </div>
         </div>
-        <div className="markdown-body nodrag nopan">
-          <MarkdownPreview content={data.content} />
+        <div className="blocknote-body nodrag nopan">
+          <Suspense
+            fallback={
+              <pre className="markdown-plain-preview">{data.content}</pre>
+            }
+          >
+            <BlockNoteMarkdownEditor
+              data={data}
+              nodeId={id}
+              readOnly={readOnly}
+              onChange={onChange}
+            />
+          </Suspense>
         </div>
       </NodeContent>
     </Node>
+  );
+}
+
+function summarizeMarkdownForCanvasNode(content: string) {
+  return (
+    content
+      .replace(/```[\s\S]*?```/g, "")
+      .split("\n")
+      .map((line) => line.replace(/^#{1,6}\s+/, "").trim())
+      .filter(Boolean)
+      .find((line) => !/^[-*]\s*$/.test(line))
+      ?.slice(0, 160) ?? "Markdown document"
   );
 }
 

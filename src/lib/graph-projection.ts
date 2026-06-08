@@ -1340,7 +1340,7 @@ function getProjectedRunStatus(events: RunStepTraceEvent[]): AgentRunStatus {
   if (events.some((event) => event.type === "run.completed")) {
     return "success";
   }
-  if (events.some((event) => event.type === "step.started")) {
+  if (events.some((event) => event.type !== "run.created")) {
     return "running";
   }
 

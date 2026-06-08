@@ -177,7 +177,7 @@ export function createSearchWebTool(): RuntimeToolDefinition {
         query:
           context.promptParts.find((part) => part.id === "runtime.user-message")
             ?.content ?? context.taskContext,
-        searchDepth: "basic",
+        searchDepth: "fast",
       };
     },
     async execute(input) {
@@ -186,6 +186,7 @@ export function createSearchWebTool(): RuntimeToolDefinition {
         includeAnswer: "basic",
         includeRawContent: "markdown",
         maxResults: 5,
+        searchDepth: "fast",
       });
       const result = await executeTavilySearch(tool, parsed);
       const sources = readTavilySources(result);

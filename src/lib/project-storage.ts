@@ -72,7 +72,10 @@ export async function loadProject(projectId: string) {
   return (await response.json()) as { project: PersistedProject };
 }
 
-export async function updateProject(input: UpdateProjectInput) {
+export async function updateProject(
+  input: UpdateProjectInput,
+  init?: Pick<RequestInit, "keepalive">
+) {
   const { projectId, ...body } = input;
   const response = await fetch(`/api/projects/${projectId}`, {
     body: JSON.stringify(body),
@@ -80,6 +83,7 @@ export async function updateProject(input: UpdateProjectInput) {
     headers: {
       "Content-Type": "application/json",
     },
+    ...init,
     method: "PATCH",
   });
 

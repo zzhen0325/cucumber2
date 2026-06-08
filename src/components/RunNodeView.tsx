@@ -1,16 +1,27 @@
 import type { Node as FlowNode, NodeProps } from "@xyflow/react";
 import {
+  Bot,
   Check,
   ChevronDown,
   CircleAlert,
   ListTree,
   Sparkles,
+  UserRound,
   WandSparkles,
+  Wrench,
   X,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { useState } from "react";
 
 import { Node, NodeContent } from "@/components/ai-elements/node";
+import { MessageResponse } from "@/components/ai-elements/message";
+import { Shimmer } from "@/components/ai-elements/shimmer";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { extractImagesFromToolOutput } from "@/lib/graph";
 import type {
   CanvasToolPart,
@@ -44,18 +55,31 @@ export function RunNodeView({
     toolParts.some((part) => part.state !== "input-streaming");
   const agentText = data.agentText?.trim() ?? "";
   const hasRunOutput = Boolean(agentText) || hasToolDetail;
+  const isActiveRun = data.status === "queued" || data.status === "running";
+  const nodeClassName = [
+    "canvas-node",
+    "run-card",
+    data.status,
+    isActiveRun ? "active" : "",
+    selected ? "selected" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <Node
-      className={selected ? "canvas-node selected run-card" : "canvas-node run-card"}
-      handles={{ source: true, target: true }}
-    >
+    <Node className={nodeClassName} handles={{ source: true, target: true }}>
       <NodeContent className="run-content">
         <div className="run-heading">
           <span className={`run-status-dot ${data.status}`}>
             <RunStatusIcon status={data.status} />
           </span>
-          <span className="run-title">{title}</span>
+          {isActiveRun ? (
+            <Shimmer as="span" className="run-title" duration={1.8}>
+              {title}
+            </Shimmer>
+          ) : (
+            <span className="run-title">{title}</span>
+          )}
           <button
             aria-label="查看 Run Trace"
             className="run-trace-button nodrag nopan"
@@ -85,29 +109,72 @@ export function RunNodeView({
           </button>
         </div>
         {hasRunOutput && expanded && (
-          <div className="run-stream">
-            {agentText && (
-              <p className="agent-text-output" title={agentText}>
-                {agentText}
+          <div className="run-stream" aria-label="Agent run stream">
+            <RunStreamGroup icon={<UserRound size={11} />} title="用户请求">
+              <p className="run-user-prompt" title={data.prompt}>
+                {data.prompt}
               </p>
+            </RunStreamGroup>
+            <RunStreamGroup icon={<Bot size={12} />} title="Agent 输出">
+              {agentText ? (
+                <MessageResponse className="agent-text-output">
+                  {agentText}
+                </MessageResponse>
+              ) : (
+                <Shimmer as="p" className="agent-text-output muted" duration={1.8}>
+                  等待模型输出...
+                </Shimmer>
+              )}
+            </RunStreamGroup>
+            {(summaryItems.length > 0 || stepTimeline.length > 0) && (
+              <RunStreamGroup icon={<ListTree size={11} />} title="运行计划">
+                <PlanSummaryView items={summaryItems} />
+                <StepTimelineView steps={stepTimeline} />
+              </RunStreamGroup>
             )}
-            <PlanSummaryView items={summaryItems} />
-            <StepTimelineView steps={stepTimeline} />
             {data.evaluation && (
-              <RunEvaluationView evaluation={data.evaluation} runNodeId={id} />
+              <RunStreamGroup icon={<Sparkles size={11} />} title="质量检查">
+                <RunEvaluationView evaluation={data.evaluation} runNodeId={id} />
+              </RunStreamGroup>
             )}
             {hasToolDetail &&
-              toolParts.map((part, index) => (
-                <ToolPartView
-                  error={data.error}
-                  key={`${part.type}-${index}`}
-                  toolPart={part}
-                />
-              ))}
+              toolParts.length > 0 && (
+                <RunStreamGroup icon={<Wrench size={11} />} title="工具调用">
+                  <div className="tool-call-stack">
+                    {toolParts.map((part, index) => (
+                      <ToolPartView
+                        error={data.error}
+                        key={`${part.type}-${part.toolCallId ?? index}`}
+                        toolPart={part}
+                      />
+                    ))}
+                  </div>
+                </RunStreamGroup>
+              )}
           </div>
         )}
       </NodeContent>
     </Node>
+  );
+}
+
+function RunStreamGroup({
+  children,
+  icon,
+  title,
+}: {
+  children: ReactNode;
+  icon: ReactNode;
+  title: string;
+}) {
+  return (
+    <section className="run-stream-group">
+      <div className="run-stream-group-heading">
+        <span>{icon}</span>
+        <strong>{title}</strong>
+      </div>
+      <div className="run-stream-group-body">{children}</div>
+    </section>
   );
 }
 
@@ -155,36 +222,64 @@ export function ToolPartView({
   error?: string;
   toolPart: CanvasToolPart;
 }) {
+  const [open, setOpen] = useState(
+    toolPart.state !== "output-available" || toolPart.type === "tool-generate_image"
+  );
   const toolName = getToolName(toolPart);
   const stateLabel = getToolStateLabel(toolPart.state);
   const detailLines = getToolDetailLines(toolPart, error);
   const isError = toolPart.state === "output-error";
   const approvalId =
     toolPart.state === "approval-requested" ? toolPart.approval?.id : undefined;
+  const hasStructuredDetail =
+    Boolean(toolPart.input) || Boolean(toolPart.output) || Boolean(toolPart.errorText);
 
   return (
-    <div className={isError ? "tool-call-row error" : "tool-call-row"}>
-      <div className="tool-call-main">
-        <span className="tool-call-action">
-          {toolPart.state === "output-available"
-            ? "完成"
-            : toolPart.state === "output-denied"
-              ? "拒绝"
-              : "调用"}
-        </span>
-        <strong title={toolName}>{toolName}</strong>
-        <span className={`tool-state ${toolPart.state}`}>
-          {getToolStateIcon(toolPart.state)}
-          {stateLabel}
-        </span>
-      </div>
-      <div className="tool-call-detail">
-        {detailLines.map((line) => (
-          <small className="tool-detail-line" key={line} title={line}>
-            {line}
-          </small>
-        ))}
-      </div>
+    <Collapsible
+      className={isError ? "tool-call-row error" : "tool-call-row"}
+      open={open}
+      onOpenChange={setOpen}
+    >
+      <CollapsibleTrigger asChild>
+        <button className="tool-call-main nodrag nopan" type="button">
+          <span className="tool-call-action">
+            {toolPart.state === "output-available"
+              ? "完成"
+              : toolPart.state === "output-denied"
+                ? "拒绝"
+                : "调用"}
+          </span>
+          <strong title={toolName}>{toolName}</strong>
+          <span className={`tool-state ${toolPart.state}`}>
+            {getToolStateIcon(toolPart.state)}
+            {stateLabel}
+          </span>
+          <ChevronDown className="tool-call-chevron" size={12} />
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="tool-call-content">
+        <div className="tool-call-detail">
+          {detailLines.map((line) => (
+            <small className="tool-detail-line" key={line} title={line}>
+              {line}
+            </small>
+          ))}
+        </div>
+        {hasStructuredDetail && (
+          <div className="tool-io-grid">
+            {toolPart.input !== undefined && (
+              <ToolJsonBlock label="参数" value={toolPart.input} />
+            )}
+            {(toolPart.output !== undefined || toolPart.errorText) && (
+              <ToolJsonBlock
+                error={isError}
+                label={isError ? "错误" : "结果"}
+                value={toolPart.errorText ?? toolPart.output}
+              />
+            )}
+          </div>
+        )}
+      </CollapsibleContent>
       {approvalId && (
         <div className="tool-approval-actions">
           <button
@@ -211,6 +306,23 @@ export function ToolPartView({
           </button>
         </div>
       )}
+    </Collapsible>
+  );
+}
+
+function ToolJsonBlock({
+  error,
+  label,
+  value,
+}: {
+  error?: boolean;
+  label: string;
+  value: unknown;
+}) {
+  return (
+    <div className={error ? "tool-json-block error" : "tool-json-block"}>
+      <span>{label}</span>
+      <pre>{formatToolValue(value)}</pre>
     </div>
   );
 }
@@ -346,19 +458,23 @@ function getRunEvaluationTitle(evaluation: NonNullable<RunNodeData["evaluation"]
 }
 
 function getToolName(toolPart: CanvasToolPart) {
-  const names: Record<CanvasToolPart["type"], string> = {
+  const names: Record<string, string> = {
     "tool-analyze_reference_images": "参考图分析",
+    "tool-asset_analyze_context": "素材分析",
     "tool-asset.analyze_context": "素材分析",
     "tool-expand_prompt": "提示词扩写",
     "tool-generate_image": "生成图片",
+    "tool-page_generate": "生成页面",
     "tool-page.generate": "生成页面",
+    "tool-plan_agent_run": "规划运行",
     "tool-runtime": "运行错误",
+    "tool-web_read": "读取网页",
     "tool-web.read": "读取网页",
     "tool-web_search": "搜索网页",
     "tool-write_document": "写文档",
   };
 
-  return names[toolPart.type];
+  return names[toolPart.type] ?? toolPart.type.replace(/^tool-/, "");
 }
 
 function getToolStateIcon(state: CanvasToolPart["state"]) {
@@ -568,4 +684,16 @@ function getToolInputLines(input: unknown) {
   }
 
   return lines.length ? lines : ["工具参数已就绪"];
+}
+
+function formatToolValue(value: unknown) {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }

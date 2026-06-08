@@ -1,9 +1,6 @@
 import type { UIMessage, UIMessageStreamWriter } from "ai";
 
 import {
-  buildCapabilityRegistry,
-} from "../capabilities.ts";
-import {
   AGENT_RUN_TEXT_SYSTEM_PROMPT,
   renderRuntimePromptParts,
   type PromptCanvasContext,
@@ -13,30 +10,19 @@ import {
   inferSeedreamResultCount,
   readSeedreamMaxOutputImagesFromEnv,
 } from "../../seedream.ts";
-import {
-  type AgentProject,
-  listLatestPublicSkills,
-  recordRunEvent,
-} from "../supabase.ts";
+import type { AgentProject } from "../supabase.ts";
 import type {
-  AgentError,
   AgentRun,
   AgentStep,
   PlanStep,
   ToolResult,
 } from "../../src/types/runtime.ts";
-import { createRuntimeEventWriter, type RuntimeEventWriter } from "./events.ts";
-import { normalizeAgentInput } from "./input-normalizer.ts";
+import type { RuntimeEventWriter } from "./events.ts";
 import { AgentRunStore } from "./run-store.ts";
-import { routeIntent } from "./intent-router.ts";
-import { buildContext } from "./context-builder.ts";
-import { createPlan } from "./planner.ts";
 import {
-  buildToolRegistry,
   getToolTraceMetadata,
   type ToolRegistry,
 } from "./tool-registry.ts";
-import { evaluateAgentRun } from "./evaluator.ts";
 import {
   createAgentError,
   runtimeErrorCodes,
@@ -45,6 +31,7 @@ import {
 } from "./errors.ts";
 import { runWithRetry } from "./retry.ts";
 import { validateCanvasOperations } from "./canvas-operation-policy.ts";
+import { executeAiSdkAgentRun } from "./ai-sdk-runner.ts";
 
 type ExecuteAgentRunInput = {
   userId: string;
@@ -83,199 +70,17 @@ export async function executeAgentRun({
   userId,
   writer: streamWriter,
 }: ExecuteAgentRunInput) {
-  const eventWriter = createRuntimeEventWriter({
+  await executeAiSdkAgentRun({
+    attachments,
+    canvasContext,
+    messages,
+    modelProvider,
     projectId,
+    projectSnapshot,
     runNodeId,
+    userId,
     writer: streamWriter,
   });
-  const store = new AgentRunStore();
-  let input: ReturnType<typeof normalizeAgentInput> | null = null;
-  let run: AgentRun | null = null;
-  const promptTrace: Record<string, unknown> = {};
-
-  try {
-    const publicSkills = await listLatestPublicSkills();
-    const capabilities = buildCapabilityRegistry(publicSkills);
-    const toolRegistry = buildToolRegistry({
-      canvasContext,
-      capabilities,
-      modelProvider,
-      projectId,
-      runNodeId,
-    });
-    input = normalizeAgentInput({
-      canvasContext,
-      messages,
-      modelProvider,
-      projectId,
-      attachments,
-      projectSnapshot,
-      runNodeId,
-      userId,
-    });
-    run = await store.createRun({ input });
-
-    await appendEvent(store, run.id, eventWriter, {
-      projectId,
-      runNodeId,
-      stepId: "run",
-      type: "run.created",
-      payload: {
-        prompt: canvasContext.prompt,
-        promptNodeId: canvasContext.promptNodeId ?? null,
-        selectedNodeId: canvasContext.selectedNodeId ?? null,
-        upstreamContext: canvasContext.upstreamContext,
-        contextTrace: canvasContext.contextTrace,
-      },
-    });
-    await appendEvent(store, run.id, eventWriter, {
-      projectId,
-      runNodeId,
-      stepId: "input",
-      type: "input.normalized",
-      payload: { input },
-    });
-    await store.setStatus(run.id, "routing");
-
-    const intent = await routeIntent({
-      capabilities,
-      input,
-      modelProvider,
-      toolRegistry,
-    });
-    await store.setIntent(run.id, intent);
-    await appendEvent(store, run.id, eventWriter, {
-      projectId,
-      runNodeId,
-      stepId: "intent-router",
-      type: "intent.routed",
-      payload: { intent },
-    });
-
-    const builtContext = buildContext({
-      input,
-      intent,
-      publicSkills,
-      runId: run.id,
-      toolRegistry,
-    });
-    await store.setContext(run.id, builtContext);
-    await appendEvent(store, run.id, eventWriter, {
-      projectId,
-      runNodeId,
-      stepId: "context-builder",
-      type: "context.built",
-      payload: { context: builtContext },
-    });
-
-    const plan = await createPlan({
-      context: builtContext,
-      intent,
-      modelProvider,
-      toolRegistry,
-    });
-    await store.setPlan(run.id, plan.normalizedPlan);
-    await appendEvent(store, run.id, eventWriter, {
-      projectId,
-      runNodeId,
-      stepId: "planner",
-      type: "plan.created",
-      payload: plan,
-    });
-
-    await recordRunEvent({
-      projectId,
-      runNodeId,
-      prompt: canvasContext.prompt,
-      selectedNodeId: canvasContext.selectedNodeId ?? null,
-      upstreamContext: canvasContext.upstreamContext,
-      status: "running",
-      skillInput: {
-        input,
-        intent,
-        context: builtContext,
-        plan: plan.normalizedPlan,
-      },
-    });
-
-    const afterPlanRun = await executePlanSteps({
-      context: builtContext,
-      run: store.getRun(run.id),
-      plan: plan.normalizedPlan,
-      streamWriter,
-      registry: toolRegistry,
-      store,
-      writer: eventWriter,
-    });
-    if (afterPlanRun.status === "waiting_approval") {
-      return;
-    }
-
-    const evaluated = evaluateAgentRun(store.getRun(run.id));
-    await store.setEvaluation(run.id, evaluated);
-    await appendEvent(store, run.id, eventWriter, {
-      projectId,
-      runNodeId,
-      stepId: "evaluation",
-      type: "evaluation.completed",
-      payload: { evaluation: evaluated },
-    });
-
-    const finalRun = store.getRun(run.id);
-    const completed = finalRun.status === "completed";
-    await recordRunEvent({
-      projectId,
-      runNodeId,
-      prompt: canvasContext.prompt,
-      selectedNodeId: canvasContext.selectedNodeId ?? null,
-      upstreamContext: canvasContext.upstreamContext,
-      status: completed ? "success" : "error",
-      skillInput: { input, intent, context: builtContext, plan: plan.normalizedPlan },
-      toolOutput: { artifacts: finalRun.artifacts, evaluation: evaluated },
-      errorText: completed ? null : evaluated.issues.map((issue) => issue.message).join("; "),
-    });
-    await appendEvent(store, run.id, eventWriter, {
-      projectId,
-      runNodeId,
-      stepId: "run",
-      type: completed ? "run.completed" : "run.failed",
-      payload: {
-        status: completed ? "success" : "error",
-        artifactIds: finalRun.artifacts.map((artifact) => artifact.id),
-        evaluation: evaluated,
-        promptTrace,
-      },
-      errorText: completed
-        ? undefined
-        : evaluated.issues.map((issue) => issue.message).join("; "),
-    });
-  } catch (error) {
-    const agentError = toAgentError(error);
-    console.error("[agent-run]", error);
-
-    await writeFailureEvent(eventWriter, {
-      agentError,
-      canvasContext,
-      projectId,
-      runNodeId,
-      storedErrors: run ? [...store.getRun(run.id).errors, agentError] : [agentError],
-    });
-
-    if (run) {
-      await persistFailureState(store, run.id, agentError);
-    }
-
-    await recordRunEvent({
-      projectId,
-      runNodeId,
-      prompt: canvasContext.prompt,
-      selectedNodeId: canvasContext.selectedNodeId ?? null,
-      upstreamContext: canvasContext.upstreamContext,
-      status: "error",
-      skillInput: input ? { input } : undefined,
-      errorText: agentError.message,
-    });
-  }
 }
 
 export async function executePlanSteps({
@@ -333,60 +138,6 @@ export async function executePlanSteps({
   }
 
   return store.getRun(run.id);
-}
-
-async function writeFailureEvent(
-  writer: RuntimeEventWriter,
-  {
-    agentError,
-    canvasContext,
-    projectId,
-    runNodeId,
-    storedErrors,
-  }: {
-    agentError: AgentError;
-    canvasContext: PromptCanvasContext;
-    projectId: string;
-    runNodeId: string;
-    storedErrors: AgentError[];
-  }
-) {
-  try {
-    await writer.writeEvent({
-      projectId,
-      runNodeId,
-      stepId: agentError.stepId ?? "run",
-      type: "run.failed",
-      payload: {
-        prompt: canvasContext.prompt,
-        promptNodeId: canvasContext.promptNodeId ?? null,
-        selectedNodeId: canvasContext.selectedNodeId ?? null,
-        upstreamContext: canvasContext.upstreamContext,
-        contextTrace: canvasContext.contextTrace,
-        errorText: agentError.message,
-        errorCode: agentError.code,
-        errorDetails: agentError.details,
-        failedStepId: agentError.stepId,
-        errors: storedErrors,
-      },
-      errorText: agentError.message,
-    });
-  } catch (failureEventError) {
-    console.error("[agent-run] failed to persist failure event", failureEventError);
-  }
-}
-
-async function persistFailureState(
-  store: AgentRunStore,
-  runId: string,
-  agentError: AgentError
-) {
-  try {
-    await store.appendError(runId, agentError);
-    await store.setStatus(runId, "failed");
-  } catch (persistenceError) {
-    console.error("[agent-run] failed to persist failure state", persistenceError);
-  }
 }
 
 export async function runStep({

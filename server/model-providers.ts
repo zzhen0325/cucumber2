@@ -2,6 +2,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import {
   Output,
   generateText,
+  type LanguageModel,
   streamText,
   type InferUIMessageChunk,
   type UIMessage,
@@ -93,6 +94,18 @@ export function isDeepSeekConfigured() {
 
 export function readArkMaxReferenceImagesFromEnv() {
   return readNumberEnv("ARK_MAX_REFERENCE_IMAGES", 4);
+}
+
+export function getLanguageModelForProvider(
+  providerId: ModelProviderId
+): LanguageModel {
+  assertTextProviderConfigured(providerId);
+
+  if (providerId === "deepseek") {
+    return getDeepSeekModel();
+  }
+
+  return getArkChatModel();
 }
 
 export async function generateTextWithProvider(
@@ -321,7 +334,16 @@ function getDeepSeekModel() {
     name: "deepseek",
     baseURL: process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com",
     apiKey: readRequiredEnv("DEEPSEEK_API_KEY"),
+    transformRequestBody: disableDeepSeekThinkingMode,
   }).chatModel(readDeepSeekModelName());
+}
+
+function getArkChatModel() {
+  return createOpenAICompatible({
+    name: "ark",
+    baseURL: readArkOpenAICompatibleBaseUrl(),
+    apiKey: readRequiredEnv("ARK_API_KEY"),
+  }).chatModel(readArkModelName());
 }
 
 function readDeepSeekModelName() {
@@ -337,6 +359,19 @@ function readArkResponsesUrl() {
     .replace(/\/+$/, "");
 
   return baseUrl.endsWith("/responses") ? baseUrl : `${baseUrl}/responses`;
+}
+
+function readArkOpenAICompatibleBaseUrl() {
+  return (process.env.ARK_BASE_URL ?? "https://ark.cn-beijing.volces.com/api/v3")
+    .replace(/\/responses\/?$/, "")
+    .replace(/\/+$/, "");
+}
+
+export function disableDeepSeekThinkingMode(args: Record<string, unknown>) {
+  return {
+    ...args,
+    thinking: { type: "disabled" },
+  };
 }
 
 function formatArkInputText(input: TextGenerationInput) {

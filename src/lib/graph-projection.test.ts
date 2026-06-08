@@ -65,6 +65,29 @@ describe("graph projection", () => {
     });
   });
 
+  it("marks a streamed AI SDK run as running before the first tool step starts", () => {
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      events: [
+        event("run.created", "run-1", "run", {
+          prompt: "生成一张黄瓜海报",
+          selectedNodeId: null,
+          runtime: "vercel-ai-sdk",
+        }),
+        event("input.normalized", "run-1", "input", {
+          input: { prompt: "生成一张黄瓜海报" },
+        }),
+      ],
+    });
+
+    const run = projection.nodes.find((node) => node.id === "run-1");
+    expect(run?.data.kind).toBe("run");
+    if (run?.data.kind !== "run") {
+      throw new Error("Expected run node");
+    }
+    expect(run.data.status).toBe("running");
+  });
+
   it("keeps manually saved node positions during replay projection", () => {
     const existingImage = imageNode("image-image-1");
     const projection = projectRunTraceToCanvas({

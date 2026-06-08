@@ -419,6 +419,15 @@ app.post("/api/agent-run", async (c) => {
     return notFound(c);
   }
 
+  const updatedProject = await updateProjectForUser({
+    projectId,
+    userId: user.id,
+    lastRunId: runNodeId,
+  });
+  if (!updatedProject) {
+    return notFound(c);
+  }
+
   const stream = createUIMessageStream({
     originalMessages: messages,
     execute: async ({ writer }) => {
@@ -428,7 +437,7 @@ app.post("/api/agent-run", async (c) => {
         messages,
         modelProvider,
         projectId,
-        projectSnapshot: project,
+        projectSnapshot: updatedProject,
         runNodeId,
         userId: user.id,
         writer,

@@ -178,6 +178,7 @@ export type ArtifactNodeData = ArtifactBackedNodeData & {
 export type MarkdownNodeData = ArtifactBackedNodeData & {
   kind: "markdown";
   content: string;
+  blockNoteBlocks?: unknown[];
 };
 
 export type DecisionNodeData = ArtifactBackedNodeData & {

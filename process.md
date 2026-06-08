@@ -17,6 +17,52 @@
 
 ## 2026-06-08
 
+### 修复画布刷新前未落库导致的节点丢失
+
+- 变更：`/api/agent-run` 在通过项目鉴权后立即把当前 `runNodeId` 写入项目 `lastRunId`，让刷新恢复可以用已持久化的 run trace 重建画布链路。
+- 变更：前端项目快照保存增加 `pagehide` / `visibilitychange` flush，并在卸载时用 keepalive 请求提交当前节点、边、选中节点、标题和最后 run，避免 debounce 定时器被刷新或切项目取消。
+- 文件：`server/api.ts`、`src/components/CanvasWorkspace.tsx`、`src/lib/project-storage.ts`、`process.md`。
+- 验证：`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec eslint src/components/CanvasWorkspace.tsx src/lib/project-storage.ts server/api.ts`、`pnpm test src/lib/graph-projection.test.ts` 通过。
+
+### Run 节点改为分组式 Agent 对话流
+
+- 变更：Run 节点展开态改为按“用户请求 / Agent 输出 / 运行计划 / 质量检查 / 工具调用”分组展示，Agent 文本使用 AI Elements `MessageResponse` 渲染，工具调用使用 collapsible 形态展示摘要、参数、结果和错误详情。
+- 变更：按 AI Elements 官方 `Shimmer` 组件方向新增本地 `ai-elements/shimmer`，运行中 Run 标题和等待文本使用文字扫光；工具调用块默认展开运行中、错误和图片生成工具，完成项可展开/收起查看完整输入输出。
+- 文件：`src/components/RunNodeView.tsx`、`src/components/ai-elements/shimmer.tsx`、`src/App.css`、`process.md`。
+- 验证：对照 AI SDK UI `useChat` / `UIMessage.parts` 和 AI Elements `Message` / `Tool` 官方文档；`pnpm build`、`pnpm exec eslint src/components/RunNodeView.tsx` 通过。
+- 备注：`pnpm lint` 当前被既有 `src/components/BlockNoteMarkdownEditor.tsx` 的 `react-hooks/refs` 报错阻塞，和本次 Run 节点改动无关。
+
+### Markdown 节点改为 BlockNote 可编辑节点
+
+- 变更：`markdownNode` 从只读 Markdown 预览改为 BlockNote shadcn 编辑器，加载现有 Markdown 内容，编辑后回写 `data.content`、`metadata.markdown` 和 `metadata.blockNoteBlocks`，保持后续分支上下文可用；Trace 回放中的 Markdown 节点为只读。
+- 变更：新增 `@blocknote/core`、`@blocknote/react`、`@blocknote/shadcn` 依赖，并按 BlockNote 官方建议用 native blocks JSON 保存富文本状态，同时保留 Markdown 作为 Agent 上游摘要/上下文。
+- 文件：`package.json`、`pnpm-lock.yaml`、`src/types/canvas.ts`、`src/components/CanvasWorkspace.tsx`、`src/components/BlockNoteMarkdownEditor.tsx`、`src/index.css`、`src/App.css`、`README.md`、`process.md`。
+- 验证：`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm build` 通过；Browser 打开 `http://localhost:5174/` 项目页正常渲染。开发过程中新增懒加载文件时 Vite HMR 曾留下旧错误日志，冷启动 Vite 后页面可正常进入项目。
+- 备注：当前测试项目没有 Markdown 节点，未向用户项目写入临时节点做编辑验证。
+
+### 接通前端 Run 节点的 AI SDK Streaming Data
+
+- 变更：`CanvasWorkspace` 的 `useChat` 增加 `onData` 处理，收到 AI SDK `data-runtime-event` part 时立即投影到当前 Run 节点；保留 `messages` effect 作为完整消息重放兜底。
+- 变更：`DefaultChatTransport` 明确使用 `/api/agent-run` 并携带同源 cookie；Run 状态投影在 `run.created` 后收到任意后续 runtime event 即进入 running，避免 AI SDK planning 阶段仍显示 queued。
+- 文件：`src/components/CanvasWorkspace.tsx`、`src/lib/graph-projection.ts`、`src/lib/graph-projection.test.ts`、`process.md`。
+- 验证：已对照 AI SDK UI `useChat`、`DefaultChatTransport`、Streaming Custom Data 文档确认 `messages[].parts` / `onData` 接法；`pnpm test src/lib/runtime-event-renderer.test.ts src/lib/graph-projection.test.ts`、`pnpm build` 通过。
+
+### 关闭 DeepSeek Thinking Mode 以支持 Tool Choice
+
+- 变更：DeepSeek OpenAI-compatible provider 增加 `transformRequestBody`，统一向请求体注入 `thinking: { type: "disabled" }`，避免 thinking mode 下 DeepSeek 拒绝 AI SDK 强制 `tool_choice`。
+- 变更：恢复 AI SDK runner 第一轮强制调用 `plan_agent_run`，保证主链路仍先规划再调用 runtime tools。
+- 文件：`server/model-providers.ts`、`server/model-providers.test.ts`、`server/runtime/ai-sdk-runner.ts`、`process.md`。
+- 验证：`pnpm test server/model-providers.test.ts server/runtime/executor.test.ts src/lib/graph.test.ts src/lib/graph-projection.test.ts`、`pnpm build` 通过。
+
+### 用 Vercel AI SDK Streaming Tool Loop 替换主运行链路
+
+- 变更：`/api/agent-run` 主路径改为 `server/runtime/ai-sdk-runner.ts`：使用 AI SDK `streamText` 原生 streaming，第一步强制调用 `plan_agent_run` 工具生成 `IntentResult` 和 `PlanStep[]`，后续工具调用由 AI SDK tool loop 继续驱动。
+- 变更：runtime tools 通过 AI SDK `tool({ inputSchema, execute })` 暴露；provider 不兼容点号的工具名会转为下划线名称，同时 trace payload 保留原 runtime tool id、schema digest、version、duration、logs、artifact 和 canvas operation 事件。
+- 变更：`server/runtime/executor.ts` 不再在主入口调用旧的 deterministic router/planner/generic step runner；旧低层 `runStep/executePlanSteps` 仅保留给现有单元测试覆盖工具结果、重试和 canvas policy 行为。
+- 文件：`server/runtime/ai-sdk-runner.ts`、`server/runtime/executor.ts`、`server/model-providers.ts`、`src/components/RunNodeView.tsx`、`README.md`、`process.md`。
+- 验证：`pnpm test server/runtime/executor.test.ts src/lib/graph.test.ts src/lib/graph-projection.test.ts`、`pnpm lint`、`pnpm build` 通过。
+- 备注：未提交真实外部模型/Seedream 请求，避免触发外部调用费用。
+
 ### 补强复合页面任务 Router/Planner
 
 - 变更：页面/HTML 请求如果同时包含分析、报告、总结等文本产物目标，会作为通用 multi-step 任务暴露 `document.write -> page.generate` 工具链，而不是落到模型 planner schema 输出。
