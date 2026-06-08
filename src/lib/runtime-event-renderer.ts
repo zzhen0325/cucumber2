@@ -19,7 +19,10 @@ import type {
 } from "@/types/canvas";
 import {
   runtimeEventTypes,
+  type ArtifactCreatedDataPart,
+  type CanvasOperationDataPart,
   type CanvasOperation,
+  type RunStatusDataPart,
   type RuntimeEvent,
 } from "@/types/runtime";
 
@@ -157,11 +160,27 @@ function summarizeRuns(events: RuntimeEvent[]) {
 const runtimeEventTypeSet = new Set<string>(runtimeEventTypes);
 
 function readRuntimeEventDataPart(part: unknown): RuntimeEvent | null {
-  if (!isRecord(part) || part.type !== "data-runtime-event") {
+  if (!isRecord(part)) {
     return null;
   }
 
-  return isRuntimeEvent(part.data) ? part.data : null;
+  if (part.type === "data-runtime-event") {
+    return isRuntimeEvent(part.data) ? part.data : null;
+  }
+
+  if (part.type === "data-artifact-created") {
+    return readArtifactCreatedEvent(part.data);
+  }
+
+  if (part.type === "data-canvas-operation") {
+    return readCanvasOperationEvent(part.data);
+  }
+
+  if (part.type === "data-run-status") {
+    return readRunStatusEvent(part.data);
+  }
+
+  return null;
 }
 
 function isRuntimeEvent(value: unknown): value is RuntimeEvent {
@@ -192,6 +211,171 @@ function isOptionalString(value: unknown) {
 
 function isOptionalStringOrNull(value: unknown) {
   return value === undefined || value === null || typeof value === "string";
+}
+
+function readArtifactCreatedEvent(data: unknown): RuntimeEvent | null {
+  if (!isArtifactCreatedDataPart(data)) {
+    return null;
+  }
+
+  return {
+    id: data.eventId,
+    projectId: data.projectId,
+    runNodeId: data.runNodeId,
+    stepId: data.stepId,
+    type: "artifact.created",
+    payload: compactRecord({
+      artifact: data.artifact,
+      canvasNodeId: data.canvasNodeId,
+      toolCallId: data.toolCallId,
+      toolName: data.toolName,
+    }),
+    createdAt: data.createdAt,
+  };
+}
+
+function readCanvasOperationEvent(data: unknown): RuntimeEvent | null {
+  if (!isCanvasOperationDataPart(data)) {
+    return null;
+  }
+
+  return {
+    id: data.eventId,
+    projectId: data.projectId,
+    runNodeId: data.runNodeId,
+    stepId: data.stepId,
+    type: data.eventType,
+    payload: compactRecord({
+      operation: data.operation,
+      reason: data.reason,
+      errorCode: data.errorCode,
+      errorText: data.errorText,
+    }),
+    errorText: data.errorText,
+    createdAt: data.createdAt,
+  };
+}
+
+function readRunStatusEvent(data: unknown): RuntimeEvent | null {
+  if (!isRunStatusDataPart(data)) {
+    return null;
+  }
+
+  return {
+    id: data.eventId,
+    projectId: data.projectId,
+    runNodeId: data.runNodeId,
+    stepId: data.stepId,
+    type: data.eventType,
+    payload: compactRecord({
+      status: data.status,
+      prompt: data.prompt,
+      promptNodeId: data.promptNodeId,
+      selectedNodeId: data.selectedNodeId,
+      upstreamContext: data.upstreamContext,
+      contextTrace: data.contextTrace,
+      artifactIds: data.artifactIds,
+      evaluation: data.evaluation,
+      runtime: data.runtime,
+      errorCode: data.errorCode,
+      errorText: data.errorText,
+      failedStepId: data.failedStepId,
+    }),
+    errorText: data.errorText,
+    createdAt: data.createdAt,
+  };
+}
+
+function isArtifactCreatedDataPart(
+  value: unknown
+): value is ArtifactCreatedDataPart {
+  return (
+    isRecord(value) &&
+    typeof value.projectId === "string" &&
+    typeof value.runNodeId === "string" &&
+    typeof value.stepId === "string" &&
+    isOptionalString(value.eventId) &&
+    isRecord(value.artifact) &&
+    typeof value.artifact.id === "string" &&
+    typeof value.artifact.type === "string" &&
+    isOptionalString(value.canvasNodeId) &&
+    isOptionalString(value.toolCallId) &&
+    isOptionalString(value.toolName) &&
+    typeof value.createdAt === "string"
+  );
+}
+
+function isCanvasOperationDataPart(
+  value: unknown
+): value is CanvasOperationDataPart {
+  return (
+    isRecord(value) &&
+    typeof value.projectId === "string" &&
+    typeof value.runNodeId === "string" &&
+    typeof value.stepId === "string" &&
+    isOptionalString(value.eventId) &&
+    isCanvasOperationEventType(value.eventType) &&
+    (value.status === "proposed" ||
+      value.status === "applied" ||
+      value.status === "rejected") &&
+    isRecord(value.operation) &&
+    typeof value.operation.id === "string" &&
+    typeof value.operation.type === "string" &&
+    isOptionalString(value.reason) &&
+    isOptionalString(value.errorCode) &&
+    isOptionalStringOrNull(value.errorText) &&
+    typeof value.createdAt === "string"
+  );
+}
+
+function isRunStatusDataPart(value: unknown): value is RunStatusDataPart {
+  return (
+    isRecord(value) &&
+    typeof value.projectId === "string" &&
+    typeof value.runNodeId === "string" &&
+    typeof value.stepId === "string" &&
+    isOptionalString(value.eventId) &&
+    isRunStatusEventType(value.eventType) &&
+    typeof value.status === "string" &&
+    isOptionalString(value.prompt) &&
+    isOptionalStringOrNull(value.promptNodeId) &&
+    isOptionalStringOrNull(value.selectedNodeId) &&
+    (value.upstreamContext === undefined || Array.isArray(value.upstreamContext)) &&
+    (value.contextTrace === undefined || isRecord(value.contextTrace)) &&
+    (value.artifactIds === undefined || Array.isArray(value.artifactIds)) &&
+    (value.evaluation === undefined || isRecord(value.evaluation)) &&
+    isOptionalString(value.runtime) &&
+    isOptionalString(value.errorCode) &&
+    isOptionalStringOrNull(value.errorText) &&
+    isOptionalString(value.failedStepId) &&
+    typeof value.createdAt === "string"
+  );
+}
+
+function isCanvasOperationEventType(
+  value: unknown
+): value is CanvasOperationDataPart["eventType"] {
+  return (
+    value === "canvas.operation.proposed" ||
+    value === "canvas.operation.applied" ||
+    value === "canvas.operation.rejected"
+  );
+}
+
+function isRunStatusEventType(
+  value: unknown
+): value is RunStatusDataPart["eventType"] {
+  return (
+    value === "run.created" ||
+    value === "run.completed" ||
+    value === "run.failed"
+  );
+}
+
+function compactRecord(value: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, item]) => item !== undefined)
+  );
 }
 
 function canvasOperationToGraphPatch(operation: CanvasOperation): GraphPatch {

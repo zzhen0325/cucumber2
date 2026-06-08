@@ -20,7 +20,7 @@ import type {
   RunStepTimelineItem,
   RunSummaryItem,
 } from "@/types/canvas";
-import type { RuntimeEvent } from "@/types/runtime";
+import type { CanvasOperation, RuntimeEvent } from "@/types/runtime";
 
 const DEFAULT_PROMPT_POSITION = { x: 260, y: 210 };
 const RUN_OFFSET_Y = 124;
@@ -367,6 +367,7 @@ export function projectRunTraceToCanvas({
   const projectedNodes = [promptNode, runNode];
   const projectedEdges: AgentCanvasEdge[] = [];
   const rejectedPatches: RejectedGraphPatch[] = [];
+  const appliedOperationIds = new Set<string>();
 
   if (selectedNodeId) {
     projectedEdges.push(
@@ -435,9 +436,30 @@ export function projectRunTraceToCanvas({
       );
     }
 
+    if (event.type === "canvas.operation.applied") {
+      const patch = readCanvasOperationPatch(event.payload.operation, projectId);
+      if (!patch) {
+        continue;
+      }
+      appliedOperationIds.add(patch.id);
+
+      const result = applyGraphPatch(
+        { projectId, nodes: projectedNodes, edges: projectedEdges },
+        patch
+      );
+      projectedNodes.splice(0, projectedNodes.length, ...result.state.nodes);
+      projectedEdges.splice(0, projectedEdges.length, ...result.state.edges);
+      if (result.rejected) {
+        rejectedPatches.push(result.rejected);
+      }
+    }
+
     if (event.type === "graph.patch.applied") {
       const patch = readGraphPatch(event.payload.patch, projectId);
       if (!patch) {
+        continue;
+      }
+      if (appliedOperationIds.has(patch.id)) {
         continue;
       }
 
@@ -1449,6 +1471,41 @@ function readGraphPatch(
     ...candidate,
     projectId: candidate.projectId ?? projectId,
   } as GraphPatch;
+}
+
+function readCanvasOperationPatch(
+  value: unknown,
+  projectId: string | undefined
+): GraphPatch | null {
+  const operation = readGraphPatch(value, projectId);
+  if (!operation) {
+    return null;
+  }
+
+  if (operation.type !== "attachArtifact") {
+    return operation;
+  }
+
+  const canvasOperation = value as CanvasOperation;
+  if (
+    canvasOperation.type !== "attachArtifact" ||
+    !canvasOperation.payload.artifactId
+  ) {
+    return operation;
+  }
+
+  return {
+    id: canvasOperation.id,
+    projectId: canvasOperation.projectId ?? projectId,
+    type: "attachArtifact",
+    payload: {
+      nodeId: canvasOperation.payload.nodeId,
+      artifact: canvasOperation.payload.artifact ?? {
+        id: canvasOperation.payload.artifactId,
+        type: "image",
+      },
+    },
+  };
 }
 
 function readString(value: unknown) {

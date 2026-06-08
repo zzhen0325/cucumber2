@@ -85,6 +85,81 @@ describe("runtime event renderer", () => {
     ).toEqual([second, first]);
   });
 
+  it("extracts typed runtime data parts into runtime events", () => {
+    const createdAt = "2026-06-08T00:00:10.000Z";
+    const artifact = {
+      id: "image-1",
+      type: "image" as const,
+      uri: "https://cdn.example/1.png",
+    };
+    const operation = {
+      id: "op-1",
+      projectId: "project-1",
+      type: "attachArtifact" as const,
+      payload: {
+        nodeId: "image-image-1",
+        artifactId: "image-1",
+        artifact,
+      },
+    };
+
+    expect(
+      runtimeEventsFromMessageParts([
+        {
+          type: "data-run-status",
+          data: {
+            projectId: "project-1",
+            runNodeId: "run-1",
+            stepId: "run",
+            eventType: "run.created",
+            status: "running",
+            prompt: "生成图片",
+            selectedNodeId: null,
+            createdAt,
+          },
+        },
+        {
+          type: "data-artifact-created",
+          data: {
+            projectId: "project-1",
+            runNodeId: "run-1",
+            stepId: "generate_image",
+            artifact,
+            canvasNodeId: "image-image-1",
+            toolName: "generate_image",
+            createdAt,
+          },
+        },
+        {
+          type: "data-canvas-operation",
+          data: {
+            projectId: "project-1",
+            runNodeId: "run-1",
+            stepId: "generate_image",
+            eventType: "canvas.operation.applied",
+            status: "applied",
+            operation,
+            createdAt,
+          },
+        },
+        {
+          type: "data-trace-pointer",
+          data: {
+            projectId: "project-1",
+            runNodeId: "run-1",
+            stepId: "generate_image",
+            eventType: "artifact.created",
+            createdAt,
+          },
+        },
+      ]).map((candidate) => candidate.type)
+    ).toEqual([
+      "run.created",
+      "artifact.created",
+      "canvas.operation.applied",
+    ]);
+  });
+
   it("sorts and filters runtime events from messages by run id", () => {
     const first = event("run.created", "run-1", "run", {});
     const second = event("run.completed", "run-1", "run", {});

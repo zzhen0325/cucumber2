@@ -439,6 +439,65 @@ export type RuntimeEvent = {
   createdAt: string;
 };
 
+export type CanvasOperationDataPart = {
+  projectId: string;
+  runNodeId: string;
+  stepId: string;
+  eventId?: string;
+  eventType:
+    | "canvas.operation.proposed"
+    | "canvas.operation.applied"
+    | "canvas.operation.rejected";
+  status: "proposed" | "applied" | "rejected";
+  operation: CanvasOperation;
+  reason?: string;
+  errorCode?: string;
+  errorText?: string | null;
+  createdAt: string;
+};
+
+export type ArtifactCreatedDataPart = {
+  projectId: string;
+  runNodeId: string;
+  stepId: string;
+  eventId?: string;
+  artifact: ArtifactRef;
+  canvasNodeId?: string;
+  toolCallId?: string;
+  toolName?: string;
+  createdAt: string;
+};
+
+export type RunStatusDataPart = {
+  projectId: string;
+  runNodeId: string;
+  stepId: string;
+  eventId?: string;
+  eventType: "run.created" | "run.completed" | "run.failed";
+  status: AgentRunStatus | LegacyAgentRunStatus;
+  prompt?: string;
+  promptNodeId?: string | null;
+  selectedNodeId?: string | null;
+  upstreamContext?: UpstreamContextItem[];
+  contextTrace?: InputCanvasContext["contextTrace"];
+  artifactIds?: string[];
+  evaluation?: EvaluationResult;
+  runtime?: string;
+  errorCode?: string;
+  errorText?: string | null;
+  failedStepId?: string;
+  createdAt: string;
+};
+
+export type TracePointerDataPart = {
+  projectId: string;
+  runNodeId: string;
+  stepId: string;
+  eventId?: string;
+  eventType: RuntimeEventType;
+  createdAt: string;
+};
+
 export function toLegacyRunStatus(status: AgentRunStatus): LegacyAgentRunStatus {
   if (status === "completed") {
     return "success";

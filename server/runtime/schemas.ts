@@ -8,11 +8,15 @@ import type {
 } from "../../src/types/canvas.ts";
 import type {
   AgentRun,
+  ArtifactCreatedDataPart,
   BuiltContext,
+  CanvasOperationDataPart,
   CanvasOperation,
   IntentResult,
   PlanStep,
   RuntimeEvent,
+  RunStatusDataPart,
+  TracePointerDataPart,
   ToolResult,
 } from "../../src/types/runtime.ts";
 import { runtimeEventTypes } from "../../src/types/runtime.ts";
@@ -396,13 +400,37 @@ export const runtimeEventSchema: z.ZodType<RuntimeEvent> = z.object({
   createdAt: z.string().datetime(),
 });
 
-export const runtimeMetadataSchema = z
-  .record(z.string(), z.unknown())
-  .optional();
+export const canvasOperationDataPartSchema: z.ZodType<CanvasOperationDataPart> =
+  z.object({
+    projectId: z.string().min(1),
+    runNodeId: z.string().min(1),
+    stepId: z.string().min(1),
+    eventId: z.string().optional(),
+    eventType: z.enum([
+      "canvas.operation.proposed",
+      "canvas.operation.applied",
+      "canvas.operation.rejected",
+    ]),
+    status: z.enum(["proposed", "applied", "rejected"]),
+    operation: canvasOperationSchema,
+    reason: z.string().optional(),
+    errorCode: z.string().optional(),
+    errorText: z.string().nullable().optional(),
+    createdAt: z.string().datetime(),
+  });
 
-export const runtimeDataSchemas = {
-  "runtime-event": runtimeEventSchema,
-};
+export const artifactCreatedDataPartSchema: z.ZodType<ArtifactCreatedDataPart> =
+  z.object({
+    projectId: z.string().min(1),
+    runNodeId: z.string().min(1),
+    stepId: z.string().min(1),
+    eventId: z.string().optional(),
+    artifact: artifactRefSchema,
+    canvasNodeId: z.string().optional(),
+    toolCallId: z.string().optional(),
+    toolName: z.string().optional(),
+    createdAt: z.string().datetime(),
+  });
 
 export const evaluationResultSchema = z.object({
   passed: z.boolean(),
@@ -416,6 +444,62 @@ export const evaluationResultSchema = z.object({
   recommendedActions: z.array(z.string()),
   needsRegeneration: z.boolean(),
 });
+
+export const runStatusDataPartSchema: z.ZodType<RunStatusDataPart> = z.object({
+  projectId: z.string().min(1),
+  runNodeId: z.string().min(1),
+  stepId: z.string().min(1),
+  eventId: z.string().optional(),
+  eventType: z.enum(["run.created", "run.completed", "run.failed"]),
+  status: z.enum([
+    "queued",
+    "routing",
+    "building_context",
+    "planning",
+    "running",
+    "waiting_approval",
+    "evaluating",
+    "completed",
+    "failed",
+    "cancelled",
+    "success",
+    "error",
+  ]),
+  prompt: z.string().optional(),
+  promptNodeId: z.string().nullable().optional(),
+  selectedNodeId: z.string().nullable().optional(),
+  upstreamContext: z.array(upstreamContextItemSchema).optional(),
+  contextTrace: agentInputSchema.shape.canvasContext.shape.contextTrace,
+  artifactIds: z.array(z.string()).optional(),
+  evaluation: evaluationResultSchema.optional(),
+  runtime: z.string().optional(),
+  errorCode: z.string().optional(),
+  errorText: z.string().nullable().optional(),
+  failedStepId: z.string().optional(),
+  createdAt: z.string().datetime(),
+});
+
+export const tracePointerDataPartSchema: z.ZodType<TracePointerDataPart> =
+  z.object({
+    projectId: z.string().min(1),
+    runNodeId: z.string().min(1),
+    stepId: z.string().min(1),
+    eventId: z.string().optional(),
+    eventType: runtimeEventTypeSchema,
+    createdAt: z.string().datetime(),
+  });
+
+export const runtimeMetadataSchema = z
+  .record(z.string(), z.unknown())
+  .optional();
+
+export const runtimeDataSchemas = {
+  "artifact-created": artifactCreatedDataPartSchema,
+  "canvas-operation": canvasOperationDataPartSchema,
+  "run-status": runStatusDataPartSchema,
+  "runtime-event": runtimeEventSchema,
+  "trace-pointer": tracePointerDataPartSchema,
+};
 
 export const agentRunSchema: z.ZodType<AgentRun> = z.object({
   id: z.string().min(1),

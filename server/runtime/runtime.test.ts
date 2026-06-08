@@ -96,6 +96,68 @@ describe("runtime core", () => {
             data: runtimeEvent,
           },
           {
+            type: "data-run-status",
+            id: "run-status-1",
+            data: {
+              projectId: "project-1",
+              runNodeId: "run-1",
+              stepId: "run",
+              eventType: "run.created",
+              status: "running",
+              prompt: "历史需求",
+              selectedNodeId: null,
+              createdAt: "2026-06-08T00:00:01.000Z",
+            },
+          },
+          {
+            type: "data-artifact-created",
+            id: "artifact-1",
+            data: {
+              projectId: "project-1",
+              runNodeId: "run-1",
+              stepId: "inspect",
+              artifact: {
+                id: "artifact-1",
+                type: "tool_result",
+                title: "Inspect result",
+              },
+              canvasNodeId: "tool-result-artifact-1",
+              createdAt: "2026-06-08T00:00:02.000Z",
+            },
+          },
+          {
+            type: "data-canvas-operation",
+            id: "operation-1",
+            data: {
+              projectId: "project-1",
+              runNodeId: "run-1",
+              stepId: "inspect",
+              eventType: "canvas.operation.applied",
+              status: "applied",
+              operation: {
+                id: "operation-1",
+                projectId: "project-1",
+                type: "setNodeStatus",
+                payload: {
+                  nodeId: "run-1",
+                  status: "completed",
+                },
+              },
+              createdAt: "2026-06-08T00:00:03.000Z",
+            },
+          },
+          {
+            type: "data-trace-pointer",
+            id: "trace-1",
+            data: {
+              projectId: "project-1",
+              runNodeId: "run-1",
+              stepId: "inspect",
+              eventType: "tool.output",
+              createdAt: "2026-06-08T00:00:04.000Z",
+            },
+          },
+          {
             type: "tool-inspect_canvas",
             toolCallId: "tool-call-1",
             state: "output-available",

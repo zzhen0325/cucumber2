@@ -217,6 +217,44 @@ describe("graph projection", () => {
     });
   });
 
+  it("applies typed canvas operation events without replaying duplicate graph patches", () => {
+    const artifactNode: AgentCanvasNode = {
+      id: "artifact-1",
+      type: "artifactNode",
+      position: { x: 640, y: 360 },
+      data: {
+        kind: "artifact",
+        title: "分析结果",
+        summary: "一段分析文本",
+        artifact: {
+          id: "artifact-1",
+          type: "tool_result",
+          title: "分析结果",
+        },
+      },
+    };
+    const operation = {
+      id: "op-create-artifact-1",
+      projectId: "project-1",
+      type: "createNode" as const,
+      payload: { node: artifactNode },
+    };
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      events: [
+        event("run.created", "run-1", "run", {
+          prompt: "创建分析节点",
+          selectedNodeId: null,
+        }),
+        event("canvas.operation.applied", "run-1", "tool", { operation }),
+        event("graph.patch.applied", "run-1", "tool", { patch: operation }),
+      ],
+    });
+
+    expect(projection.nodes.filter((node) => node.id === "artifact-1")).toHaveLength(1);
+    expect(projection.rejectedPatches).toEqual([]);
+  });
+
   it("reuses the real prompt node id when it is present in the trace", () => {
     const projection = projectRunTraceToCanvas({
       projectId: "project-1",

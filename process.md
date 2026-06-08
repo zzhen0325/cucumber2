@@ -17,6 +17,13 @@
 
 ## 2026-06-09
 
+### Agent Run stream protocol 拆分为 typed data parts
+
+- 变更：`RuntimeEventWriter` 不再把 artifact、canvas operation、run lifecycle 全部写成 `data-runtime-event`；改为写 `data-artifact-created`、`data-canvas-operation`、`data-run-status` 和持久化后的 `data-trace-pointer`，普通运行细节继续使用 `data-runtime-event`。
+- 变更：前端 `runtime-event-renderer` 支持从 typed data parts 还原 runtime events；`graph-projection` 直接消费 `canvas.operation.applied`，并按 operation/patch id 跳过兼容 `graph.patch.applied` 的重复应用。
+- 文件：`server/runtime/events.ts`、`server/runtime/schemas.ts`、`src/types/runtime.ts`、`src/lib/runtime-event-renderer.ts`、`src/lib/graph-projection.ts`、`server/runtime/runtime.test.ts`、`src/lib/runtime-event-renderer.test.ts`、`src/lib/graph-projection.test.ts`、`README.md`、`process.md`。
+- 验证：已对照 AI SDK UI Streaming Custom Data / Stream Protocol 文档；`pnpm test -- src/lib/runtime-event-renderer.test.ts src/lib/graph-projection.test.ts server/runtime/runtime.test.ts --testNamePattern "runtime event|data parts|canvas operation|schema|validates UI runtime"`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec tsc -p tsconfig.app.json --noEmit` 通过。
+
 ### Agent Run 后续工具改为服务端确定性 activeTools
 
 - 变更：新增 `server/runtime/tool-router.ts`，按 prompt 和画布上下文在服务端确定 obvious tool route：图片走 `prompt.expand` / `seedream.generateImage`，参考图补 `vision.analyzeReferenceImages`，网页/HTML 走 `html.generate`，最新/搜索/来源走 `web.search` / `document.write`，普通分析/总结/计划走 `document.write`。
