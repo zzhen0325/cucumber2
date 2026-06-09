@@ -17,6 +17,21 @@
 
 ## 2026-06-09
 
+### 修复图片 Intent 漏暴露 prompt.expand
+
+- 现象：Run 节点报错 `Tool step expand_prompt references non-exposed tool prompt.expand.`；触发条件是模型把请求路由为图片生成，但 `requiredTools` 只返回 `seedream.generateImage`，漏掉前置的 `prompt.expand`。
+- 变更：`routeIntent` 在模型结构化输出后增加服务端 runtime 契约归一化；图片生成 intent 只要使用 `seedream.generateImage`，就会在进入 Context Builder / Planner 前补齐 `prompt.expand -> seedream.generateImage` 的可暴露工具链，并保留引用图分析工具顺序。
+- 文件：`server/runtime/intent-router.ts`、`server/runtime/runtime.test.ts`、`process.md`。
+- 验证：`pnpm exec vitest run server/runtime/runtime.test.ts server/runtime/ai-sdk-runner.test.ts --reporter=dot`、`pnpm exec tsc -b --pretty false`、`pnpm exec eslint server/runtime/intent-router.ts server/runtime/runtime.test.ts` 通过；`curl http://127.0.0.1:8787/api/health` 显示 DeepSeek / Ark / Seedream / Supabase 已配置。
+
+### 修复 DeepSeek IntentResult 结构化输出不匹配
+
+- 变更：`routeIntent` 的模型提示补充完整 `IntentResult` 必填形状、枚举值和对象数组约束，并在明确图片生成请求时提供基于当前输入/工具 allowlist 的 preferred intent 示例，避免 DeepSeek 把 `targets`、`deliverables`、`operations` 简化成字符串数组或漏掉 `needsPlanning` / `routingReason`。
+- 变更：图片生成计划改为服务端确定性 `buildPlanFromIntentDeterministically`，不再额外调用 LLM planner 生成 `PlanStep[]`；复杂未知路线仍可走 structured planner。
+- 变更：补充中文“生成四张小狗的图”这类 `的图` / 多张图表达的显式图片生成识别，并修正 image task 中 `expanded_prompt` 的 `toolHint` 为 `prompt.expand`。
+- 文件：`server/runtime/intent-router.ts`、`server/runtime/planner.ts`、`server/runtime/runtime.test.ts`、`process.md`。
+- 验证：`pnpm exec vitest run server/runtime/runtime.test.ts server/runtime/ai-sdk-runner.test.ts --reporter=dot`、`pnpm exec tsc -b --pretty false`、`pnpm exec eslint server/runtime/intent-router.ts server/runtime/planner.ts server/runtime/runtime.test.ts server/runtime/ai-sdk-runner.ts` 通过；真实 DeepSeek routeIntent + createPlan 探针确认“生成四张小狗的图”生成 image intent 和 4 图计划。
+
 ### 取消模型侧强制 plan_agent_run
 
 - 变更：`server/runtime/ai-sdk-runner.ts` 不再把第 0 步暴露为强制 `plan_agent_run` tool call；Run 开始后先由服务端执行 `routeIntent`、`buildContext`、`createPlan`，把 `intent.routed`、`context.built`、`plan.created` 写入 Run Trace，再启动 AI SDK `streamText` runtime tool loop。

@@ -664,6 +664,182 @@ describe("runtime core", () => {
     ]);
   });
 
+  it("plans image tasks before calling the model planner", async () => {
+    const capabilities = buildCapabilityRegistry([promptExpandSkill]);
+    const canvasContext = {
+      prompt: "生成四张小狗的图",
+      selectedNodeId: null,
+      upstreamContext: [],
+    };
+    const toolRegistry = buildToolRegistry({
+      canvasContext,
+      capabilities,
+      modelProvider: "deepseek",
+      projectId: "project-1",
+      runNodeId: "run-1",
+    });
+    const input = normalizeAgentInput({
+      userId: "user-1",
+      projectId: "project-1",
+      runNodeId: "run-1",
+      modelProvider: "deepseek",
+      messages: [],
+      canvasContext,
+    });
+    const intent = routeIntentDeterministically({
+      capabilities,
+      input,
+      toolRegistry,
+    });
+    const context = buildContext({
+      input,
+      intent,
+      publicSkills: [promptExpandSkill],
+      runId: "agent-run-1",
+      toolRegistry,
+    });
+    let modelPlannerCalled = false;
+    const plan = await createPlan({
+      context,
+      intent,
+      modelProvider: "deepseek",
+      toolRegistry,
+      async generatePlanSteps() {
+        modelPlannerCalled = true;
+        throw new Error("model planner should not be called for image routes");
+      },
+    });
+
+    expect(modelPlannerCalled).toBe(false);
+    expect(plan.normalizedPlan.map((step) => step.id)).toEqual([
+      "agent_text",
+      "expand_prompt",
+      "generate_image",
+      "evaluate_result",
+    ]);
+    expect(
+      plan.normalizedPlan.find((step) => step.id === "generate_image")
+        ?.expectedArtifacts
+    ).toEqual([
+      {
+        type: "image",
+        count: 4,
+        description: "Generated image",
+      },
+    ]);
+  });
+
+  it("normalizes model-routed image intents to expose the full runtime tool chain", async () => {
+    const capabilities = buildCapabilityRegistry([promptExpandSkill]);
+    const canvasContext = {
+      prompt: "生成2张日本家居主题的bannerKV 16:9",
+      selectedNodeId: null,
+      upstreamContext: [],
+    };
+    const toolRegistry = buildToolRegistry({
+      canvasContext,
+      capabilities,
+      modelProvider: "deepseek",
+      projectId: "project-1",
+      runNodeId: "run-1",
+    });
+    const input = normalizeAgentInput({
+      userId: "user-1",
+      projectId: "project-1",
+      runNodeId: "run-1",
+      modelProvider: "deepseek",
+      messages: [],
+      canvasContext,
+    });
+    const intent = await routeIntent({
+      capabilities,
+      input,
+      modelProvider: "deepseek",
+      toolRegistry,
+      async generateIntentResult() {
+        return {
+          primaryIntent: "image_generation",
+          confidence: 0.88,
+          task: {
+            kind: "image_generation",
+            goals: [canvasContext.prompt],
+            targets: [],
+            constraints: [
+              {
+                kind: "format",
+                text: "16:9 banner KV",
+              },
+            ],
+            deliverables: [
+              {
+                kind: "image",
+                description: "Japanese home themed banner KV",
+                count: 2,
+              },
+            ],
+            operations: [
+              {
+                kind: "generate",
+                target: "image_artifacts",
+                toolHint: toolIds.generateImage,
+              },
+            ],
+          },
+          requiredCapabilities: ["image.generate"],
+          requiredTools: [toolIds.generateImage],
+          needsPlanning: true,
+          ambiguity: [],
+          routingReason: "Model selected image generation but omitted prompt expansion.",
+        };
+      },
+    });
+    const context = buildContext({
+      input,
+      intent,
+      publicSkills: [promptExpandSkill],
+      runId: "agent-run-1",
+      toolRegistry,
+    });
+    const plan = await createPlan({
+      context,
+      intent,
+      modelProvider: "deepseek",
+      toolRegistry,
+      async generatePlanSteps() {
+        throw new Error("model planner should not be called for image routes");
+      },
+    });
+
+    expect(intent.requiredCapabilities).toEqual([
+      "prompt.expand",
+      "image.generate",
+    ]);
+    expect(intent.requiredTools).toEqual([
+      toolIds.expandPrompt,
+      toolIds.generateImage,
+    ]);
+    expect(context.availableTools.map((tool) => tool.id)).toEqual([
+      toolIds.expandPrompt,
+      toolIds.generateImage,
+    ]);
+    expect(plan.normalizedPlan.map((step) => step.id)).toEqual([
+      "agent_text",
+      "expand_prompt",
+      "generate_image",
+      "evaluate_result",
+    ]);
+    expect(
+      plan.normalizedPlan.find((step) => step.id === "generate_image")
+        ?.expectedArtifacts
+    ).toEqual([
+      {
+        type: "image",
+        count: 2,
+        description: "Generated image",
+      },
+    ]);
+  });
+
   it("preserves unsupported structured model routing without inventing a fallback tool", async () => {
     const capabilities = buildCapabilityRegistry([promptExpandSkill]);
     const canvasContext = {
@@ -1179,22 +1355,19 @@ describe("runtime core", () => {
       runId: "agent-run-1",
       toolRegistry,
     });
-    let plannerPrompt = "";
+    let modelPlannerCalled = false;
     const plan = await createPlan({
       context,
       intent,
       modelProvider: "deepseek",
       toolRegistry,
-      async generatePlanSteps(prompt) {
-        plannerPrompt = prompt;
+      async generatePlanSteps() {
+        modelPlannerCalled = true;
         return buildPlanFromIntentDeterministically(intent);
       },
     });
 
-    expect(plannerPrompt).toContain("ALLOWED_TOOLS");
-    expect(plannerPrompt).toContain(toolIds.expandPrompt);
-    expect(plannerPrompt).toContain("promptParts");
-    expect(plannerPrompt).toContain("runtime.selected-context");
+    expect(modelPlannerCalled).toBe(false);
     expect(plan.normalizedPlan.map((step) => step.id)).toEqual([
       "agent_text",
       "expand_prompt",

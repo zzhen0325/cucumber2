@@ -226,6 +226,56 @@ describe("runtime event renderer", () => {
       uri: "https://example.test/image.png",
     });
   });
+
+  it("does not carry old legacy tool results into a new run message window", () => {
+    const oldRunMessage = {
+      parts: [
+        {
+          type: "tool-generate_image",
+          state: "output-available",
+          toolCallId: "tool-old",
+          input: { prompt: "上一轮生成图片" },
+          output: {
+            images: [
+              {
+                id: "old-image",
+                url: "https://example.test/old.png",
+                title: "上一轮结果",
+              },
+            ],
+          },
+        },
+      ],
+    };
+    const newRunMessage = {
+      parts: [
+        {
+          type: "tool-generate_image",
+          state: "input-available",
+          toolCallId: "tool-new",
+          input: { prompt: "新输入" },
+        },
+      ],
+    };
+
+    const events = runtimeEventsFromMessages([oldRunMessage, newRunMessage], {
+      projectId: "project-1",
+      runNodeId: "run-2",
+      prompt: "新输入",
+      promptNodeId: "prompt-2",
+      selectedNodeId: null,
+      includeLegacyToolParts: true,
+      messageStartIndex: 1,
+    });
+
+    expect(events.map((candidate) => candidate.type)).toEqual([
+      "run.created",
+      "tool.input",
+    ]);
+    expect(events.some((candidate) => candidate.type === "artifact.created")).toBe(
+      false
+    );
+  });
 });
 
 function event(

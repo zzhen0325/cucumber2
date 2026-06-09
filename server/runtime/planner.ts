@@ -108,6 +108,13 @@ export async function createPlan({
 }
 
 function planBeforeModel(intent: IntentResult): PlanStep[] | undefined {
+  if (
+    intent.requiredTools.includes(toolIds.generateImage) ||
+    intent.requiredTools.includes(toolIds.expandPrompt)
+  ) {
+    return buildPlanFromIntentDeterministically(intent);
+  }
+
   if (intent.requiredTools.includes(toolIds.searchWeb)) {
     return buildPlanFromIntentDeterministically(intent);
   }

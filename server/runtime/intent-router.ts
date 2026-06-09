@@ -24,9 +24,63 @@ const intentRouterSystemPrompt = [
   "Use only capability ids and tool ids that are present in the prompt allowlist.",
   "Classify in layers: coarse intent, target object, operation, constraints, deliverables, confidence, then route.",
   "Represent those layers through primaryIntent, task.kind, task.targets, task.operations, task.constraints, task.deliverables, confidence, ambiguity, requiredCapabilities, and requiredTools.",
+  "Every required field must be present. Arrays such as task.targets, task.constraints, task.deliverables, task.operations, and ambiguity must contain objects, never plain strings.",
+  "Use the exact enum values shown in the prompt. Do not invent shorthand values such as generate or generate_images.",
   "Do not choose an image route unless the user explicitly asks to create or edit an image artifact.",
   "If the request is unsupported or ambiguous, still return a structured task and add ambiguity entries instead of silently choosing a nearby tool.",
 ].join("\n");
+
+const taskKindValues = [
+  "image_generation",
+  "image_editing",
+  "page_generation",
+  "page_editing",
+  "document_writing",
+  "web_research",
+  "file_analysis",
+  "code_modification",
+  "canvas_operation",
+  "multi_step",
+];
+
+const targetKindValues = [
+  "canvas_node",
+  "artifact",
+  "file",
+  "webpage",
+  "project",
+  "unknown",
+];
+
+const constraintKindValues = [
+  "style",
+  "format",
+  "policy",
+  "budget",
+  "quality",
+  "other",
+];
+
+const deliverableKindValues = [
+  "image",
+  "document",
+  "code",
+  "webpage",
+  "canvas_node",
+  "analysis",
+  "decision",
+];
+
+const operationKindValues = [
+  "generate",
+  "edit",
+  "analyze",
+  "write",
+  "search",
+  "create_canvas_node",
+  "attach_artifact",
+  "evaluate",
+];
 
 const ROUTE_MISSING_INTENT = "capability.route_missing";
 
@@ -57,7 +111,12 @@ export async function routeIntent({
           maxOutputTokens: 1_400,
         })
   );
-  return validateRoutedIntent({ capabilities, intent: routed, toolRegistry });
+  const runtimeIntent = normalizeIntentForRuntimeContract({
+    input,
+    intent: routed,
+    toolRegistry,
+  });
+  return validateRoutedIntent({ capabilities, intent: runtimeIntent, toolRegistry });
 }
 
 function validateRoutedIntent({
@@ -297,6 +356,16 @@ export function validateIntentAgainstRegistry({
     }
   }
 
+  if (
+    isRuntimeImageIntent(intent) &&
+    intent.requiredTools.includes(toolIds.generateImage) &&
+    !intent.requiredTools.includes(toolIds.expandPrompt)
+  ) {
+    errors.push(
+      `Image generation intent must expose ${toolIds.expandPrompt} before ${toolIds.generateImage}.`
+    );
+  }
+
   if (!intent.primaryIntent.trim()) {
     errors.push("Intent is missing primaryIntent.");
   }
@@ -307,13 +376,73 @@ export function validateIntentAgainstRegistry({
   };
 }
 
+function normalizeIntentForRuntimeContract({
+  input,
+  intent,
+  toolRegistry,
+}: {
+  input: AgentInput;
+  intent: IntentResult;
+  toolRegistry: ToolRegistry;
+}): IntentResult {
+  if (
+    !isRuntimeImageIntent(intent) ||
+    !toolRegistry.getTool(toolIds.generateImage)
+  ) {
+    return intent;
+  }
+
+  const hasReferenceImage = input.canvasContext.upstreamContext.some(
+    (item) => item.type === "image" || item.artifact?.type === "image"
+  );
+  const requiredImageTools = [
+    ...(hasReferenceImage && toolRegistry.getTool(toolIds.analyzeReferenceImages)
+      ? [toolIds.analyzeReferenceImages]
+      : []),
+    ...(toolRegistry.getTool(toolIds.expandPrompt) ? [toolIds.expandPrompt] : []),
+    toolIds.generateImage,
+  ];
+  const imageToolSet = new Set<string>(requiredImageTools);
+  const requiredTools = uniqueInOrder([
+    ...requiredImageTools,
+    ...intent.requiredTools.filter((toolId) => !imageToolSet.has(toolId)),
+  ]);
+  const requiredCapabilities = uniqueInOrder([
+    ...(toolRegistry.getTool(toolIds.expandPrompt)
+      ? [PROMPT_EXPAND_CAPABILITY_ID]
+      : []),
+    IMAGE_GENERATE_CAPABILITY_ID,
+    ...intent.requiredCapabilities,
+  ]);
+
+  return intentResultSchema.parse({
+    ...intent,
+    requiredCapabilities,
+    requiredTools,
+  });
+}
+
+function isRuntimeImageIntent(intent: IntentResult) {
+  return (
+    intent.primaryIntent === "image_generation" ||
+    intent.primaryIntent === "image_editing" ||
+    intent.task.kind === "image_generation" ||
+    intent.task.kind === "image_editing" ||
+    intent.requiredTools.includes(toolIds.generateImage)
+  );
+}
+
+function uniqueInOrder<T>(items: T[]) {
+  return Array.from(new Set(items));
+}
+
 function isExplicitImageGenerationRequest(input: AgentInput) {
   const text = input.userMessage.toLowerCase();
   const hasReferenceImage = input.canvasContext.upstreamContext.some(
     (item) => item.type === "image" || item.artifact?.type === "image"
   );
   const asksForImageArtifact =
-    /(图片|图像|照片|海报|插画|一张图|出图|logo|image|picture|photo|poster|illustration|graphic)/i.test(
+    /(图片|图像|照片|海报|插画|一张图|[一二三四五六七八九十百两\d]+张.{0,16}图|的图|出图|logo|image|picture|photo|poster|illustration|graphic)/i.test(
       text
     );
   const asksToCreateOrEdit =
@@ -391,9 +520,132 @@ function buildIntentRouterPrompt({
       2
     ),
     "",
+    "INTENT_RESULT_REQUIRED_SHAPE",
+    buildIntentResultShapeHint(),
+    "",
+    "ENUM_VALUES",
+    JSON.stringify(
+      {
+        taskKind: taskKindValues,
+        targetKind: targetKindValues,
+        constraintKind: constraintKindValues,
+        deliverableKind: deliverableKindValues,
+        operationKind: operationKindValues,
+        ambiguitySeverity: ["low", "medium", "high"],
+      },
+      null,
+      2
+    ),
+    "",
+    "PREFERRED_INTENT_EXAMPLE",
+    JSON.stringify(buildPreferredIntentExample({ input, toolRegistry }), null, 2),
+    "",
     "SAFETY_POLICY",
     "Models may only choose capabilities and tools from the allowlist. Unsupported tasks must be explicit ambiguity instead of silently choosing image generation.",
   ].join("\n");
+}
+
+function buildIntentResultShapeHint() {
+  return JSON.stringify(
+    {
+      primaryIntent: "image_generation | document_writing | web_research | multi_step | ...",
+      confidence: 0.9,
+      task: {
+        kind: "one taskKind enum value",
+        goals: ["user-facing goal text"],
+        targets: [
+          {
+            id: "optional canvas/artifact id",
+            kind: "one targetKind enum value",
+            ref: "optional reference",
+            summary: "optional target summary",
+          },
+        ],
+        constraints: [
+          {
+            kind: "one constraintKind enum value",
+            text: "constraint text",
+          },
+        ],
+        deliverables: [
+          {
+            kind: "one deliverableKind enum value",
+            description: "expected output artifact",
+            count: 1,
+          },
+        ],
+        operations: [
+          {
+            kind: "one operationKind enum value",
+            target: "operation target",
+            toolHint: "optional runtime tool id from AVAILABLE_TOOLS",
+          },
+        ],
+      },
+      requiredCapabilities: ["capability.id.from.allowlist"],
+      requiredTools: ["runtime.toolId.from.allowlist"],
+      needsPlanning: true,
+      ambiguity: [
+        {
+          id: "question-id",
+          question: "clarifying question or limitation",
+          options: ["optional choice"],
+          severity: "low | medium | high",
+        },
+      ],
+      routingReason: "short reason grounded in the user request and allowlist",
+    },
+    null,
+    2
+  );
+}
+
+function buildPreferredIntentExample({
+  input,
+  toolRegistry,
+}: {
+  input: AgentInput;
+  toolRegistry: ToolRegistry;
+}) {
+  const hasReferenceImage = input.canvasContext.upstreamContext.some(
+    (item) => item.type === "image" || item.artifact?.type === "image"
+  );
+  if (
+    !isExplicitImageGenerationRequest(input) ||
+    !toolRegistry.getTool(toolIds.generateImage)
+  ) {
+    return {
+      note:
+        "No preferred example for this request. Return the required shape using the allowlisted capabilities and tools.",
+    };
+  }
+
+  const requiredTools = [
+    ...(hasReferenceImage && toolRegistry.getTool(toolIds.analyzeReferenceImages)
+      ? [toolIds.analyzeReferenceImages]
+      : []),
+    ...(toolRegistry.getTool(toolIds.expandPrompt) ? [toolIds.expandPrompt] : []),
+    toolIds.generateImage,
+  ];
+
+  return intentResultSchema.parse({
+    primaryIntent: hasReferenceImage ? "image_editing" : "image_generation",
+    confidence: 0.9,
+    task: createImageTask(input, hasReferenceImage),
+    requiredCapabilities: [
+      ...(toolRegistry.getTool(toolIds.expandPrompt)
+        ? [PROMPT_EXPAND_CAPABILITY_ID]
+        : []),
+      IMAGE_GENERATE_CAPABILITY_ID,
+    ],
+    requiredTools,
+    needsPlanning: true,
+    ambiguity: [],
+    routingReason: [
+      "User explicitly asks to create image artifacts.",
+      `Reference image context: ${hasReferenceImage ? "yes" : "no"}.`,
+    ].join(" "),
+  });
 }
 
 function inferComplexRoute(
@@ -490,7 +742,7 @@ function inferComplexRoute(
             ]
           : []),
       ],
-      operations: [
+    operations: [
         ...(wantsWeb
           ? [{ kind: "search" as const, target: "web_sources", toolHint: webSourceToolId }]
           : []),
@@ -793,7 +1045,7 @@ function createImageTask(
         count: resultCount,
       },
     ],
-    operations: [
+      operations: [
       ...(hasReferenceImage
         ? [
             {
@@ -803,8 +1055,15 @@ function createImageTask(
             },
           ]
         : []),
-      { kind: "generate", target: "expanded_prompt", toolHint: toolIds.generateImage },
-      { kind: "attach_artifact", target: "run_canvas_branch", toolHint: toolIds.attachArtifact },
+      {
+        kind: "generate",
+        target: "expanded_prompt",
+        toolHint: toolIds.expandPrompt,
+      },
+      {
+        kind: "attach_artifact",
+        target: "run_canvas_branch",
+      },
       { kind: "evaluate", target: "image_artifacts" },
     ],
   };

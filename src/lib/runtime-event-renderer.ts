@@ -38,6 +38,7 @@ export type RuntimeEventsFromMessagesOptions = {
   promptNodeId?: string;
   selectedNodeId?: string | null;
   includeLegacyToolParts?: boolean;
+  messageStartIndex?: number;
 };
 
 export function projectRuntimeEventsToCanvas({
@@ -79,7 +80,8 @@ export function runtimeEventsFromMessages(
     typeof runNodeIdOrOptions === "string"
       ? { runNodeId: runNodeIdOrOptions }
       : (runNodeIdOrOptions ?? {});
-  const dataPartEvents = messages
+  const sourceMessages = getMessageWindow(messages, options.messageStartIndex);
+  const dataPartEvents = sourceMessages
     .flatMap((message) => runtimeEventsFromMessageParts(message.parts))
     .filter((event) => !options.runNodeId || event.runNodeId === options.runNodeId)
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
@@ -88,7 +90,7 @@ export function runtimeEventsFromMessages(
     return dataPartEvents;
   }
 
-  return legacyRuntimeEventsFromToolParts(messages, options).sort((left, right) =>
+  return legacyRuntimeEventsFromToolParts(sourceMessages, options).sort((left, right) =>
     left.createdAt.localeCompare(right.createdAt)
   );
 }
@@ -376,6 +378,14 @@ function compactRecord(value: Record<string, unknown>) {
   return Object.fromEntries(
     Object.entries(value).filter(([, item]) => item !== undefined)
   );
+}
+
+function getMessageWindow<T>(messages: T[], startIndex: number | undefined) {
+  if (!Number.isFinite(startIndex)) {
+    return messages;
+  }
+
+  return messages.slice(Math.max(0, Math.floor(startIndex ?? 0)));
 }
 
 function canvasOperationToGraphPatch(operation: CanvasOperation): GraphPatch {

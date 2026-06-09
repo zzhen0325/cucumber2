@@ -194,9 +194,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const [modelProviderError, setModelProviderError] = useState<string | null>(null);
   const activeRunId = useRef<string | null>(null);
   const activeRunRequest = useRef<AgentRunRequestBody | null>(null);
+  const activeRunMessageStartIndex = useRef(0);
   const loadedProjectIdRef = useRef<string | null>(null);
   const streamedRuntimeEvents = useRef<StreamedRuntimeEvents>([]);
   const hasLoadedProject = useRef(false);
+  const messagesRef = useRef<ReturnType<typeof useChat>["messages"]>([]);
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
   const projectTitleRef = useRef(projectTitle);
@@ -382,6 +384,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           promptNodeId: activeRunRequest.current?.canvasContext.promptNodeId,
           selectedNodeId: activeRunRequest.current?.canvasContext.selectedNodeId,
           includeLegacyToolParts: true,
+          messageStartIndex: activeRunMessageStartIndex.current,
         }),
         { replace: true }
       );
@@ -402,6 +405,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     () => nodes.filter((node) => node.selected).map((node) => node.id),
     [nodes]
   );
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
   const selectedNode = useMemo(() => {
     if (selectedNodeIds.length !== 1) {
       return undefined;
@@ -547,6 +555,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     hasLoadedProject.current = false;
     activeRunId.current = null;
     activeRunRequest.current = null;
+    activeRunMessageStartIndex.current = 0;
     streamedRuntimeEvents.current = [];
 
     loadProject(projectId)
@@ -793,6 +802,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       promptNodeId: activeRunRequest.current?.canvasContext.promptNodeId,
       selectedNodeId: activeRunRequest.current?.canvasContext.selectedNodeId,
       includeLegacyToolParts: true,
+      messageStartIndex: activeRunMessageStartIndex.current,
     });
     projectStreamedRuntimeEvents(runtimeEvents, { replace: true });
   }, [
@@ -824,6 +834,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       const anchorId = referenceNodeId;
       const draft = createRunDraft(value, anchorId, nodes, edges);
       activeRunId.current = draft.runNode.id;
+      activeRunMessageStartIndex.current = messagesRef.current.length;
       streamedRuntimeEvents.current = streamedRuntimeEvents.current.filter(
         (event) => event.runNodeId !== draft.runNode.id
       );
