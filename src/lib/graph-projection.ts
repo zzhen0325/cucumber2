@@ -315,6 +315,7 @@ export function projectRunTraceToCanvas({
     };
   const runStatus = getProjectedRunStatus(orderedEvents);
   const toolParts = buildToolParts(orderedEvents, prompt);
+  const agentText = buildAgentText(orderedEvents, runStatus);
   const promptNode: AgentCanvasNode = getExistingOrProjectedNode(
     existingNodes,
     promptNodeId,
@@ -341,6 +342,7 @@ export function projectRunTraceToCanvas({
         kind: "run",
         prompt,
         status: runStatus,
+        agentText,
         toolPart: toolParts.at(-1),
         toolParts,
         stepTimeline: buildStepTimeline(orderedEvents),
@@ -1378,6 +1380,35 @@ function getProjectedRunStatus(events: RunStepTraceEvent[]): AgentRunStatus {
   }
 
   return "queued";
+}
+
+function buildAgentText(
+  events: RunStepTraceEvent[],
+  status: AgentRunStatus
+): string | undefined {
+  const stepTexts = events
+    .filter((event) => event.type === "step.finished")
+    .map((event) => readString(event.payload.text)?.trim())
+    .filter((text): text is string => Boolean(text));
+
+  if (stepTexts.length) {
+    return stepTexts.join("\n\n");
+  }
+
+  if (status === "success") {
+    return "已完成，结果已写入画布。";
+  }
+  if (status === "error") {
+    return "运行失败，请查看错误详情。";
+  }
+  if (events.some((event) => event.type === "tool.input")) {
+    return "正在调用工具，结果会自动写入画布。";
+  }
+  if (events.some((event) => event.type === "plan.created")) {
+    return "已生成运行计划，正在执行。";
+  }
+
+  return undefined;
 }
 
 function readRunError(events: RunStepTraceEvent[]) {

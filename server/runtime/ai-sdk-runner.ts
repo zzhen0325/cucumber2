@@ -30,6 +30,7 @@ import type {
   AgentStep,
   BuiltContext,
   CanvasOperation,
+  IntentResult,
   PlanStep,
   ToolResult,
 } from "../../src/types/runtime.ts";
@@ -54,6 +55,12 @@ import {
   toAgentError,
 } from "./errors.ts";
 import {
+  buildPlanFromIntentDeterministically,
+  normalizePlan,
+  validatePlanAgainstRegistry,
+} from "./planner.ts";
+import { routeIntentDeterministically } from "./intent-router.ts";
+import {
   intentResultSchema,
   planSchema,
   runtimeDataSchemas,
@@ -61,6 +68,7 @@ import {
 } from "./schemas.ts";
 import { runWithRetry } from "./retry.ts";
 import { validateCanvasOperations } from "./canvas-operation-policy.ts";
+import { toolIds } from "./tool-registry.ts";
 
 type ExecuteAiSdkAgentRunInput = {
   userId: string;
@@ -85,12 +93,6 @@ type RuntimeValidationTools = Parameters<
 >[0]["tools"];
 
 const planAgentRunToolName = "plan_agent_run";
-const defaultRetryPolicy = {
-  maxRetries: 0,
-  backoffMs: 0,
-  retryableErrorCodes: [],
-};
-
 const planAgentRunInputSchema = z.object({
   intent: intentResultSchema,
   plan: planSchema,
@@ -181,6 +183,7 @@ export async function executeAiSdkAgentRun({
     await store.setStatus(run.id, "planning");
 
     const tools = createAiSdkTools({
+      capabilities,
       canvasContext,
       eventWriter,
       inputRun: run,
@@ -233,7 +236,10 @@ export async function executeAiSdkAgentRun({
         }
 
         return {
-          activeTools: routedToolNames,
+          activeTools: selectAiSdkActiveToolNames({
+            fallbackToolNames: routedToolNames,
+            state,
+          }),
           toolChoice: "auto",
         };
       },
@@ -333,6 +339,7 @@ export async function executeAiSdkAgentRun({
 }
 
 function createAiSdkTools({
+  capabilities,
   canvasContext,
   eventWriter,
   inputRun,
@@ -342,6 +349,7 @@ function createAiSdkTools({
   streamWriter,
   toolRegistry,
 }: {
+  capabilities: ReturnType<typeof buildCapabilityRegistry>;
   canvasContext: PromptCanvasContext;
   eventWriter: RuntimeEventWriter;
   inputRun: AgentRun;
@@ -358,37 +366,39 @@ function createAiSdkTools({
       inputSchema: planAgentRunInputSchema,
       async execute(input, options) {
         const parsed = planAgentRunInputSchema.parse(input);
-        const normalizedPlan = planSchema.parse(
-          parsed.plan.map((step) => ({
-            ...step,
-            dependsOn: step.dependsOn ?? [],
-            expectedArtifacts: step.expectedArtifacts ?? [],
-            expectedCanvasOperations: step.expectedCanvasOperations ?? [],
-            approvalRequired: step.approvalRequired ?? false,
-            retryPolicy: step.retryPolicy ?? defaultRetryPolicy,
-          }))
-        );
-        const validation = validateAiSdkPlan(normalizedPlan, toolRegistry);
-        if (!validation.ok) {
-          throw new Error(validation.errors.join("; "));
-        }
-
-        state.plan = normalizedPlan;
+        const policyIntent = routeIntentDeterministically({
+          capabilities,
+          input: inputRun.input,
+          toolRegistry,
+        });
+        const selectedIntent = selectAiSdkPolicyIntent({
+          modelIntent: parsed.intent,
+          policyIntent,
+        });
         state.context = buildContext({
           input: inputRun.input,
-          intent: parsed.intent,
+          intent: selectedIntent,
           publicSkills,
           runId: inputRun.id,
           toolRegistry,
         });
-        await store.setIntent(inputRun.id, parsed.intent);
+        const planning = normalizeAiSdkPlanForIntent({
+          context: state.context,
+          intent: selectedIntent,
+          modelPlan: parsed.plan,
+          toolRegistry,
+        });
+        state.plan = planning.normalizedPlan;
+        await store.setIntent(inputRun.id, selectedIntent);
         await appendEvent(store, inputRun.id, eventWriter, {
           projectId: inputRun.projectId,
           runNodeId: inputRun.input.metadata.runNodeId,
           stepId: "intent-router",
           type: "intent.routed",
           payload: {
-            intent: parsed.intent,
+            intent: selectedIntent,
+            modelIntent: parsed.intent,
+            policyIntent,
             runtime: "vercel-ai-sdk",
             toolCallId: options.toolCallId,
           },
@@ -405,7 +415,7 @@ function createAiSdkTools({
             toolCallId: options.toolCallId,
           },
         });
-        await store.setPlan(inputRun.id, normalizedPlan);
+        await store.setPlan(inputRun.id, planning.normalizedPlan);
         await appendEvent(store, inputRun.id, eventWriter, {
           projectId: inputRun.projectId,
           runNodeId: inputRun.input.metadata.runNodeId,
@@ -413,8 +423,10 @@ function createAiSdkTools({
           type: "plan.created",
           payload: {
             rawPlan: parsed.plan,
-            normalizedPlan,
-            validation,
+            normalizedPlan: planning.normalizedPlan,
+            validation: planning.validation,
+            correctedPlan: planning.correctedPlan,
+            correctionReasons: planning.correctionReasons,
             runtime: "vercel-ai-sdk",
             toolCallId: options.toolCallId,
           },
@@ -428,15 +440,15 @@ function createAiSdkTools({
           status: "running",
           skillInput: {
             input: inputRun.input,
-            intent: parsed.intent,
+            intent: selectedIntent,
             context: state.context,
-            plan: normalizedPlan,
+            plan: planning.normalizedPlan,
           },
         });
 
         return {
           ok: true,
-          plannedToolIds: normalizedPlan.flatMap((step) =>
+          plannedToolIds: planning.normalizedPlan.flatMap((step) =>
             step.toolId ? [step.toolId] : []
           ),
           response: parsed.response ?? "",
@@ -475,6 +487,163 @@ function createAiSdkTools({
 
   void streamWriter;
   return tools;
+}
+
+export function selectAiSdkPolicyIntent({
+  modelIntent,
+  policyIntent,
+}: {
+  modelIntent: IntentResult;
+  policyIntent: IntentResult;
+}) {
+  if (
+    policyIntent.requiredTools.length ||
+    policyIntent.task.kind === "canvas_operation"
+  ) {
+    return policyIntent;
+  }
+
+  if (isImageIntent(modelIntent) && !isImageIntent(policyIntent)) {
+    return policyIntent;
+  }
+
+  return modelIntent;
+}
+
+export function normalizeAiSdkPlanForIntent({
+  context,
+  intent,
+  modelPlan,
+  toolRegistry,
+}: {
+  context: BuiltContext;
+  intent: IntentResult;
+  modelPlan: PlanStep[];
+  toolRegistry: ToolRegistry;
+}) {
+  const normalizedModelPlan = normalizePlan(modelPlan, {
+    expectedImageCount: getExpectedImageCountForIntent(intent),
+  });
+  const modelValidation = mergePlanValidations(
+    validatePlanAgainstRegistry(normalizedModelPlan, toolRegistry, context),
+    validatePlanAgainstIntent(normalizedModelPlan, intent)
+  );
+
+  if (modelValidation.ok) {
+    return {
+      normalizedPlan: normalizedModelPlan,
+      validation: modelValidation,
+      correctedPlan: false,
+      correctionReasons: [],
+    };
+  }
+
+  const deterministicPlan = buildPlanFromIntentDeterministically(intent);
+  const normalizedDeterministicPlan = normalizePlan(deterministicPlan, {
+    expectedImageCount: getExpectedImageCountForIntent(intent),
+  });
+  const deterministicValidation = mergePlanValidations(
+    validatePlanAgainstRegistry(
+      normalizedDeterministicPlan,
+      toolRegistry,
+      context
+    ),
+    validatePlanAgainstIntent(normalizedDeterministicPlan, intent)
+  );
+
+  if (!deterministicValidation.ok) {
+    throw new Error(
+      [...modelValidation.errors, ...deterministicValidation.errors].join("; ")
+    );
+  }
+
+  return {
+    normalizedPlan: normalizedDeterministicPlan,
+    validation: deterministicValidation,
+    correctedPlan: true,
+    correctionReasons: modelValidation.errors,
+  };
+}
+
+export function selectAiSdkActiveToolNames({
+  fallbackToolNames,
+  state,
+}: {
+  fallbackToolNames: string[];
+  state: Pick<MutableAiRunState, "plan" | "toolNamesById">;
+}) {
+  const plannedToolNames = uniqueInOrder(
+    state.plan.flatMap((step) => {
+      if (!step.toolId) {
+        return [];
+      }
+
+      const toolName = state.toolNamesById.get(step.toolId);
+      return toolName ? [toolName] : [];
+    })
+  );
+
+  return plannedToolNames.length ? plannedToolNames : fallbackToolNames;
+}
+
+function validatePlanAgainstIntent(plan: PlanStep[], intent: IntentResult) {
+  const errors: string[] = [];
+  const allowedToolIds = new Set(intent.requiredTools);
+  const plannedToolIds = new Set(
+    plan.flatMap((step) => (step.toolId ? [step.toolId] : []))
+  );
+
+  for (const step of plan) {
+    if (
+      (step.kind === "tool" || step.kind === "canvas") &&
+      step.toolId &&
+      !allowedToolIds.has(step.toolId)
+    ) {
+      errors.push(
+        `Step ${step.id} references tool ${step.toolId}, but intent only allows ${intent.requiredTools.join(", ") || "no tools"}.`
+      );
+    }
+  }
+
+  if (isImageIntent(intent)) {
+    if (!plannedToolIds.has(toolIds.expandPrompt)) {
+      errors.push("Image intent plan is missing prompt.expand.");
+    }
+    if (!plannedToolIds.has(toolIds.generateImage)) {
+      errors.push("Image intent plan is missing image.generate.");
+    }
+  }
+
+  return { ok: errors.length === 0, errors };
+}
+
+function mergePlanValidations(
+  ...validations: Array<{ ok: boolean; errors: string[] }>
+) {
+  const errors = validations.flatMap((validation) => validation.errors);
+  return { ok: errors.length === 0, errors };
+}
+
+function getExpectedImageCountForIntent(intent: IntentResult) {
+  return Math.max(
+    1,
+    intent.task.deliverables
+      .filter((deliverable) => deliverable.kind === "image")
+      .reduce((total, deliverable) => total + (deliverable.count ?? 1), 0)
+  );
+}
+
+function isImageIntent(intent: IntentResult) {
+  return (
+    intent.primaryIntent === "image_generation" ||
+    intent.task.kind === "image_generation" ||
+    intent.task.kind === "image_editing" ||
+    intent.requiredTools.includes(toolIds.generateImage)
+  );
+}
+
+function uniqueInOrder(values: string[]) {
+  return Array.from(new Set(values));
 }
 
 async function executeRuntimeToolFromAiSdk({
@@ -920,28 +1089,6 @@ function buildAiSdkAgentPrompt({
       "Never invent artifacts or canvas changes. Only returned tool results count.",
     ].join("\n"),
   ].join("\n");
-}
-
-function validateAiSdkPlan(plan: PlanStep[], toolRegistry: ToolRegistry) {
-  const errors: string[] = [];
-  const stepIds = new Set(plan.map((step) => step.id));
-  const toolIds = new Set(toolRegistry.listAll().map((runtimeTool) => runtimeTool.id));
-
-  for (const step of plan) {
-    for (const dependency of step.dependsOn) {
-      if (!stepIds.has(dependency)) {
-        errors.push(`Step ${step.id} depends on unknown step ${dependency}.`);
-      }
-    }
-    if ((step.kind === "tool" || step.kind === "canvas") && !step.toolId) {
-      errors.push(`${step.kind} step ${step.id} is missing toolId.`);
-    }
-    if (step.toolId && !toolIds.has(step.toolId)) {
-      errors.push(`Step ${step.id} references unregistered tool ${step.toolId}.`);
-    }
-  }
-
-  return { ok: errors.length === 0, errors };
 }
 
 function getLifecycleStepId(toolName: string, state: MutableAiRunState) {

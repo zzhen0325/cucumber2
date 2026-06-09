@@ -62,11 +62,66 @@ describe("graph projection", () => {
       throw new Error("Expected run node");
     }
     expect(run.data.status).toBe("success");
+    expect(run.data.agentText).toBe("已完成，结果已写入画布。");
     expect(run.data.stepTimeline?.[0]).toMatchObject({
       id: "expand_prompt",
       status: "success",
       toolName: "expand_prompt",
     });
+  });
+
+  it("projects AI SDK step text into the run node agent output", () => {
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      events: [
+        event("run.created", "run-1", "run", {
+          prompt: "生成图片",
+          selectedNodeId: null,
+          runtime: "vercel-ai-sdk",
+        }),
+        event("step.finished", "run-1", "ai-sdk-step-0", {
+          stepNumber: 0,
+          text: "我会生成 4 张小狗图片。",
+        }),
+        event("step.finished", "run-1", "ai-sdk-step-1", {
+          stepNumber: 1,
+          text: "图片已经生成完成。",
+        }),
+      ],
+    });
+
+    const run = projection.nodes.find((node) => node.id === "run-1");
+    expect(run?.data.kind).toBe("run");
+    if (run?.data.kind !== "run") {
+      throw new Error("Expected run node");
+    }
+    expect(run.data.agentText).toBe(
+      "我会生成 4 张小狗图片。\n\n图片已经生成完成。"
+    );
+  });
+
+  it("shows deterministic progress text while a tool-only run is executing", () => {
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      events: [
+        event("run.created", "run-1", "run", {
+          prompt: "生成图片",
+          selectedNodeId: null,
+        }),
+        event("tool.input", "run-1", "generate_image", {
+          toolCallId: "tool-generate",
+          toolName: "generate_image",
+          input: { prompt: "生成图片" },
+        }),
+      ],
+    });
+
+    const run = projection.nodes.find((node) => node.id === "run-1");
+    expect(run?.data.kind).toBe("run");
+    if (run?.data.kind !== "run") {
+      throw new Error("Expected run node");
+    }
+    expect(run.data.agentText).toBe("正在调用工具，结果会自动写入画布。");
   });
 
   it("marks a streamed AI SDK run as running before the first tool step starts", () => {
