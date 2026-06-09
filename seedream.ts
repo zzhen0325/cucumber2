@@ -12,10 +12,11 @@ export type SeedreamUpstreamContext = {
 };
 
 export type SeedreamGenerateInput = {
-  prompt: string;
+  prompts: string[];
   selectedNodeId?: string | null;
   upstreamContext?: SeedreamUpstreamContext[];
-  resultCount?: number;
+  resultCount: number;
+  promptBatchMode: "single_prompt" | "distinct_prompts";
 };
 
 export type SeedreamGeneratedImage = {
@@ -214,75 +215,85 @@ export async function generateSeedreamImage(
   input: SeedreamGenerateInput,
   config = readSeedreamConfigFromEnv()
 ): Promise<{ images: SeedreamGeneratedImage[] }> {
-  const { body, imageUrls, resultCount } = buildSeedreamRequestBody(
-    input,
-    config
-  );
-  const result = await new SeedreamClient(config).submitAndPoll(body);
-  const urls = getNestedArray(result, ["data", "image_urls"]).filter(
-    (item): item is string => typeof item === "string" && item.length > 0
-  );
+  const requests = buildSeedreamRequestBodies(input, config);
+  const client = new SeedreamClient(config);
+  const images: SeedreamGeneratedImage[] = [];
 
-  if (!urls.length) {
-    throw new Error("Seedream returned no image URL.");
-  }
-  if (urls.length < resultCount) {
-    throw new Error(
-      `Seedream returned ${urls.length} image URL${
-        urls.length === 1 ? "" : "s"
-      }, but ${resultCount} were requested.`
+  for (const request of requests) {
+    const result = await client.submitAndPoll(request.body);
+    const urls = getNestedArray(result, ["data", "image_urls"]).filter(
+      (item): item is string => typeof item === "string" && item.length > 0
     );
+
+    if (!urls.length) {
+      throw new Error("Seedream returned no image URL.");
+    }
+    if (urls.length < request.resultCount) {
+      throw new Error(
+        `Seedream returned ${urls.length} image URL${
+          urls.length === 1 ? "" : "s"
+        }, but ${request.resultCount} were requested.`
+      );
+    }
+
+    for (const url of urls.slice(0, request.resultCount)) {
+      const index = images.length + 1;
+      images.push({
+        id: `seedream-${Date.now()}-${index}`,
+        url,
+        title:
+          input.resultCount === 1
+            ? "Seedream image"
+            : `Seedream image ${index}`,
+        metadata: {
+          provider: "seedream",
+          reqKey: config.reqKey,
+          width: config.width,
+          height: config.height,
+          inputImageCount: request.imageUrls.length,
+          requestedImageCount: request.resultCount,
+          totalRequestedImageCount: input.resultCount,
+          promptBatchMode: input.promptBatchMode,
+          promptIndex: request.promptIndex,
+        },
+      });
+    }
   }
 
-  return {
-    images: urls.slice(0, resultCount).map((url, index) => ({
-      id: `seedream-${Date.now()}-${index + 1}`,
-      url,
-      title:
-        resultCount === 1
-          ? "Seedream image"
-          : `Seedream image ${index + 1}`,
-      metadata: {
-        provider: "seedream",
-        reqKey: config.reqKey,
-        width: config.width,
-        height: config.height,
-        inputImageCount: imageUrls.length,
-        requestedImageCount: resultCount,
-      },
-    })),
-  };
+  return { images };
 }
 
-export function buildSeedreamRequestBody(
+export function buildSeedreamRequestBodies(
   input: SeedreamGenerateInput,
   config: SeedreamConfig
 ) {
-  const prompt = normalizeSeedreamPrompt(input.prompt);
-  if (!prompt) {
-    throw new Error("Seedream image prompt is empty.");
-  }
-
-  const resultCount = resolveSeedreamResultCount(input, config.maxOutputImages);
   const imageUrls = collectInputImageUrls(
     input.upstreamContext ?? [],
     config.maxInputImages
   );
-  const geometry = resolveSeedreamGeometry(prompt, config);
-  const body: Record<string, unknown> = {
-    prompt: withSeedreamResultCountInstruction(prompt, resultCount),
-    force_single: resultCount === 1 ? config.forceSingle : false,
-    ...geometry,
-  };
+  return resolveSeedreamPromptRequests(input, config.maxOutputImages).map(
+    (request) => {
+      const geometry = resolveSeedreamGeometry(request.prompt, config);
+      const body: Record<string, unknown> = {
+        prompt: withSeedreamResultCountInstruction(
+          request.prompt,
+          request.resultCount
+        ),
+        force_single:
+          request.resultCount === 1 ? config.forceSingle : false,
+        ...geometry,
+      };
 
-  if (imageUrls.length) {
-    body.image_urls = imageUrls;
-  }
-  if (config.scale !== undefined) {
-    body.scale = config.scale;
-  }
+      if (imageUrls.length) {
+        body.image_urls = imageUrls;
+      }
+      if (config.scale !== undefined) {
+        body.scale = config.scale;
+      }
 
-  return { body, imageUrls, resultCount };
+      return { ...request, body, imageUrls };
+    }
+  );
 }
 
 export function inferSeedreamResultCount(prompt: string, maxOutputImages = 4) {
@@ -309,25 +320,6 @@ export function inferSeedreamResultCountFromPrompts(
   return 1;
 }
 
-function resolveSeedreamResultCount(
-  input: SeedreamGenerateInput,
-  maxOutputImages: number
-) {
-  const explicit = input.resultCount;
-  if (explicit !== undefined) {
-    if (!Number.isInteger(explicit) || explicit < 1) {
-      throw new Error("Seedream resultCount must be a positive integer.");
-    }
-    if (explicit > maxOutputImages) {
-      throw new Error(`一次最多生成 ${maxOutputImages} 张图片。`);
-    }
-
-    return explicit;
-  }
-
-  return inferSeedreamResultCount(input.prompt, maxOutputImages);
-}
-
 function withSeedreamResultCountInstruction(prompt: string, resultCount: number) {
   if (resultCount === 1) {
     return prompt;
@@ -335,8 +327,45 @@ function withSeedreamResultCountInstruction(prompt: string, resultCount: number)
 
   return [
     prompt,
-    `请生成 ${resultCount} 张彼此不同的独立图片结果。`,
+    `请基于以上同一个提示词生成 ${resultCount} 张独立图片结果。不要把多张结果合成在一张图里。`,
   ].join("\n");
+}
+
+function resolveSeedreamPromptRequests(
+  input: SeedreamGenerateInput,
+  maxOutputImages: number
+) {
+  if (!Number.isInteger(input.resultCount) || input.resultCount < 1) {
+    throw new Error("Seedream resultCount must be a positive integer.");
+  }
+  if (input.resultCount > maxOutputImages) {
+    throw new Error(`一次最多生成 ${maxOutputImages} 张图片。`);
+  }
+
+  const prompts = input.prompts.map(normalizeSeedreamPrompt).filter(Boolean);
+  if (!prompts.length) {
+    throw new Error("Seedream image prompt is empty.");
+  }
+
+  if (input.promptBatchMode === "distinct_prompts") {
+    if (prompts.length !== input.resultCount) {
+      throw new Error(
+        "Seedream distinct prompt batch must include one prompt per requested image."
+      );
+    }
+
+    return prompts.map((prompt, index) => ({
+      prompt,
+      promptIndex: index + 1,
+      resultCount: 1,
+    }));
+  }
+
+  if (prompts.length !== 1) {
+    throw new Error("Seedream single prompt batch must include exactly one prompt.");
+  }
+
+  return [{ prompt: prompts[0], promptIndex: 1, resultCount: input.resultCount }];
 }
 
 function resolveSeedreamGeometry(prompt: string, config: SeedreamConfig) {

@@ -50,6 +50,7 @@ import {
   buildAgentRunTextPromptAssembly,
   buildReferenceImageAnalysisPromptAssembly,
   buildSkillPromptAssembly,
+  selectPromptBatchMode,
   selectReferenceImages,
   type PromptAssemblyTrace,
   type PromptCanvasContext,
@@ -727,13 +728,23 @@ export async function executeLegacyImageAgentRunForTests({
       skill: promptSkill,
     });
     promptTrace.promptExpand = skillAssembly.trace;
-    const expandedPrompt = await expandPromptWithSkill({
+    const expandedPromptText = await expandPromptWithSkill({
       modelProvider,
       prompt: skillAssembly.prompt,
     });
+    const resultCount = inferSeedreamResultCountFromPrompts(
+      [canvasContext.prompt, expandedPromptText],
+      readSeedreamMaxOutputImagesFromEnv()
+    );
+    const promptBatchMode = selectPromptBatchMode(
+      canvasContext.prompt,
+      resultCount
+    );
     skillOutput = {
       originalPrompt: canvasContext.prompt,
-      expandedPrompt,
+      expandedPrompts: [expandedPromptText],
+      requestedResultCount: resultCount,
+      promptBatchMode,
       referenceImageAnalysis: referenceImageAnalysis || undefined,
       capabilityId: promptExpandCapability.manifest.capabilityId,
       skill: getSkillToolSummary(promptSkill),
@@ -769,14 +780,12 @@ export async function executeLegacyImageAgentRunForTests({
       payload: { label: "Generate image" },
     });
     const imageToolInput: GenerateImageToolInput = {
-      prompt: expandedPrompt,
+      prompts: [expandedPromptText],
       originalPrompt: canvasContext.prompt,
       selectedNodeId: canvasContext.selectedNodeId ?? null,
       upstreamContext: toSeedreamUpstreamContext(canvasContext.upstreamContext),
-      resultCount: inferSeedreamResultCountFromPrompts(
-        [canvasContext.prompt, expandedPrompt],
-        readSeedreamMaxOutputImagesFromEnv()
-      ),
+      resultCount,
+      promptBatchMode,
       promptSkill: getSkillToolSummary(promptSkill),
       capabilityIds: selectedCapabilityIds,
       contextTrace: canvasContext.contextTrace,
@@ -1260,18 +1269,18 @@ async function expandPromptWithSkill({
   modelProvider: ModelProviderId;
   prompt: string;
 }) {
-  const expandedPrompt = (
+  const expandedPromptText = (
     await generateTextWithProvider(modelProvider, {
       system: PROMPT_EXPAND_SYSTEM_PROMPT,
       prompt,
       maxOutputTokens: 1_200,
     })
   ).trim();
-  if (!expandedPrompt) {
+  if (!expandedPromptText) {
     throw new Error("prompt-expand skill returned an empty prompt.");
   }
 
-  return expandedPrompt;
+  return expandedPromptText;
 }
 
 function getSkillToolSummary(skill: AgentSkill) {

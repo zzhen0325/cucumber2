@@ -28,7 +28,11 @@ describe("graph projection", () => {
         event("tool.output", "run-1", "expand_prompt", {
           toolCallId: "tool-expand",
           toolName: "expand_prompt",
-          output: { expandedPrompt: "高质量黄瓜海报" },
+          output: {
+            expandedPrompts: ["高质量黄瓜海报"],
+            requestedResultCount: 1,
+            promptBatchMode: "single_prompt",
+          },
         }),
         event("artifact.created", "run-1", "generate_image", {
           artifact: {

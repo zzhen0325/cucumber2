@@ -17,6 +17,13 @@
 
 ## 2026-06-09
 
+### 多图生成区分单提示词与多提示词批次
+
+- 变更：`prompt.expand` 输出契约改为 `expandedPrompts`、`promptBatchMode`、`requestedResultCount`；普通“生成四张小狗图”只扩写一条 prompt 并用同一 prompt 请求 4 张结果，明确“生成4张不同的小狗图”会扩写 4 条 prompt 并分别生成 1 张。
+- 变更：Seedream 请求层新增批次拆分，`single_prompt` 保持一次多结果请求，`distinct_prompts` 拆为每条 prompt 一个单图请求；Run 节点工具摘要改为展示多条扩写提示词数量。
+- 文件：`server/runtime/tools/image-tools.ts`、`server/runtime/tools/image-tools.test.ts`、`server/run-kernel.ts`、`seedream.ts`、`server/prompts.ts`、`server/capabilities.ts`、`src/components/RunNodeView.tsx`、`README.md`、`process.md`。
+- 验证：已对照 AI SDK tool calling / `prepareStep` / `activeTools` 官方文档；`pnpm exec vitest run seedream.test.ts server/prompts.test.ts server/runtime/tools/image-tools.test.ts src/lib/graph.test.ts src/lib/graph-projection.test.ts`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm exec eslint server/runtime/tools/image-tools.ts server/runtime/tools/image-tools.test.ts server/run-kernel.ts seedream.ts server/prompts.ts server/capabilities.ts src/components/RunNodeView.tsx seedream.test.ts server/prompts.test.ts src/lib/graph.test.ts src/lib/graph-projection.test.ts` 通过。
+
 ### Agent Run stream protocol 拆分为 typed data parts
 
 - 变更：`RuntimeEventWriter` 不再把 artifact、canvas operation、run lifecycle 全部写成 `data-runtime-event`；改为写 `data-artifact-created`、`data-canvas-operation`、`data-run-status` 和持久化后的 `data-trace-pointer`，普通运行细节继续使用 `data-runtime-event`。

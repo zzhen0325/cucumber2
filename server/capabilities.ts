@@ -117,7 +117,7 @@ export const builtinPromptExpandCapability = capabilityManifestSchema.parse({
   },
   outputSchema: {
     type: "object",
-    required: ["expandedPrompt"],
+    required: ["expandedPrompts", "promptBatchMode", "requestedResultCount"],
   },
   toolIds: ["expand_prompt"],
   tokenBudget: 1200,

@@ -689,7 +689,11 @@ describe("agent canvas graph", () => {
       {
         type: "tool-expand_prompt",
         state: "output-available",
-        output: { expandedPrompt: "高质量黄瓜工作台图片" },
+        output: {
+          expandedPrompts: ["高质量黄瓜工作台图片"],
+          requestedResultCount: 1,
+          promptBatchMode: "single_prompt",
+        },
       },
       {
         type: "tool-generate_image",

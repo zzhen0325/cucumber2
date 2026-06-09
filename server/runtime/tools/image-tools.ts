@@ -22,9 +22,11 @@ import {
   PROMPT_EXPAND_SYSTEM_PROMPT,
   REFERENCE_IMAGE_ANALYSIS_SYSTEM_PROMPT,
   renderRuntimePromptAssembly,
+  selectPromptBatchMode,
   selectPromptExpandMode,
   selectReferenceImages,
   selectRelevantSkillConfig,
+  type PromptBatchMode,
   type PromptCanvasContext,
   type ReferenceImageInput,
 } from "../../prompts.ts";
@@ -63,13 +65,17 @@ const promptExpandInputSchema = z.object({
   contextTrace: z.unknown().optional(),
   skillSlug: z.literal("prompt-expand"),
   modelProvider: z.string(),
+  requestedResultCount: z.number().int().positive(),
+  promptBatchMode: z.enum(["single_prompt", "distinct_prompts"]),
   referenceImageAnalysis: z.string().optional(),
   promptTrace: z.record(z.string(), z.unknown()).optional(),
 });
 
 const promptExpandOutputSchema = z.object({
   originalPrompt: z.string(),
-  expandedPrompt: z.string().min(1),
+  expandedPrompts: z.array(z.string().min(1)).min(1),
+  requestedResultCount: z.number().int().positive(),
+  promptBatchMode: z.enum(["single_prompt", "distinct_prompts"]),
   referenceImageAnalysis: z.string().optional(),
   capabilityId: z.string(),
   skill: z.object({
@@ -81,11 +87,12 @@ const promptExpandOutputSchema = z.object({
 });
 
 const generateImageInputSchema = z.object({
-  prompt: z.string().min(1),
+  prompts: z.array(z.string().min(1)).min(1),
   originalPrompt: z.string().min(1),
   selectedNodeId: z.string().nullable(),
   upstreamContext: z.array(z.unknown()),
   resultCount: z.number().int().positive(),
+  promptBatchMode: z.enum(["single_prompt", "distinct_prompts"]),
   promptSkill: z.object({
     id: z.string(),
     name: z.string(),
@@ -212,9 +219,19 @@ export function createPromptExpandTool({
         previousSteps,
         toolIds.analyzeReferenceImages
       )?.analysis;
+      const requestedResultCount = inferSeedreamResultCountFromPrompts(
+        [canvasContext.prompt],
+        readSeedreamMaxOutputImagesFromEnv()
+      );
+      const promptBatchMode = selectPromptBatchMode(
+        canvasContext.prompt,
+        requestedResultCount
+      );
       const assembly = buildPromptExpandPromptAssembly({
         canvasContext,
         context,
+        promptBatchMode,
+        requestedResultCount,
         referenceImageAnalysis,
         skill: promptSkill,
       });
@@ -225,6 +242,8 @@ export function createPromptExpandTool({
         contextTrace: canvasContext.contextTrace,
         skillSlug: "prompt-expand",
         modelProvider,
+        requestedResultCount,
+        promptBatchMode,
         referenceImageAnalysis,
         promptTrace: assembly.trace,
       };
@@ -235,18 +254,25 @@ export function createPromptExpandTool({
       const skillAssembly = buildPromptExpandPromptAssembly({
         canvasContext,
         context: toolContext.context,
+        promptBatchMode: parsed.promptBatchMode,
+        requestedResultCount: parsed.requestedResultCount,
         referenceImageAnalysis: parsed.referenceImageAnalysis,
         skill: promptSkill,
       });
-      const expandedPrompt = (
+      const rawExpandedPrompt = (
         await generateTextWithProvider(modelProvider, {
           system: PROMPT_EXPAND_SYSTEM_PROMPT,
           prompt: skillAssembly.prompt,
-          maxOutputTokens: 1_200,
+          maxOutputTokens:
+            parsed.promptBatchMode === "distinct_prompts" ? 2_400 : 1_200,
         })
       ).trim();
+      const expandedPrompts = parseExpandedPrompts(rawExpandedPrompt, {
+        promptBatchMode: parsed.promptBatchMode,
+        requestedResultCount: parsed.requestedResultCount,
+      });
 
-      if (!expandedPrompt) {
+      if (!expandedPrompts.length) {
         throw new Error("prompt-expand skill returned an empty prompt.");
       }
 
@@ -254,7 +280,9 @@ export function createPromptExpandTool({
         ok: true,
         data: {
           originalPrompt: canvasContext.prompt,
-          expandedPrompt,
+          expandedPrompts,
+          requestedResultCount: parsed.requestedResultCount,
+          promptBatchMode: parsed.promptBatchMode,
           referenceImageAnalysis: parsed.referenceImageAnalysis,
           capabilityId: promptExpandCapability.manifest.capabilityId,
           skill: getSkillToolSummary(promptSkill),
@@ -296,11 +324,12 @@ export function createGenerateImageTool({
     risk: "medium",
     renderHint: { kind: "image", label: "Generated images" },
     prepareInput: ({ previousSteps }) => {
-      const promptOutput = readPreviousData<{ expandedPrompt?: string }>(
-        previousSteps,
-        toolIds.expandPrompt
-      );
-      if (!promptOutput?.expandedPrompt) {
+      const promptOutput = readPreviousData<{
+        expandedPrompts?: string[];
+        promptBatchMode?: PromptBatchMode;
+        requestedResultCount?: number;
+      }>(previousSteps, toolIds.expandPrompt);
+      if (!promptOutput?.expandedPrompts?.length) {
         throw new Error("Cannot generate image before prompt.expand output.");
       }
       const promptSkill =
@@ -312,16 +341,28 @@ export function createGenerateImageTool({
         PROMPT_EXPAND_CAPABILITY_ID,
         IMAGE_GENERATE_CAPABILITY_ID,
       ];
+      if (!promptOutput.promptBatchMode) {
+        throw new Error("prompt.expand output is missing promptBatchMode.");
+      }
+      if (!promptOutput.requestedResultCount) {
+        throw new Error("prompt.expand output is missing requestedResultCount.");
+      }
+      const promptBatchMode = promptOutput.promptBatchMode;
+      const resultCount =
+        promptBatchMode === "distinct_prompts"
+          ? promptOutput.expandedPrompts.length
+          : inferSeedreamResultCountFromPrompts(
+              [canvasContext.prompt, ...promptOutput.expandedPrompts],
+              readSeedreamMaxOutputImagesFromEnv()
+            );
 
       return {
-        prompt: promptOutput.expandedPrompt,
+        prompts: promptOutput.expandedPrompts,
         originalPrompt: canvasContext.prompt,
         selectedNodeId: canvasContext.selectedNodeId ?? null,
         upstreamContext: toSeedreamUpstreamContext(canvasContext.upstreamContext),
-        resultCount: inferSeedreamResultCountFromPrompts(
-          [canvasContext.prompt, promptOutput.expandedPrompt],
-          readSeedreamMaxOutputImagesFromEnv()
-        ),
+        resultCount,
+        promptBatchMode,
         promptSkill: getSkillToolSummary(promptSkill as AgentSkill),
         capabilityIds,
         contextTrace: canvasContext.contextTrace,
@@ -410,11 +451,15 @@ function buildReferenceImagePromptAssembly({
 function buildPromptExpandPromptAssembly({
   canvasContext,
   context,
+  promptBatchMode,
+  requestedResultCount,
   referenceImageAnalysis,
   skill,
 }: {
   canvasContext: PromptCanvasContext;
   context: BuiltContext;
+  promptBatchMode: PromptBatchMode;
+  requestedResultCount: number;
   referenceImageAnalysis?: string;
   skill: AgentSkill;
 }) {
@@ -448,11 +493,101 @@ function buildPromptExpandPromptAssembly({
       referenceImageAnalysis?.trim() || "None"
     ),
     runtimePromptPart(
+      "prompt-expand.batch-policy",
+      "instruction",
+      [
+        `requestedResultCount: ${requestedResultCount}`,
+        `promptBatchMode: ${promptBatchMode}`,
+        promptBatchMode === "distinct_prompts"
+          ? `用户明确要求多张不同结果。请输出 ${requestedResultCount} 条不同的小图生成 prompt，每条 prompt 独占一行，格式必须是 PROMPT n: <prompt>。每条 prompt 都应能单独生成一张图片，并在主体、场景、构图、品种、姿态、风格或光影中至少一个维度明显不同。不要输出 JSON、解释、标题或额外文本。`
+          : "用户只要求多张结果。请只输出 1 条完整 prompt，后续生成工具会用同一条 prompt 请求多张独立图片。不要输出编号、列表、合集、拼图、四宫格或单张图内多画面构图，除非用户明确要求。",
+      ].join("\n")
+    ),
+    runtimePromptPart(
       "prompt-expand.instruction",
       "instruction",
-      "请根据以上 section 输出一段可直接用于图像生成的自然语言 prompt，保持用户原意，优先吸收参考图视觉摘要和相关上游上下文。若用户要求生成多张/多个结果，这只是输出数量要求，不要改写为一组、拼图、四宫格、合集或单张图内的多图构图，除非用户明确要求单张图内包含组合画面。"
+      "请根据以上 section 输出可直接用于图像生成的自然语言 prompt，保持用户原意，优先吸收参考图视觉摘要和相关上游上下文，并严格遵循 batch policy。"
     ),
   ]);
+}
+
+export function parseExpandedPrompts(
+  rawOutput: string,
+  {
+    promptBatchMode,
+    requestedResultCount,
+  }: {
+    promptBatchMode: PromptBatchMode;
+    requestedResultCount: number;
+  }
+) {
+  const raw = rawOutput.trim();
+  if (!raw) {
+    return [];
+  }
+
+  if (promptBatchMode === "single_prompt") {
+    return [raw];
+  }
+
+  const prompts =
+    parseJsonPromptArray(raw) ??
+    parseTaggedPromptLines(raw) ??
+    parseNumberedPromptLines(raw);
+
+  if (!prompts || prompts.length !== requestedResultCount) {
+    throw new Error(
+      `prompt-expand skill must return exactly ${requestedResultCount} distinct prompts.`
+    );
+  }
+
+  return prompts;
+}
+
+function parseJsonPromptArray(raw: string) {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    const candidate =
+      Array.isArray(parsed)
+        ? parsed
+        : parsed && typeof parsed === "object"
+          ? (parsed as Record<string, unknown>).expandedPrompts
+          : undefined;
+
+    if (!Array.isArray(candidate)) {
+      return null;
+    }
+
+    return cleanPromptList(candidate);
+  } catch {
+    return null;
+  }
+}
+
+function parseTaggedPromptLines(raw: string) {
+  const pattern =
+    /(?:^|\n)\s*(?:PROMPT|Prompt|prompt|提示词)\s*\d+\s*[:：]\s*([\s\S]*?)(?=\n\s*(?:PROMPT|Prompt|prompt|提示词)\s*\d+\s*[:：]|$)/g;
+  const prompts = Array.from(raw.matchAll(pattern), (match) => match[1]);
+  return prompts.length ? cleanPromptList(prompts) : null;
+}
+
+function parseNumberedPromptLines(raw: string) {
+  const prompts = raw
+    .split(/\n+/)
+    .map((line) =>
+      line.replace(
+        /^\s*(?:[-*]|\d+[).、:：]|[一二两三四五六七八九十][、:：])\s*/,
+        ""
+      )
+    );
+  return prompts.length ? cleanPromptList(prompts) : null;
+}
+
+function cleanPromptList(values: unknown[]) {
+  return values
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter(Boolean);
 }
 
 function runtimePromptPart(id: string, category: string, content: string) {

@@ -71,7 +71,7 @@ SEEDREAM_CA_CERT=/absolute/path/to/corp-root-ca.pem
 
 Image generation also requires a public `prompt-expand` skill. Upload `/Users/bytedance/Desktop/prompt-expand-skill.zip` or another zip with a `SKILL.md` frontmatter `name: prompt-expand` from the canvas Skill panel. The server stores the parsed skill in `public.agent_skills`, including `SKILL.md` instructions, parsed `config/*.json`, optional capability manifest metadata, and the source manifest. It does not install, start, or execute code from uploaded zips.
 
-When the prompt explicitly asks for multiple results, such as `一次生成4张图片`, the tool requests that many Seedream output URLs and renders them as sibling image result nodes. For multi-result requests, the server also appends the requested output count to the final Seedream prompt because the Visual API infers group size from the prompt while `force_single` only controls whether to force one image. `SEEDREAM_MAX_OUTPUT_IMAGES` caps explicit requests; prompts above the cap fail visibly in the Run node instead of silently returning fewer images.
+When the prompt explicitly asks for multiple results, such as `一次生成4张图片`, the prompt expansion stage first decides the batch mode. A plain multi-result request uses one expanded prompt and asks Seedream for that many outputs from the same prompt. A request that explicitly asks for different results, such as `生成4张不同的小狗图`, returns four expanded prompts and the server submits them to Seedream as four single-image requests. `SEEDREAM_MAX_OUTPUT_IMAGES` caps explicit requests; prompts above the cap fail visibly in the Run node instead of silently returning fewer images.
 
 Seedream reference images are sent as `image_urls` from upstream image result or image artifact nodes. Multiple upstream image URLs are supported and deduplicated before submission. If the user prompt includes explicit dimensions such as `2048x2048`, the request sends `width` and `height`; if it includes a ratio/orientation such as `16:9`, `横版`, `竖版`, or `方图`, the server computes matching `width`/`height`; if it only includes `2K` or `4K`, the request sends Seedream `size`. `SEEDREAM_SCALE` is optional and maps to Seedream `scale`.
 
@@ -166,7 +166,7 @@ Capability manifests can be supplied in `SKILL.md` frontmatter or as `manifest.j
 }
 ```
 
-It returns an `expandedPrompt`. `generate_image` then receives the expanded prompt plus the original prompt, selected node, upstream context, requested result count, and skill metadata. The server passes image node URLs from `upstreamContext` to Seedream as reference images, carries the requested output count into the final Seedream prompt, resolves explicit size/aspect-ratio hints into Seedream geometry fields, disables Seedream `force_single` for multi-result requests, then returns:
+It returns `expandedPrompts`, `promptBatchMode`, and `requestedResultCount`. For `single_prompt`, `expandedPrompts` must contain exactly one prompt and `generate_image` requests `requestedResultCount` Seedream outputs from that same prompt. For `distinct_prompts`, `expandedPrompts` must contain one prompt per requested image and `generate_image` submits one Seedream request per prompt. The server passes image node URLs from `upstreamContext` to Seedream as reference images, resolves explicit size/aspect-ratio hints into Seedream geometry fields per prompt, disables Seedream `force_single` for same-prompt multi-result requests, then returns:
 
 ```json
 {

@@ -7,6 +7,7 @@ import {
   createPromptPart,
   formatUpstreamContext,
   selectPromptExpandMode,
+  selectPromptBatchMode,
   selectReferenceImages,
   selectRelevantSkillConfig,
   type PromptCanvasContext,
@@ -91,6 +92,16 @@ describe("server prompt helpers", () => {
     );
     expect(assembly.trace.promptDigest).toMatch(/^[a-f0-9]{64}$/);
     expect(assembly.trace.omittedContextReason).toBeUndefined();
+  });
+
+  it("distinguishes same-prompt batches from distinct-prompt batches", () => {
+    expect(selectPromptBatchMode("生成四张小狗的图", 4)).toBe("single_prompt");
+    expect(selectPromptBatchMode("生成4张不同的小狗图", 4)).toBe(
+      "distinct_prompts"
+    );
+    expect(selectPromptBatchMode("生成一张不同的小狗图", 1)).toBe(
+      "single_prompt"
+    );
   });
 
   it("keeps prompt part order and prunes lower priority droppable parts first", () => {

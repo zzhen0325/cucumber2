@@ -570,9 +570,21 @@ function getToolOutputLines(toolPart: CanvasToolPart) {
   }
 
   if (toolPart.type === "tool-expand_prompt") {
-    const output = toolPart.output as { expandedPrompt?: unknown };
-    if (typeof output?.expandedPrompt === "string" && output.expandedPrompt.trim()) {
-      return [`扩写: ${output.expandedPrompt.trim()}`];
+    const output = toolPart.output as {
+      expandedPrompts?: unknown;
+      promptBatchMode?: unknown;
+    };
+    if (Array.isArray(output?.expandedPrompts)) {
+      const prompts = output.expandedPrompts.filter(
+        (prompt): prompt is string =>
+          typeof prompt === "string" && Boolean(prompt.trim())
+      );
+      if (prompts.length === 1) {
+        return [`扩写: ${prompts[0].trim()}`];
+      }
+      if (prompts.length > 1) {
+        return [`扩写: ${prompts.length} 条不同提示词`];
+      }
     }
 
     return ["扩写完成"];
@@ -682,6 +694,8 @@ function getToolInputLines(input: unknown) {
     imageCount?: unknown;
     modelProvider?: unknown;
     skillSlug?: unknown;
+    prompts?: unknown;
+    promptBatchMode?: unknown;
     resultCount?: unknown;
     upstreamContext?: unknown;
   };
@@ -704,6 +718,19 @@ function getToolInputLines(input: unknown) {
   }
   if (typeof candidate.skillSlug === "string" && candidate.skillSlug.trim()) {
     lines.push(`Skill: ${candidate.skillSlug.trim()}`);
+  }
+  if (Array.isArray(candidate.prompts)) {
+    lines.push(`提示词: ${candidate.prompts.length} 条`);
+  }
+  if (
+    typeof candidate.promptBatchMode === "string" &&
+    candidate.promptBatchMode.trim()
+  ) {
+    lines.push(
+      candidate.promptBatchMode === "distinct_prompts"
+        ? "模式: 多提示词"
+        : "模式: 单提示词"
+    );
   }
   if (
     typeof candidate.resultCount === "number" &&

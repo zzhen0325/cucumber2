@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildSeedreamRequestBody,
+  buildSeedreamRequestBodies,
   inferSeedreamResultCount,
   inferSeedreamResultCountFromPrompts,
   type SeedreamConfig,
@@ -53,14 +53,17 @@ describe("seedream result count", () => {
   });
 
   it("carries multi-image counts into the submitted Seedream prompt", () => {
-    const request = buildSeedreamRequestBody(
+    const requests = buildSeedreamRequestBodies(
       {
-        prompt: "A glossy cucumber campaign poster",
+        prompts: ["A glossy cucumber campaign poster"],
         resultCount: 4,
+        promptBatchMode: "single_prompt",
       },
       testSeedreamConfig
     );
+    const request = requests[0];
 
+    expect(requests).toHaveLength(1);
     expect(request.resultCount).toBe(4);
     expect(request.body).toMatchObject({
       width: 1024,
@@ -68,14 +71,40 @@ describe("seedream result count", () => {
       force_single: false,
     });
     expect(request.body.prompt).toContain("A glossy cucumber campaign poster");
-    expect(request.body.prompt).toContain("请生成 4 张");
+    expect(request.body.prompt).toContain("同一个提示词生成 4 张");
+  });
+
+  it("splits distinct prompt batches into one Seedream request per prompt", () => {
+    const requests = buildSeedreamRequestBodies(
+      {
+        prompts: [
+          "A corgi puppy in a sunny kitchen",
+          "A husky puppy in fresh snow",
+          "A poodle puppy in a fashion studio",
+          "A dachshund puppy in a garden",
+        ],
+        resultCount: 4,
+        promptBatchMode: "distinct_prompts",
+      },
+      testSeedreamConfig
+    );
+
+    expect(requests).toHaveLength(4);
+    expect(requests.map((request) => request.resultCount)).toEqual([1, 1, 1, 1]);
+    expect(requests.map((request) => request.body.prompt)).toEqual([
+      "A corgi puppy in a sunny kitchen",
+      "A husky puppy in fresh snow",
+      "A poodle puppy in a fashion studio",
+      "A dachshund puppy in a garden",
+    ]);
   });
 
   it("passes reference images and explicit aspect ratio geometry", () => {
-    const request = buildSeedreamRequestBody(
+    const request = buildSeedreamRequestBodies(
       {
-        prompt: "生成4张 16:9 横版 2K 海报",
+        prompts: ["生成4张 16:9 横版 2K 海报"],
         resultCount: 4,
+        promptBatchMode: "single_prompt",
         upstreamContext: [
           {
             nodeId: "image-1",
@@ -100,7 +129,7 @@ describe("seedream result count", () => {
         ],
       },
       { ...testSeedreamConfig, scale: 60 }
-    );
+    )[0];
 
     expect(request.body.image_urls).toEqual([
       "https://cdn.example/ref-1.png",
@@ -118,17 +147,25 @@ describe("seedream result count", () => {
 
   it("uses explicit pixel dimensions or size-only requests when present", () => {
     expect(
-      buildSeedreamRequestBody(
-        { prompt: "生成一张 2048x2048 方形图片" },
+      buildSeedreamRequestBodies(
+        {
+          prompts: ["生成一张 2048x2048 方形图片"],
+          resultCount: 1,
+          promptBatchMode: "single_prompt",
+        },
         testSeedreamConfig
-      ).body
+      )[0].body
     ).toMatchObject({ width: 2048, height: 2048 });
 
     expect(
-      buildSeedreamRequestBody(
-        { prompt: "生成一张 4K 超清产品图" },
+      buildSeedreamRequestBodies(
+        {
+          prompts: ["生成一张 4K 超清产品图"],
+          resultCount: 1,
+          promptBatchMode: "single_prompt",
+        },
         testSeedreamConfig
-      ).body
+      )[0].body
     ).toMatchObject({ size: 4096 * 4096 });
   });
 });
