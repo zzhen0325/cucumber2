@@ -22,6 +22,7 @@ import {
   FileText,
   Frame,
   Globe2,
+  Hand,
   Image,
   Layers,
   MousePointer2,
@@ -35,6 +36,7 @@ import {
   X,
   ZoomIn,
   ZoomOut,
+  type LucideIcon,
 } from "lucide-react";
 import {
   createContext,
@@ -167,6 +169,13 @@ type CanvasWorkspaceProps = {
   projectId: string;
   onBack: () => void;
 };
+type CanvasTool = "select" | "hand";
+type ToolRailItem = {
+  icon: LucideIcon;
+  label: string;
+  tool?: CanvasTool;
+  disabled?: boolean;
+};
 
 export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<AgentCanvasNode>(initialNodes);
@@ -182,6 +191,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const [traceEvents, setTraceEvents] = useState<RunStepTraceEvent[]>([]);
   const [traceLoading, setTraceLoading] = useState(false);
   const [traceError, setTraceError] = useState<string | null>(null);
+  const [canvasTool, setCanvasTool] = useState<CanvasTool>("select");
   const [replaySnapshot, setReplaySnapshot] = useState<{
     runNodeId: string;
     nodes: AgentCanvasNode[];
@@ -206,6 +216,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const isReplayModeRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const isReplayMode = Boolean(replaySnapshot);
+  const isHandTool = canvasTool === "hand";
   const canvasNodes = replaySnapshot?.nodes ?? nodes;
   const canvasEdges = replaySnapshot?.edges ?? edges;
 
@@ -993,7 +1004,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         }}
       >
         <Canvas<AgentCanvasNode, AgentCanvasEdge>
-          className="agent-canvas"
+          className={`agent-canvas canvas-tool-${canvasTool}`}
           colorMode="light"
           edgeTypes={edgeTypes}
           fitViewOptions={{ maxZoom: 1, padding: 0.32 }}
@@ -1006,14 +1017,15 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           onEdgesChange={isReplayMode ? undefined : onEdgesChange}
           onNodesChange={isReplayMode ? undefined : onNodesChange}
           onPaneClick={() => {
-            if (!isReplayMode) {
+            if (!isReplayMode && !isHandTool) {
               setNodes((current) => applySelectedNodeIds(current, []));
             }
           }}
           selectionMode={SelectionMode.Partial}
-          nodesDraggable={!isReplayMode}
+          nodesDraggable={!isReplayMode && !isHandTool}
           nodesConnectable={false}
-          panOnDrag={false}
+          panOnDrag={isHandTool}
+          selectionOnDrag={!isHandTool}
           proOptions={{ hideAttribution: true }}
         >
           <CanvasAutoFit nodeCount={canvasNodes.length} />
@@ -1037,7 +1049,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         onBack={onBack}
         onModelProviderChange={handleModelProviderChange}
       />
-      <ToolRail />
+      <ToolRail activeTool={canvasTool} onToolChange={setCanvasTool} />
       <ViewportControls
         skillPanelOpen={skillPanelOpen}
         onToggleSkills={() => setSkillPanelOpen((current) => !current)}
@@ -1328,9 +1340,16 @@ function TopBar({
   );
 }
 
-function ToolRail() {
-  const tools = [
-    { icon: MousePointer2, label: "Select", active: true },
+function ToolRail({
+  activeTool,
+  onToolChange,
+}: {
+  activeTool: CanvasTool;
+  onToolChange: (tool: CanvasTool) => void;
+}) {
+  const tools: ToolRailItem[] = [
+    { icon: MousePointer2, label: "移动工具", tool: "select" as const },
+    { icon: Hand, label: "抓手工具", tool: "hand" as const },
     { icon: PenLine, label: "Draw", disabled: true },
     { icon: Type, label: "Text", disabled: true },
     { icon: Frame, label: "Frame", disabled: true },
@@ -1342,18 +1361,22 @@ function ToolRail() {
 
   return (
     <aside className="tool-rail" aria-label="Canvas tools">
-      {tools.map(({ icon: Icon, label, active, disabled }) => (
-        <button
-          aria-label={label}
-          className={active ? "active" : ""}
-          disabled={disabled}
-          key={label}
-          type="button"
-          title={disabled ? "暂未开放" : label}
-        >
-          <Icon size={16} />
-        </button>
-      ))}
+      {tools.map(({ icon: Icon, label, tool, disabled }) => {
+        const active = tool === activeTool;
+        return (
+          <button
+            aria-label={label}
+            className={active ? "active" : ""}
+            disabled={disabled}
+            key={label}
+            onClick={tool ? () => onToolChange(tool) : undefined}
+            type="button"
+            title={disabled ? "暂未开放" : label}
+          >
+            <Icon size={16} />
+          </button>
+        );
+      })}
     </aside>
   );
 }
@@ -1710,7 +1733,9 @@ function PromptNode({
       style={getResizableNodeStyle(width, height)}
     >
       <NodeContent className="prompt-content">
-        <p title={data.contextLabel}>{data.prompt}</p>
+        <p className="copyable-text nodrag nopan" title={data.contextLabel}>
+          {data.prompt}
+        </p>
       </NodeContent>
     </Node>
   );
@@ -1754,10 +1779,16 @@ function ArtifactLikeNode({ data, selected, width, height }: ArtifactLikeNodePro
           <span className="artifact-icon">
             <ArtifactNodeIcon kind={data.kind} />
           </span>
-          <span>{label}</span>
+          <span className="copyable-text nodrag nopan">{label}</span>
         </div>
-        <strong title={data.title}>{data.title}</strong>
-        {summary && <p title={summary}>{summary}</p>}
+        <strong className="copyable-text nodrag nopan" title={data.title}>
+          {data.title}
+        </strong>
+        {summary && (
+          <p className="copyable-text nodrag nopan" title={summary}>
+            {summary}
+          </p>
+        )}
       </NodeContent>
     </Node>
   );
@@ -1792,7 +1823,9 @@ function HtmlPageNode({
           </span>
           <div>
             <span>HTML</span>
-            <strong title={data.title}>{data.title}</strong>
+            <strong className="copyable-text nodrag nopan" title={data.title}>
+              {data.title}
+            </strong>
           </div>
           {previewUrl && (
             <a
@@ -1821,7 +1854,9 @@ function HtmlPageNode({
         </div>
         {selected && (
           <div className="html-page-footer">
-            <span>{data.summary ?? "页面预览"}</span>
+            <span className="copyable-text nodrag nopan">
+              {data.summary ?? "页面预览"}
+            </span>
           </div>
         )}
       </NodeContent>
@@ -1914,10 +1949,12 @@ function MarkdownNode({
           </span>
           <div>
             <span>Markdown</span>
-            <strong title={data.title}>{data.title}</strong>
+            <strong className="copyable-text nodrag nopan" title={data.title}>
+              {data.title}
+            </strong>
           </div>
         </div>
-        <div className="blocknote-body nodrag nopan">
+        <div className="blocknote-body nodrag nopan nowheel">
           <Suspense
             fallback={
               <pre className="markdown-plain-preview">{data.content}</pre>

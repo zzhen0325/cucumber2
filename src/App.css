@@ -21,12 +21,28 @@
   cursor: default;
 }
 
-.agent-canvas .react-flow__pane:active {
-  cursor: crosshair;
+.agent-canvas .react-flow__pane.selection {
+  cursor: default;
 }
 
-.agent-canvas .react-flow__pane.selection {
-  cursor: crosshair;
+.agent-canvas .react-flow__pane.draggable {
+  cursor: grab;
+}
+
+.agent-canvas .react-flow__pane.dragging {
+  cursor: grabbing;
+}
+
+.agent-canvas.canvas-tool-hand .react-flow__pane {
+  cursor: grab;
+}
+
+.agent-canvas.canvas-tool-hand .react-flow__pane:active {
+  cursor: grabbing;
+}
+
+.agent-canvas.canvas-tool-hand .react-flow__pane.selection {
+  cursor: grabbing;
 }
 
 .agent-canvas .react-flow__selection,
@@ -1131,6 +1147,14 @@
     0 4px 20px rgba(0, 0, 0, 0.05);
 }
 
+.canvas-node .copyable-text,
+.canvas-node .copyable-region,
+.canvas-node .copyable-region :is(p, span, strong, small, pre, code, li, h1, h2, h3, h4, h5, h6) {
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 .canvas-node-resizer-line {
   border-color: rgba(41, 191, 78, 0.72) !important;
 }
@@ -1170,6 +1194,8 @@
 }
 
 .run-card {
+  --run-text: #29bf4e;
+  --run-text-muted: rgba(41, 191, 78, 0.64);
   min-height: 36px;
   border-color: #ffffff;
   background: #f8ffbf;
@@ -1190,7 +1216,7 @@
   align-items: center;
   gap: 4px;
   padding: 0 12px;
-  color: #111111;
+  color: var(--run-text);
   font-size: 12px;
   line-height: 16px;
 }
@@ -1224,7 +1250,7 @@
 }
 
 .run-heading .ai-shimmer {
-  --ai-shimmer-text: #111111;
+  --ai-shimmer-text: var(--run-text);
 }
 
 @keyframes ai-shimmer {
@@ -1262,7 +1288,7 @@
   border: 0;
   border-radius: 50%;
   background: transparent;
-  color: #111111;
+  color: var(--run-text);
   cursor: pointer;
   transition:
     background 140ms ease,
@@ -1317,7 +1343,7 @@
   min-width: 0;
   align-items: center;
   gap: 5px;
-  color: #555555;
+  color: var(--run-text-muted);
   font-size: 10px;
   line-height: 12px;
 }
@@ -1330,7 +1356,7 @@
   place-items: center;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.62);
-  color: #174222;
+  color: var(--run-text);
 }
 
 .run-stream-group-heading strong {
@@ -1351,7 +1377,7 @@
   display: -webkit-box;
   overflow: hidden;
   margin: 0;
-  color: #111111;
+  color: var(--run-text);
   font-size: 11px;
   line-height: 15px;
   overflow-wrap: anywhere;
@@ -1362,7 +1388,7 @@
 .agent-text-output {
   display: block;
   margin: 0;
-  color: #174222;
+  color: var(--run-text);
   font-size: 11px;
   line-height: 15px;
   overflow-wrap: anywhere;
@@ -1370,7 +1396,7 @@
 }
 
 .agent-text-output.muted {
-  color: #737373;
+  color: var(--run-text-muted);
 }
 
 .agent-text-output p {
@@ -1396,13 +1422,13 @@
   border: 1px solid rgba(235, 235, 235, 0.7);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.48);
-  color: #111111;
+  color: var(--run-text);
   font-size: 11px;
   line-height: 13px;
 }
 
 .run-summary-item span {
-  color: #555555;
+  color: var(--run-text-muted);
   white-space: nowrap;
 }
 
@@ -1425,7 +1451,7 @@
   padding: 3px 7px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.64);
-  color: #555555;
+  color: var(--run-text-muted);
   font-size: 10px;
   line-height: 12px;
   text-overflow: ellipsis;
@@ -1448,7 +1474,7 @@
   border: 1px solid rgba(235, 235, 235, 0.7);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.54);
-  color: #111111;
+  color: var(--run-text);
   font-size: 11px;
   line-height: 13px;
 }
@@ -1465,7 +1491,7 @@
 
 .run-evaluation-label {
   overflow: hidden;
-  color: #174222;
+  color: var(--run-text);
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1478,7 +1504,7 @@
 .run-evaluation small {
   display: -webkit-box;
   overflow: hidden;
-  color: #555555;
+  color: var(--run-text-muted);
   font-size: 11px;
   line-height: 13px;
   overflow-wrap: anywhere;
@@ -1497,7 +1523,7 @@
   border: 0;
   border-radius: 999px;
   background: #ffffff;
-  color: #174222;
+  color: var(--run-text);
   cursor: pointer;
   font-size: 11px;
   line-height: 13px;
@@ -1515,7 +1541,7 @@
   border: 1px solid rgba(235, 235, 235, 0.7);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.54);
-  color: #111111;
+  color: var(--run-text);
   font-size: 11px;
   line-height: 13px;
 }
@@ -1541,7 +1567,7 @@
 }
 
 .tool-call-action {
-  color: #555555;
+  color: var(--run-text-muted);
 }
 
 .tool-call-row strong {
@@ -1555,7 +1581,7 @@
   display: flex;
   align-items: center;
   gap: 3px;
-  color: #555555;
+  color: var(--run-text-muted);
   white-space: nowrap;
 }
 
@@ -1571,11 +1597,11 @@
 
 .tool-state.input-available,
 .tool-state.input-streaming {
-  color: #174222;
+  color: var(--run-text);
 }
 
 .tool-call-chevron {
-  color: #737373;
+  color: var(--run-text-muted);
   transition: transform 140ms ease;
 }
 
@@ -1596,7 +1622,7 @@
 
 .tool-detail-line {
   display: block;
-  color: #555555;
+  color: var(--run-text-muted);
   font-size: 11px;
   line-height: 13px;
   overflow-wrap: anywhere;
@@ -1622,7 +1648,7 @@
 }
 
 .tool-json-block span {
-  color: #737373;
+  color: var(--run-text-muted);
   font-size: 10px;
   line-height: 12px;
 }
@@ -1634,7 +1660,7 @@
   padding: 7px;
   border-radius: 7px;
   background: rgba(246, 246, 243, 0.72);
-  color: #111111;
+  color: var(--run-text);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 10px;
   line-height: 1.42;
@@ -1884,8 +1910,11 @@
   border-radius: 16px;
   background: #fbfbfa;
   color: #111111;
+  cursor: text;
   font-size: 12px;
   line-height: 18px;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .blocknote-body .bn-root {
@@ -1916,6 +1945,9 @@
 .blocknote-body .bn-editor {
   min-height: 100%;
   background: transparent;
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .blocknote-body .bn-editor {
@@ -1932,6 +1964,9 @@
 .blocknote-body .bn-block-content {
   min-height: 18px;
   padding: 1px 0;
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .blocknote-body .bn-block-content[data-content-type="heading"] h1 {
@@ -1965,9 +2000,12 @@
   overflow: visible;
   background: transparent;
   color: #111111;
+  cursor: text;
   font: inherit;
   line-height: 18px;
   overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
   white-space: pre-wrap;
 }
 

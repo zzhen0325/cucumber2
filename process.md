@@ -17,6 +17,12 @@
 
 ## 2026-06-09
 
+### 允许画布节点文本选取复制
+
+- 变更：对 Prompt、Artifact、HTML、Markdown 标题和 Run 输出文本区域补充 React Flow `nodrag` / `nopan` 交互类，并恢复 `user-select: text`；Markdown 编辑/预览滚动区域补充 `nowheel`，避免滚动时带动画布。
+- 文件：`src/components/CanvasWorkspace.tsx`、`src/components/RunNodeView.tsx`、`src/App.css`、`process.md`。
+- 验证：已对照 React Flow Utility Classes 官方文档；`pnpm exec eslint src/components/CanvasWorkspace.tsx src/components/RunNodeView.tsx` 通过；VS Code diagnostics 仅保留既有 `line-clamp` CSS warning。
+
 ### 修复图片 Intent 漏暴露 prompt.expand
 
 - 现象：Run 节点报错 `Tool step expand_prompt references non-exposed tool prompt.expand.`；触发条件是模型把请求路由为图片生成，但 `requiredTools` 只返回 `seedream.generateImage`，漏掉前置的 `prompt.expand`。

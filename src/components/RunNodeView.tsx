@@ -119,7 +119,10 @@ export function RunNodeView({
           </button>
         </div>
         {hasRunOutput && expanded && (
-          <div className="run-stream" aria-label="Agent run stream">
+          <div
+            className="run-stream copyable-region nodrag nopan"
+            aria-label="Agent run stream"
+          >
             <RunStreamGroup icon={<UserRound size={11} />} title="用户请求">
               <p className="run-user-prompt" title={data.prompt}>
                 {data.prompt}
