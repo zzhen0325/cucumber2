@@ -53,13 +53,12 @@ import {
 } from "./errors.ts";
 import {
   buildPlanFromIntentDeterministically,
+  createPlan,
   normalizePlan,
   validatePlanAgainstRegistry,
 } from "./planner.ts";
-import { validateIntentAgainstRegistry } from "./intent-router.ts";
+import { routeIntent } from "./intent-router.ts";
 import {
-  intentResultSchema,
-  planSchema,
   runtimeDataSchemas,
   runtimeMetadataSchema,
 } from "./schemas.ts";
@@ -88,16 +87,6 @@ type MutableAiRunState = {
 type RuntimeValidationTools = Parameters<
   typeof validateUIMessages<UIMessage>
 >[0]["tools"];
-
-const planAgentRunToolName = "plan_agent_run";
-const planAgentRunInputSchema = z.object({
-  intent: intentResultSchema,
-  plan: planSchema,
-  response: z
-    .string()
-    .optional()
-    .describe("One or two concise sentences to stream after planning."),
-});
 
 export async function executeAiSdkAgentRun({
   attachments,
@@ -148,8 +137,6 @@ export async function executeAiSdkAgentRun({
         getAiSdkToolName(runtimeTool),
       ])
     );
-    const shouldUsePlanner = true;
-
     await appendEvent(store, run.id, eventWriter, {
       projectId,
       runNodeId,
@@ -162,7 +149,7 @@ export async function executeAiSdkAgentRun({
         upstreamContext: canvasContext.upstreamContext,
         contextTrace: canvasContext.contextTrace,
         runtime: "vercel-ai-sdk",
-        routing: "plan_agent_run structured intent",
+        routing: "server structured planning + AI SDK runtime tools",
       },
     });
     await appendEvent(store, run.id, eventWriter, {
@@ -174,15 +161,22 @@ export async function executeAiSdkAgentRun({
     });
     await store.setStatus(run.id, "planning");
 
-    const tools = createAiSdkTools({
+    await prepareServerPlannedRun({
       capabilities,
       canvasContext,
       eventWriter,
       inputRun: run,
+      modelProvider,
       publicSkills,
       state,
       store,
-      streamWriter,
+      toolRegistry,
+    });
+
+    const tools = createAiSdkTools({
+      eventWriter,
+      state,
+      store,
       toolRegistry,
     });
     const validatedMessages = await validateUIMessages({
@@ -202,7 +196,9 @@ export async function executeAiSdkAgentRun({
               type: "text",
               text: buildAiSdkAgentPrompt({
                 canvasContext,
+                context: state.context,
                 modelProvider,
+                plan: state.plan,
                 publicSkills,
                 toolRegistry,
               }),
@@ -219,14 +215,7 @@ export async function executeAiSdkAgentRun({
       tools,
       stopWhen: stepCountIs(12),
       maxOutputTokens: 3_200,
-      prepareStep({ stepNumber }) {
-        if (stepNumber === 0 && shouldUsePlanner) {
-          return {
-            activeTools: [planAgentRunToolName],
-            toolChoice: { type: "tool", toolName: planAgentRunToolName },
-          };
-        }
-
+      prepareStep() {
         return {
           activeTools: selectAiSdkActiveToolNames({
             fallbackToolNames: [],
@@ -330,132 +319,136 @@ export async function executeAiSdkAgentRun({
   }
 }
 
-function createAiSdkTools({
+async function prepareServerPlannedRun({
   capabilities,
   canvasContext,
   eventWriter,
   inputRun,
+  modelProvider,
   publicSkills,
   state,
   store,
-  streamWriter,
   toolRegistry,
 }: {
   capabilities: ReturnType<typeof buildCapabilityRegistry>;
   canvasContext: PromptCanvasContext;
   eventWriter: RuntimeEventWriter;
   inputRun: AgentRun;
+  modelProvider: ModelProviderId;
   publicSkills: Awaited<ReturnType<typeof listLatestPublicSkills>>;
   state: MutableAiRunState;
   store: AgentRunStore;
-  streamWriter: UIMessageStreamWriter<UIMessage>;
+  toolRegistry: ToolRegistry;
+}) {
+  const selectedIntent = await routeIntent({
+    capabilities,
+    input: inputRun.input,
+    modelProvider,
+    toolRegistry,
+  });
+
+  await store.setIntent(inputRun.id, selectedIntent);
+  await appendEvent(store, inputRun.id, eventWriter, {
+    projectId: inputRun.projectId,
+    runNodeId: inputRun.input.metadata.runNodeId,
+    stepId: "intent-router",
+    type: "intent.routed",
+    payload: {
+      intent: selectedIntent,
+      runtime: "vercel-ai-sdk",
+      routing: "server_structured_output",
+    },
+  });
+
+  state.context = buildContext({
+    input: inputRun.input,
+    intent: selectedIntent,
+    publicSkills,
+    runId: inputRun.id,
+    toolRegistry,
+  });
+  await store.setContext(inputRun.id, state.context);
+  await appendEvent(store, inputRun.id, eventWriter, {
+    projectId: inputRun.projectId,
+    runNodeId: inputRun.input.metadata.runNodeId,
+    stepId: "context-builder",
+    type: "context.built",
+    payload: {
+      context: state.context,
+      runtime: "vercel-ai-sdk",
+      routing: "server_built_context",
+    },
+  });
+
+  const planning = await createPlan({
+    context: state.context,
+    intent: selectedIntent,
+    modelProvider,
+    toolRegistry,
+  });
+  const planValidation = mergePlanValidations(
+    planning.validation,
+    validatePlanAgainstIntent(planning.normalizedPlan, selectedIntent)
+  );
+
+  if (!planValidation.ok) {
+    throwAgentError({
+      code: runtimeErrorCodes.PLAN_INVALID,
+      message: planValidation.errors.join("; "),
+      retryable: false,
+      severity: "error",
+      details: {
+        validation: planValidation,
+        intent: selectedIntent,
+        rawPlan: planning.rawPlan,
+        normalizedPlan: planning.normalizedPlan,
+      },
+    });
+  }
+
+  state.plan = planning.normalizedPlan;
+  await store.setPlan(inputRun.id, state.plan);
+  await appendEvent(store, inputRun.id, eventWriter, {
+    projectId: inputRun.projectId,
+    runNodeId: inputRun.input.metadata.runNodeId,
+    stepId: "planner",
+    type: "plan.created",
+    payload: {
+      rawPlan: planning.rawPlan,
+      normalizedPlan: state.plan,
+      validation: planValidation,
+      runtime: "vercel-ai-sdk",
+      routing: "server_structured_output",
+    },
+  });
+  await recordRunEvent({
+    projectId: inputRun.projectId,
+    runNodeId: inputRun.input.metadata.runNodeId,
+    prompt: canvasContext.prompt,
+    selectedNodeId: canvasContext.selectedNodeId ?? null,
+    upstreamContext: canvasContext.upstreamContext,
+    status: "running",
+    skillInput: {
+      input: inputRun.input,
+      intent: selectedIntent,
+      context: state.context,
+      plan: state.plan,
+    },
+  });
+}
+
+function createAiSdkTools({
+  eventWriter,
+  state,
+  store,
+  toolRegistry,
+}: {
+  eventWriter: RuntimeEventWriter;
+  state: MutableAiRunState;
+  store: AgentRunStore;
   toolRegistry: ToolRegistry;
 }): ToolSet {
-  const tools: ToolSet = {
-    [planAgentRunToolName]: aiTool({
-      description:
-        "Plan the agent run before any other tool call. Return layered structured intent and an executable tool plan using only allowed tool ids.",
-      inputSchema: planAgentRunInputSchema,
-      async execute(input, options) {
-        const parsed = planAgentRunInputSchema.parse(input);
-        const intentValidation = validateIntentAgainstRegistry({
-          capabilities,
-          intent: parsed.intent,
-          toolRegistry,
-        });
-
-        if (!intentValidation.ok) {
-          throwAgentError({
-            code: runtimeErrorCodes.CAPABILITY_UNAVAILABLE,
-            message: intentValidation.errors.join("; "),
-            retryable: false,
-            severity: "error",
-            details: { validation: intentValidation, intent: parsed.intent },
-          });
-        }
-
-        const selectedIntent = parsed.intent;
-        state.context = buildContext({
-          input: inputRun.input,
-          intent: selectedIntent,
-          publicSkills,
-          runId: inputRun.id,
-          toolRegistry,
-        });
-        const planning = normalizeAiSdkPlanForIntent({
-          context: state.context,
-          intent: selectedIntent,
-          modelPlan: parsed.plan,
-          toolRegistry,
-        });
-        state.plan = planning.normalizedPlan;
-        await store.setIntent(inputRun.id, selectedIntent);
-        await appendEvent(store, inputRun.id, eventWriter, {
-          projectId: inputRun.projectId,
-          runNodeId: inputRun.input.metadata.runNodeId,
-          stepId: "intent-router",
-          type: "intent.routed",
-          payload: {
-            intent: selectedIntent,
-            modelIntent: parsed.intent,
-            runtime: "vercel-ai-sdk",
-            routing: "schema_validated_model_intent",
-            toolCallId: options.toolCallId,
-          },
-        });
-        await store.setContext(inputRun.id, state.context);
-        await appendEvent(store, inputRun.id, eventWriter, {
-          projectId: inputRun.projectId,
-          runNodeId: inputRun.input.metadata.runNodeId,
-          stepId: "context-builder",
-          type: "context.built",
-          payload: {
-            context: state.context,
-            runtime: "vercel-ai-sdk",
-            toolCallId: options.toolCallId,
-          },
-        });
-        await store.setPlan(inputRun.id, planning.normalizedPlan);
-        await appendEvent(store, inputRun.id, eventWriter, {
-          projectId: inputRun.projectId,
-          runNodeId: inputRun.input.metadata.runNodeId,
-          stepId: "planner",
-          type: "plan.created",
-          payload: {
-            rawPlan: parsed.plan,
-            normalizedPlan: planning.normalizedPlan,
-            validation: planning.validation,
-            correctedPlan: planning.correctedPlan,
-            correctionReasons: planning.correctionReasons,
-            runtime: "vercel-ai-sdk",
-            toolCallId: options.toolCallId,
-          },
-        });
-        await recordRunEvent({
-          projectId: inputRun.projectId,
-          runNodeId: inputRun.input.metadata.runNodeId,
-          prompt: canvasContext.prompt,
-          selectedNodeId: canvasContext.selectedNodeId ?? null,
-          upstreamContext: canvasContext.upstreamContext,
-          status: "running",
-          skillInput: {
-            input: inputRun.input,
-            intent: selectedIntent,
-            context: state.context,
-            plan: planning.normalizedPlan,
-          },
-        });
-
-        return {
-          ok: true,
-          plannedToolIds: planning.normalizedPlan.flatMap((step) =>
-            step.toolId ? [step.toolId] : []
-          ),
-          response: parsed.response ?? "",
-        };
-      },
-    }),
-  };
+  const tools: ToolSet = {};
 
   for (const runtimeTool of toolRegistry.listAll()) {
     const aiToolName = getAiSdkToolName(runtimeTool);
@@ -485,7 +478,6 @@ function createAiSdkTools({
     });
   }
 
-  void streamWriter;
   return tools;
 }
 
@@ -641,7 +633,7 @@ async function executeRuntimeToolFromAiSdk({
   writer: RuntimeEventWriter;
 }) {
   if (!state.context) {
-    throw new Error("AI SDK runtime tool was called before plan_agent_run.");
+    throw new Error("AI SDK runtime tool was called before server planning completed.");
   }
 
   const run = store.getRun(state.context.runId);
@@ -941,8 +933,7 @@ async function finalizeRun({
       runId,
       createAgentError({
         code: runtimeErrorCodes.PLAN_INVALID,
-        message:
-          "AI SDK model finished without calling plan_agent_run, so no executable plan was created.",
+        message: "Server planner finished without creating an executable plan.",
         retryable: true,
         severity: "error",
         stepId: "planner",
@@ -998,19 +989,24 @@ async function finalizeRun({
 
 function buildAiSdkAgentPrompt({
   canvasContext,
+  context,
   modelProvider,
+  plan,
   publicSkills,
   toolRegistry,
 }: {
   canvasContext: PromptCanvasContext;
+  context?: BuiltContext;
   modelProvider: ModelProviderId;
+  plan: PlanStep[];
   publicSkills: Awaited<ReturnType<typeof listLatestPublicSkills>>;
   toolRegistry: ToolRegistry;
 }) {
   return [
     "You are running Cucumber, an infinite canvas agent.",
-    "Use Vercel AI SDK tool calling as the only execution mechanism.",
-    "Your first action must be calling plan_agent_run with an intent and an executable plan. Do not write ordinary assistant text before plan_agent_run returns. Then call the planned tools. Do not claim a tool succeeded before it returns.",
+    "Use Vercel AI SDK tool calling as the only execution mechanism for runtime actions.",
+    "The server has already created and validated the intent, context, and executable plan. Do not call or simulate a planning tool.",
+    "Follow SERVER_PLAN by calling the planned runtime tools. Do not write ordinary assistant text as a substitute for a required tool call. Do not claim a tool succeeded before it returns.",
     "Use the user's language in visible text.",
     "",
     "USER_PROMPT",
@@ -1029,6 +1025,29 @@ function buildAiSdkAgentPrompt({
       2
     ),
     "",
+    "SERVER_CONTEXT",
+    JSON.stringify(
+      context
+        ? {
+            taskContext: context.taskContext,
+            selectedItems: context.selectedItems,
+            omittedItems: context.omittedItems,
+            availableTools: context.availableTools.map((tool) => ({
+              id: tool.id,
+              name: tool.name,
+              description: tool.description,
+            })),
+            injectedSkills: context.injectedSkills,
+            trace: context.trace,
+          }
+        : null,
+      null,
+      2
+    ),
+    "",
+    "SERVER_PLAN",
+    JSON.stringify(plan, null, 2),
+    "",
     "PUBLIC_SKILLS",
     JSON.stringify(
       publicSkills.map((skill) => ({
@@ -1042,27 +1061,12 @@ function buildAiSdkAgentPrompt({
     ),
     "",
     "ALLOWED_RUNTIME_TOOLS",
-    JSON.stringify(
-      toolRegistry.listAll().map((runtimeTool) => ({
-        aiSdkToolName: getAiSdkToolName(runtimeTool),
-        toolId: runtimeTool.id,
-        capabilityId: runtimeTool.capabilityId,
-        description: runtimeTool.description,
-        policy: runtimeTool.policy,
-        risk: runtimeTool.risk,
-        inputDerivedByServer: Boolean(runtimeTool.prepareInput),
-      })),
-      null,
-      2
-    ),
+    JSON.stringify(buildAllowedRuntimeToolPromptItems(context, toolRegistry), null, 2),
     "",
-    "PLANNING_RULES",
+    "RUNTIME_RULES",
     [
-      "plan_agent_run.plan[*].toolId must use the runtime toolId, not aiSdkToolName.",
-      "Build intent in layers: coarse primaryIntent, target object(s), operation(s), constraints, deliverables, confidence/ambiguity, then required capabilities/tools.",
-      "Represent target/object and operation details in IntentResult.task.targets, task.operations, task.constraints, and task.deliverables instead of inventing many narrow primaryIntent labels.",
-      "Do not route to image generation unless the user explicitly asks to create, generate, edit, redraw, or render an image artifact.",
-      "After planning, call tools by aiSdkToolName.",
+      "Tool calls must use aiSdkToolName from ALLOWED_RUNTIME_TOOLS, not runtime toolId.",
+      "Do not call or simulate any planning tool; planning is server-authored and already recorded in Run Trace.",
       "For image generation, plan and call expand_prompt before generate_image. If upstream images are relevant, call analyze_reference_images before expand_prompt.",
       "For current web information, plan and call web_search before write_document.",
       "For document/report/answer tasks, compose the final Markdown yourself as write_document input so the result appears as a canvas artifact.",
@@ -1073,11 +1077,39 @@ function buildAiSdkAgentPrompt({
   ].join("\n");
 }
 
-function getLifecycleStepId(toolName: string, state: MutableAiRunState) {
-  if (toolName === planAgentRunToolName) {
-    return "planner";
+function buildAllowedRuntimeToolPromptItems(
+  context: BuiltContext | undefined,
+  toolRegistry: ToolRegistry
+) {
+  const toolSummaries = context?.availableTools;
+  if (!toolSummaries) {
+    return toolRegistry.listAll().map((runtimeTool) => ({
+      aiSdkToolName: getAiSdkToolName(runtimeTool),
+      toolId: runtimeTool.id,
+      capabilityId: runtimeTool.capabilityId,
+      description: runtimeTool.description,
+      policy: runtimeTool.policy,
+      risk: runtimeTool.risk,
+      inputDerivedByServer: Boolean(runtimeTool.prepareInput),
+    }));
   }
 
+  return toolSummaries.map((summary) => {
+    const runtimeTool = toolRegistry.getTool(summary.id);
+
+    return {
+      aiSdkToolName: runtimeTool ? getAiSdkToolName(runtimeTool) : summary.id,
+      toolId: summary.id,
+      capabilityId: summary.capabilityId,
+      description: summary.description,
+      policy: summary.policy,
+      risk: summary.risk,
+      inputDerivedByServer: runtimeTool ? Boolean(runtimeTool.prepareInput) : false,
+    };
+  });
+}
+
+function getLifecycleStepId(toolName: string, state: MutableAiRunState) {
   const runtimeToolId = Array.from(state.toolNamesById.entries()).find(
     ([, aiSdkToolName]) => aiSdkToolName === toolName
   )?.[0];

@@ -17,6 +17,14 @@
 
 ## 2026-06-09
 
+### 取消模型侧强制 plan_agent_run
+
+- 变更：`server/runtime/ai-sdk-runner.ts` 不再把第 0 步暴露为强制 `plan_agent_run` tool call；Run 开始后先由服务端执行 `routeIntent`、`buildContext`、`createPlan`，把 `intent.routed`、`context.built`、`plan.created` 写入 Run Trace，再启动 AI SDK `streamText` runtime tool loop。
+- 变更：执行阶段 `toolChoice` 固定为 `auto`，`activeTools` 只来自服务端已验证计划中的 runtime tools；planning tool 不再进入模型侧可调用工具列表，Run 节点仍通过 trace event 展示运行计划。
+- 变更：规划继续使用 AI SDK 官方 structured output 路径：DeepSeek 分支经 `generateText + Output.object()` 生成 schema-validated intent/plan；计划校验失败直接抛出运行错误，不生成假结果。
+- 文件：`server/runtime/ai-sdk-runner.ts`、`README.md`、`process.md`。
+- 验证：已对照 AI SDK 官方 structured output、tool calling、`activeTools` / `toolChoice` 文档；`pnpm exec tsc -b --pretty false`、`pnpm exec vitest run server/runtime/ai-sdk-runner.test.ts --reporter=dot` 通过。
+
 ### Agent Run 意图识别改回结构化模型主路由
 
 - 变更：`/api/agent-run` 主路径不再使用 `server/runtime/tool-router.ts` 的关键词式 deterministic activeTools 预路由；第 0 步仍强制 `plan_agent_run`，但后续工具只从 schema-validated `IntentResult` / `PlanStep[]` 暴露。
