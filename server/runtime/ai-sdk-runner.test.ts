@@ -3,12 +3,10 @@ import { describe, expect, it } from "vitest";
 import { buildCapabilityRegistry } from "../capabilities";
 import { buildContext } from "./context-builder";
 import { normalizeAgentInput } from "./input-normalizer";
-import { routeIntentDeterministically } from "./intent-router";
 import { buildPlanFromIntentDeterministically } from "./planner";
 import {
   normalizeAiSdkPlanForIntent,
   selectAiSdkActiveToolNames,
-  selectAiSdkPolicyIntent,
 } from "./ai-sdk-runner";
 import { buildToolRegistry, toolIds } from "./tool-registry";
 import type { IntentResult, PlanStep } from "../../src/types/runtime";
@@ -29,28 +27,24 @@ const promptExpandSkill = {
 };
 
 describe("AI SDK runner planning policy", () => {
-  it("corrects a model image route to document output when the prompt only asks to expand image prompt text", () => {
-    const setup = createPlanningSetup("扩写小狗图片提示词");
-    const modelIntent = imageIntentFixture("扩写小狗图片提示词");
-    const selectedIntent = selectAiSdkPolicyIntent({
-      modelIntent,
-      policyIntent: setup.policyIntent,
-    });
+  it("normalizes plans against the schema-validated model intent", () => {
+    const setup = createPlanningSetup("生成一张小狗图片");
+    const modelIntent = documentIntentFixture("生成一张小狗图片");
     const context = buildContext({
       input: setup.input,
-      intent: selectedIntent,
+      intent: modelIntent,
       publicSkills: [promptExpandSkill],
       runId: "agent-run-1",
       toolRegistry: setup.toolRegistry,
     });
     const planning = normalizeAiSdkPlanForIntent({
       context,
-      intent: selectedIntent,
+      intent: modelIntent,
       modelPlan: invalidImageDocumentPlan(),
       toolRegistry: setup.toolRegistry,
     });
 
-    expect(selectedIntent).toMatchObject({
+    expect(modelIntent).toMatchObject({
       primaryIntent: "document_writing",
       requiredTools: [toolIds.writeDocument],
       task: { kind: "document_writing" },
@@ -66,25 +60,21 @@ describe("AI SDK runner planning policy", () => {
   it("corrects image-generation plans that try to write a Markdown document instead of generating an image", () => {
     const setup = createPlanningSetup("生成一张小狗图片");
     const modelIntent = imageIntentFixture("生成一张小狗图片");
-    const selectedIntent = selectAiSdkPolicyIntent({
-      modelIntent,
-      policyIntent: setup.policyIntent,
-    });
     const context = buildContext({
       input: setup.input,
-      intent: selectedIntent,
+      intent: modelIntent,
       publicSkills: [promptExpandSkill],
       runId: "agent-run-1",
       toolRegistry: setup.toolRegistry,
     });
     const planning = normalizeAiSdkPlanForIntent({
       context,
-      intent: selectedIntent,
+      intent: modelIntent,
       modelPlan: invalidImageDocumentPlan(),
       toolRegistry: setup.toolRegistry,
     });
 
-    expect(selectedIntent).toMatchObject({
+    expect(modelIntent).toMatchObject({
       primaryIntent: "image_generation",
       requiredTools: [toolIds.expandPrompt, toolIds.generateImage],
     });
@@ -107,7 +97,7 @@ describe("AI SDK runner planning policy", () => {
     ]);
   });
 
-  it("uses planned tool names after planning instead of stale keyword routing", () => {
+  it("uses planned tool names after planning", () => {
     expect(
       selectAiSdkActiveToolNames({
         fallbackToolNames: ["write_document"],
@@ -123,6 +113,22 @@ describe("AI SDK runner planning policy", () => {
         },
       })
     ).toEqual(["expand_prompt", "generate_image"]);
+  });
+
+  it("exposes no runtime tools before the structured plan is available", () => {
+    expect(
+      selectAiSdkActiveToolNames({
+        fallbackToolNames: [],
+        state: {
+          plan: [],
+          toolNamesById: new Map([
+            [toolIds.expandPrompt, "expand_prompt"],
+            [toolIds.generateImage, "generate_image"],
+            [toolIds.writeDocument, "write_document"],
+          ]),
+        },
+      })
+    ).toEqual([]);
   });
 });
 
@@ -148,13 +154,7 @@ function createPlanningSetup(prompt: string) {
     messages: [],
     canvasContext,
   });
-  const policyIntent = routeIntentDeterministically({
-    capabilities,
-    input,
-    toolRegistry,
-  });
-
-  return { input, policyIntent, toolRegistry };
+  return { input, toolRegistry };
 }
 
 function imageIntentFixture(prompt: string): IntentResult {
@@ -186,6 +186,38 @@ function imageIntentFixture(prompt: string): IntentResult {
     needsPlanning: true,
     ambiguity: [],
     routingReason: "Model inferred image generation.",
+  };
+}
+
+function documentIntentFixture(prompt: string): IntentResult {
+  return {
+    primaryIntent: "document_writing",
+    confidence: 0.84,
+    task: {
+      kind: "document_writing",
+      goals: [prompt],
+      targets: [],
+      constraints: [],
+      deliverables: [
+        {
+          kind: "document",
+          description: "Markdown document artifact.",
+          count: 1,
+        },
+      ],
+      operations: [
+        {
+          kind: "write",
+          target: "markdown_document",
+          toolHint: toolIds.writeDocument,
+        },
+      ],
+    },
+    requiredCapabilities: ["document.write"],
+    requiredTools: [toolIds.writeDocument],
+    needsPlanning: true,
+    ambiguity: [],
+    routingReason: "Model inferred text document output.",
   };
 }
 

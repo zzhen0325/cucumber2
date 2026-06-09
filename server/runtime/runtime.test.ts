@@ -36,6 +36,7 @@ import {
 import { runtimeEventTypes } from "../../src/types/runtime";
 import type {
   BuiltContext,
+  IntentResult,
   PlanStep,
   StructuredTask,
   ToolDefinition,
@@ -457,7 +458,7 @@ describe("runtime core", () => {
     });
   });
 
-  it("keeps visual style analysis out of the image prompt expansion flow", async () => {
+  it("rejects structured model routes that require unregistered tools", async () => {
     const capabilities = buildCapabilityRegistry([promptExpandSkill]);
     const toolRegistry = createTestToolRegistry();
     const input = normalizeAgentInput({
@@ -472,56 +473,23 @@ describe("runtime core", () => {
         upstreamContext: [],
       },
     });
-    const intent = await routeIntent({
-      capabilities,
-      input,
-      modelProvider: "deepseek",
-      toolRegistry,
-      async generateIntentResult() {
-        return {
-          primaryIntent: "image_generation",
-          confidence: 0.91,
-          task: {
-            kind: "image_generation",
-            goals: [input.userMessage],
-            targets: [],
-            constraints: [],
-            deliverables: [
-              { kind: "image", description: "Incorrect image artifact." },
-            ],
-            operations: [
-              { kind: "generate", target: "expanded_prompt", toolHint: toolIds.generateImage },
-            ],
-          },
-          requiredCapabilities: ["prompt.expand", "image.generate"],
-          requiredTools: [toolIds.expandPrompt, toolIds.generateImage],
-          needsPlanning: true,
-          ambiguity: [],
-          routingReason: "Misrouted image generation fixture.",
-        };
-      },
-    });
-    const context = buildContext({
-      input,
-      intent,
-      publicSkills: [promptExpandSkill],
-      runId: "agent-run-1",
-      toolRegistry,
-    });
+    await expect(
+      routeIntent({
+        capabilities,
+        input,
+        modelProvider: "deepseek",
+        toolRegistry,
+        async generateIntentResult() {
+          return documentAnalysisIntent(input.userMessage);
+        },
+      })
+    ).rejects.toThrow("unregistered tool document.write");
     const deterministicIntent = routeIntentDeterministically({
       capabilities,
       input,
       toolRegistry,
     });
 
-    expect(intent).toMatchObject({
-      primaryIntent: "capability.route_missing",
-      requiredCapabilities: ["asset.analyze"],
-      requiredTools: [],
-      task: { kind: "file_analysis" },
-    });
-    expect(context.availableTools).toEqual([]);
-    expect(context.injectedSkills).toEqual([]);
     expect(deterministicIntent).toMatchObject({
       primaryIntent: "capability.route_missing",
       requiredTools: [],
@@ -557,27 +525,7 @@ describe("runtime core", () => {
       modelProvider: "deepseek",
       toolRegistry,
       async generateIntentResult() {
-        return {
-          primaryIntent: "image_generation",
-          confidence: 0.91,
-          task: {
-            kind: "image_generation",
-            goals: [input.userMessage],
-            targets: [],
-            constraints: [],
-            deliverables: [
-              { kind: "image", description: "Incorrect image artifact." },
-            ],
-            operations: [
-              { kind: "generate", target: "expanded_prompt", toolHint: toolIds.generateImage },
-            ],
-          },
-          requiredCapabilities: ["prompt.expand", "image.generate"],
-          requiredTools: [toolIds.expandPrompt, toolIds.generateImage],
-          needsPlanning: true,
-          ambiguity: [],
-          routingReason: "Misrouted image generation fixture.",
-        };
+        return documentAnalysisIntent(input.userMessage);
       },
     });
     const context = buildContext({
@@ -621,7 +569,7 @@ describe("runtime core", () => {
     });
   });
 
-  it("routes executable document tasks before calling the model router", async () => {
+  it("routes executable document tasks through the structured model router", async () => {
     const capabilities = buildCapabilityRegistry([promptExpandSkill]);
     const canvasContext = {
       prompt: "分析下Gemini的视觉风格",
@@ -651,11 +599,11 @@ describe("runtime core", () => {
       toolRegistry,
       async generateIntentResult() {
         modelRouterCalled = true;
-        throw new Error("model router should not be called for document routes");
+        return documentAnalysisIntent(input.userMessage);
       },
     });
 
-    expect(modelRouterCalled).toBe(false);
+    expect(modelRouterCalled).toBe(true);
     expect(intent).toMatchObject({
       primaryIntent: "document.analysis",
       requiredTools: [toolIds.writeDocument],
@@ -716,7 +664,7 @@ describe("runtime core", () => {
     ]);
   });
 
-  it("turns unsupported non-image routing into a capability report document when possible", async () => {
+  it("preserves unsupported structured model routing without inventing a fallback tool", async () => {
     const capabilities = buildCapabilityRegistry([promptExpandSkill]);
     const canvasContext = {
       prompt: "修改代码并修复类型错误",
@@ -764,10 +712,10 @@ describe("runtime core", () => {
     });
 
     expect(intent).toMatchObject({
-      primaryIntent: "document.capability_report",
-      requiredCapabilities: ["document.write"],
-      requiredTools: [toolIds.writeDocument],
-      ambiguity: [{ severity: "medium" }],
+      primaryIntent: "capability.route_missing",
+      requiredCapabilities: ["code.modify"],
+      requiredTools: [],
+      ambiguity: [{ severity: "high" }],
     });
   });
 
@@ -827,7 +775,7 @@ describe("runtime core", () => {
       modelProvider: "deepseek",
       toolRegistry,
       async generateIntentResult() {
-        throw new Error("model router should not be called for web research");
+        return webResearchIntent(input.userMessage);
       },
     });
     const context = buildContext({
@@ -900,7 +848,7 @@ describe("runtime core", () => {
         "canvas.mutate",
       ],
       requiredTools: [
-        toolIds.readWebpage,
+        toolIds.searchWeb,
         toolIds.analyzeAssets,
         toolIds.generateHtml,
         toolIds.createCanvasNode,
@@ -938,7 +886,7 @@ describe("runtime core", () => {
 
     expect(plan.map((step) => step.id)).toEqual([
       "agent_text",
-      "read_webpage",
+      "search_web",
       "analyze_assets",
       "generate_html",
       "create_page_node",
@@ -951,7 +899,7 @@ describe("runtime core", () => {
     });
   });
 
-  it("routes compound analysis-to-page tasks through report and HTML tools without model planning", async () => {
+  it("routes compound analysis-to-page tasks through structured model routing and deterministic plan validation", async () => {
     const capabilities = buildCapabilityRegistry([promptExpandSkill]);
     const toolRegistry = createRuntimeToolRegistry();
     const input = normalizeAgentInput({
@@ -974,7 +922,7 @@ describe("runtime core", () => {
       toolRegistry,
       async generateIntentResult() {
         modelRouterCalled = true;
-        throw new Error("model router should not be called for compound page tasks");
+        return compoundPageIntent(input.userMessage);
       },
     });
     const context = buildContext({
@@ -996,7 +944,7 @@ describe("runtime core", () => {
       },
     });
 
-    expect(modelRouterCalled).toBe(false);
+    expect(modelRouterCalled).toBe(true);
     expect(modelPlannerCalled).toBe(false);
     expect(intent).toMatchObject({
       primaryIntent: "multi_step.landing_page",
@@ -1602,6 +1550,127 @@ function buildToolStep(id: string, toolId: string): PlanStep {
     expectedCanvasOperations: [],
     risk: "low",
     approvalRequired: false,
+  };
+}
+
+function documentAnalysisIntent(prompt: string): IntentResult {
+  return {
+    primaryIntent: "document.analysis",
+    confidence: 0.82,
+    task: {
+      kind: "document_writing",
+      goals: [prompt],
+      targets: [],
+      constraints: [
+        {
+          kind: "policy",
+          text: "Text-first analysis should produce a Markdown document artifact.",
+        },
+      ],
+      deliverables: [
+        {
+          kind: "document",
+          description: "Markdown document artifact with the requested analysis.",
+        },
+      ],
+      operations: [
+        { kind: "analyze", target: "available_context" },
+        {
+          kind: "write",
+          target: "markdown_document",
+          toolHint: toolIds.writeDocument,
+        },
+        { kind: "evaluate", target: "document_artifact" },
+      ],
+    },
+    requiredCapabilities: ["document.write"],
+    requiredTools: [toolIds.writeDocument],
+    needsPlanning: true,
+    ambiguity: [],
+    routingReason: "Structured model route for text-first analysis.",
+  };
+}
+
+function webResearchIntent(prompt: string): IntentResult {
+  return {
+    primaryIntent: "web_research",
+    confidence: 0.86,
+    task: {
+      kind: "web_research",
+      goals: [prompt],
+      targets: [],
+      constraints: [
+        {
+          kind: "policy",
+          text: "Search current sources before writing the Markdown artifact.",
+        },
+      ],
+      deliverables: [
+        {
+          kind: "document",
+          description: "Markdown research document grounded in search results.",
+        },
+      ],
+      operations: [
+        { kind: "search", target: "web_sources", toolHint: toolIds.searchWeb },
+        {
+          kind: "write",
+          target: "research_document",
+          toolHint: toolIds.writeDocument,
+        },
+        { kind: "evaluate", target: "document_artifact" },
+      ],
+    },
+    requiredCapabilities: ["web.research", "document.write"],
+    requiredTools: [toolIds.searchWeb, toolIds.writeDocument],
+    needsPlanning: true,
+    ambiguity: [],
+    routingReason: "Structured model route for current-source research.",
+  };
+}
+
+function compoundPageIntent(prompt: string): IntentResult {
+  return {
+    primaryIntent: "multi_step.landing_page",
+    confidence: 0.84,
+    task: {
+      kind: "multi_step",
+      goals: [prompt],
+      targets: [],
+      constraints: [
+        {
+          kind: "policy",
+          text: "Create source analysis before generating the HTML artifact.",
+        },
+      ],
+      deliverables: [
+        {
+          kind: "document",
+          description: "Markdown analysis report used as page source material.",
+        },
+        {
+          kind: "webpage",
+          description: "Standalone HTML page artifact.",
+        },
+      ],
+      operations: [
+        {
+          kind: "write",
+          target: "analysis_report",
+          toolHint: toolIds.writeDocument,
+        },
+        {
+          kind: "write",
+          target: "html_page_from_report",
+          toolHint: toolIds.generateHtml,
+        },
+      ],
+    },
+    requiredCapabilities: ["document.write", "html.generate"],
+    requiredTools: [toolIds.writeDocument, toolIds.generateHtml],
+    needsPlanning: true,
+    ambiguity: [],
+    routingReason: "Structured model route for analysis-to-page workflow.",
   };
 }
 

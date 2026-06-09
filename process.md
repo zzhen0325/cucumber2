@@ -17,6 +17,13 @@
 
 ## 2026-06-09
 
+### Agent Run 意图识别改回结构化模型主路由
+
+- 变更：`/api/agent-run` 主路径不再使用 `server/runtime/tool-router.ts` 的关键词式 deterministic activeTools 预路由；第 0 步仍强制 `plan_agent_run`，但后续工具只从 schema-validated `IntentResult` / `PlanStep[]` 暴露。
+- 变更：`routeIntent` 删除本地先行路由和非图片 guard，改为 AI SDK v6 structured output 主路径；旧 deterministic helper 仅保留给兼容测试，同时修正复合页面中的网页来源策略：有 URL/网页节点才用 `web.read`，没有明确 URL 的资料/搜索需求走 `web.search`。
+- 文件：`server/runtime/ai-sdk-runner.ts`、`server/runtime/intent-router.ts`、`server/runtime/planner.ts`、`server/runtime/runtime.test.ts`、`server/runtime/ai-sdk-runner.test.ts`、`README.md`、`process.md`；删除 `server/runtime/tool-router.ts`、`server/runtime/tool-router.test.ts`。
+- 验证：已对照 AI SDK 官方 structured output 和 `streamText.prepareStep` / `activeTools` 文档；`pnpm exec vitest run server/runtime/ai-sdk-runner.test.ts server/runtime/runtime.test.ts server/runtime/tools/web-page-tools.test.ts`、`pnpm exec tsc -p tsconfig.node.json --noEmit`、`pnpm exec eslint server/runtime/ai-sdk-runner.ts server/runtime/ai-sdk-runner.test.ts server/runtime/intent-router.ts server/runtime/planner.ts server/runtime/runtime.test.ts`、`pnpm build` 通过。
+
 ### 多图生成区分单提示词与多提示词批次
 
 - 变更：`prompt.expand` 输出契约改为 `expandedPrompts`、`promptBatchMode`、`requestedResultCount`；普通“生成四张小狗图”只扩写一条 prompt 并用同一 prompt 请求 4 张结果，明确“生成4张不同的小狗图”会扩写 4 条 prompt 并分别生成 1 张。

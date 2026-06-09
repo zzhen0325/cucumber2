@@ -267,12 +267,12 @@ function canvasOperationProducerToolIds(
 }
 
 export function buildPlanFromIntentDeterministically(intent: IntentResult): PlanStep[] {
-  if (intent.requiredTools.includes(toolIds.searchWeb)) {
-    return buildWebResearchPlan();
-  }
-
   if (intent.requiredTools.includes(toolIds.generateHtml)) {
     return buildLandingPagePlan(intent);
+  }
+
+  if (intent.requiredTools.includes(toolIds.searchWeb)) {
+    return buildWebResearchPlan();
   }
 
   if (intent.requiredTools.includes(toolIds.writeDocument)) {
@@ -474,6 +474,28 @@ function buildLandingPagePlan(intent: IntentResult): PlanStep[] {
       retryPolicy: { maxRetries: 1, backoffMs: 500, retryableErrorCodes: [runtimeErrorCodes.TOOL_TIMEOUT] },
     });
     generationDependencies.push("read_webpage");
+  }
+
+  if (intent.requiredTools.includes(toolIds.searchWeb)) {
+    steps.push({
+      id: "search_web",
+      title: "Search web",
+      goal: "Search current web sources for the page brief.",
+      kind: "tool",
+      toolId: toolIds.searchWeb,
+      capabilityId: "web.research",
+      dependsOn: ["agent_text"],
+      expectedArtifacts: [],
+      expectedCanvasOperations: [],
+      risk: "low",
+      approvalRequired: false,
+      retryPolicy: {
+        maxRetries: 1,
+        backoffMs: 500,
+        retryableErrorCodes: [runtimeErrorCodes.TOOL_TIMEOUT],
+      },
+    });
+    generationDependencies.push("search_web");
   }
 
   if (intent.requiredTools.includes(toolIds.analyzeAssets)) {

@@ -22,7 +22,10 @@ const intentRouterSystemPrompt = [
   "Return only structured intent data that matches the schema.",
   "Do not execute tools, create canvas nodes, or decide final tool arguments.",
   "Use only capability ids and tool ids that are present in the prompt allowlist.",
-  "If the request is unsupported or ambiguous, still return a structured task and add ambiguity entries.",
+  "Classify in layers: coarse intent, target object, operation, constraints, deliverables, confidence, then route.",
+  "Represent those layers through primaryIntent, task.kind, task.targets, task.operations, task.constraints, task.deliverables, confidence, ambiguity, requiredCapabilities, and requiredTools.",
+  "Do not choose an image route unless the user explicitly asks to create or edit an image artifact.",
+  "If the request is unsupported or ambiguous, still return a structured task and add ambiguity entries instead of silently choosing a nearby tool.",
 ].join("\n");
 
 const ROUTE_MISSING_INTENT = "capability.route_missing";
@@ -40,19 +43,6 @@ export async function routeIntent({
   modelProvider: ModelProviderId;
   toolRegistry: ToolRegistry;
 }): Promise<IntentResult> {
-  const deterministicIntent = routeIntentBeforeModel({
-    capabilities,
-    input,
-    toolRegistry,
-  });
-  if (deterministicIntent) {
-    return validateRoutedIntent({
-      capabilities,
-      intent: deterministicIntent,
-      toolRegistry,
-    });
-  }
-
   const prompt = buildIntentRouterPrompt({ capabilities, input, toolRegistry });
   const routed = intentResultSchema.parse(
     generateIntentResult
@@ -67,37 +57,7 @@ export async function routeIntent({
           maxOutputTokens: 1_400,
         })
   );
-  const intent = guardNonImageRoute({
-    input,
-    routed: guardImageRoute({ input, routed, toolRegistry }),
-    toolRegistry,
-  });
-  return validateRoutedIntent({ capabilities, intent, toolRegistry });
-}
-
-function routeIntentBeforeModel({
-  capabilities,
-  input,
-  toolRegistry,
-}: {
-  capabilities: RegisteredCapability[];
-  input: AgentInput;
-  toolRegistry: ToolRegistry;
-}): IntentResult | undefined {
-  if (isExplicitImageGenerationRequest(input)) {
-    return undefined;
-  }
-
-  const intent = routeIntentDeterministically({
-    capabilities,
-    input,
-    toolRegistry,
-  });
-  if (intent.requiredTools.length || intent.task.kind === "canvas_operation") {
-    return intent;
-  }
-
-  return undefined;
+  return validateRoutedIntent({ capabilities, intent: routed, toolRegistry });
 }
 
 function validateRoutedIntent({
@@ -347,173 +307,6 @@ export function validateIntentAgainstRegistry({
   };
 }
 
-function guardImageRoute({
-  input,
-  routed,
-  toolRegistry,
-}: {
-  input: AgentInput;
-  routed: IntentResult;
-  toolRegistry: ToolRegistry;
-}) {
-  if (!requiresImageGeneration(routed) || isExplicitImageGenerationRequest(input)) {
-    return routed;
-  }
-
-  const text = input.userMessage.toLowerCase();
-  const complexRoute = inferComplexRoute(text, input);
-  if (complexRoute) {
-    const missingTools = complexRoute.requiredTools.filter(
-      (toolId) => !toolRegistry.getTool(toolId)
-    );
-
-    if (!missingTools.length) {
-      return intentResultSchema.parse({
-        primaryIntent: "multi_step.landing_page",
-        confidence: 0.78,
-        task: complexRoute.task,
-        requiredCapabilities: complexRoute.requiredCapabilities,
-        requiredTools: complexRoute.requiredTools,
-        needsPlanning: true,
-        ambiguity: [],
-        routingReason:
-          "Image route rejected because the request has a non-image deliverable; routed to executable multi-step workflow.",
-      });
-    }
-
-    return intentResultSchema.parse({
-      primaryIntent: ROUTE_MISSING_INTENT,
-      confidence: 0.68,
-      task: getMissingComplexRouteTask(input, complexRoute),
-      requiredCapabilities: complexRoute.requiredCapabilities,
-      requiredTools: [],
-      needsPlanning: true,
-      ambiguity: [
-        {
-          id: ROUTE_MISSING_INTENT,
-          question: `This multi-step request requires missing tools ${missingTools.join(", ")} before it can run end-to-end.`,
-          severity: "high",
-        },
-      ],
-      routingReason:
-        "Image route rejected because the request has a non-image deliverable and the required workflow tools are missing.",
-    });
-  }
-
-  const canvasOperation = inferCanvasOperation(text, input);
-  if (canvasOperation) {
-    return intentResultSchema.parse({
-      ...canvasOperation,
-      routingReason:
-        "Image route rejected because the request asks for canvas mutation, not an image artifact.",
-    });
-  }
-
-  const documentRoute = inferDocumentRoute(text, input, toolRegistry);
-  if (documentRoute) {
-    return intentResultSchema.parse({
-      ...documentRoute,
-      routingReason:
-        "Image route rejected because the request has a text/document deliverable, not an image artifact.",
-    });
-  }
-
-  const missingCapability =
-    inferMissingCapability(text) ?? inferAnalysisCapability(text);
-  const capabilityId = missingCapability?.capabilityId ?? "capability.unsupported";
-  return intentResultSchema.parse({
-    primaryIntent: ROUTE_MISSING_INTENT,
-    confidence: Math.min(routed.confidence, 0.68),
-    task: createUnsupportedTask(
-      input,
-      capabilityId,
-      missingCapability?.taskKind ?? "multi_step"
-    ),
-    requiredCapabilities: [capabilityId],
-    requiredTools: [],
-    needsPlanning: true,
-    ambiguity: [
-      {
-        id: ROUTE_MISSING_INTENT,
-        question: `Capability ${capabilityId} is required before this request can run.`,
-        severity: "high",
-      },
-    ],
-    routingReason:
-      "Image route rejected because the request does not explicitly ask for an image artifact.",
-  });
-}
-
-function guardNonImageRoute({
-  input,
-  routed,
-  toolRegistry,
-}: {
-  input: AgentInput;
-  routed: IntentResult;
-  toolRegistry: ToolRegistry;
-}) {
-  if (
-    isExplicitImageGenerationRequest(input) ||
-    routed.requiredTools.length ||
-    routed.task.kind === "canvas_operation"
-  ) {
-    return routed;
-  }
-
-  const text = input.userMessage.toLowerCase();
-  const complexRoute = inferComplexRoute(text, input);
-  if (complexRoute) {
-    const missingTools = complexRoute.requiredTools.filter(
-      (toolId) => !toolRegistry.getTool(toolId)
-    );
-    if (!missingTools.length) {
-      return intentResultSchema.parse({
-        primaryIntent: "multi_step.landing_page",
-        confidence: Math.max(routed.confidence, 0.74),
-        task: complexRoute.task,
-        requiredCapabilities: complexRoute.requiredCapabilities,
-        requiredTools: complexRoute.requiredTools,
-        needsPlanning: true,
-        ambiguity: [],
-        routingReason:
-          "Post-route policy selected an executable multi-step workflow from the available tool registry.",
-      });
-    }
-  }
-
-  const canvasOperation = inferCanvasOperation(text, input);
-  if (canvasOperation) {
-    return intentResultSchema.parse({
-      ...canvasOperation,
-      routingReason:
-        "Post-route policy selected an executable canvas operation from the available tool registry.",
-    });
-  }
-
-  const documentRoute = inferDocumentRoute(text, input, toolRegistry);
-  if (!documentRoute) {
-    return routed;
-  }
-
-  return intentResultSchema.parse({
-    ...documentRoute,
-    routingReason:
-      routed.primaryIntent === ROUTE_MISSING_INTENT
-        ? "Unsupported or empty routed intent was converted to an honest Markdown document artifact instead of stopping without output."
-        : "Text-first routed intent had no executable tools, so it was converted to a Markdown document artifact.",
-  });
-}
-
-function requiresImageGeneration(intent: IntentResult) {
-  return (
-    intent.primaryIntent === "image_generation" ||
-    intent.task.kind === "image_generation" ||
-    intent.task.kind === "image_editing" ||
-    intent.requiredTools.includes(toolIds.generateImage)
-  );
-}
-
 function isExplicitImageGenerationRequest(input: AgentInput) {
   const text = input.userMessage.toLowerCase();
   const hasReferenceImage = input.canvasContext.upstreamContext.some(
@@ -618,6 +411,9 @@ function inferComplexRoute(
     /(https?:\/\/|调研|搜索|查找|资料|来源|联网|research|search|sources?|current|latest|(?:根据|基于|参考).{0,12}网页|网页.{0,8}(?:资料|来源|调研|搜索))/i.test(
       text
     );
+  const webSourceToolId = hasExplicitWebpageSource(text, input)
+    ? toolIds.readWebpage
+    : toolIds.searchWeb;
   const wantsAssetContext =
     /(图片|图像|照片|素材|image|photo|asset)/i.test(text) ||
     input.canvasContext.upstreamContext.some(
@@ -640,7 +436,7 @@ function inferComplexRoute(
     ...(wantsCanvas ? ["canvas.mutate"] : []),
   ];
   const requiredTools = [
-    ...(wantsWeb ? [toolIds.readWebpage] : []),
+    ...(wantsWeb ? [webSourceToolId] : []),
     ...(wantsAssetContext ? [toolIds.analyzeAssets] : []),
     ...(wantsReportFirst ? [toolIds.writeDocument] : []),
     toolIds.generateHtml,
@@ -696,7 +492,7 @@ function inferComplexRoute(
       ],
       operations: [
         ...(wantsWeb
-          ? [{ kind: "search" as const, target: "web_sources", toolHint: toolIds.readWebpage }]
+          ? [{ kind: "search" as const, target: "web_sources", toolHint: webSourceToolId }]
           : []),
         ...(wantsAssetContext
           ? [
@@ -733,6 +529,21 @@ function inferComplexRoute(
       ],
     },
   };
+}
+
+function hasExplicitWebpageSource(text: string, input: AgentInput) {
+  if (/https?:\/\/\S+/i.test(text)) {
+    return true;
+  }
+
+  return input.canvasContext.upstreamContext.some(
+    (item) =>
+      item.type === "webpage" ||
+      item.artifact?.type === "webpage" ||
+      isHttpUrl(item.contentRef) ||
+      isHttpUrl(item.artifact?.uri) ||
+      isHttpUrl(item.artifact?.contentRef)
+  );
 }
 
 function getMissingComplexRouteTask(
@@ -1086,4 +897,8 @@ function isOperationalOnlyRequest(text: string) {
   return /(修改代码|修复代码|提交代码|创建文件|删除文件|部署|发邮件|付款|支付|登录|操作浏览器|code\s*(?:modify|patch|change)|deploy|send email|payment|login|browser automation)/i.test(
     text
   );
+}
+
+function isHttpUrl(value: unknown): value is string {
+  return typeof value === "string" && /^https?:\/\//i.test(value);
 }

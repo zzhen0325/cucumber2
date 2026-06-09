@@ -46,12 +46,9 @@ import {
   type ToolRegistry,
 } from "./tool-registry.ts";
 import {
-  resolveRoutedAiSdkToolNames,
-  routeToolsDeterministically,
-} from "./tool-router.ts";
-import {
   createAgentError,
   runtimeErrorCodes,
+  throwAgentError,
   toAgentError,
 } from "./errors.ts";
 import {
@@ -59,7 +56,7 @@ import {
   normalizePlan,
   validatePlanAgainstRegistry,
 } from "./planner.ts";
-import { routeIntentDeterministically } from "./intent-router.ts";
+import { validateIntentAgainstRegistry } from "./intent-router.ts";
 import {
   intentResultSchema,
   planSchema,
@@ -151,11 +148,6 @@ export async function executeAiSdkAgentRun({
         getAiSdkToolName(runtimeTool),
       ])
     );
-    const routedTools = routeToolsDeterministically(canvasContext);
-    const routedToolNames = resolveRoutedAiSdkToolNames({
-      route: routedTools,
-      toolNamesById: state.toolNamesById,
-    });
     const shouldUsePlanner = true;
 
     await appendEvent(store, run.id, eventWriter, {
@@ -170,7 +162,7 @@ export async function executeAiSdkAgentRun({
         upstreamContext: canvasContext.upstreamContext,
         contextTrace: canvasContext.contextTrace,
         runtime: "vercel-ai-sdk",
-        deterministicToolRoute: routedTools,
+        routing: "plan_agent_run structured intent",
       },
     });
     await appendEvent(store, run.id, eventWriter, {
@@ -237,7 +229,7 @@ export async function executeAiSdkAgentRun({
 
         return {
           activeTools: selectAiSdkActiveToolNames({
-            fallbackToolNames: routedToolNames,
+            fallbackToolNames: [],
             state,
           }),
           toolChoice: "auto",
@@ -362,19 +354,27 @@ function createAiSdkTools({
   const tools: ToolSet = {
     [planAgentRunToolName]: aiTool({
       description:
-        "Plan the agent run before any other tool call. Return intent and executable tool plan using only allowed tool ids.",
+        "Plan the agent run before any other tool call. Return layered structured intent and an executable tool plan using only allowed tool ids.",
       inputSchema: planAgentRunInputSchema,
       async execute(input, options) {
         const parsed = planAgentRunInputSchema.parse(input);
-        const policyIntent = routeIntentDeterministically({
+        const intentValidation = validateIntentAgainstRegistry({
           capabilities,
-          input: inputRun.input,
+          intent: parsed.intent,
           toolRegistry,
         });
-        const selectedIntent = selectAiSdkPolicyIntent({
-          modelIntent: parsed.intent,
-          policyIntent,
-        });
+
+        if (!intentValidation.ok) {
+          throwAgentError({
+            code: runtimeErrorCodes.CAPABILITY_UNAVAILABLE,
+            message: intentValidation.errors.join("; "),
+            retryable: false,
+            severity: "error",
+            details: { validation: intentValidation, intent: parsed.intent },
+          });
+        }
+
+        const selectedIntent = parsed.intent;
         state.context = buildContext({
           input: inputRun.input,
           intent: selectedIntent,
@@ -398,8 +398,8 @@ function createAiSdkTools({
           payload: {
             intent: selectedIntent,
             modelIntent: parsed.intent,
-            policyIntent,
             runtime: "vercel-ai-sdk",
+            routing: "schema_validated_model_intent",
             toolCallId: options.toolCallId,
           },
         });
@@ -487,27 +487,6 @@ function createAiSdkTools({
 
   void streamWriter;
   return tools;
-}
-
-export function selectAiSdkPolicyIntent({
-  modelIntent,
-  policyIntent,
-}: {
-  modelIntent: IntentResult;
-  policyIntent: IntentResult;
-}) {
-  if (
-    policyIntent.requiredTools.length ||
-    policyIntent.task.kind === "canvas_operation"
-  ) {
-    return policyIntent;
-  }
-
-  if (isImageIntent(modelIntent) && !isImageIntent(policyIntent)) {
-    return policyIntent;
-  }
-
-  return modelIntent;
 }
 
 export function normalizeAiSdkPlanForIntent({
@@ -1080,6 +1059,9 @@ function buildAiSdkAgentPrompt({
     "PLANNING_RULES",
     [
       "plan_agent_run.plan[*].toolId must use the runtime toolId, not aiSdkToolName.",
+      "Build intent in layers: coarse primaryIntent, target object(s), operation(s), constraints, deliverables, confidence/ambiguity, then required capabilities/tools.",
+      "Represent target/object and operation details in IntentResult.task.targets, task.operations, task.constraints, and task.deliverables instead of inventing many narrow primaryIntent labels.",
+      "Do not route to image generation unless the user explicitly asks to create, generate, edit, redraw, or render an image artifact.",
       "After planning, call tools by aiSdkToolName.",
       "For image generation, plan and call expand_prompt before generate_image. If upstream images are relevant, call analyze_reference_images before expand_prompt.",
       "For current web information, plan and call web_search before write_document.",
