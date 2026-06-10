@@ -111,9 +111,13 @@ Uploaded skills are public and visible to every logged-in user. Only the uploade
 
 ## Canvas Branching
 
-Submitting from the bottom composer with no referenced node creates a new root `prompt -> run` chain. Selecting a single non-Run node makes it the reference for the next submission and creates `selected node -> prompt -> run`, including image, Markdown document, document, code, webpage, memory, decision, tool-result, and generic artifact nodes. Dragging on the empty canvas marquee-selects multiple nodes for group movement or deletion; multi-selection does not create a branch anchor. Agent Run nodes are status views only; selecting one does not create a branch anchor.
+Submitting from the bottom composer with no referenced node creates a new root `prompt -> run` chain. Selecting a single non-Run node makes it the reference for the next submission and creates `selected node -> prompt -> run`, including image, Markdown document, document, code, webpage, memory, decision, tool-result, generic artifact, sticky note, and shape nodes. Dragging a parent node moves all downstream child nodes that are connected through `source -> target` edges, preserving the visible branch layout. Dragging on the empty canvas marquee-selects multiple nodes for group movement or deletion; multi-selection does not create a branch anchor. Agent Run nodes are status views only; selecting one does not create a branch anchor.
+
+The viewport controls include an auto-layout action backed by Dagre. New node or edge additions are automatically reflowed after project load, while manual node dragging is preserved because pure position changes do not retrigger auto-layout.
 
 Files can be dragged directly onto the canvas to create preview nodes when the existing node taxonomy can carry the file. Images become `imageResultNode` previews backed by data URLs, Markdown files become editable `markdownNode` BlockNote document previews, and code, document, webpage, dataset, or generic files become artifact-backed preview cards with file metadata and a text snippet when readable. Uploaded nodes are saved with the project snapshot; selecting a single uploaded image or artifact can anchor the next follow-up branch just like generated nodes.
+
+The left tool rail includes sticky note and shape tools directly. Select a tool, then drag on the empty React Flow pane to draw a persisted `stickyNoteNode` or `shapeNode` at that size; sticky note text and shape labels are editable in-place and saved with the project snapshot.
 
 Composer pasted or dropped files are sent to `/api/agent-run` as lightweight `AgentInput.attachments` metadata. Data URLs are represented with `contentRef` and a short preview summary, so large file contents are not inlined into planner prompts. Before normalization, the server checks the selected node, upstream context nodes, and upstream artifact ids against the user-owned project snapshot.
 

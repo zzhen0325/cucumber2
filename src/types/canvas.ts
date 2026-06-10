@@ -162,6 +162,28 @@ export type ImageResultNodeData = {
   status?: ImageResultStatus;
 };
 
+export type StickyNoteNodeData = {
+  kind: "stickyNote";
+  text: string;
+  color: "yellow" | "green" | "blue" | "pink";
+  createdAt: string;
+};
+
+export type ShapeVariant =
+  | "rectangle"
+  | "ellipse"
+  | "diamond"
+  | "triangle"
+  | "pill"
+  | "frame";
+
+export type ShapeNodeData = {
+  kind: "shape";
+  shape: ShapeVariant;
+  label: string;
+  createdAt: string;
+};
+
 export type ArtifactBackedNodeData = {
   artifact: ArtifactRef;
   title: string;
@@ -215,6 +237,8 @@ export type AgentCanvasNodeData =
   | PromptNodeData
   | RunNodeData
   | ImageResultNodeData
+  | StickyNoteNodeData
+  | ShapeNodeData
   | ArtifactNodeData
   | MarkdownNodeData
   | DecisionNodeData

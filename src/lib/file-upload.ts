@@ -16,6 +16,7 @@ export type UploadedFilePreviewKind =
 
 const NODE_WIDTH = 240;
 const IMAGE_NODE_HEIGHT = 240;
+const IMAGE_NODE_MIN_SIDE = 24;
 const MARKDOWN_NODE_WIDTH = 420;
 const MARKDOWN_NODE_HEIGHT = 360;
 const ARTIFACT_NODE_HEIGHT = 132;
@@ -179,14 +180,24 @@ async function createCanvasNodeFromFile(
   const kind = classifyUploadedFile(file);
   const title = file.name.trim() || "Untitled file";
   const artifactId = createUploadId(kind, title);
-  const metadata = getBaseUploadMetadata(file, uploadedAt);
+  const baseMetadata = getBaseUploadMetadata(file, uploadedAt);
 
   if (kind === "image") {
-    const dataUrl = await readFileAsDataUrl(file);
+    const imagePreview = await createUploadedImagePreview(file);
+    const metadata = {
+      ...baseMetadata,
+      ...(imagePreview.dimensions
+        ? {
+            height: imagePreview.dimensions.height,
+            width: imagePreview.dimensions.width,
+          }
+        : {}),
+    };
+    const nodeDimensions = getImageNodeDimensions(imagePreview.dimensions);
     const artifact: ArtifactRef = {
       id: artifactId,
       type: "image",
-      uri: dataUrl,
+      uri: imagePreview.dataUrl,
       title,
       metadata,
     };
@@ -195,12 +206,13 @@ async function createCanvasNodeFromFile(
       id: `image-${artifactId}`,
       type: "imageResultNode",
       position: { x: 0, y: 0 },
+      ...nodeDimensions,
       data: {
         kind: "imageResult",
         artifact,
         image: {
           id: artifactId,
-          url: dataUrl,
+          url: imagePreview.dataUrl,
           title,
           metadata,
           artifact,
@@ -210,6 +222,8 @@ async function createCanvasNodeFromFile(
       },
     };
   }
+
+  const metadata = baseMetadata;
 
   const text = shouldReadText(file, kind) ? await file.text() : "";
   const preview = text ? trimText(text, TEXT_PREVIEW_LIMIT) : "";
@@ -494,6 +508,168 @@ async function readFileAsDataUrl(file: File) {
   const buffer = await file.arrayBuffer();
 
   return `data:${mimeType};base64,${arrayBufferToBase64(buffer)}`;
+}
+
+async function createUploadedImagePreview(file: File) {
+  const [buffer, dataUrl] = await Promise.all([file.arrayBuffer(), readFileAsDataUrl(file)]);
+
+  return {
+    dataUrl,
+    dimensions: readImageDimensions(buffer, file.type),
+  };
+}
+
+function getImageNodeDimensions(
+  dimensions: { width: number; height: number } | null
+) {
+  if (!dimensions) {
+    return { width: NODE_WIDTH, height: IMAGE_NODE_HEIGHT };
+  }
+
+  const ratio = dimensions.width / dimensions.height;
+  return {
+    width: NODE_WIDTH,
+    height: Math.max(IMAGE_NODE_MIN_SIDE, Math.round(NODE_WIDTH / ratio)),
+  };
+}
+
+function readImageDimensions(
+  buffer: ArrayBuffer,
+  mimeType: string
+): { width: number; height: number } | null {
+  const bytes = new Uint8Array(buffer);
+
+  if (mimeType === "image/png") {
+    return readPngDimensions(bytes);
+  }
+  if (mimeType === "image/gif") {
+    return readGifDimensions(bytes);
+  }
+  if (mimeType === "image/webp") {
+    return readWebpDimensions(bytes);
+  }
+  if (mimeType === "image/jpeg" || mimeType === "image/jpg") {
+    return readJpegDimensions(bytes);
+  }
+
+  return (
+    readPngDimensions(bytes) ??
+    readGifDimensions(bytes) ??
+    readWebpDimensions(bytes) ??
+    readJpegDimensions(bytes)
+  );
+}
+
+function readPngDimensions(bytes: Uint8Array) {
+  const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (bytes.length < 24 || !pngSignature.every((value, index) => bytes[index] === value)) {
+    return null;
+  }
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const width = view.getUint32(16);
+  const height = view.getUint32(20);
+
+  return width > 0 && height > 0 ? { width, height } : null;
+}
+
+function readGifDimensions(bytes: Uint8Array) {
+  const isGif =
+    bytes.length >= 10 &&
+    bytes[0] === 0x47 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x38;
+  if (!isGif) {
+    return null;
+  }
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const width = view.getUint16(6, true);
+  const height = view.getUint16(8, true);
+
+  return width > 0 && height > 0 ? { width, height } : null;
+}
+
+function readWebpDimensions(bytes: Uint8Array) {
+  if (
+    bytes.length < 30 ||
+    readAscii(bytes, 0, 4) !== "RIFF" ||
+    readAscii(bytes, 8, 4) !== "WEBP"
+  ) {
+    return null;
+  }
+
+  const chunkType = readAscii(bytes, 12, 4);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (chunkType === "VP8X" && bytes.length >= 30) {
+    const width = 1 + readUint24(view, 24);
+    const height = 1 + readUint24(view, 27);
+    return width > 0 && height > 0 ? { width, height } : null;
+  }
+
+  if (chunkType === "VP8 " && bytes.length >= 30) {
+    const width = view.getUint16(26, true) & 0x3fff;
+    const height = view.getUint16(28, true) & 0x3fff;
+    return width > 0 && height > 0 ? { width, height } : null;
+  }
+
+  if (chunkType === "VP8L" && bytes.length >= 25) {
+    const bits =
+      bytes[21] |
+      (bytes[22] << 8) |
+      (bytes[23] << 16) |
+      (bytes[24] << 24);
+    const width = (bits & 0x3fff) + 1;
+    const height = ((bits >> 14) & 0x3fff) + 1;
+    return width > 0 && height > 0 ? { width, height } : null;
+  }
+
+  return null;
+}
+
+function readJpegDimensions(bytes: Uint8Array) {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) {
+    return null;
+  }
+
+  let offset = 2;
+  while (offset + 8 < bytes.length) {
+    if (bytes[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+
+    const marker = bytes[offset + 1];
+    const length = (bytes[offset + 2] << 8) | bytes[offset + 3];
+    if (length < 2 || offset + length + 2 > bytes.length) {
+      return null;
+    }
+
+    const isStartOfFrame =
+      marker >= 0xc0 &&
+      marker <= 0xcf &&
+      marker !== 0xc4 &&
+      marker !== 0xc8 &&
+      marker !== 0xcc;
+    if (isStartOfFrame) {
+      const height = (bytes[offset + 5] << 8) | bytes[offset + 6];
+      const width = (bytes[offset + 7] << 8) | bytes[offset + 8];
+      return width > 0 && height > 0 ? { width, height } : null;
+    }
+
+    offset += 2 + length;
+  }
+
+  return null;
+}
+
+function readAscii(bytes: Uint8Array, offset: number, length: number) {
+  return String.fromCharCode(...bytes.slice(offset, offset + length));
+}
+
+function readUint24(view: DataView, offset: number) {
+  return view.getUint8(offset) | (view.getUint8(offset + 1) << 8) | (view.getUint8(offset + 2) << 16);
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer) {

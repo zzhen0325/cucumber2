@@ -18,6 +18,7 @@ const PROMPT_NODE_HEIGHT = 84;
 const COMPACT_RUN_NODE_HEIGHT = 36;
 const RUN_NODE_HEIGHT = 300;
 const RESULT_NODE_HEIGHT = 240;
+const RESULT_NODE_MIN_SIDE = 24;
 const MARKDOWN_NODE_WIDTH = 420;
 const MARKDOWN_NODE_HEIGHT = 360;
 const WEBPAGE_NODE_WIDTH = 420;
@@ -377,38 +378,51 @@ function createAlignedImageResultNodes(
       hasVisibleRunOutput(runNode.data))
       ? EXPANDED_RESULT_OFFSET_FROM_PROMPT_Y
       : RESULT_OFFSET_FROM_PROMPT_Y;
+  const dimensions = results.map(getImageResultNodeDimensions);
+  const totalWidth =
+    dimensions.reduce((sum, dimension) => sum + dimension.width, 0) +
+    Math.max(results.length - 1, 0) * RESULT_GAP;
+  const maxHeight = Math.max(
+    RESULT_NODE_HEIGHT,
+    ...dimensions.map((dimension) => dimension.height)
+  );
   const preferredStartX =
-    runNode.position.x -
-    ((results.length - 1) * (NODE_WIDTH + RESULT_GAP)) / 2;
+    runNode.position.x + NODE_WIDTH / 2 - totalWidth / 2;
   const y = runNode.position.y + resultOffset - RUN_OFFSET_Y;
   const startX = resolveNonOverlappingX(
     {
       x: preferredStartX,
       y,
-      width:
-        results.length * NODE_WIDTH +
-        Math.max(results.length - 1, 0) * RESULT_GAP,
-      height: RESULT_NODE_HEIGHT,
+      width: totalWidth,
+      height: maxHeight,
     },
     existingNodes
   );
 
-  const resultNodes: AgentCanvasNode[] = results.map((result, index) => ({
-    id: result.id,
-    type: "imageResultNode",
-    position:
-      getExistingPosition(existingNodes, result.id) ??
-      { x: startX + index * (NODE_WIDTH + RESULT_GAP), y },
-    data: {
-      kind: "imageResult",
-      image: result.image,
-      artifact: result.artifact,
-      prompt: runNode.data.kind === "run" ? runNode.data.prompt : "",
-      runId: runNode.id,
-      request: result.request,
-      status: result.status,
-    },
-  }));
+  let currentX = startX;
+  const resultNodes: AgentCanvasNode[] = results.map((result, index) => {
+    const dimension = dimensions[index];
+    const position =
+      getExistingPosition(existingNodes, result.id) ?? { x: currentX, y };
+    currentX += dimension.width + RESULT_GAP;
+
+    return {
+      id: result.id,
+      type: "imageResultNode",
+      position,
+      width: dimension.width,
+      height: dimension.height,
+      data: {
+        kind: "imageResult",
+        image: result.image,
+        artifact: result.artifact,
+        prompt: runNode.data.kind === "run" ? runNode.data.prompt : "",
+        runId: runNode.id,
+        request: result.request,
+        status: result.status,
+      },
+    };
+  });
 
   const resultEdges: AgentCanvasEdge[] = resultNodes.map((node) => ({
     id: `edge-${runNode.id}-${node.id}`,
@@ -418,6 +432,64 @@ function createAlignedImageResultNodes(
   }));
 
   return { resultNodes, resultEdges };
+}
+
+function getImageResultNodeDimensions({
+  image,
+  request,
+}: {
+  image: GeneratedImage;
+  request?: ImageRequestPreview;
+}) {
+  const ratio = getImageAspectRatio(image, request);
+  const width = NODE_WIDTH;
+  const height = Math.max(RESULT_NODE_MIN_SIDE, Math.round(width / ratio));
+
+  return { width, height };
+}
+
+function getImageAspectRatio(
+  image: GeneratedImage,
+  request?: ImageRequestPreview
+) {
+  const metadataWidth = readPositiveNumber(image.metadata?.width);
+  const metadataHeight = readPositiveNumber(image.metadata?.height);
+  if (metadataWidth && metadataHeight) {
+    return metadataWidth / metadataHeight;
+  }
+
+  const requestWidth = readPositiveNumber(request?.width);
+  const requestHeight = readPositiveNumber(request?.height);
+  if (requestWidth && requestHeight) {
+    return requestWidth / requestHeight;
+  }
+
+  const parsedRatio = parseAspectRatio(request?.aspectRatio);
+  if (parsedRatio) {
+    return parsedRatio;
+  }
+
+  return 1;
+}
+
+function parseAspectRatio(value: string | undefined) {
+  const match = value?.match(/^(\d+(?:\.\d+)?)\s*[:：/]\s*(\d+(?:\.\d+)?)$/);
+  if (!match) {
+    return null;
+  }
+
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    return null;
+  }
+
+  return width / height;
 }
 
 function getExistingPosition(nodes: AgentCanvasNode[], nodeId: string) {
@@ -734,6 +806,12 @@ function getRevisionAnchorPriority(node: AgentCanvasNode) {
   if (node.data.kind === "prompt") {
     return 60;
   }
+  if (node.data.kind === "stickyNote") {
+    return 50;
+  }
+  if (node.data.kind === "shape") {
+    return 40;
+  }
 
   return 0;
 }
@@ -805,6 +883,31 @@ function contextItemsFromNode(
     ];
   }
 
+  if (node.data.kind === "stickyNote") {
+    const summary = node.data.text.trim() || "空便签";
+    return [
+      {
+        nodeId: node.id,
+        type: "doc",
+        summary,
+        title: "便签",
+        priority: getContextPriority("doc", isSelectedNode),
+      },
+    ];
+  }
+
+  if (node.data.kind === "shape") {
+    return [
+      {
+        nodeId: node.id,
+        type: "artifact",
+        summary: `${getShapeLabel(node.data.shape)}：${node.data.label}`.trim(),
+        title: node.data.label,
+        priority: getContextPriority("artifact", isSelectedNode),
+      },
+    ];
+  }
+
   if (isArtifactBackedNode(node)) {
     const type = getArtifactContextType(node.data.artifact);
     const summary = getArtifactNodeSummary(node);
@@ -859,6 +962,23 @@ function getArtifactNodeSummary(node: ArtifactBackedCanvasNode) {
   }
 
   return node.data.summary ?? node.data.title;
+}
+
+function getShapeLabel(shape: AgentCanvasNode["data"] extends infer Data
+  ? Data extends { kind: "shape"; shape: infer Shape }
+    ? Shape
+    : never
+  : never) {
+  const labels = {
+    diamond: "菱形",
+    ellipse: "圆形",
+    frame: "框架",
+    pill: "胶囊",
+    rectangle: "矩形",
+    triangle: "三角形",
+  } as const;
+
+  return labels[shape];
 }
 
 function selectContextWithinBudget(
@@ -1505,6 +1625,12 @@ function stableTextId(text: string) {
 
 function safeNodeId(value: string) {
   return value.replace(/[^a-zA-Z0-9_-]/g, "-");
+}
+
+function readPositiveNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : undefined;
 }
 
 function dedupeMarkdownDocuments(documents: GeneratedMarkdownDocument[]) {

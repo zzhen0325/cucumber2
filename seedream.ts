@@ -238,6 +238,9 @@ export async function generateSeedreamImage(
 
     for (const url of urls.slice(0, request.resultCount)) {
       const index = images.length + 1;
+      const outputWidth = readPositiveNumber(request.body.width);
+      const outputHeight = readPositiveNumber(request.body.height);
+      const outputSize = readPositiveNumber(request.body.size);
       images.push({
         id: `seedream-${Date.now()}-${index}`,
         url,
@@ -248,8 +251,9 @@ export async function generateSeedreamImage(
         metadata: {
           provider: "seedream",
           reqKey: config.reqKey,
-          width: config.width,
-          height: config.height,
+          width: outputWidth,
+          height: outputHeight,
+          size: outputSize,
           inputImageCount: request.imageUrls.length,
           requestedImageCount: request.resultCount,
           totalRequestedImageCount: input.resultCount,
@@ -632,6 +636,12 @@ function readOptionalNumberEnv(name: string) {
 
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function readPositiveNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : undefined;
 }
 
 function signingKey(

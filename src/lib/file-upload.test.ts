@@ -27,7 +27,7 @@ describe("file upload canvas nodes", () => {
 
   it("creates image result nodes with a persistent data URL preview", async () => {
     const [node] = await createCanvasNodesFromFiles(
-      [new File([Uint8Array.from([1, 2, 3])], "reference.png", { type: "image/png" })],
+      [new File([createFakePngBytes(1600, 900)], "reference.png", { type: "image/png" })],
       { x: 10, y: 20 },
       []
     );
@@ -46,8 +46,11 @@ describe("file upload canvas nodes", () => {
       throw new Error("Expected image result node");
     }
 
-    expect(node.data.image.url).toBe("data:image/png;base64,AQID");
+    expect(node.width).toBe(240);
+    expect(node.height).toBe(135);
+    expect(node.data.image.url).toContain("data:image/png;base64,");
     expect(node.data.artifact?.type).toBe("image");
+    expect(node.data.image.metadata).toMatchObject({ width: 1600, height: 900 });
   });
 
   it("creates markdown preview nodes with file content", async () => {
@@ -129,4 +132,16 @@ function existingImageNode(): AgentCanvasNode {
       runId: "run-1",
     },
   };
+}
+
+function createFakePngBytes(width: number, height: number) {
+  const bytes = new Uint8Array(24);
+  bytes.set([137, 80, 78, 71, 13, 10, 26, 10], 0);
+  bytes.set([0, 0, 0, 13], 8);
+  bytes.set([73, 72, 68, 82], 12);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(16, width);
+  view.setUint32(20, height);
+
+  return bytes;
 }

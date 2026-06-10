@@ -522,6 +522,7 @@ describe("graph projection", () => {
       aspectRatio: "16:9",
       size: 2048 * 2048,
     });
+    expect(imageNodes[0].height).toBe(135);
   });
 
   it("fills pre-allocated image nodes in place as artifacts arrive", () => {

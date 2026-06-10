@@ -1,4 +1,5 @@
 import {
+  applyNodeChanges,
   Controls,
   MiniMap,
   SelectionMode,
@@ -6,21 +7,25 @@ import {
   useEdgesState,
   useNodesState,
   type Node as FlowNode,
+  type NodeChange,
   type NodeProps,
   type NodeTypes,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import {
   ArrowLeft,
   ArrowUpRight,
-  Box,
   Check,
+  Circle,
   CircleDot,
   Cpu,
   Database,
+  Diamond,
   FileText,
   Frame,
+  Workflow,
   Globe2,
   Hand,
   Image,
@@ -28,10 +33,11 @@ import {
   MousePointer2,
   Paperclip,
   Palette,
-  PenLine,
-  Plus,
   Sparkles,
+  Square,
+  StickyNote,
   Type,
+  Triangle,
   WandSparkles,
   X,
   ZoomIn,
@@ -50,7 +56,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { CSSProperties, FormEvent } from "react";
+import type { CSSProperties, FormEvent, MouseEvent as ReactMouseEvent } from "react";
 
 import { Canvas } from "@/components/ai-elements/canvas";
 import { Edge } from "@/components/ai-elements/edge";
@@ -86,6 +92,10 @@ import {
   type ModelProviderSummary,
 } from "@/lib/model-providers";
 import {
+  getCanvasLayoutSignature,
+  layoutAgentCanvasGraph,
+} from "@/lib/canvas-layout";
+import {
   loadProject,
   loadRunTrace,
   updateProject,
@@ -111,6 +121,9 @@ import type {
   ImageResultNodeData,
   MarkdownNodeData,
   PromptNodeData,
+  ShapeNodeData,
+  ShapeVariant,
+  StickyNoteNodeData,
   WebpageNodeData,
 } from "@/types/canvas";
 import type { InputAttachment } from "@/types/runtime";
@@ -125,6 +138,8 @@ const nodeTypes = {
   runNode: memo(RunNodeView),
   imageResultNode: memo(ImageResultNode),
   markdownNode: memo(MarkdownNode),
+  shapeNode: memo(ShapeNode),
+  stickyNoteNode: memo(StickyNoteNode),
   toolResultNode: memo(ArtifactLikeNode),
   webpageNode: memo(HtmlPageNode),
 } as NodeTypes;
@@ -148,6 +163,15 @@ const MarkdownNodeEditingContext = createContext<{
   readOnly: true,
   onChange: () => undefined,
 });
+const ManualNodeEditingContext = createContext<{
+  readOnly: boolean;
+  onShapeLabelChange: (nodeId: string, label: string) => void;
+  onStickyTextChange: (nodeId: string, text: string) => void;
+}>({
+  readOnly: true,
+  onShapeLabelChange: () => undefined,
+  onStickyTextChange: () => undefined,
+});
 
 type StorageStatus = "loading" | "saving" | "saved" | "error";
 type StreamedRuntimeEvents = ReturnType<typeof runtimeEventsFromMessages>;
@@ -169,16 +193,64 @@ type CanvasWorkspaceProps = {
   projectId: string;
   onBack: () => void;
 };
-type CanvasTool = "select" | "hand";
+type ManualCanvasTool = "stickyNote" | ShapeVariant;
+type CanvasTool = "select" | "hand" | ManualCanvasTool;
+type ManualNodeTemplate =
+  | {
+      icon: LucideIcon;
+      kind: "stickyNote";
+      label: string;
+      tool: "stickyNote";
+      color: StickyNoteNodeData["color"];
+      text: string;
+    }
+  | {
+      icon: LucideIcon;
+      kind: "shape";
+      label: string;
+      tool: ShapeVariant;
+      shape: ShapeVariant;
+    };
 type ToolRailItem = {
   icon: LucideIcon;
   label: string;
-  tool?: CanvasTool;
-  disabled?: boolean;
+  tool: CanvasTool;
+};
+type CanvasPoint = { x: number; y: number };
+type CreationDraft = {
+  startFlow: CanvasPoint;
+  startScreen: CanvasPoint;
+  template: ManualNodeTemplate;
+};
+type CreationPreview = {
+  label: string;
+  rect: {
+    height: number;
+    left: number;
+    top: number;
+    width: number;
+  };
 };
 
+const manualNodeTemplates: ManualNodeTemplate[] = [
+  {
+    color: "yellow",
+    icon: StickyNote,
+    kind: "stickyNote",
+    label: "便签",
+    text: "写下想法...",
+    tool: "stickyNote",
+  },
+  { icon: Square, kind: "shape", label: "矩形", shape: "rectangle", tool: "rectangle" },
+  { icon: Circle, kind: "shape", label: "圆形", shape: "ellipse", tool: "ellipse" },
+  { icon: Diamond, kind: "shape", label: "菱形", shape: "diamond", tool: "diamond" },
+  { icon: Triangle, kind: "shape", label: "三角形", shape: "triangle", tool: "triangle" },
+  { icon: CircleDot, kind: "shape", label: "胶囊", shape: "pill", tool: "pill" },
+  { icon: Frame, kind: "shape", label: "框架", shape: "frame", tool: "frame" },
+];
+
 export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
-  const [nodes, setNodes, onNodesChange] = useNodesState<AgentCanvasNode>(initialNodes);
+  const [nodes, setNodes] = useNodesState<AgentCanvasNode>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<AgentCanvasEdge>(initialEdges);
   const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
   const [projectTitle, setProjectTitle] = useState("Untitled");
@@ -192,6 +264,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const [traceLoading, setTraceLoading] = useState(false);
   const [traceError, setTraceError] = useState<string | null>(null);
   const [canvasTool, setCanvasTool] = useState<CanvasTool>("select");
+  const [layoutFitRequest, setLayoutFitRequest] = useState(0);
   const [replaySnapshot, setReplaySnapshot] = useState<{
     runNodeId: string;
     nodes: AgentCanvasNode[];
@@ -215,8 +288,18 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const persistedSelectedNodeIdRef = useRef<string | null>(null);
   const isReplayModeRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const autoLayoutFrame = useRef<number | null>(null);
+  const autoLayoutSignatureRef = useRef<string | null>(null);
+  const flowInstance = useRef<ReactFlowInstance<
+    AgentCanvasNode,
+    AgentCanvasEdge
+  > | null>(null);
+  const creationDraftRef = useRef<CreationDraft | null>(null);
+  const [creationPreview, setCreationPreview] = useState<CreationPreview | null>(null);
   const isReplayMode = Boolean(replaySnapshot);
   const isHandTool = canvasTool === "hand";
+  const activeManualTemplate = getManualNodeTemplateForTool(canvasTool);
+  const isCreateTool = Boolean(activeManualTemplate);
   const canvasNodes = replaySnapshot?.nodes ?? nodes;
   const canvasEdges = replaySnapshot?.edges ?? edges;
 
@@ -235,6 +318,22 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   useEffect(() => {
     isReplayModeRef.current = isReplayMode;
   }, [isReplayMode]);
+
+  const handleAutoLayout = useCallback(() => {
+    if (isReplayModeRef.current || !nodesRef.current.length) {
+      return;
+    }
+
+    setNodes((current) => {
+      const layoutedNodes = layoutAgentCanvasGraph(current, edgesRef.current);
+      autoLayoutSignatureRef.current = getCanvasLayoutSignature(
+        layoutedNodes,
+        edgesRef.current
+      );
+      return layoutedNodes;
+    });
+    setLayoutFitRequest((current) => current + 1);
+  }, [setNodes]);
 
   useEffect(() => {
     loadedProjectIdRef.current = loadedProjectId;
@@ -473,6 +572,23 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     setNodes,
   });
 
+  const handleCanvasInit = useCallback(
+    (instance: ReactFlowInstance<AgentCanvasNode, AgentCanvasEdge>) => {
+      flowInstance.current = instance;
+      fileDrop.handleCanvasInit(instance);
+    },
+    [fileDrop]
+  );
+
+  const handleNodesChange = useCallback(
+    (changes: NodeChange<AgentCanvasNode>[]) => {
+      setNodes((current) =>
+        applyLinkedNodeDragChanges(changes, current, edgesRef.current)
+      );
+    },
+    [setNodes]
+  );
+
   useEffect(() => {
     let ignore = false;
 
@@ -591,6 +707,10 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           hydratedSnapshot.nodes,
           project.selectedNodeId
         );
+        autoLayoutSignatureRef.current = getCanvasLayoutSignature(
+          hydratedSnapshot.nodes,
+          hydratedSnapshot.edges
+        );
         setNodes(applySelectedNodeIds(hydratedSnapshot.nodes, nextSelectedNodeIds));
         setEdges(hydratedSnapshot.edges);
         activeRunId.current = project.lastRunId;
@@ -609,6 +729,10 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
     return () => {
       ignore = true;
+      if (autoLayoutFrame.current) {
+        window.cancelAnimationFrame(autoLayoutFrame.current);
+        autoLayoutFrame.current = null;
+      }
     };
   }, [projectId, setEdges, setNodes]);
 
@@ -746,6 +870,34 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   ]);
 
   useEffect(() => {
+    if (!hasLoadedProject.current || isReplayMode || !nodes.length) {
+      return;
+    }
+
+    const signature = getCanvasLayoutSignature(nodes, edges);
+    if (autoLayoutSignatureRef.current === signature) {
+      return;
+    }
+
+    autoLayoutSignatureRef.current = signature;
+    if (autoLayoutFrame.current) {
+      window.cancelAnimationFrame(autoLayoutFrame.current);
+    }
+
+    autoLayoutFrame.current = window.requestAnimationFrame(() => {
+      autoLayoutFrame.current = null;
+      handleAutoLayout();
+    });
+
+    return () => {
+      if (autoLayoutFrame.current) {
+        window.cancelAnimationFrame(autoLayoutFrame.current);
+        autoLayoutFrame.current = null;
+      }
+    };
+  }, [edges, handleAutoLayout, isReplayMode, nodes]);
+
+  useEffect(() => {
     if (error) {
       markRunError(activeRunId.current, error.message);
     }
@@ -822,6 +974,86 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     projectStreamedRuntimeEvents,
     status,
   ]);
+
+  const handleCreationMouseDown = useCallback(
+    (event: ReactMouseEvent) => {
+      const template = activeManualTemplate;
+      const instance = flowInstance.current;
+      if (isReplayMode || !template || !instance || event.button !== 0) {
+        return;
+      }
+      if (!isCanvasPaneEventTarget(event.target)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      const startScreen = { x: event.clientX, y: event.clientY };
+      creationDraftRef.current = {
+        startFlow: instance.screenToFlowPosition(startScreen),
+        startScreen,
+        template,
+      };
+      setCreationPreview({
+        label: template.label,
+        rect: screenRectFromPoints(startScreen, startScreen),
+      });
+      setNodes((current) => applySelectedNodeIds(current, []));
+    },
+    [activeManualTemplate, isReplayMode, setNodes]
+  );
+
+  useEffect(() => {
+    if (!creationPreview) {
+      return;
+    }
+
+    const handleMove = (event: MouseEvent) => {
+      const draft = creationDraftRef.current;
+      if (!draft) {
+        return;
+      }
+      setCreationPreview({
+        label: draft.template.label,
+        rect: screenRectFromPoints(draft.startScreen, {
+          x: event.clientX,
+          y: event.clientY,
+        }),
+      });
+    };
+
+    const handleUp = (event: MouseEvent) => {
+      const draft = creationDraftRef.current;
+      const instance = flowInstance.current;
+      creationDraftRef.current = null;
+      setCreationPreview(null);
+      if (!draft || !instance) {
+        return;
+      }
+
+      const node = createManualCanvasNodeFromDrag(
+        draft,
+        {
+          x: event.clientX,
+          y: event.clientY,
+        },
+        instance
+      );
+      setNodes((current) => [
+        ...applySelectedNodeIds(current, []),
+        { ...node, selected: true },
+      ]);
+      setCanvasTool("select");
+    };
+
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp, { once: true });
+
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, [creationPreview, setNodes]);
 
   const handleSubmit = useCallback(
     async (
@@ -989,6 +1221,40 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     [isReplayMode, setNodes]
   );
 
+  const handleStickyTextChange = useCallback(
+    (nodeId: string, text: string) => {
+      if (isReplayMode) {
+        return;
+      }
+
+      setNodes((current) =>
+        current.map((node) =>
+          node.id === nodeId && node.data.kind === "stickyNote"
+            ? { ...node, data: { ...node.data, text } }
+            : node
+        )
+      );
+    },
+    [isReplayMode, setNodes]
+  );
+
+  const handleShapeLabelChange = useCallback(
+    (nodeId: string, label: string) => {
+      if (isReplayMode) {
+        return;
+      }
+
+      setNodes((current) =>
+        current.map((node) =>
+          node.id === nodeId && node.data.kind === "shape"
+            ? { ...node, data: { ...node.data, label } }
+            : node
+        )
+      );
+    },
+    [isReplayMode, setNodes]
+  );
+
   return (
     <main
       className="app-shell"
@@ -1003,41 +1269,56 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           onChange: handleMarkdownNodeChange,
         }}
       >
-        <Canvas<AgentCanvasNode, AgentCanvasEdge>
-          className={`agent-canvas canvas-tool-${canvasTool}`}
-          colorMode="light"
-          edgeTypes={edgeTypes}
-          fitViewOptions={{ maxZoom: 1, padding: 0.32 }}
-          maxZoom={1.5}
-          minZoom={0.28}
-          nodeTypes={nodeTypes}
-          nodes={canvasNodes}
-          edges={canvasEdges}
-          onInit={fileDrop.handleCanvasInit}
-          onEdgesChange={isReplayMode ? undefined : onEdgesChange}
-          onNodesChange={isReplayMode ? undefined : onNodesChange}
-          onPaneClick={() => {
-            if (!isReplayMode && !isHandTool) {
-              setNodes((current) => applySelectedNodeIds(current, []));
-            }
+        <ManualNodeEditingContext.Provider
+          value={{
+            readOnly: isReplayMode,
+            onShapeLabelChange: handleShapeLabelChange,
+            onStickyTextChange: handleStickyTextChange,
           }}
-          selectionMode={SelectionMode.Partial}
-          nodesDraggable={!isReplayMode && !isHandTool}
-          nodesConnectable={false}
-          panOnDrag={isHandTool}
-          selectionOnDrag={!isHandTool}
-          proOptions={{ hideAttribution: true }}
         >
-          <CanvasAutoFit nodeCount={canvasNodes.length} />
-          <Controls position="bottom-right" showInteractive={false} />
-          <MiniMap
-            pannable
-            zoomable
-            position="top-right"
-            className="canvas-minimap"
-          />
-        </Canvas>
+          <Canvas<AgentCanvasNode, AgentCanvasEdge>
+            className={`agent-canvas canvas-tool-${canvasTool}${
+              isCreateTool ? " canvas-tool-create" : ""
+            }`}
+            colorMode="light"
+            edgeTypes={edgeTypes}
+            fitViewOptions={{ maxZoom: 1, padding: 0.32 }}
+            maxZoom={1.5}
+            minZoom={0.28}
+            nodeTypes={nodeTypes}
+            nodes={canvasNodes}
+            edges={canvasEdges}
+            onInit={handleCanvasInit}
+            onEdgesChange={isReplayMode ? undefined : onEdgesChange}
+            onNodesChange={isReplayMode ? undefined : handleNodesChange}
+            onMouseDown={handleCreationMouseDown}
+            onPaneClick={() => {
+              if (!isReplayMode && !isHandTool && !isCreateTool) {
+                setNodes((current) => applySelectedNodeIds(current, []));
+              }
+            }}
+            selectionMode={SelectionMode.Partial}
+            nodesDraggable={!isReplayMode && !isHandTool && !isCreateTool}
+            nodesConnectable={false}
+            panOnDrag={isHandTool}
+            selectionOnDrag={!isHandTool && !isCreateTool}
+            proOptions={{ hideAttribution: true }}
+          >
+            <CanvasAutoFit
+              fitRequest={layoutFitRequest}
+              nodeCount={canvasNodes.length}
+            />
+            <Controls position="bottom-right" showInteractive={false} />
+            <MiniMap
+              pannable
+              zoomable
+              position="top-right"
+              className="canvas-minimap"
+            />
+          </Canvas>
+        </ManualNodeEditingContext.Provider>
       </MarkdownNodeEditingContext.Provider>
+      <CanvasCreationPreview preview={creationPreview} />
 
       <TopBar
         modelProvider={modelProvider}
@@ -1051,7 +1332,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       />
       <ToolRail activeTool={canvasTool} onToolChange={setCanvasTool} />
       <ViewportControls
+        canAutoLayout={!isReplayMode && nodes.length > 0}
         skillPanelOpen={skillPanelOpen}
+        onAutoLayout={handleAutoLayout}
         onToggleSkills={() => setSkillPanelOpen((current) => !current)}
       />
       <SkillPanel
@@ -1098,7 +1381,13 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   );
 }
 
-function CanvasAutoFit({ nodeCount }: { nodeCount: number }) {
+function CanvasAutoFit({
+  fitRequest,
+  nodeCount,
+}: {
+  fitRequest: number;
+  nodeCount: number;
+}) {
   const { fitView } = useReactFlow<AgentCanvasNode, AgentCanvasEdge>();
 
   useEffect(() => {
@@ -1111,9 +1400,30 @@ function CanvasAutoFit({ nodeCount }: { nodeCount: number }) {
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [fitView, nodeCount]);
+  }, [fitRequest, fitView, nodeCount]);
 
   return null;
+}
+
+function CanvasCreationPreview({ preview }: { preview: CreationPreview | null }) {
+  if (!preview) {
+    return null;
+  }
+
+  return (
+    <div
+      aria-hidden
+      className="canvas-creation-preview"
+      style={{
+        height: preview.rect.height,
+        left: preview.rect.left,
+        top: preview.rect.top,
+        width: preview.rect.width,
+      }}
+    >
+      <span>{preview.label}</span>
+    </div>
+  );
 }
 
 function getInitialSelectedNodeIds(
@@ -1142,6 +1452,139 @@ function applySelectedNodeIds(
     const selected = selectedNodeIdSet.has(node.id);
     return node.selected === selected ? node : { ...node, selected };
   });
+}
+
+function applyLinkedNodeDragChanges(
+  changes: NodeChange<AgentCanvasNode>[],
+  nodes: AgentCanvasNode[],
+  edges: AgentCanvasEdge[]
+) {
+  const nextNodes = applyNodeChanges<AgentCanvasNode>(changes, nodes);
+  const positionChanges = changes.filter(isPositionChangeWithPosition);
+  if (!positionChanges.length) {
+    return nextNodes;
+  }
+
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const nextNodesById = new Map(nextNodes.map((node) => [node.id, node]));
+  const movedNodeIds = new Set(positionChanges.map((change) => change.id));
+  const rootPositionChanges = positionChanges.filter(
+    (change) => !hasMovedAncestor(change.id, movedNodeIds, edges)
+  );
+  const offsetsByNodeId = new Map<string, { x: number; y: number }>();
+
+  for (const change of rootPositionChanges) {
+    const previousNode = nodesById.get(change.id);
+    const nextNode = nextNodesById.get(change.id);
+    if (!previousNode || !nextNode) {
+      continue;
+    }
+
+    const offset = {
+      x: nextNode.position.x - previousNode.position.x,
+      y: nextNode.position.y - previousNode.position.y,
+    };
+    if (!offset.x && !offset.y) {
+      continue;
+    }
+
+    for (const descendantId of getDescendantNodeIds(change.id, edges)) {
+      if (movedNodeIds.has(descendantId) || offsetsByNodeId.has(descendantId)) {
+        continue;
+      }
+      offsetsByNodeId.set(descendantId, offset);
+    }
+  }
+
+  if (!offsetsByNodeId.size) {
+    return nextNodes;
+  }
+
+  return nextNodes.map((node) => {
+    const offset = offsetsByNodeId.get(node.id);
+    if (!offset) {
+      return node;
+    }
+
+    return {
+      ...node,
+      position: {
+        x: node.position.x + offset.x,
+        y: node.position.y + offset.y,
+      },
+    };
+  });
+}
+
+type PositionChangeWithPosition = Extract<
+  NodeChange<AgentCanvasNode>,
+  { type: "position" }
+> & {
+  position: { x: number; y: number };
+};
+
+function isPositionChangeWithPosition(
+  change: NodeChange<AgentCanvasNode>
+): change is PositionChangeWithPosition {
+  return (
+    change.type === "position" &&
+    "position" in change &&
+    typeof change.position?.x === "number" &&
+    typeof change.position.y === "number"
+  );
+}
+
+function hasMovedAncestor(
+  nodeId: string,
+  movedNodeIds: Set<string>,
+  edges: AgentCanvasEdge[]
+) {
+  const incomingByTarget = new Map<string, string[]>();
+  for (const edge of edges) {
+    const incoming = incomingByTarget.get(edge.target) ?? [];
+    incoming.push(edge.source);
+    incomingByTarget.set(edge.target, incoming);
+  }
+
+  const visited = new Set<string>();
+  const queue = [...(incomingByTarget.get(nodeId) ?? [])];
+  while (queue.length) {
+    const currentId = queue.shift();
+    if (!currentId || visited.has(currentId)) {
+      continue;
+    }
+    visited.add(currentId);
+    if (movedNodeIds.has(currentId)) {
+      return true;
+    }
+    queue.push(...(incomingByTarget.get(currentId) ?? []));
+  }
+
+  return false;
+}
+
+function getDescendantNodeIds(nodeId: string, edges: AgentCanvasEdge[]) {
+  const outgoingBySource = new Map<string, string[]>();
+  for (const edge of edges) {
+    const outgoing = outgoingBySource.get(edge.source) ?? [];
+    outgoing.push(edge.target);
+    outgoingBySource.set(edge.source, outgoing);
+  }
+
+  const descendants: string[] = [];
+  const visited = new Set<string>([nodeId]);
+  const queue = [...(outgoingBySource.get(nodeId) ?? [])];
+  while (queue.length) {
+    const currentId = queue.shift();
+    if (!currentId || visited.has(currentId)) {
+      continue;
+    }
+    visited.add(currentId);
+    descendants.push(currentId);
+    queue.push(...(outgoingBySource.get(currentId) ?? []));
+  }
+
+  return descendants;
 }
 
 function mergeProjectedNodes(
@@ -1218,6 +1661,137 @@ function dedupeRuntimeEvents(events: StreamedRuntimeEvents): StreamedRuntimeEven
   }
 
   return deduped;
+}
+
+function getManualNodeTemplateForTool(tool: CanvasTool) {
+  if (tool === "select" || tool === "hand") {
+    return null;
+  }
+
+  return manualNodeTemplates.find((template) => template.tool === tool) ?? null;
+}
+
+function isCanvasPaneEventTarget(target: EventTarget) {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+
+  return Boolean(
+    target.closest(".react-flow__pane") && !target.closest(".react-flow__node")
+  );
+}
+
+function screenRectFromPoints(start: CanvasPoint, end: CanvasPoint) {
+  return {
+    height: Math.abs(end.y - start.y),
+    left: Math.min(start.x, end.x),
+    top: Math.min(start.y, end.y),
+    width: Math.abs(end.x - start.x),
+  };
+}
+
+function createManualCanvasNodeFromDrag(
+  draft: CreationDraft,
+  endScreen: CanvasPoint,
+  instance: ReactFlowInstance<AgentCanvasNode, AgentCanvasEdge>
+) {
+  const endFlow = instance.screenToFlowPosition(endScreen);
+  const defaultDimensions = getDefaultManualNodeDimensions(draft.template);
+  const minimumDimensions = getMinimumManualNodeDimensions(draft.template);
+  const draggedWidth = Math.abs(endFlow.x - draft.startFlow.x);
+  const draggedHeight = Math.abs(endFlow.y - draft.startFlow.y);
+  const usedDefaultSize = draggedWidth < 8 && draggedHeight < 8;
+  const dimensions = usedDefaultSize
+    ? defaultDimensions
+    : {
+        width: Math.max(draggedWidth, minimumDimensions.width),
+        height: Math.max(draggedHeight, minimumDimensions.height),
+      };
+  const position = usedDefaultSize
+    ? draft.startFlow
+    : {
+        x: Math.min(draft.startFlow.x, endFlow.x),
+        y: Math.min(draft.startFlow.y, endFlow.y),
+      };
+
+  return createManualCanvasNode(draft.template, position, dimensions);
+}
+
+function createManualCanvasNode(
+  template: ManualNodeTemplate,
+  position: CanvasPoint,
+  dimensions: { width: number; height: number }
+): AgentCanvasNode {
+  const createdAt = new Date().toISOString();
+  if (template.kind === "stickyNote") {
+    return {
+      id: createCanvasNodeId("sticky"),
+      type: "stickyNoteNode",
+      position,
+      ...dimensions,
+      data: {
+        kind: "stickyNote",
+        color: template.color,
+        createdAt,
+        text: template.text,
+      },
+    };
+  }
+
+  return {
+    id: createCanvasNodeId("shape"),
+    type: "shapeNode",
+    position,
+    ...dimensions,
+    data: {
+      kind: "shape",
+      createdAt,
+      label: template.label,
+      shape: template.shape,
+    },
+  };
+}
+
+function createCanvasNodeId(prefix: string) {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+}
+
+function getDefaultManualNodeDimensions(template: ManualNodeTemplate) {
+  if (template.kind === "stickyNote") {
+    return { width: 220, height: 170 };
+  }
+
+  return getDefaultShapeDimensions(template.shape);
+}
+
+function getMinimumManualNodeDimensions(template: ManualNodeTemplate) {
+  if (template.kind === "stickyNote") {
+    return { width: 150, height: 110 };
+  }
+  if (template.shape === "ellipse") {
+    return { width: 72, height: 72 };
+  }
+
+  return { width: 88, height: 64 };
+}
+
+function getDefaultShapeDimensions(shape: ShapeVariant) {
+  if (shape === "frame") {
+    return { width: 280, height: 190 };
+  }
+  if (shape === "pill") {
+    return { width: 220, height: 96 };
+  }
+  if (shape === "ellipse") {
+    return { width: 180, height: 180 };
+  }
+  if (shape === "triangle") {
+    return { width: 190, height: 170 };
+  }
+
+  return { width: 200, height: 140 };
 }
 
 async function hydrateProjectSnapshotFromLastRun(project: PersistedProject) {
@@ -1348,30 +1922,27 @@ function ToolRail({
   onToolChange: (tool: CanvasTool) => void;
 }) {
   const tools: ToolRailItem[] = [
-    { icon: MousePointer2, label: "移动工具", tool: "select" as const },
-    { icon: Hand, label: "抓手工具", tool: "hand" as const },
-    { icon: PenLine, label: "Draw", disabled: true },
-    { icon: Type, label: "Text", disabled: true },
-    { icon: Frame, label: "Frame", disabled: true },
-    { icon: Plus, label: "Insert", disabled: true },
-    { icon: Image, label: "Image", disabled: true },
-    { icon: Box, label: "Container", disabled: true },
-    { icon: ArrowUpRight, label: "Connector", disabled: true },
+    { icon: MousePointer2, label: "移动工具", tool: "select" },
+    { icon: Hand, label: "抓手工具", tool: "hand" },
+    ...manualNodeTemplates.map((template) => ({
+      icon: template.icon,
+      label: template.label,
+      tool: template.tool,
+    })),
   ];
 
   return (
     <aside className="tool-rail" aria-label="Canvas tools">
-      {tools.map(({ icon: Icon, label, tool, disabled }) => {
+      {tools.map(({ icon: Icon, label, tool }) => {
         const active = tool === activeTool;
         return (
           <button
             aria-label={label}
             className={active ? "active" : ""}
-            disabled={disabled}
             key={label}
-            onClick={tool ? () => onToolChange(tool) : undefined}
+            onClick={() => onToolChange(tool)}
             type="button"
-            title={disabled ? "暂未开放" : label}
+            title={label}
           >
             <Icon size={16} />
           </button>
@@ -1382,10 +1953,14 @@ function ToolRail({
 }
 
 function ViewportControls({
+  canAutoLayout,
   skillPanelOpen,
+  onAutoLayout,
   onToggleSkills,
 }: {
+  canAutoLayout: boolean;
   skillPanelOpen: boolean;
+  onAutoLayout: () => void;
   onToggleSkills: () => void;
 }) {
   return (
@@ -1398,6 +1973,15 @@ function ViewportControls({
       </button>
       <button aria-label="Generated files" disabled title="暂未开放" type="button">
         <Image size={14} />
+      </button>
+      <button
+        aria-label="自动布局"
+        disabled={!canAutoLayout}
+        onClick={onAutoLayout}
+        title={canAutoLayout ? "自动布局" : "暂无节点"}
+        type="button"
+      >
+        <Workflow size={14} />
       </button>
       <button
         aria-label="Skills"
@@ -1741,6 +2325,81 @@ function PromptNode({
   );
 }
 
+function StickyNoteNode({
+  id,
+  data,
+  selected,
+  width,
+  height,
+}: NodeProps<FlowNode<StickyNoteNodeData, "stickyNoteNode">>) {
+  const { onStickyTextChange, readOnly } = useContext(ManualNodeEditingContext);
+
+  return (
+    <Node
+      className={
+        selected
+          ? `canvas-node selected sticky-note-card ${data.color}`
+          : `canvas-node sticky-note-card ${data.color}`
+      }
+      handles={{ source: true, target: true }}
+      minHeight={120}
+      minWidth={160}
+      selected={selected}
+      style={getResizableNodeStyle(width, height)}
+    >
+      <NodeContent className="sticky-note-content">
+        <textarea
+          aria-label="便签内容"
+          className="sticky-note-input nodrag nopan nowheel"
+          onChange={(event) => onStickyTextChange(id, event.currentTarget.value)}
+          placeholder="写下想法..."
+          readOnly={readOnly}
+          spellCheck={false}
+          value={data.text}
+        />
+      </NodeContent>
+    </Node>
+  );
+}
+
+function ShapeNode({
+  id,
+  data,
+  selected,
+  width,
+  height,
+}: NodeProps<FlowNode<ShapeNodeData, "shapeNode">>) {
+  const { onShapeLabelChange, readOnly } = useContext(ManualNodeEditingContext);
+
+  return (
+    <Node
+      className={
+        selected
+          ? `canvas-node selected shape-card ${data.shape}`
+          : `canvas-node shape-card ${data.shape}`
+      }
+      handles={{ source: true, target: true }}
+      minHeight={72}
+      minWidth={96}
+      selected={selected}
+      style={getResizableNodeStyle(width, height)}
+    >
+      <NodeContent className="shape-content">
+        <div className="shape-visual">
+          <input
+            aria-label="形状标签"
+            className="shape-label-input nodrag nopan"
+            onChange={(event) => onShapeLabelChange(id, event.currentTarget.value)}
+            readOnly={readOnly}
+            spellCheck={false}
+            value={data.label}
+          />
+        </div>
+      </NodeContent>
+    </Node>
+  );
+}
+
 type ArtifactLikeNodeData = Extract<
   AgentCanvasNode["data"],
   {
@@ -2000,7 +2659,7 @@ function ImageResultNode({
         selected ? "canvas-node selected result-card" : "canvas-node result-card"
       }
       handles={{ source: true, target: true }}
-      minHeight={120}
+      minHeight={24}
       minWidth={120}
       selected={selected}
       style={getResizableNodeStyle(width, height)}

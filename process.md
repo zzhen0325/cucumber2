@@ -17,6 +17,27 @@
 
 ## 2026-06-09
 
+### React Flow 便签与形状工具
+
+- 变更：左侧工具栏直接平铺便签、矩形、圆形、菱形、三角形、胶囊和框架工具；选择工具后在画布空白处拖拽绘制节点尺寸，松开后生成节点并自动切回移动工具；便签内容和形状标签可在节点内编辑并随项目快照保存。
+- 文件：`src/types/canvas.ts`、`src/components/CanvasWorkspace.tsx`、`src/lib/graph.ts`、`src/App.css`、`README.md`、`process.md`。
+- 验证：已对照 React Flow Custom Nodes 与 Drag and Drop 官方示例；`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm exec eslint src/components/CanvasWorkspace.tsx src/lib/graph.ts src/lib/graph-projection.ts src/types/canvas.ts` 通过。
+- 备注：手动节点使用现有 `AgentCanvasNode` 数据模型，不新增独立画布状态；文件拖拽上传仍由原有 file drop 逻辑处理。
+
+### 父级节点联动拖拽子级
+
+- 变更：画布节点变更改为自定义处理，父节点拖动时按现有 `source -> target` 边关系递归移动所有下游子级节点；保持 React Flow 原生拖拽、框选和多选拖动行为，不迁移到 `parentId` 子流坐标模型。
+- 文件：`src/components/CanvasWorkspace.tsx`、`README.md`、`process.md`。
+- 验证：已对照 React Flow Sub Flows 官方文档；`pnpm exec tsc -b --pretty false` 通过。
+- 备注：完整 `pnpm lint` 仍被既有 `src/components/BlockNoteMarkdownEditor.tsx` 的 `react-hooks/refs` 问题阻断，本次未改该文件。
+
+### React Flow 画布自动布局
+
+- 变更：新增 Dagre 驱动的画布自动布局能力，右上 viewport controls 提供“自动布局”按钮；项目加载时保留已有位置，新节点或新边出现后自动重排，纯拖拽位置变化不会触发重排。
+- 文件：`src/lib/canvas-layout.ts`、`src/lib/canvas-layout.test.ts`、`src/components/CanvasWorkspace.tsx`、`src/App.css`、`README.md`、`package.json`、`pnpm-lock.yaml`、`process.md`。
+- 验证：`pnpm exec vitest run src/lib/canvas-layout.test.ts --reporter=dot`、`pnpm exec tsc -p tsconfig.app.json --noEmit`、`pnpm exec eslint src/lib/canvas-layout.ts src/lib/canvas-layout.test.ts src/components/CanvasWorkspace.tsx` 通过。
+- 备注：已按 React Flow 官方 Layouting 文档采用外部布局库；Dagre 返回中心点坐标，前端转换为 React Flow 的左上角坐标。
+
 ### 允许画布节点文本选取复制
 
 - 变更：对 Prompt、Artifact、HTML、Markdown 标题和 Run 输出文本区域补充 React Flow `nodrag` / `nopan` 交互类，并恢复 `user-select: text`；Markdown 编辑/预览滚动区域补充 `nowheel`，避免滚动时带动画布。

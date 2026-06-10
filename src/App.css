@@ -45,6 +45,37 @@
   cursor: grabbing;
 }
 
+.agent-canvas.canvas-tool-create .react-flow__pane {
+  cursor: crosshair;
+}
+
+.canvas-creation-preview {
+  position: absolute;
+  z-index: 18;
+  display: grid;
+  min-width: 8px;
+  min-height: 8px;
+  place-items: center;
+  border: 1px solid rgba(41, 191, 78, 0.76);
+  border-radius: 18px;
+  background: rgba(41, 191, 78, 0.08);
+  box-shadow: 0 0 0 3px rgba(41, 191, 78, 0.08);
+  color: rgba(23, 66, 34, 0.78);
+  font-size: 11px;
+  line-height: 14px;
+  pointer-events: none;
+}
+
+.canvas-creation-preview span {
+  max-width: 86px;
+  overflow: hidden;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .agent-canvas .react-flow__selection,
 .agent-canvas .react-flow__nodesselection-rect {
   border-radius: 12px;
@@ -613,7 +644,7 @@
   display: flex;
   align-items: center;
   gap: 2px;
-  width: 243px;
+  width: 273px;
   height: 38px;
   padding: 5px;
   border: 1px solid #ebebeb;
@@ -1191,6 +1222,118 @@
   text-align: center;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.sticky-note-card {
+  width: 220px;
+  height: 170px;
+  border-color: rgba(217, 207, 116, 0.48);
+  background: #fff8b8;
+  box-shadow: 0 6px 18px rgba(111, 93, 18, 0.07);
+}
+
+.sticky-note-card.green {
+  border-color: rgba(41, 191, 78, 0.24);
+  background: #eaffcf;
+}
+
+.sticky-note-card.blue {
+  border-color: rgba(74, 132, 195, 0.2);
+  background: #eaf4ff;
+}
+
+.sticky-note-card.pink {
+  border-color: rgba(212, 92, 142, 0.2);
+  background: #ffeef5;
+}
+
+.sticky-note-content {
+  height: 100%;
+  padding: 16px;
+}
+
+.sticky-note-input {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #111111;
+  font: inherit;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.sticky-note-input::placeholder {
+  color: rgba(17, 17, 17, 0.42);
+}
+
+.shape-card {
+  width: 200px;
+  height: 140px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.shape-card.selected {
+  border-color: transparent;
+}
+
+.shape-content {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  place-items: stretch;
+}
+
+.shape-visual {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  border: 1px solid #e4e3df;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+}
+
+.shape-card.ellipse .shape-visual {
+  border-radius: 999px;
+}
+
+.shape-card.pill .shape-visual {
+  border-radius: 999px;
+}
+
+.shape-card.diamond .shape-visual {
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  border-radius: 0;
+}
+
+.shape-card.triangle .shape-visual {
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  border-radius: 0;
+}
+
+.shape-card.frame .shape-visual {
+  border: 1.5px dashed #d9d9d9;
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.shape-label-input {
+  width: min(80%, 140px);
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #111111;
+  font: inherit;
+  font-size: 12px;
+  line-height: 16px;
+  text-align: center;
 }
 
 .run-card {
@@ -2013,7 +2156,7 @@
   position: relative;
   width: 240px;
   height: 240px;
-  min-height: 120px;
+  min-height: 24px;
   overflow: visible;
 }
 
@@ -2368,7 +2511,7 @@
 
   .viewport-controls {
     right: 10px;
-    width: 232px;
+    width: 262px;
   }
 
   .skill-panel {

@@ -361,6 +361,24 @@ describe("agent canvas graph", () => {
     expect(resultEdges[0]).toMatchObject({ source: "run-1", target: "image-a" });
   });
 
+  it("sizes image result nodes from the generated image ratio", () => {
+    const run = runNode("run-1", "生成 16:9 横版图片");
+    const { resultNodes } = createImageResultNodes(
+      run,
+      [
+        {
+          id: "wide",
+          url: "https://cdn.example/wide.png",
+          metadata: { width: 1536, height: 864 },
+        },
+      ],
+      [run]
+    );
+
+    expect(resultNodes[0].width).toBe(240);
+    expect(resultNodes[0].height).toBe(135);
+  });
+
   it("maps markdown tool output into a document container node", () => {
     const run = runNode("run-1", "调研竞品并输出 Markdown");
     const documents = extractMarkdownDocumentsFromToolOutput({
