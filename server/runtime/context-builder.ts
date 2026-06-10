@@ -1,5 +1,6 @@
 import type { AgentSkill } from "../supabase.ts";
 import { PROMPT_EXPAND_CAPABILITY_ID } from "../capabilities.ts";
+import { toModelSafeUpstreamContextItem } from "../prompts.ts";
 import type {
   AgentInput,
   BuiltContext,
@@ -32,6 +33,7 @@ export function buildContext({
   const graphItems = input.canvasContext.upstreamContext
     .map((item, index): ContextItem => {
       const selected = item.nodeId === input.canvasContext.selectedNodeId;
+      const modelSafeItem = toModelSafeUpstreamContextItem(item);
       const relevanceScore = selected
         ? 1
         : Math.max(0.2, 0.85 - index * 0.08 + (item.priority ?? 0) * 0.05);
@@ -41,7 +43,13 @@ export function buildContext({
         source: selected ? "selected_node" : "upstream_graph",
         relevanceScore,
         tokenEstimate: estimateTokens(
-          [item.summary, item.prompt, item.title, item.contentRef, item.imageUrl]
+          [
+            modelSafeItem.summary,
+            modelSafeItem.prompt,
+            modelSafeItem.title,
+            modelSafeItem.contentRef,
+            modelSafeItem.referenceImageAvailable ? "reference image" : undefined,
+          ]
             .filter(Boolean)
             .join("\n")
         ),
@@ -66,8 +74,8 @@ export function buildContext({
           attachment.name,
           attachment.mimeType,
           attachment.preview,
-          attachment.contentRef,
-          attachment.uri,
+          attachment.kind === "image" ? undefined : attachment.contentRef,
+          attachment.kind === "image" ? "reference image" : attachment.uri,
         ]
           .filter(Boolean)
           .join("\n")
@@ -274,15 +282,19 @@ function readCapabilityId(sourceManifest: Record<string, unknown>) {
 }
 
 function renderContextItem(item: ContextItem) {
+  const modelSafeItem = toModelSafeUpstreamContextItem(item);
+
   return [
-    `nodeId: ${item.nodeId}`,
-    `type: ${item.type}`,
+    `nodeId: ${modelSafeItem.nodeId}`,
+    `type: ${modelSafeItem.type}`,
     `reason: ${item.inclusionReason}`,
-    item.title ? `title: ${item.title}` : "",
-    item.summary ? `summary: ${item.summary}` : "",
-    item.prompt ? `prompt: ${item.prompt}` : "",
-    item.imageUrl ? `imageUrl: ${item.imageUrl}` : "",
-    item.contentRef ? `contentRef: ${item.contentRef}` : "",
+    modelSafeItem.title ? `title: ${modelSafeItem.title}` : "",
+    modelSafeItem.summary ? `summary: ${modelSafeItem.summary}` : "",
+    modelSafeItem.prompt ? `prompt: ${modelSafeItem.prompt}` : "",
+    modelSafeItem.referenceImageAvailable
+      ? "referenceImageAvailable: true"
+      : "",
+    modelSafeItem.contentRef ? `contentRef: ${modelSafeItem.contentRef}` : "",
   ]
     .filter(Boolean)
     .join("\n");

@@ -12,6 +12,10 @@ import {
   inferSeedreamResultCount,
   readSeedreamMaxOutputImagesFromEnv,
 } from "../../seedream.ts";
+import {
+  toModelSafeUpstreamContext,
+  toModelSafeUpstreamContextItem,
+} from "../prompts.ts";
 import type { AgentInput, IntentResult, StructuredTask } from "../../src/types/runtime.ts";
 import { intentResultSchema } from "./schemas.ts";
 import { toolIds, type ToolRegistry } from "./tool-registry.ts";
@@ -112,7 +116,6 @@ export async function routeIntent({
         })
   );
   const runtimeIntent = normalizeIntentForRuntimeContract({
-    input,
     intent: routed,
     toolRegistry,
   });
@@ -296,11 +299,7 @@ export function routeIntentDeterministically({
     });
   }
 
-  const requiredTools = [
-    ...(hasReferenceImage ? [toolIds.analyzeReferenceImages] : []),
-    toolIds.expandPrompt,
-    toolIds.generateImage,
-  ];
+  const requiredTools = [toolIds.expandPrompt, toolIds.generateImage];
 
   return intentResultSchema.parse({
     primaryIntent: "image_generation",
@@ -377,11 +376,9 @@ export function validateIntentAgainstRegistry({
 }
 
 function normalizeIntentForRuntimeContract({
-  input,
   intent,
   toolRegistry,
 }: {
-  input: AgentInput;
   intent: IntentResult;
   toolRegistry: ToolRegistry;
 }): IntentResult {
@@ -392,13 +389,7 @@ function normalizeIntentForRuntimeContract({
     return intent;
   }
 
-  const hasReferenceImage = input.canvasContext.upstreamContext.some(
-    (item) => item.type === "image" || item.artifact?.type === "image"
-  );
   const requiredImageTools = [
-    ...(hasReferenceImage && toolRegistry.getTool(toolIds.analyzeReferenceImages)
-      ? [toolIds.analyzeReferenceImages]
-      : []),
     ...(toolRegistry.getTool(toolIds.expandPrompt) ? [toolIds.expandPrompt] : []),
     toolIds.generateImage,
   ];
@@ -482,22 +473,20 @@ function buildIntentRouterPrompt({
           kind: attachment.kind,
           name: attachment.name,
           mimeType: attachment.mimeType,
-          contentRef: attachment.contentRef,
+          contentRef:
+            attachment.kind === "image" ? undefined : attachment.contentRef,
           artifactType: attachment.artifact?.type,
         })),
         selectedNodeId: input.canvasContext.selectedNodeId ?? null,
-        selectedNode: input.canvasContext.upstreamContext.find(
-          (item) => item.nodeId === input.canvasContext.selectedNodeId
+        selectedNode: (() => {
+          const selected = input.canvasContext.upstreamContext.find(
+            (item) => item.nodeId === input.canvasContext.selectedNodeId
+          );
+          return selected ? toModelSafeUpstreamContextItem(selected) : undefined;
+        })(),
+        upstreamContext: toModelSafeUpstreamContext(
+          input.canvasContext.upstreamContext
         ),
-        upstreamContext: input.canvasContext.upstreamContext.map((item) => ({
-          nodeId: item.nodeId,
-          type: item.type,
-          artifactType: item.artifact?.type,
-          title: item.title,
-          summary: item.summary,
-          prompt: item.prompt,
-          contentRef: item.contentRef,
-        })),
       },
       null,
       2
@@ -621,9 +610,6 @@ function buildPreferredIntentExample({
   }
 
   const requiredTools = [
-    ...(hasReferenceImage && toolRegistry.getTool(toolIds.analyzeReferenceImages)
-      ? [toolIds.analyzeReferenceImages]
-      : []),
     ...(toolRegistry.getTool(toolIds.expandPrompt) ? [toolIds.expandPrompt] : []),
     toolIds.generateImage,
   ];
@@ -1037,6 +1023,14 @@ function createImageTask(
         kind: "policy",
         text: "Model outputs must become validated tool inputs or canvas operation proposals.",
       },
+      ...(hasReferenceImage
+        ? [
+            {
+              kind: "policy" as const,
+              text: "Reference images are passed directly to the image generation provider and must not be analyzed by the language model.",
+            },
+          ]
+        : []),
     ],
     deliverables: [
       {
@@ -1045,16 +1039,7 @@ function createImageTask(
         count: resultCount,
       },
     ],
-      operations: [
-      ...(hasReferenceImage
-        ? [
-            {
-              kind: "analyze" as const,
-              target: "reference_images",
-              toolHint: toolIds.analyzeReferenceImages,
-            },
-          ]
-        : []),
+    operations: [
       {
         kind: "generate",
         target: "expanded_prompt",

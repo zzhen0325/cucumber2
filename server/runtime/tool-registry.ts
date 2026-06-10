@@ -29,8 +29,6 @@ import {
 import {
   createGenerateImageTool,
   createPromptExpandTool,
-  createReferenceImageTool,
-  selectRuntimeReferenceImages,
 } from "./tools/image-tools.ts";
 import { createDocumentWriteTool } from "./tools/document-tools.ts";
 import { toolIds } from "./tools/ids.ts";
@@ -47,6 +45,10 @@ export type RuntimeToolDefinition = ToolDefinition & {
   inputSchema: z.ZodType;
   outputSchema: z.ZodType;
   toPlannerToolName: string;
+  toModelOutput?: (output: unknown) => {
+    type: "text";
+    value: string;
+  };
   prepareInput?: (input: {
     context: BuiltContext;
     previousSteps: AgentStep[];
@@ -115,14 +117,7 @@ export function buildToolRegistry({
   );
   const promptSkill = promptExpandCapability?.skill as AgentSkill | undefined;
 
-  const referenceImages = selectRuntimeReferenceImages(canvasContext);
-  const tools: RuntimeToolDefinition[] = [
-    createReferenceImageTool({
-      imageCapability,
-      canvasContext,
-      referenceImages,
-    }),
-  ];
+  const tools: RuntimeToolDefinition[] = [];
 
   if (promptExpandCapability && promptSkill) {
     tools.push(

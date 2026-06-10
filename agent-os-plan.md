@@ -15,7 +15,7 @@
 - `server/runtime/schemas.ts` 为跨边界 runtime 对象提供 Zod schema。
 - `server/runtime/input-normalizer.ts`、`intent-router.ts`、`context-builder.ts`、`planner.ts`、`tool-registry.ts`、`executor.ts`、`evaluator.ts` 分别实现输入标准化、结构化意图、上下文选择、schema-validated plan、工具注册、通用 step 执行和基础质量评估。
 - `server/runtime/run-store.ts` 负责 `AgentRun` 快照，`supabase/migrations/20260608005000_agent_runtime_core.sql` 新增 `agent_runs`、`agent_run_steps` 并扩展 event 类型约束。
-- Tool Registry 已注册当前图片链路工具：`vision.analyzeReferenceImages`、`prompt.expand`、`seedream.generateImage`；文本产物工具：`document.write`；网页/页面工具：`web.read`、`asset.analyzeContext`、`page.generate`；以及 `canvas.createNode`、`canvas.updateNode`、`canvas.createEdge`、`canvas.attachArtifact` proposal tools。
+- Tool Registry 已注册当前图片链路工具：`prompt.expand`、`seedream.generateImage`；参考图不经过语言模型分析，由服务端直接写入 Seedream `image_urls`。文本产物工具为 `document.write`；网页/页面工具为 `web.read`、`asset.analyzeContext`、`page.generate`；另有 `canvas.createNode`、`canvas.updateNode`、`canvas.createEdge`、`canvas.attachArtifact` proposal tools。
 - `src/lib/runtime-event-renderer.ts` 提供明确的 Runtime Event -> Canvas 投影入口，复用现有 `src/lib/graph-projection.ts` reducer。
 - `src/lib/graph.ts` 已有 `collectUpstreamContextWithTrace`，能按 ReactFlow 图结构收集上游 prompt、image、artifact、doc、code、webpage、memory 等 context item。
 - `server/prompts.ts` 仍保留具体 prompt render helper；Context Builder 负责 runtime selection、budget、tool exposure 和 skill injection trace。
@@ -445,7 +445,7 @@ pnpm exec tsc -p tsconfig.app.json --noEmit
 - [x] 新增 `server/runtime/tools/` 目录，每个工具一个文件或一个领域一个文件。
 - [x] 将当前 `generateSeedreamImage` 包装为 `seedream.generateImage` tool。
 - [x] 将 `expandPromptWithSkill` 包装为 `prompt.expand` tool。
-- [x] 将 `analyzeReferenceImages` 包装为 `vision.analyzeReferenceImages` tool。
+- [x] 参考图改为绕过语言模型，直接作为 `seedream.generateImage` 的 provider input。
 - [x] 新增 canvas tools 的接口定义：`canvas.createNode`、`canvas.updateNode`、`canvas.createEdge`、`canvas.attachArtifact`。第一版只返回 `CanvasOperation` proposal，不直接写项目快照。
 - [x] 新增 tool policy：network、write files、modify project、external cost、approval、timeout、retry。
 - [x] 工具输入输出必须使用 Zod parse，失败返回 typed `AgentError`。
@@ -557,7 +557,7 @@ Part 1 完成必须满足：
 - [x] Context Builder 独立决定 context、skill、tool exposure。
 - [x] Planner 是 LLM planner，并通过 schema + registry validation。
 - [x] Executor 通过 `executor.runStep` 执行通用 step。
-- [x] Tool Registry 可注册至少当前三类工具：prompt expand、reference image analysis、image generate。
+- [x] Tool Registry 可注册当前图片链路工具：prompt expand、image generate；参考图由 image generate 直接消费。
 - [x] 当前图片生成体验不回退。
 - [x] 最小测试通过。
 

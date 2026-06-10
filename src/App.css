@@ -1187,16 +1187,43 @@
 }
 
 .canvas-node-resizer-line {
-  border-color: rgba(41, 191, 78, 0.72) !important;
+  border-color: transparent !important;
+  background: transparent !important;
+  opacity: 0 !important;
 }
 
 .canvas-node-resizer-handle {
-  width: 9px !important;
-  height: 9px !important;
-  border: 2px solid #ffffff !important;
-  border-radius: 50% !important;
-  background: #29bf4e !important;
-  box-shadow: 0 2px 8px rgba(41, 191, 78, 0.22);
+  width: 16px !important;
+  height: 16px !important;
+  border: 0 !important;
+  border-radius: 10 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: transparent !important;
+}
+
+.canvas-node-resizer-handle.top.left {
+  border-top: 3px solid #d9d8d4 !important;
+  border-left: 3px solid #d9d8d4 !important;
+  border-top-left-radius: 18px !important;
+}
+
+.canvas-node-resizer-handle.top.right {
+  border-top: 3px solid #d9d8d4 !important;
+  border-right: 3px solid #d9d8d4 !important;
+  border-top-right-radius: 18px !important;
+}
+
+.canvas-node-resizer-handle.bottom.left {
+  border-bottom: 3px solid #d9d8d4 !important;
+  border-left: 3px solid #d9d8d4 !important;
+  border-bottom-left-radius: 18px !important;
+}
+
+.canvas-node-resizer-handle.bottom.right {
+  border-right: 3px solid #d9d8d4 !important;
+  border-bottom: 3px solid #d9d8d4 !important;
+  border-bottom-right-radius: 18px !important;
 }
 
 .prompt-card {

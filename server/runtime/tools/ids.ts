@@ -1,5 +1,4 @@
 export const toolIds = {
-  analyzeReferenceImages: "vision.analyzeReferenceImages",
   analyzeAssets: "asset.analyzeContext",
   attachArtifact: "canvas.attachArtifact",
   createCanvasEdge: "canvas.createEdge",

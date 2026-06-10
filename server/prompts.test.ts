@@ -32,23 +32,26 @@ const skill = {
 
 describe("server prompt helpers", () => {
   it("formats upstream context once for prompt and image nodes", () => {
-    expect(
-      formatUpstreamContext([
-        {
-          nodeId: "prompt-1",
-          prompt: "初始需求",
-          summary: "初始需求",
-          type: "prompt",
-        },
-        {
-          imageUrl: "https://cdn.example/1.png",
-          nodeId: "image-1",
-          prompt: "生成图片",
-          summary: "Generated image",
-          type: "image",
-        },
-      ])
-    ).toContain("prompt: 生成图片");
+    const imageUrl = `data:image/png;base64,${"A".repeat(20_000)}`;
+    const formatted = formatUpstreamContext([
+      {
+        nodeId: "prompt-1",
+        prompt: "初始需求",
+        summary: "初始需求",
+        type: "prompt",
+      },
+      {
+        imageUrl,
+        nodeId: "image-1",
+        prompt: "生成图片",
+        summary: "Generated image",
+        type: "image",
+      },
+    ]);
+
+    expect(formatted).toContain("prompt: 生成图片");
+    expect(formatted).toContain("referenceImageAvailable: true");
+    expect(formatted).not.toContain(imageUrl);
   });
 
   it("selects the text config instead of truncating the whole config blob", () => {

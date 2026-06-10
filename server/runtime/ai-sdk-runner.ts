@@ -17,6 +17,8 @@ import {
 } from "../model-providers.ts";
 import {
   AGENT_RUN_TEXT_SYSTEM_PROMPT,
+  toModelSafeUpstreamContext,
+  toModelSafeUpstreamContextItem,
   type PromptCanvasContext,
 } from "../prompts.ts";
 import {
@@ -452,6 +454,7 @@ function createAiSdkTools({
 
   for (const runtimeTool of toolRegistry.listAll()) {
     const aiToolName = getAiSdkToolName(runtimeTool);
+    const toModelOutput = runtimeTool.toModelOutput;
     tools[aiToolName] = aiTool({
       title: runtimeTool.name,
       description: [
@@ -465,6 +468,9 @@ function createAiSdkTools({
         ? z.object({}).passthrough()
         : runtimeTool.inputSchema,
       metadata: getToolTraceMetadata(runtimeTool),
+      toModelOutput: toModelOutput
+        ? ({ output }) => toModelOutput(output)
+        : undefined,
       async execute(input, options) {
         return executeRuntimeToolFromAiSdk({
           input,
@@ -1018,7 +1024,9 @@ function buildAiSdkAgentPrompt({
         modelProvider,
         promptNodeId: canvasContext.promptNodeId ?? null,
         selectedNodeId: canvasContext.selectedNodeId ?? null,
-        upstreamContext: canvasContext.upstreamContext,
+        upstreamContext: toModelSafeUpstreamContext(
+          canvasContext.upstreamContext
+        ),
         contextTrace: canvasContext.contextTrace,
       },
       null,
@@ -1030,8 +1038,16 @@ function buildAiSdkAgentPrompt({
       context
         ? {
             taskContext: context.taskContext,
-            selectedItems: context.selectedItems,
-            omittedItems: context.omittedItems,
+            selectedItems: context.selectedItems.map((item) => ({
+              ...toModelSafeUpstreamContextItem(item),
+              source: item.source,
+              inclusionReason: item.inclusionReason,
+            })),
+            omittedItems: context.omittedItems.map((item) => ({
+              ...toModelSafeUpstreamContextItem(item),
+              source: item.source,
+              omissionReason: item.omissionReason,
+            })),
             availableTools: context.availableTools.map((tool) => ({
               id: tool.id,
               name: tool.name,
@@ -1067,7 +1083,7 @@ function buildAiSdkAgentPrompt({
     [
       "Tool calls must use aiSdkToolName from ALLOWED_RUNTIME_TOOLS, not runtime toolId.",
       "Do not call or simulate any planning tool; planning is server-authored and already recorded in Run Trace.",
-      "For image generation, plan and call expand_prompt before generate_image. If upstream images are relevant, call analyze_reference_images before expand_prompt.",
+      "For image generation, call expand_prompt before generate_image. Reference images are injected into generate_image by the server and must not be analyzed or copied into model text.",
       "For current web information, plan and call web_search before write_document.",
       "For document/report/answer tasks, compose the final Markdown yourself as write_document input so the result appears as a canvas artifact.",
       "write_document is an artifactizer: provide title, complete markdown, summary, and sourcesUsed when source links informed the document. Do not pass a prompt, outline, or placeholder markdown.",

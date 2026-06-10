@@ -15,6 +15,17 @@
 - 备注：风险、后续项或未完成事项。
 ```
 
+## 2026-06-10
+
+### 参考图绕过语言模型并直传 Seedream
+
+- 变更：意图路由、上下文构建、结构化规划、prompt 扩写和主 Agent prompt 统一使用模型安全的画布上下文；图片节点只暴露 `referenceImageAvailable: true` 和文本元数据，不再序列化 `imageUrl`、data URL、artifact URI 或图片内容。
+- 变更：当前 Agent Runtime 删除 `vision.analyzeReferenceImages` / `analyze_reference_images` 工具和计划步骤；图片链路固定为 `prompt.expand -> seedream.generateImage`，原始上游图片仍由服务端直接写入 Seedream `image_urls`。
+- 变更：`seedream.generateImage` 使用 AI SDK v6 `toModelOutput`，完整图片结果继续供 UI、画布和 artifact 存储消费，但回传模型的工具结果只有生成数量摘要，不包含 URL 或图片 payload。
+- 文件：`server/prompts.ts`、`server/runtime/context-builder.ts`、`server/runtime/intent-router.ts`、`server/runtime/planner.ts`、`server/runtime/ai-sdk-runner.ts`、`server/runtime/tool-registry.ts`、`server/runtime/tools/image-tools.ts`、`server/runtime/tools/ids.ts`、`server/prompts.test.ts`、`server/runtime/runtime.test.ts`、`server/runtime/tools/image-tools.test.ts`、`README.md`、`agent-os-plan.md`、`process.md`。
+- 验证：对照 AI SDK v6 `convertToModelMessages`、`streamText` 和 `Tool.toModelOutput` 官方文档；`pnpm exec vitest run server/prompts.test.ts server/runtime/runtime.test.ts server/runtime/ai-sdk-runner.test.ts server/runtime/tools/image-tools.test.ts seedream.test.ts --reporter=dot` 通过，5 个测试文件共 50 个测试通过。
+- 备注：`pnpm exec tsc -p tsconfig.node.json --noEmit` 仍被既有 `server/runtime/canvas-operation-policy.ts` 缺少 `stickyNote` / `shape` 映射的错误阻断，本次未改该无关文件。
+
 ## 2026-06-09
 
 ### React Flow 便签与形状工具

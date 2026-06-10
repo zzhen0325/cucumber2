@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { parseExpandedPrompts } from "./image-tools";
+import {
+  parseExpandedPrompts,
+  summarizeGenerateImageOutputForModel,
+} from "./image-tools";
 
 describe("image runtime tools", () => {
   it("parses distinct prompt batches from PROMPT lines", () => {
@@ -27,5 +30,17 @@ describe("image runtime tools", () => {
         requestedResultCount: 4,
       })
     ).toThrow("exactly 4 distinct prompts");
+  });
+
+  it("keeps generated image URLs out of model tool results", () => {
+    const imageUrl = `data:image/png;base64,${"A".repeat(20_000)}`;
+    const modelOutput = summarizeGenerateImageOutputForModel({
+      data: {
+        images: [{ id: "image-1", url: imageUrl }],
+      },
+    });
+
+    expect(modelOutput.value).toContain("1 image artifact");
+    expect(modelOutput.value).not.toContain(imageUrl);
   });
 });

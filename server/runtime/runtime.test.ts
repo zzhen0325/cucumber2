@@ -262,6 +262,7 @@ describe("runtime core", () => {
   it("routes image generation and builds a tool allowlist context", async () => {
     const capabilities = buildCapabilityRegistry([promptExpandSkill]);
     const toolRegistry = createTestToolRegistry();
+    const inlineImageUrl = `data:image/png;base64,${"A".repeat(20_000)}`;
     const input = normalizeAgentInput({
       userId: "user-1",
       projectId: "project-1",
@@ -275,7 +276,7 @@ describe("runtime core", () => {
           {
             nodeId: "image-1",
             type: "image",
-            imageUrl: "https://cdn.example/1.png",
+            imageUrl: inlineImageUrl,
             summary: "绿色海报",
           },
         ],
@@ -303,12 +304,14 @@ describe("runtime core", () => {
     expect(intent.primaryIntent).toBe("image_generation");
     expect(routerPrompt).toContain("AVAILABLE_CAPABILITIES");
     expect(routerPrompt).toContain(toolIds.generateImage);
+    expect(routerPrompt).toContain('"referenceImageAvailable": true');
+    expect(routerPrompt).not.toContain(inlineImageUrl);
     expect(intent.requiredTools).toEqual([
-      toolIds.analyzeReferenceImages,
       toolIds.expandPrompt,
       toolIds.generateImage,
     ]);
     expect(context.selectedItems[0].nodeId).toBe("image-1");
+    expect(JSON.stringify(context.promptParts)).not.toContain(inlineImageUrl);
     expect(context.availableTools.map((tool) => tool.id)).toEqual(
       intent.requiredTools
     );
@@ -1160,7 +1163,6 @@ describe("runtime core", () => {
     const capabilities = buildCapabilityRegistry([promptExpandSkill]);
     const baseRegistry = createTestToolRegistry();
     const canvasRegistry = new ToolRegistry([
-      testTool(toolIds.analyzeReferenceImages, "image.generate"),
       testTool(toolIds.expandPrompt, "prompt.expand"),
       testTool(toolIds.generateImage, "image.generate"),
       testTool(toolIds.createCanvasNode, "canvas.mutate"),
@@ -1487,37 +1489,13 @@ describe("runtime core", () => {
       runId: "agent-run-1",
       toolRegistry,
     });
-    const referenceTool = toolRegistry.requireTool(
-      toolIds.analyzeReferenceImages
-    );
     const expandTool = toolRegistry.requireTool(toolIds.expandPrompt);
-    const referenceInput = referenceTool.prepareInput?.({
-      context,
-      previousSteps: [],
-      step: buildToolStep("analyze_reference_images", referenceTool.id),
-    }) as { promptTrace?: { selectedPromptPartIds?: string[] } };
     const expandInput = expandTool.prepareInput?.({
       context,
-      previousSteps: [
-        {
-          id: "step-analyze_reference_images",
-          planStepId: "analyze_reference_images",
-          status: "success",
-          output: {
-            ok: true,
-            data: { analysis: "视觉摘要" },
-            artifacts: [],
-            canvasOperations: [],
-            logs: [],
-          },
-        },
-      ],
+      previousSteps: [],
       step: buildToolStep("expand_prompt", expandTool.id),
     }) as { promptTrace?: { selectedPromptPartIds?: string[] } };
 
-    expect(referenceInput.promptTrace?.selectedPromptPartIds).toContain(
-      "runtime.selected-context"
-    );
     expect(expandInput.promptTrace?.selectedPromptPartIds).toContain(
       "runtime.selected-context"
     );
@@ -1666,7 +1644,6 @@ describe("runtime core", () => {
 
 function createTestToolRegistry() {
   return new ToolRegistry([
-    testTool(toolIds.analyzeReferenceImages, "image.generate"),
     testTool(toolIds.expandPrompt, "prompt.expand"),
     testTool(toolIds.generateImage, "image.generate"),
   ] as never);

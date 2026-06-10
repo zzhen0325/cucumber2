@@ -42,6 +42,23 @@ export type PromptCanvasContext = {
   };
 };
 
+export type ModelSafeUpstreamContextItem = {
+  nodeId: string;
+  type: PromptUpstreamContextItem["type"];
+  prompt?: string;
+  summary?: string;
+  title?: string;
+  contentRef?: string;
+  priority?: number;
+  referenceImageAvailable: boolean;
+  artifact?: {
+    id: string;
+    type: string;
+    title?: string;
+    contentRef?: string;
+  };
+};
+
 export type PromptSkill = {
   name: string;
   description?: string;
@@ -153,13 +170,50 @@ export const REFERENCE_IMAGE_ANALYSIS_SYSTEM_PROMPT = [
   "不要编造不可见元素，不要输出 JSON、标题、列表或中间推理。",
 ].join("\n");
 
+export function toModelSafeUpstreamContextItem(
+  item: PromptUpstreamContextItem
+): ModelSafeUpstreamContextItem {
+  const referenceImageAvailable =
+    item.type === "image" ||
+    item.artifact?.type === "image" ||
+    Boolean(item.imageUrl);
+
+  return {
+    nodeId: item.nodeId,
+    type: item.type,
+    prompt: item.prompt,
+    summary: item.summary,
+    title: item.title,
+    contentRef: referenceImageAvailable ? undefined : item.contentRef,
+    priority: item.priority,
+    referenceImageAvailable,
+    artifact: item.artifact
+      ? {
+          id: item.artifact.id,
+          type: item.artifact.type,
+          title: item.artifact.title,
+          contentRef: referenceImageAvailable
+            ? undefined
+            : item.artifact.contentRef,
+        }
+      : undefined,
+  };
+}
+
+export function toModelSafeUpstreamContext(
+  items: PromptUpstreamContextItem[]
+) {
+  return items.map(toModelSafeUpstreamContextItem);
+}
+
 export function formatUpstreamContext(items: PromptUpstreamContextItem[]) {
   if (!items.length) {
     return "无";
   }
 
   return items
-    .map((item, index) => {
+    .map((rawItem, index) => {
+      const item = toModelSafeUpstreamContextItem(rawItem);
       const lines = [
         `[${index + 1}]`,
         `type: ${item.type}`,
@@ -176,17 +230,14 @@ export function formatUpstreamContext(items: PromptUpstreamContextItem[]) {
       if (item.prompt?.trim()) {
         lines.push(`prompt: ${item.prompt.trim()}`);
       }
-      if (item.imageUrl?.trim()) {
-        lines.push(`imageUrl: ${item.imageUrl.trim()}`);
+      if (item.referenceImageAvailable) {
+        lines.push("referenceImageAvailable: true");
       }
       if (item.contentRef?.trim()) {
         lines.push(`contentRef: ${item.contentRef.trim()}`);
       }
       if (item.artifact) {
         lines.push(`artifactType: ${item.artifact.type}`);
-        if (item.artifact.uri?.trim()) {
-          lines.push(`artifactUri: ${item.artifact.uri.trim()}`);
-        }
         if (item.artifact.contentRef?.trim()) {
           lines.push(`artifactContentRef: ${item.artifact.contentRef.trim()}`);
         }

@@ -3,6 +3,7 @@ import {
   generateStructuredObjectWithProvider,
   type ModelProviderId,
 } from "../model-providers.ts";
+import { toModelSafeUpstreamContextItem } from "../prompts.ts";
 import { planSchema } from "./schemas.ts";
 import { toolIds, type RuntimeToolDefinition, type ToolRegistry } from "./tool-registry.ts";
 import { runtimeErrorCodes, throwAgentError } from "./errors.ts";
@@ -321,23 +322,6 @@ export function buildPlanFromIntentDeterministically(intent: IntentResult): Plan
     },
   ];
 
-  if (intent.requiredTools.includes(toolIds.analyzeReferenceImages)) {
-    steps.push({
-      id: "analyze_reference_images",
-      title: "Analyze reference images",
-      goal: "Summarize visible upstream image context for prompt expansion.",
-      kind: "tool",
-      toolId: toolIds.analyzeReferenceImages,
-      capabilityId: "image.generate",
-      dependsOn: ["agent_text"],
-      expectedArtifacts: [],
-      expectedCanvasOperations: [],
-      risk: "medium",
-      approvalRequired: false,
-      retryPolicy: defaultRetryPolicy,
-    });
-  }
-
   steps.push(
     {
       id: "expand_prompt",
@@ -346,11 +330,7 @@ export function buildPlanFromIntentDeterministically(intent: IntentResult): Plan
       kind: "tool",
       toolId: toolIds.expandPrompt,
       capabilityId: "prompt.expand",
-      dependsOn: [
-        intent.requiredTools.includes(toolIds.analyzeReferenceImages)
-          ? "analyze_reference_images"
-          : "agent_text",
-      ],
+      dependsOn: ["agent_text"],
       expectedArtifacts: [],
       expectedCanvasOperations: [],
       risk: "low",
@@ -618,15 +598,9 @@ function buildPlannerPrompt({
       {
         taskContext: context.taskContext,
         selectedItems: context.selectedItems.map((item) => ({
-          nodeId: item.nodeId,
-          type: item.type,
+          ...toModelSafeUpstreamContextItem(item),
           source: item.source,
           inclusionReason: item.inclusionReason,
-          summary: item.summary,
-          prompt: item.prompt,
-          imageUrl: item.imageUrl,
-          artifactType: item.artifact?.type,
-          contentRef: item.contentRef,
         })),
         omittedItems: context.omittedItems.map((item) => ({
           nodeId: item.nodeId,
@@ -651,7 +625,7 @@ function buildPlannerPrompt({
       `For text-first analysis, summaries, reports, plans, answers, or capability reports, use ${toolIds.writeDocument} to create a Markdown document artifact.`,
       `For simple image generation, include ${toolIds.expandPrompt} and ${toolIds.generateImage}.`,
       `For page, component, landing page, website, or HTML work, use ${toolIds.readWebpage} when webpage sources are present, ${toolIds.analyzeAssets} for image or artifact context, ${toolIds.generateHtml} through the generate_html tool to create the complete standalone HTML artifact, and ${toolIds.createCanvasNode} when the page must appear on canvas.`,
-      `Use ${toolIds.analyzeReferenceImages} before prompt expansion when selected/upstream images need visual analysis.`,
+      "Reference images are provider inputs only. Do not analyze them or include their URLs/data in model prompts.",
       "Canvas changes must be expectedCanvasOperations or tool-returned CanvasOperation proposals, never direct node mutation.",
       "If no executable tool is exposed for the task, create an approval step asking for clarification instead of inventing a tool.",
     ].join("\n"),

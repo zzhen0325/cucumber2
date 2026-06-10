@@ -20,43 +20,19 @@ import {
 } from "../../model-providers.ts";
 import {
   PROMPT_EXPAND_SYSTEM_PROMPT,
-  REFERENCE_IMAGE_ANALYSIS_SYSTEM_PROMPT,
   renderRuntimePromptAssembly,
   selectPromptBatchMode,
   selectPromptExpandMode,
-  selectReferenceImages,
   selectRelevantSkillConfig,
+  toModelSafeUpstreamContext,
   type PromptBatchMode,
   type PromptCanvasContext,
-  type ReferenceImageInput,
 } from "../../prompts.ts";
 import { createArtifact, type AgentSkill } from "../../supabase.ts";
 import type { AgentStep, BuiltContext } from "../../../src/types/runtime.ts";
 import type { RuntimeToolDefinition } from "../tool-registry.ts";
 import { toolResultSchema } from "../schemas.ts";
 import { TOOL_DEFINITION_VERSION, toolIds } from "./ids.ts";
-
-const referenceImageInputSchema = z.object({
-  prompt: z.string().min(1),
-  selectedNodeId: z.string().nullable(),
-  imageCount: z.number().int().nonnegative(),
-  referenceImages: z.array(
-    z.object({
-      nodeId: z.string(),
-      imageUrl: z.string(),
-      prompt: z.string().optional(),
-      summary: z.string().optional(),
-    })
-  ),
-  modelProvider: z.literal("ark"),
-  promptTrace: z.record(z.string(), z.unknown()).optional(),
-});
-
-const referenceImageOutputSchema = z.object({
-  imageCount: z.number().int().nonnegative(),
-  analysis: z.string(),
-  modelProvider: z.literal("ark"),
-});
 
 const promptExpandInputSchema = z.object({
   prompt: z.string().min(1),
@@ -67,7 +43,6 @@ const promptExpandInputSchema = z.object({
   modelProvider: z.string(),
   requestedResultCount: z.number().int().positive(),
   promptBatchMode: z.enum(["single_prompt", "distinct_prompts"]),
-  referenceImageAnalysis: z.string().optional(),
   promptTrace: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -76,7 +51,6 @@ const promptExpandOutputSchema = z.object({
   expandedPrompts: z.array(z.string().min(1)).min(1),
   requestedResultCount: z.number().int().positive(),
   promptBatchMode: z.enum(["single_prompt", "distinct_prompts"]),
-  referenceImageAnalysis: z.string().optional(),
   capabilityId: z.string(),
   skill: z.object({
     id: z.string(),
@@ -108,87 +82,6 @@ const generateImageOutputSchema = z.object({
   artifacts: z.array(z.unknown()),
 });
 
-export function createReferenceImageTool({
-  canvasContext,
-  imageCapability,
-  referenceImages,
-}: {
-  canvasContext: PromptCanvasContext;
-  imageCapability: RegisteredCapability;
-  referenceImages: ReferenceImageInput[];
-}): RuntimeToolDefinition {
-  return {
-    id: toolIds.analyzeReferenceImages,
-    version: TOOL_DEFINITION_VERSION,
-    toPlannerToolName: "analyze_reference_images",
-    capabilityId: imageCapability.manifest.capabilityId,
-    name: "Analyze reference images",
-    description: "Analyze upstream image context before prompt expansion.",
-    inputSchema: referenceImageInputSchema,
-    outputSchema: referenceImageOutputSchema,
-    policy: {
-      ...imageCapability.manifest.policy,
-      canUseNetwork: true,
-      mayExternalCost: true,
-    },
-    timeoutMs: 60_000,
-    retryPolicy: { maxRetries: 0, backoffMs: 0, retryableErrorCodes: [] },
-    risk: "medium",
-    renderHint: { kind: "text", label: "Reference image analysis" },
-    prepareInput: ({ context }) => {
-      const assembly = buildReferenceImagePromptAssembly({
-        context,
-        referenceImages,
-      });
-      return {
-        prompt: canvasContext.prompt,
-        selectedNodeId: canvasContext.selectedNodeId ?? null,
-        imageCount: referenceImages.length,
-        referenceImages: referenceImages.map((image) => ({
-          nodeId: image.nodeId,
-          imageUrl: image.imageUrl,
-          prompt: image.prompt,
-          summary: image.summary,
-        })),
-        modelProvider: "ark",
-        promptTrace: assembly.trace,
-      };
-    },
-    async execute(input, toolContext) {
-      assertCapabilityMayExecute(imageCapability);
-      const parsed = referenceImageInputSchema.parse(input);
-      const assembly = buildReferenceImagePromptAssembly({
-        context: toolContext.context,
-        referenceImages: parsed.referenceImages,
-      });
-      const analysis = (
-        await generateTextWithProvider("ark", {
-          system: REFERENCE_IMAGE_ANALYSIS_SYSTEM_PROMPT,
-          prompt: assembly.prompt,
-          imageUrls: parsed.referenceImages.map((image) => image.imageUrl),
-          maxOutputTokens: 900,
-        })
-      ).trim();
-
-      if (!analysis) {
-        throw new Error("Ark reference image analysis returned empty text.");
-      }
-
-      return toolResultSchema.parse({
-        ok: true,
-        data: {
-          imageCount: parsed.imageCount,
-          analysis,
-          modelProvider: "ark",
-        },
-        artifacts: [],
-        canvasOperations: [],
-        logs: [toolLog("Reference images analyzed.")],
-      });
-    },
-  };
-}
-
 export function createPromptExpandTool({
   canvasContext,
   modelProvider,
@@ -214,11 +107,7 @@ export function createPromptExpandTool({
     retryPolicy: { maxRetries: 0, backoffMs: 0, retryableErrorCodes: [] },
     risk: "low",
     renderHint: { kind: "text", label: "Expanded prompt" },
-    prepareInput: ({ context, previousSteps }) => {
-      const referenceImageAnalysis = readPreviousData<{ analysis?: string }>(
-        previousSteps,
-        toolIds.analyzeReferenceImages
-      )?.analysis;
+    prepareInput: ({ context }) => {
       const requestedResultCount = inferSeedreamResultCountFromPrompts(
         [canvasContext.prompt],
         readSeedreamMaxOutputImagesFromEnv()
@@ -232,19 +121,19 @@ export function createPromptExpandTool({
         context,
         promptBatchMode,
         requestedResultCount,
-        referenceImageAnalysis,
         skill: promptSkill,
       });
       return {
         prompt: canvasContext.prompt,
         selectedNodeId: canvasContext.selectedNodeId ?? null,
-        upstreamContext: canvasContext.upstreamContext,
+        upstreamContext: toModelSafeUpstreamContext(
+          canvasContext.upstreamContext
+        ),
         contextTrace: canvasContext.contextTrace,
         skillSlug: "prompt-expand",
         modelProvider,
         requestedResultCount,
         promptBatchMode,
-        referenceImageAnalysis,
         promptTrace: assembly.trace,
       };
     },
@@ -256,7 +145,6 @@ export function createPromptExpandTool({
         context: toolContext.context,
         promptBatchMode: parsed.promptBatchMode,
         requestedResultCount: parsed.requestedResultCount,
-        referenceImageAnalysis: parsed.referenceImageAnalysis,
         skill: promptSkill,
       });
       const rawExpandedPrompt = (
@@ -283,7 +171,6 @@ export function createPromptExpandTool({
           expandedPrompts,
           requestedResultCount: parsed.requestedResultCount,
           promptBatchMode: parsed.promptBatchMode,
-          referenceImageAnalysis: parsed.referenceImageAnalysis,
           capabilityId: promptExpandCapability.manifest.capabilityId,
           skill: getSkillToolSummary(promptSkill),
           promptTrace: skillAssembly.trace,
@@ -318,6 +205,7 @@ export function createGenerateImageTool({
     description: "Generate image artifacts with Seedream.",
     inputSchema: generateImageInputSchema,
     outputSchema: generateImageOutputSchema,
+    toModelOutput: summarizeGenerateImageOutputForModel,
     policy: imageCapability.manifest.policy,
     timeoutMs: 180_000,
     retryPolicy: { maxRetries: 0, backoffMs: 0, retryableErrorCodes: [] },
@@ -412,40 +300,21 @@ export function createGenerateImageTool({
   };
 }
 
-export function selectRuntimeReferenceImages(canvasContext: PromptCanvasContext) {
-  return selectReferenceImages(canvasContext, 4);
-}
+export function summarizeGenerateImageOutputForModel(output: unknown) {
+  const candidate = output as {
+    data?: { images?: unknown[] };
+    images?: unknown[];
+  };
+  const images = Array.isArray(candidate?.data?.images)
+    ? candidate.data.images
+    : Array.isArray(candidate?.images)
+      ? candidate.images
+      : [];
 
-function buildReferenceImagePromptAssembly({
-  context,
-  referenceImages,
-}: {
-  context: BuiltContext;
-  referenceImages: ReferenceImageInput[];
-}) {
-  return renderRuntimePromptAssembly([
-    ...context.promptParts,
-    runtimePromptPart(
-      "reference-analysis.reference-images",
-      "reference_images",
-      referenceImages
-        .map((image, index) =>
-          [
-            `[${index + 1}]`,
-            `nodeId: ${image.nodeId}`,
-            `summary: ${image.summary?.trim() || "None"}`,
-            `prompt: ${image.prompt?.trim() || "None"}`,
-            `imageUrl: ${image.imageUrl}`,
-          ].join("\n")
-        )
-        .join("\n\n") || "None"
-    ),
-    runtimePromptPart(
-      "reference-analysis.instruction",
-      "instruction",
-      "请输出一段中文视觉摘要，聚焦主体、风格、构图、色彩、材质、光影、文字版式和与当前用户需求相关的可复用约束。"
-    ),
-  ]);
+  return {
+    type: "text" as const,
+    value: `Image generation completed with ${images.length} image artifact(s). Image URLs and payloads are omitted from model context.`,
+  };
 }
 
 function buildPromptExpandPromptAssembly({
@@ -453,14 +322,12 @@ function buildPromptExpandPromptAssembly({
   context,
   promptBatchMode,
   requestedResultCount,
-  referenceImageAnalysis,
   skill,
 }: {
   canvasContext: PromptCanvasContext;
   context: BuiltContext;
   promptBatchMode: PromptBatchMode;
   requestedResultCount: number;
-  referenceImageAnalysis?: string;
   skill: AgentSkill;
 }) {
   const mode = selectPromptExpandMode(canvasContext);
@@ -488,11 +355,6 @@ function buildPromptExpandPromptAssembly({
       JSON.stringify(relevantConfig, null, 2)
     ),
     runtimePromptPart(
-      "prompt-expand.reference-image-analysis",
-      "reference_image_analysis",
-      referenceImageAnalysis?.trim() || "None"
-    ),
-    runtimePromptPart(
       "prompt-expand.batch-policy",
       "instruction",
       [
@@ -506,7 +368,7 @@ function buildPromptExpandPromptAssembly({
     runtimePromptPart(
       "prompt-expand.instruction",
       "instruction",
-      "请根据以上 section 输出可直接用于图像生成的自然语言 prompt，保持用户原意，优先吸收参考图视觉摘要和相关上游上下文，并严格遵循 batch policy。"
+      "请根据以上 section 输出可直接用于图像生成的自然语言 prompt，保持用户原意并严格遵循 batch policy。参考图像素不会提供给本模型，参考图会由生成工具直接发送给图像生成服务；不要猜测或编造参考图中的视觉内容。"
     ),
   ]);
 }
@@ -624,10 +486,6 @@ function readPreviousData<T>(
 
 function getToolStepAliases(toolId: string) {
   const aliases: Record<string, string[]> = {
-    [toolIds.analyzeReferenceImages]: [
-      toolIds.analyzeReferenceImages,
-      "analyze_reference_images",
-    ],
     [toolIds.expandPrompt]: [toolIds.expandPrompt, "expand_prompt"],
     [toolIds.generateImage]: [toolIds.generateImage, "generate_image"],
   };
