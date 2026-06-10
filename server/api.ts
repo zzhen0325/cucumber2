@@ -47,6 +47,7 @@ import {
   type AppUser,
 } from "./supabase.ts";
 import { parseSkillZip } from "./skill-parser.ts";
+import { executeOpenAIAgentsRunV2 } from "./agent-v2/index.ts";
 import { executeAgentRun } from "./runtime/executor.ts";
 
 loadServerEnv();
@@ -432,6 +433,57 @@ app.post("/api/agent-run", async (c) => {
     originalMessages: messages,
     execute: async ({ writer }) => {
       await executeAgentRun({
+        canvasContext,
+        attachments,
+        messages,
+        modelProvider,
+        projectId,
+        projectSnapshot: updatedProject,
+        runNodeId,
+        userId: user.id,
+        writer,
+      });
+    },
+    onError: getErrorMessage,
+  });
+
+  return createUIMessageStreamResponse({ stream });
+});
+
+app.post("/api/agent-run-v2", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const body = await c.req.json();
+  const messages = (body.messages ?? []) as UIMessage[];
+  const canvasContext = canvasContextSchema.parse(body.canvasContext ?? {});
+  const attachments = z.array(z.unknown()).default([]).parse(body.attachments);
+  const modelProvider = modelProviderSchema
+    .default(getDefaultModelProviderId())
+    .parse(body.modelProvider);
+  const projectId = z.string().uuid().parse(body.projectId);
+  const runNodeId = z.string().min(1).parse(body.runNodeId);
+  const project = await getProjectForUser(projectId, user.id);
+
+  if (!project) {
+    return notFound(c);
+  }
+
+  const updatedProject = await updateProjectForUser({
+    projectId,
+    userId: user.id,
+    lastRunId: runNodeId,
+  });
+  if (!updatedProject) {
+    return notFound(c);
+  }
+
+  const stream = createUIMessageStream({
+    originalMessages: messages,
+    execute: async ({ writer }) => {
+      await executeOpenAIAgentsRunV2({
         canvasContext,
         attachments,
         messages,

@@ -16,6 +16,7 @@ Agent Run nodes display streamed text, a step timeline, tool state, and an advan
 - AI Elements registry components for Canvas, Node, Edge, Tool, Message, and Prompt Input
 - React Flow under the AI Elements canvas
 - Hono Node server for `/api/agent-run`, backed by Vercel AI SDK streaming tool calling, a service-side Tool Registry, policy gate, and artifact metadata store
+- OpenAI Agents SDK v2 runtime behind `/api/agent-run-v2`, using a reusable Runner, a focused Manager Agent, and proposal-first canvas tools
 - Graph projection reducer for replaying run events, artifacts, and graph patch proposals back into canvas nodes and edges
 
 ## Run Locally
@@ -54,6 +55,9 @@ TAVILY_API_KEY=...
 SUPABASE_URL=https://wbjqqywnwmghtcwpoatb.supabase.co
 SUPABASE_SECRET_KEY=...
 
+OPENAI_API_KEY=...
+VITE_AGENT_V2=0
+
 # Optional: required when a proxy/VPN injects a private root CA.
 SEEDREAM_CA_CERT_PEM="-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
 # Or use a local certificate file path:
@@ -62,6 +66,8 @@ SEEDREAM_CA_CERT=/absolute/path/to/corp-root-ca.pem
 ```
 
 `DEEPSEEK_API_KEY` and `ARK_API_KEY` configure selectable text model providers. The canvas stores the user's global provider preference in browser localStorage under `cucumber:model-provider` and sends it with each `/api/agent-run` request. Reference-image branches do not require Ark visual analysis; the language model receives only lightweight reference metadata. Keep API keys server-only; rotate any key that has been pasted into chat or logs.
+
+`OPENAI_API_KEY` is required only when routing through `/api/agent-run-v2`. Set `VITE_AGENT_V2=1` at build time, or run `localStorage.setItem("cucumber:agent-v2", "1")` in the browser console and reload, to switch the front end from `/api/agent-run` to `/api/agent-run-v2`.
 
 `SEEDREAM_ACCESS_KEY_ID` and `SEEDREAM_SECRET_ACCESS_KEY` are required by the `generate_image` tool. The Seedream client also accepts `VOLCENGINE_ACCESS_KEY_ID` and `VOLCENGINE_SECRET_ACCESS_KEY` as aliases. Missing credentials are shown directly in the Run node; the app does not create placeholder images.
 

@@ -7,7 +7,8 @@
 - 项目是一个 Infinite Canvas Agent Run MVP。
 - 前端使用 Vite、React、TypeScript、React Flow 和 AI Elements 组件。
 - 服务端使用 Hono Node server，主要入口是 `server/api.ts`。
-- Agent Run 入口是 `/api/agent-run`，通过 AI SDK UI message stream 返回 `generate_image` 工具状态。
+- Agent Run 旧入口是 `/api/agent-run`，通过 AI SDK UI message stream 返回 `generate_image` 工具状态。
+- Agent Run v2 入口是 `/api/agent-run-v2`，核心代码放在 `server/agent-v2/`，使用 OpenAI Agents SDK Runner + proposal-first tools。
 - 画布节点和边的核心类型在 `src/types/canvas.ts`；图结构和上下文收集逻辑在 `src/lib/graph.ts`。
 
 ## Working Rules
@@ -27,6 +28,8 @@
 - 不做降级或兜底方案，将错误抛出
 - 测试时只运行相关的最小测试集。
 - 不做 legacy adapter，旧实现可以直接删除，不要增加复杂性。
+- Agent v2 必须坚持 proposal-first：OpenAI Agents SDK 决定“应该做什么”，Cucumber runtime/policy 决定“是否允许落到画布”；tool 不得直接改数据库或绕过 `CanvasOperation` 校验。
+- Agent v2 的前端切换通过 `VITE_AGENT_V2=1` 或 `localStorage.cucumber:agent-v2=1` 控制，默认保留 `/api/agent-run`。
 
 ## Agent Canvas Behavior
 
