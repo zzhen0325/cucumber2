@@ -1299,8 +1299,8 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
             colorMode="light"
             edgeTypes={edgeTypes}
             fitViewOptions={{ maxZoom: 1, padding: 0.32 }}
-            maxZoom={1.5}
-            minZoom={0.28}
+            maxZoom={5}
+            minZoom={0.05}
             nodeTypes={nodeTypes}
             nodes={canvasNodes}
             edges={canvasEdges}

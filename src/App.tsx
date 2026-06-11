@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CanvasWorkspace } from "@/components/CanvasWorkspace";
 import { AuthPage } from "@/components/AuthPage";
-import { ProjectListPage } from "@/components/ProjectListPage";
+import { WorkspaceShell } from "@/components/WorkspaceShell";
 import { getCurrentUser, logout, type AppUser } from "@/lib/auth-storage";
 
 import "./App.css";
@@ -99,7 +99,7 @@ function App() {
       )}
 
       {sessionStatus === "ready" && user && !projectId && (
-        <ProjectListPage
+        <WorkspaceShell
           user={user}
           onLogout={handleLogout}
           onOpenProject={openProject}

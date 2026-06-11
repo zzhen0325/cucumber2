@@ -84,3 +84,65 @@ textarea,
 input {
   font: inherit;
 }
+
+/* ── Shadow utilities (ported from cucumber) ── */
+@utility shadow-subtle {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+@utility shadow-card {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+}
+@utility shadow-card-hover {
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
+}
+
+/* ── Accent glow utility ── */
+@utility accent-glow {
+  box-shadow: 0 0 20px rgba(41, 191, 78, 0.25);
+}
+
+/* ── Loading screen animations (ported from cucumber) ── */
+@keyframes logo-float {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-10px) scale(1.04);
+  }
+}
+
+.animate-logo-float {
+  animation: logo-float 2.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes loading-dot {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 0.9; }
+}
+
+.animate-loading-dot {
+  animation: loading-dot 1.2s ease-in-out infinite;
+}
+
+@keyframes star-sparkle {
+  0% { transform: rotate(0deg) scale(1); }
+  25% { transform: rotate(90deg) scale(0.85); }
+  50% { transform: rotate(180deg) scale(1); }
+  75% { transform: rotate(270deg) scale(0.85); }
+  100% { transform: rotate(360deg) scale(1); }
+}
+
+.animate-star-sparkle {
+  animation: star-sparkle 3s ease-in-out infinite;
+}
+
+@keyframes smile-draw {
+  0% { stroke-dashoffset: 28; opacity: 0; }
+  30% { stroke-dashoffset: 0; opacity: 1; }
+  70% { stroke-dashoffset: 0; opacity: 1; }
+  100% { stroke-dashoffset: -28; opacity: 0; }
+}
+
+.animate-smile-draw {
+  animation: smile-draw 2.8s ease-in-out infinite;
+}
