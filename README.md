@@ -67,7 +67,7 @@ SEEDREAM_CA_CERT=/absolute/path/to/corp-root-ca.pem
 
 `DEEPSEEK_API_KEY` and `ARK_API_KEY` configure selectable text model providers. The canvas stores the user's global provider preference in browser localStorage under `cucumber:model-provider` and sends it with each `/api/agent-run` request. Reference-image branches do not require Ark visual analysis; the language model receives only lightweight reference metadata. Keep API keys server-only; rotate any key that has been pasted into chat or logs.
 
-`OPENAI_API_KEY` is required only when routing through `/api/agent-run-v2`. Set `VITE_AGENT_V2=1` at build time, or run `localStorage.setItem("cucumber:agent-v2", "1")` in the browser console and reload, to switch the front end from `/api/agent-run` to `/api/agent-run-v2`.
+`/api/agent-run-v2` runs on the OpenAI Agents SDK and picks its model provider from the environment: it prefers Doubao (Volcengine Ark) via the OpenAI-compatible Responses API when `ARK_API_KEY` is set (model from `ARK_MODEL`, base URL from `ARK_BASE_URL`), then DeepSeek's Chat Completions endpoint when `DEEPSEEK_API_KEY` is set, and finally the native OpenAI provider (`OPENAI_API_KEY`) when neither is configured. Set `VITE_AGENT_V2=1` at build time, or run `localStorage.setItem("cucumber:agent-v2", "1")` in the browser console and reload, to switch the front end from `/api/agent-run` to `/api/agent-run-v2`.
 
 `SEEDREAM_ACCESS_KEY_ID` and `SEEDREAM_SECRET_ACCESS_KEY` are required by the `generate_image` tool. The Seedream client also accepts `VOLCENGINE_ACCESS_KEY_ID` and `VOLCENGINE_SECRET_ACCESS_KEY` as aliases. Missing credentials are shown directly in the Run node; the app does not create placeholder images.
 
