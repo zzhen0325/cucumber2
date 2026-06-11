@@ -1,7 +1,7 @@
 import type { PartialBlock } from "@blocknote/core";
 import { useCreateBlockNote, useEditorChange } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/shadcn";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { MarkdownNodeData } from "@/types/canvas";
 
@@ -21,7 +21,7 @@ export function BlockNoteMarkdownEditor({
   readOnly,
   onChange,
 }: BlockNoteMarkdownEditorProps) {
-  const initialBlocks = useRef(getStoredBlockNoteBlocks(data)).current;
+  const [initialBlocks] = useState(() => getStoredBlockNoteBlocks(data));
   const hasHydratedMarkdown = useRef(false);
   const hydrating = useRef(false);
   const editor = useCreateBlockNote(
