@@ -11,13 +11,39 @@ const attachArtifactInputSchema = z.object({
   operationId: z.string().min(1).optional(),
 });
 
+const attachArtifactJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["nodeId", "artifactId"],
+  properties: {
+    nodeId: { type: "string", description: "Target canvas node id." },
+    artifactId: { type: "string", description: "Id of an artifact created in this run." },
+    operationId: { type: "string", description: "Optional stable operation id." },
+  },
+} as const;
+
 export const attachArtifactTool = tool({
   name: "attach_artifact",
   description:
     "Propose attaching an artifact created in this run to a canvas node. This validates and emits a proposal; it does not mutate storage directly.",
-  parameters: attachArtifactInputSchema,
-  async execute(args, runContext) {
+  parameters: attachArtifactJsonSchema as never,
+  strict: false,
+  async execute(rawArgs, runContext) {
     const context = requireCucumberContext(runContext?.context);
+    const parsed = attachArtifactInputSchema.safeParse(rawArgs);
+    if (!parsed.success) {
+      return {
+        accepted: [],
+        rejected: [
+          {
+            reason: `invalid_attach_input: ${parsed.error.issues
+              .map((issue) => `${issue.path.join(".")} ${issue.message}`)
+              .join("; ")}`,
+          },
+        ],
+      };
+    }
+    const args = parsed.data;
     const artifact = context.producedArtifacts.find((item) => item.id === args.artifactId);
     if (!artifact) {
       return {

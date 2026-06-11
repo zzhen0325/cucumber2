@@ -14,13 +14,40 @@ const createArtifactInputSchema = z.object({
   metadata: jsonRecordSchema.optional(),
 });
 
+const createArtifactJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["type"],
+  properties: {
+    id: { type: "string", description: "Optional stable artifact id." },
+    type: {
+      type: "string",
+      enum: ["image", "file", "doc", "code", "webpage", "dataset", "decision", "tool_result", "memory"],
+    },
+    title: { type: "string" },
+    uri: { type: "string" },
+    contentRef: { type: "string" },
+    metadata: { type: "object", additionalProperties: true },
+  },
+} as const;
+
 export const createArtifactTool = tool({
   name: "create_artifact",
   description:
     "Create an in-memory artifact reference for this run. The runtime may emit it, but this tool does not write storage or database rows directly.",
-  parameters: createArtifactInputSchema,
-  async execute(args, runContext) {
+  parameters: createArtifactJsonSchema as never,
+  strict: false,
+  async execute(rawArgs, runContext) {
     const context = requireCucumberContext(runContext?.context);
+    const parsed = createArtifactInputSchema.safeParse(rawArgs);
+    if (!parsed.success) {
+      return {
+        error: `invalid_artifact_input: ${parsed.error.issues
+          .map((issue) => `${issue.path.join(".")} ${issue.message}`)
+          .join("; ")}`,
+      };
+    }
+    const args = parsed.data;
     const artifact: ArtifactRef = {
       id: args.id ?? `artifact-${crypto.randomUUID()}`,
       type: args.type,

@@ -1,10 +1,11 @@
-import { Runner } from "@openai/agents";
+import { Agent, Runner } from "@openai/agents";
 
 import type { RuntimeEventWriter } from "../runtime/events.ts";
 import { createRuntimeEventWriter } from "../runtime/events.ts";
 import { recordRunEvent } from "../supabase.ts";
 import type { CanvasOperation } from "../../src/types/runtime.ts";
 import { managerAgent } from "./agents/manager.agent.ts";
+import { resolveAgentModel } from "./model-config.ts";
 import type {
   AgentRunInput,
   AgentRuntime,
@@ -19,6 +20,18 @@ const runner = new Runner({ workflowName: "Cucumber Agent V2" });
 export class OpenAIAgentsRuntime implements AgentRuntime {
   async *run(input: AgentRunInput): AsyncIterable<CucumberRunEvent> {
     const context = buildCucumberAgentContext(input);
+    // Resolve the model lazily, now that env vars are loaded. The same model is
+    // applied to every agent in the graph (manager + handoff specialists) so a
+    // handoff does not silently fall back to a different provider.
+    const model = resolveAgentModel();
+    if (model) {
+      managerAgent.model = model;
+      for (const handoff of managerAgent.handoffs) {
+        if (handoff instanceof Agent) {
+          handoff.model = model;
+        }
+      }
+    }
     const stream = await runner.run(managerAgent, buildManagerRunPrompt(input), {
       context,
       maxTurns: 8,

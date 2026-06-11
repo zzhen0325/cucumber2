@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
+import { createInMemorySupabaseClient, isInMemoryDbEnabled } from "./dev/in-memory-supabase.ts";
 import { canEditSkill } from "./skill-access.ts";
 import { canAccessProject } from "./project-access.ts";
 import { getProjectSummaryStats } from "../src/lib/project-summary.ts";
@@ -211,7 +212,7 @@ type RunStepEventRow = {
 let cachedClient: SupabaseClient | null = null;
 
 export function isSupabaseConfigured() {
-  return Boolean(getSupabaseUrl() && getSupabaseSecretKey());
+  return isInMemoryDbEnabled() || Boolean(getSupabaseUrl() && getSupabaseSecretKey());
 }
 
 export async function getUserCount() {
@@ -768,6 +769,11 @@ async function getSkillRow(skillId: string) {
 
 function getSupabaseClient() {
   if (cachedClient) {
+    return cachedClient;
+  }
+
+  if (isInMemoryDbEnabled()) {
+    cachedClient = createInMemorySupabaseClient() as unknown as SupabaseClient;
     return cachedClient;
   }
 

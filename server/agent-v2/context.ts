@@ -3,7 +3,7 @@ import type { UIMessage } from "ai";
 import type { AgentCanvasEdge, AgentCanvasNode, ArtifactRef } from "../../src/types/canvas.ts";
 import type { CanvasOperation } from "../../src/types/runtime.ts";
 import type { ModelProviderId } from "../model-providers.ts";
-import type { PromptCanvasContext } from "../prompts.ts";
+import type { PromptCanvasContext, PromptUpstreamContextItem } from "../prompts.ts";
 import type { AgentProject } from "../supabase.ts";
 
 export type CanvasSnapshot = {
@@ -53,6 +53,12 @@ export type CucumberAgentContext = {
   knownNodeIds: string[];
   producedArtifacts: ArtifactRef[];
   pendingEvents: PendingCucumberEvent[];
+  // Image-generation context. Reference image urls live in `upstreamContext`
+  // and are forwarded directly to the image service; they are never surfaced to
+  // the language model (see generate-image.tool.ts).
+  prompt: string;
+  selectedNodeId: string | null;
+  upstreamContext: PromptUpstreamContextItem[];
 };
 
 export type ExecuteAgentRunV2Input = {
@@ -129,8 +135,11 @@ export function buildCucumberAgentContext(input: AgentRunInput): CucumberAgentCo
     pendingEvents: [],
     producedArtifacts: [],
     projectId: input.projectId,
+    prompt: input.canvasContext.prompt,
     runNodeId: input.runNodeId,
+    selectedNodeId: input.canvasContext.selectedNodeId ?? null,
     selectedNodeIds: input.selectedNodeIds ?? [],
+    upstreamContext: input.canvasContext.upstreamContext ?? [],
     userId: input.userId,
     workspaceId: input.workspaceId,
   };

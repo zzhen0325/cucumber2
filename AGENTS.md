@@ -30,6 +30,9 @@
 - 不做 legacy adapter，旧实现可以直接删除，不要增加复杂性。
 - Agent v2 必须坚持 proposal-first：OpenAI Agents SDK 决定“应该做什么”，Cucumber runtime/policy 决定“是否允许落到画布”；tool 不得直接改数据库或绕过 `CanvasOperation` 校验。
 - Agent v2 的前端切换通过 `VITE_AGENT_V2=1` 或 `localStorage.cucumber:agent-v2=1` 控制，默认保留 `/api/agent-run`。
+- Agent v2 specialist 拆分：Manager (`server/agent-v2/agents/manager.agent.ts`) 通过 SDK handoff 委派给 Image Agent (`server/agent-v2/agents/image.agent.ts`)。图片请求由 Image Agent 用 `generate_image` 工具（`server/agent-v2/tools/image/generate-image.tool.ts`）调用 Seedream 生成。
+- `generate_image` 不直接写库：它只调用 Seedream、把结果作为内存 `ArtifactRef` 推入 `context.pendingEvents`（`artifact_created`），由 runtime 发出 `artifact.created`，前端 `graph-projection` 自动渲染 image result 节点。参考图（`upstreamContext` 中的 image url）只转发给 Seedream，不暴露给模型。
+- handoff specialist 的 model 由 `runtime.ts` 统一惰性注入（与 manager 同一 provider），新增 specialist 时无需单独配置 model。
 
 ## Agent Canvas Behavior
 
