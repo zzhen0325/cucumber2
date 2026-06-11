@@ -53,6 +53,11 @@ export type CucumberAgentContext = {
   knownNodeIds: string[];
   producedArtifacts: ArtifactRef[];
   pendingEvents: PendingCucumberEvent[];
+  // Optional live event sink wired up by the runtime stream merger. When set,
+  // tools can emit events (e.g. each image the moment it finishes) that are
+  // streamed to the client immediately instead of being buffered in
+  // `pendingEvents` until the tool call returns.
+  pushLiveEvent?: (event: PendingCucumberEvent) => void;
   // Image-generation context. Reference image urls live in `upstreamContext`
   // and are forwarded directly to the image service; they are never surfaced to
   // the language model (see generate-image.tool.ts).

@@ -78,16 +78,13 @@ export const generateImageTool = tool({
 
     const upstreamContext = toSeedreamUpstreamContext(context.upstreamContext);
 
-    const { images } = await generateSeedreamImage({
-      prompts: [prompt],
-      selectedNodeId: context.selectedNodeId,
-      upstreamContext,
-      resultCount,
-      promptBatchMode: "single_prompt",
-    });
-
     const artifacts: ArtifactRef[] = [];
-    for (const image of images) {
+    const emitArtifact = (image: {
+      id: string;
+      url: string;
+      title?: string;
+      metadata?: Record<string, unknown>;
+    }) => {
       const artifact: ArtifactRef = {
         id: image.id,
         type: "image",
@@ -96,11 +93,26 @@ export const generateImageTool = tool({
         metadata: image.metadata,
       };
       context.producedArtifacts.push(artifact);
-      // Emitting `artifact_created` lets the runtime project an image result
-      // node onto the canvas. The raw URL stays out of the model-facing result.
-      context.pendingEvents.push({ type: "artifact_created", artifact });
       artifacts.push(artifact);
-    }
+      // Stream each image to the client the moment it lands so the canvas
+      // renders results one-by-one. Falls back to `pendingEvents` (drained when
+      // the tool returns) if no live sink is wired up.
+      const event = { type: "artifact_created" as const, artifact };
+      if (context.pushLiveEvent) {
+        context.pushLiveEvent(event);
+      } else {
+        context.pendingEvents.push(event);
+      }
+    };
+
+    await generateSeedreamImage({
+      prompts: [prompt],
+      selectedNodeId: context.selectedNodeId,
+      upstreamContext,
+      resultCount,
+      promptBatchMode: "single_prompt",
+      onImage: emitArtifact,
+    });
 
     return {
       generated: artifacts.length,

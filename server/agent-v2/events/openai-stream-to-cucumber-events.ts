@@ -11,42 +11,98 @@ export async function* openAIStreamToCucumberEvents(
   stream: StreamWithCompletion,
   context: CucumberAgentContext
 ): AsyncIterable<CucumberRunEvent> {
-  for await (const event of stream) {
-    if (event.type === "raw_model_stream_event") {
-      const delta = readTextDelta(event.data);
-      if (delta) {
-        yield { type: "text_delta", text: delta };
-      }
-      continue;
-    }
+  // Merge two producers into one ordered queue:
+  //   1. the SDK run stream (text deltas, tool lifecycle, final output)
+  //   2. live tool events pushed via `context.pushLiveEvent` while a tool is
+  //      still running (e.g. each Seedream image the moment it finishes).
+  // Without this merge the SDK `for await` loop is suspended inside the tool's
+  // `await`, so per-image events could not surface until the tool returned.
+  const queue: CucumberRunEvent[] = [];
+  let notify: (() => void) | null = null;
+  let finished = false;
+  let streamError: unknown = null;
 
-    if (event.type === "run_item_stream_event") {
-      if (event.name === "tool_called") {
-        yield {
-          type: "tool_started",
-          toolCallId: readToolCallId(event.item),
-          toolName: readToolName(event.item) ?? "unknown_tool",
-          input: readToolInput(event.item),
-        };
+  const wake = () => {
+    if (notify) {
+      const resolve = notify;
+      notify = null;
+      resolve();
+    }
+  };
+  const push = (event: CucumberRunEvent) => {
+    queue.push(event);
+    wake();
+  };
+
+  context.pushLiveEvent = (event) => push(event);
+
+  const pump = (async () => {
+    try {
+      for await (const event of stream) {
+        if (event.type === "raw_model_stream_event") {
+          const delta = readTextDelta(event.data);
+          if (delta) {
+            push({ type: "text_delta", text: delta });
+          }
+          continue;
+        }
+
+        if (event.type === "run_item_stream_event") {
+          if (event.name === "tool_called") {
+            push({
+              type: "tool_started",
+              toolCallId: readToolCallId(event.item),
+              toolName: readToolName(event.item) ?? "unknown_tool",
+              input: readToolInput(event.item),
+            });
+          }
+
+          if (event.name === "tool_output") {
+            push({
+              type: "tool_completed",
+              toolCallId: readToolCallId(event.item),
+              toolName: readToolName(event.item) ?? "unknown_tool",
+              output: readToolOutput(event.item),
+            });
+            for (const pending of drainPendingEvents(context)) {
+              push(pending);
+            }
+          }
+        }
       }
 
-      if (event.name === "tool_output") {
-        yield {
-          type: "tool_completed",
-          toolCallId: readToolCallId(event.item),
-          toolName: readToolName(event.item) ?? "unknown_tool",
-          output: readToolOutput(event.item),
-        };
-        yield* drainPendingEvents(context);
+      for (const pending of drainPendingEvents(context)) {
+        push(pending);
       }
+      if (stream.completed) {
+        await stream.completed;
+      }
+      push({ type: "run_completed", finalOutput: stringifyFinalOutput(stream.finalOutput) });
+    } catch (error) {
+      streamError = error;
+    } finally {
+      finished = true;
+      context.pushLiveEvent = undefined;
+      wake();
     }
+  })();
+
+  while (true) {
+    while (queue.length) {
+      yield queue.shift() as CucumberRunEvent;
+    }
+    if (finished) {
+      break;
+    }
+    await new Promise<void>((resolve) => {
+      notify = resolve;
+    });
   }
 
-  yield* drainPendingEvents(context);
-  if (stream.completed) {
-    await stream.completed;
+  await pump;
+  if (streamError) {
+    throw streamError;
   }
-  yield { type: "run_completed", finalOutput: stringifyFinalOutput(stream.finalOutput) };
 }
 
 function* drainPendingEvents(context: CucumberAgentContext): Iterable<PendingCucumberEvent> {

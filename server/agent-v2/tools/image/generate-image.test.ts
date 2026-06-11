@@ -58,11 +58,17 @@ describe("generate_image tool", () => {
 
   it("generates images and emits artifact_created events without leaking urls", async () => {
     isSeedreamConfigured.mockReturnValue(true);
-    generateSeedreamImage.mockResolvedValue({
-      images: [
-        { id: "seedream-1", url: "https://cdn.example/1.png", title: "Seedream image" },
-      ],
-    });
+    generateSeedreamImage.mockImplementation(
+      async (input: { onImage?: (image: unknown) => void }) => {
+        const images = [
+          { id: "seedream-1", url: "https://cdn.example/1.png", title: "Seedream image" },
+        ];
+        for (const image of images) {
+          input.onImage?.(image);
+        }
+        return { images };
+      }
+    );
 
     const context = buildContext();
     const result = await invokeTool(context, { prompt: "黄瓜海报", resultCount: 1 });

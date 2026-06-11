@@ -17,6 +17,9 @@ export type SeedreamGenerateInput = {
   upstreamContext?: SeedreamUpstreamContext[];
   resultCount: number;
   promptBatchMode: "single_prompt" | "distinct_prompts";
+  // Optional callback invoked the moment each image finishes, so callers can
+  // stream results to the UI instead of waiting for the whole batch.
+  onImage?: (image: SeedreamGeneratedImage) => void;
 };
 
 export type SeedreamGeneratedImage = {
@@ -255,6 +258,8 @@ export async function generateSeedreamImage(
   // Fan out one task per request so every image is generated independently.
   // Run them with a bounded concurrency and a stagger delay between submits to
   // stay under the Seedream account's API concurrency limit (code 50430).
+  // Each task builds its own image and invokes `onImage` the moment it lands so
+  // callers can stream results instead of waiting for the whole batch.
   const imagesPerRequest = await mapWithConcurrency(
     requests,
     config.maxConcurrency,
@@ -276,41 +281,69 @@ export async function generateSeedreamImage(
         );
       }
 
-      return { request, urls: urls.slice(0, request.resultCount) };
+      const selectedUrls = urls.slice(0, request.resultCount);
+      const images = selectedUrls.map((url, offset) =>
+        buildSeedreamGeneratedImage({
+          url,
+          // Each request maps to a single image, so promptIndex doubles as the
+          // stable position within the overall batch.
+          index: request.promptIndex + offset,
+          request,
+          config,
+          totalRequestedImageCount: input.resultCount,
+          promptBatchMode: input.promptBatchMode,
+        })
+      );
+
+      for (const image of images) {
+        input.onImage?.(image);
+      }
+
+      return images;
     }
   );
 
-  const images: SeedreamGeneratedImage[] = [];
-  for (const { request, urls } of imagesPerRequest) {
-    for (const url of urls) {
-      const index = images.length + 1;
-      const outputWidth = readPositiveNumber(request.body.width);
-      const outputHeight = readPositiveNumber(request.body.height);
-      const outputSize = readPositiveNumber(request.body.size);
-      images.push({
-        id: `seedream-${Date.now()}-${index}`,
-        url,
-        title:
-          input.resultCount === 1
-            ? "Seedream image"
-            : `Seedream image ${index}`,
-        metadata: {
-          provider: "seedream",
-          reqKey: config.reqKey,
-          width: outputWidth,
-          height: outputHeight,
-          size: outputSize,
-          inputImageCount: request.imageUrls.length,
-          requestedImageCount: request.resultCount,
-          totalRequestedImageCount: input.resultCount,
-          promptBatchMode: input.promptBatchMode,
-          promptIndex: request.promptIndex,
-        },
-      });
-    }
-  }
+  return { images: imagesPerRequest.flat() };
+}
 
-  return { images };
+function buildSeedreamGeneratedImage({
+  url,
+  index,
+  request,
+  config,
+  totalRequestedImageCount,
+  promptBatchMode,
+}: {
+  url: string;
+  index: number;
+  request: { body: Record<string, unknown>; imageUrls: string[]; resultCount: number; promptIndex: number };
+  config: SeedreamConfig;
+  totalRequestedImageCount: number;
+  promptBatchMode: SeedreamGenerateInput["promptBatchMode"];
+}): SeedreamGeneratedImage {
+  const outputWidth = readPositiveNumber(request.body.width);
+  const outputHeight = readPositiveNumber(request.body.height);
+  const outputSize = readPositiveNumber(request.body.size);
+  return {
+    id: `seedream-${Date.now()}-${index}`,
+    url,
+    title:
+      totalRequestedImageCount === 1
+        ? "Seedream image"
+        : `Seedream image ${index}`,
+    metadata: {
+      provider: "seedream",
+      reqKey: config.reqKey,
+      width: outputWidth,
+      height: outputHeight,
+      size: outputSize,
+      inputImageCount: request.imageUrls.length,
+      requestedImageCount: request.resultCount,
+      totalRequestedImageCount,
+      promptBatchMode,
+      promptIndex: request.promptIndex,
+    },
+  };
 }
 
 // Map over items with a bounded number of in-flight tasks. Submits are spaced
