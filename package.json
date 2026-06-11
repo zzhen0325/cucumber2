@@ -14,7 +14,6 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@ai-sdk/openai-compatible": "^2.0.48",
     "@ai-sdk/react": "^3.0.199",
     "@blocknote/core": "^0.51.4",
     "@blocknote/react": "^0.51.4",
@@ -29,14 +28,12 @@
     "@streamdown/math": "^1.0.2",
     "@streamdown/mermaid": "^1.0.2",
     "@supabase/supabase-js": "^2.107.0",
-    "@tavily/ai-sdk": "^0.5.0",
     "@xyflow/react": "^12.11.0",
     "ai": "^6.0.197",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "hono": "^4.12.23",
-    "jszip": "^3.10.1",
     "lucide-react": "^1.17.0",
     "nanoid": "^5.1.11",
     "openai": "6.42.0",

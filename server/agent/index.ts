@@ -5,4 +5,4 @@ export type {
   CucumberAgentContext,
   CucumberRunEvent,
 } from "./context.ts";
-export { executeOpenAIAgentsRunV2, openAIAgentsRuntime, OpenAIAgentsRuntime } from "./runtime.ts";
+export { agentRuntime, executeAgentRun, OpenAIAgentsRuntime } from "./runtime.ts";

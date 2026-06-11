@@ -163,7 +163,6 @@ function hasVisibleRunOutput(data: Extract<AgentCanvasNode["data"], { kind: "run
       hasVisibleToolPart ||
       data.stepTimeline?.length ||
       data.summaryItems?.length ||
-      data.evaluation ||
       data.error
   );
 }

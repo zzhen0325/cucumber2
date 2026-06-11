@@ -1,11 +1,6 @@
 import {
-  createHtmlPageNodes,
   createImageResultNodes,
-  createMarkdownDocumentNodes,
   createPendingImageResultNodes,
-  extractHtmlPagesFromToolOutput,
-  extractImagesFromToolOutput,
-  extractMarkdownDocumentsFromToolOutput,
 } from "@/lib/graph";
 import type {
   AgentCanvasEdge,
@@ -16,18 +11,17 @@ import type {
   CanvasToolPart,
   GeneratedImage,
   ImageRequestPreview,
-  RunEvaluationSummary,
   RunStepTimelineItem,
   RunSummaryItem,
 } from "@/types/canvas";
-import type { CanvasOperation, RuntimeEvent } from "@/types/runtime";
+import type { AgentEvent, CanvasOperation } from "@/types/runtime";
 
 const DEFAULT_PROMPT_POSITION = { x: 260, y: 210 };
 const RUN_OFFSET_Y = 124;
 const ARTIFACT_NODE_GAP_Y = 162;
 const ARTIFACT_NODE_GAP_X = 257;
 
-export type RunStepTraceEvent = RuntimeEvent;
+export type RunStepTraceEvent = AgentEvent;
 
 export type GraphProjectionState = {
   projectId?: string;
@@ -64,12 +58,7 @@ export type GraphPatch =
       type: "setNodeStatus";
       payload: { nodeId: string; status: AgentRunStatus; error?: string };
     }
-  | {
-      id: string;
-      projectId?: string;
-      type: "attachArtifact";
-      payload: { nodeId: string; artifact: ArtifactRef };
-    };
+  ;
 
 export type RejectedGraphPatch = {
   patch: GraphPatch;
@@ -204,61 +193,7 @@ export function applyGraphPatch(
     };
   }
 
-  const existing =
-    state.nodes.find((node) => node.id === patch.payload.nodeId) ??
-    findNodeByArtifactId(state.nodes, patch.payload.artifact.id);
-  if (!existing) {
-    return rejectPatch(state, patch, "missing_node");
-  }
-
-  return {
-    state: {
-      ...state,
-      nodes: state.nodes.map((node) =>
-        node.id === existing.id
-          ? attachArtifactToNode(node, patch.payload.artifact)
-          : node
-      ),
-    },
-  };
-}
-
-export function projectToolOutputToCanvas(
-  runNode: AgentCanvasNode,
-  output: unknown,
-  existingNodes: AgentCanvasNode[]
-) {
-  const images = extractImagesFromToolOutput(output);
-  const imageProjection = createImageResultNodes(runNode, images, existingNodes);
-  const markdownDocuments = extractMarkdownDocumentsFromToolOutput(output);
-  const markdownProjection = createMarkdownDocumentNodes(
-    runNode,
-    markdownDocuments,
-    [...existingNodes, ...imageProjection.resultNodes]
-  );
-  const htmlPages = extractHtmlPagesFromToolOutput(output);
-  const htmlProjection = createHtmlPageNodes(
-    runNode,
-    htmlPages,
-    [
-      ...existingNodes,
-      ...imageProjection.resultNodes,
-      ...markdownProjection.resultNodes,
-    ]
-  );
-
-  return {
-    resultNodes: [
-      ...imageProjection.resultNodes,
-      ...markdownProjection.resultNodes,
-      ...htmlProjection.resultNodes,
-    ],
-    resultEdges: [
-      ...imageProjection.resultEdges,
-      ...markdownProjection.resultEdges,
-      ...htmlProjection.resultEdges,
-    ],
-  };
+  return rejectPatch(state, patch, "unknown_patch_type");
 }
 
 export function projectRunTraceToCanvas({
@@ -346,7 +281,6 @@ export function projectRunTraceToCanvas({
         toolPart: toolParts.at(-1),
         toolParts,
         stepTimeline: buildStepTimeline(orderedEvents),
-        evaluation: readEvaluationSummary(orderedEvents),
         summaryItems: buildRunSummaryItems(orderedEvents),
         traceAvailable: true,
         error: readRunError(orderedEvents),
@@ -369,7 +303,6 @@ export function projectRunTraceToCanvas({
   const projectedNodes = [promptNode, runNode];
   const projectedEdges: AgentCanvasEdge[] = [];
   const rejectedPatches: RejectedGraphPatch[] = [];
-  const appliedOperationIds = new Set<string>();
 
   if (selectedNodeId) {
     projectedEdges.push(
@@ -443,8 +376,6 @@ export function projectRunTraceToCanvas({
       if (!patch) {
         continue;
       }
-      appliedOperationIds.add(patch.id);
-
       const result = applyGraphPatch(
         { projectId, nodes: projectedNodes, edges: projectedEdges },
         patch
@@ -456,25 +387,6 @@ export function projectRunTraceToCanvas({
       }
     }
 
-    if (event.type === "graph.patch.applied") {
-      const patch = readGraphPatch(event.payload.patch, projectId);
-      if (!patch) {
-        continue;
-      }
-      if (appliedOperationIds.has(patch.id)) {
-        continue;
-      }
-
-      const result = applyGraphPatch(
-        { projectId, nodes: projectedNodes, edges: projectedEdges },
-        patch
-      );
-      projectedNodes.splice(0, projectedNodes.length, ...result.state.nodes);
-      projectedEdges.splice(0, projectedEdges.length, ...result.state.edges);
-      if (result.rejected) {
-        rejectedPatches.push(result.rejected);
-      }
-    }
   }
 
   return {
@@ -525,60 +437,6 @@ function getNodeTypeForKind(kind: AgentCanvasNodeData["kind"]) {
   return nodeTypes[kind];
 }
 
-function attachArtifactToNode(
-  node: AgentCanvasNode,
-  artifact: ArtifactRef
-): AgentCanvasNode {
-  if (node.data.kind === "imageResult") {
-    return {
-      ...node,
-      data: {
-        ...node.data,
-        artifact,
-        image: {
-          ...node.data.image,
-          artifact,
-          url: artifact.uri ?? node.data.image.url,
-        },
-        status: artifact.uri ? "ready" : node.data.status,
-      },
-    };
-  }
-
-  if ("artifact" in node.data) {
-    return {
-      ...node,
-      data: {
-        ...node.data,
-        artifact,
-      },
-    };
-  }
-
-  return node;
-}
-
-function findNodeByArtifactId(
-  nodes: AgentCanvasNode[],
-  artifactId: string | undefined
-) {
-  if (!artifactId) {
-    return undefined;
-  }
-
-  return nodes.find((node) => {
-    if (node.data.kind === "imageResult") {
-      return (
-        node.data.artifact?.id === artifactId ||
-        node.data.image.artifact?.id === artifactId ||
-        node.data.image.id === artifactId
-      );
-    }
-
-    return "artifact" in node.data && node.data.artifact.id === artifactId;
-  });
-}
-
 function buildToolParts(
   events: RunStepTraceEvent[],
   prompt: string
@@ -605,10 +463,7 @@ function buildToolParts(
       toolParts.set(toolCallId, {
         ...previous,
         type: `tool-${toolName}`,
-        state:
-          event.payload.state === "approval-requested"
-            ? "approval-requested"
-            : "input-available",
+        state: "input-available",
         input: event.payload.input ?? previous?.input,
       });
     }
@@ -627,10 +482,7 @@ function buildToolParts(
       toolParts.set(toolCallId, {
         ...previous,
         type: `tool-${toolName}`,
-        state:
-          event.payload.state === "output-denied"
-            ? "output-denied"
-            : "output-error",
+        state: "output-error",
         input: previous?.input,
         output: previous?.output,
         errorText: event.errorText ?? readString(event.payload.errorText),
@@ -654,21 +506,9 @@ function buildToolParts(
 
 function buildStepTimeline(events: RunStepTraceEvent[]): RunStepTimelineItem[] {
   const timeline = new Map<string, RunStepTimelineItem>();
-  const failedStepId = readNullableString(
-    events.find((event) => event.type === "run.failed")?.payload.failedStepId
-  );
   const completed = events.some((event) => event.type === "run.completed");
 
   for (const event of events) {
-    if (event.type === "step.started") {
-      timeline.set(event.stepId, {
-        id: event.stepId,
-        label: readString(event.payload.label) ?? event.stepId,
-        status: "running",
-        startedAt: event.createdAt,
-      });
-    }
-
     if (event.type === "tool.input" || event.type === "tool.output") {
       const previous = timeline.get(event.stepId);
       timeline.set(event.stepId, {
@@ -703,134 +543,35 @@ function buildStepTimeline(events: RunStepTraceEvent[]): RunStepTimelineItem[] {
     if (completed) {
       return { ...step, status: "success" };
     }
-    if (failedStepId && step.id !== failedStepId) {
-      return { ...step, status: "success" };
-    }
-
     return step;
   });
 }
 
-function readEvaluationSummary(
-  events: RunStepTraceEvent[]
-): RunEvaluationSummary | undefined {
-  const event = events.findLast(
-    (candidate) => candidate.type === "evaluation.completed"
-  );
-  const evaluation = readRecord(event?.payload.evaluation);
-  if (!evaluation) {
-    return undefined;
-  }
-
-  const issues = Array.isArray(evaluation.issues) ? evaluation.issues : [];
-  const recommendedActions = Array.isArray(evaluation.recommendedActions)
-    ? evaluation.recommendedActions.filter(
-        (action): action is string => typeof action === "string" && action.length > 0
-      )
-    : [];
-
-  return {
-    passed: evaluation.passed === true,
-    issueCount: issues.length,
-    recommendedActions,
-    needsRegeneration: evaluation.needsRegeneration === true,
-  };
-}
-
 function buildRunSummaryItems(events: RunStepTraceEvent[]): RunSummaryItem[] {
   const items: RunSummaryItem[] = [];
-  const intent = readIntentSummary(events);
-  const context = readContextSummary(events);
-  const plan = readPlanSummary(events);
-  const artifact = readArtifactSummary(events);
-
-  if (intent) {
-    items.push(intent);
-  }
-  if (context) {
-    items.push(context);
-  }
-  if (plan) {
-    items.push(plan);
-  }
-  if (artifact) {
-    items.push(artifact);
+  const agents = events
+    .filter((event) => event.type === "agent.active")
+    .map((event) => readString(event.payload.agentName))
+    .filter((name): name is string => Boolean(name));
+  if (agents.length) {
+    items.push({
+      kind: "agent",
+      label: "Agent",
+      detail: [...new Set(agents)].join(" -> "),
+    });
   }
 
-  return items;
-}
-
-function readIntentSummary(events: RunStepTraceEvent[]): RunSummaryItem | undefined {
-  const event = events.find((candidate) => candidate.type === "intent.routed");
-  const intent = readRecord(event?.payload.intent);
-  const task = readRecord(intent?.task);
-  const taskKind = readString(task?.kind);
-  const primaryIntent = readString(intent?.primaryIntent);
-  const label = humanizeRuntimeLabel(taskKind ?? primaryIntent);
-  if (!label) {
-    return undefined;
+  const handoffs = events.filter((event) => event.type === "handoff.completed");
+  if (handoffs.length) {
+    items.push({
+      kind: "handoff",
+      label: "Handoff",
+      detail: handoffs
+        .map((event) => readString(event.payload.toAgent) ?? "specialist")
+        .join(" -> "),
+    });
   }
 
-  return {
-    kind: "intent",
-    label: "意图",
-    detail: label,
-  };
-}
-
-function readContextSummary(events: RunStepTraceEvent[]): RunSummaryItem | undefined {
-  const event = events.find((candidate) => candidate.type === "context.built");
-  const context = readRecord(event?.payload.context);
-  const trace = readRecord(context?.trace);
-  const selectedItems = Array.isArray(context?.selectedItems)
-    ? context.selectedItems
-    : [];
-  const omittedItems = Array.isArray(context?.omittedItems)
-    ? context.omittedItems
-    : [];
-  const selectedCount = readNumber(trace?.selectedCount) ?? selectedItems.length;
-  const omittedCount = readNumber(trace?.omittedCount) ?? omittedItems.length;
-  if (!selectedCount && !omittedCount) {
-    return undefined;
-  }
-
-  return {
-    kind: "context",
-    label: "上下文",
-    detail: omittedCount
-      ? `${selectedCount} 项，省略 ${omittedCount} 项`
-      : `${selectedCount} 项`,
-  };
-}
-
-function readPlanSummary(events: RunStepTraceEvent[]): RunSummaryItem | undefined {
-  const event = events.find((candidate) => candidate.type === "plan.created");
-  const rawPlan = Array.isArray(event?.payload.rawPlan) ? event.payload.rawPlan : [];
-  const normalizedPlan = Array.isArray(event?.payload.normalizedPlan)
-    ? event.payload.normalizedPlan
-    : [];
-  const steps = normalizedPlan.length ? normalizedPlan : rawPlan;
-  if (!steps.length) {
-    return undefined;
-  }
-
-  const stepTitles = steps
-    .map((step) => readString(readRecord(step)?.title))
-    .filter((title): title is string => Boolean(title))
-    .slice(0, 2)
-    .map(humanizeRuntimeLabel)
-    .filter((title): title is string => Boolean(title));
-
-  return {
-    kind: "plan",
-    label: "计划",
-    detail: stepTitles.length
-      ? `${steps.length} 步：${stepTitles.join(" / ")}`
-      : `${steps.length} 步`,
-  };
-}
-
-function readArtifactSummary(events: RunStepTraceEvent[]): RunSummaryItem | undefined {
   const artifactTypes = events.flatMap((event) => {
     if (event.type !== "artifact.created") {
       return [];
@@ -839,119 +580,53 @@ function readArtifactSummary(events: RunStepTraceEvent[]): RunSummaryItem | unde
     const type = readString(artifact?.type);
     return type ? [type] : [];
   });
-  if (!artifactTypes.length) {
-    return undefined;
+  if (artifactTypes.length) {
+    const counts = new Map<string, number>();
+    for (const type of artifactTypes) {
+      counts.set(type, (counts.get(type) ?? 0) + 1);
+    }
+    const detail = Array.from(counts.entries())
+      .map(([type, count]) => `${count} ${humanizeRuntimeLabel(type)}`)
+      .join("，");
+
+    items.push({
+      kind: "artifact",
+      label: "产物",
+      detail,
+    });
   }
 
-  const counts = new Map<string, number>();
-  for (const type of artifactTypes) {
-    counts.set(type, (counts.get(type) ?? 0) + 1);
+  const appliedOperations = events.filter(
+    (event) => event.type === "canvas.operation.applied"
+  ).length;
+  if (appliedOperations) {
+    items.push({
+      kind: "canvas",
+      label: "画布",
+      detail: `${appliedOperations} 项操作`,
+    });
   }
-  const detail = Array.from(counts.entries())
-    .map(([type, count]) => `${count} ${humanizeRuntimeLabel(type)}`)
-    .join("，");
 
-  return {
-    kind: "artifact",
-    label: "产物",
-    detail,
-  };
+  return items;
 }
 
 function readExpectedImageRequest(
   events: RunStepTraceEvent[],
   prompt: string
 ): { count: number; preview: Omit<ImageRequestPreview, "index" | "count"> } | null {
-  const intentEvent = events.findLast(
-    (candidate) => candidate.type === "intent.routed"
-  );
-  const intent = readRecord(intentEvent?.payload.intent);
-  const intentLooksLikeImage = isImageGenerationIntent(intent);
-  const count =
-    readImageCountFromIntent(intent) ??
-    readImageCountFromPlan(events) ??
-    readImageCountFromGenerateInput(events) ??
-    (intentLooksLikeImage ? inferImageCountFromPrompt(prompt) : undefined);
-
-  if (!intentLooksLikeImage && !readImageCountFromGenerateInput(events)) {
-    return null;
-  }
-
-  return {
-    count: Math.max(1, count ?? 1),
-    preview: readImageRequestPreview(prompt),
-  };
-}
-
-function isImageGenerationIntent(intent: Record<string, unknown> | null) {
-  const task = readRecord(intent?.task);
-  const requiredTools = Array.isArray(intent?.requiredTools)
-    ? intent.requiredTools
-    : [];
-
-  return (
-    intent?.primaryIntent === "image_generation" ||
-    task?.kind === "image_generation" ||
-    task?.kind === "image_editing" ||
-    requiredTools.includes("seedream.generateImage") ||
-    requiredTools.includes("generate_image")
-  );
-}
-
-function readImageCountFromIntent(intent: Record<string, unknown> | null) {
-  const task = readRecord(intent?.task);
-  const deliverables = Array.isArray(task?.deliverables)
-    ? task.deliverables
-    : [];
-  const count = deliverables.reduce((total, deliverable) => {
-    const record = readRecord(deliverable);
-    if (record?.kind !== "image") {
-      return total;
-    }
-
-    return total + Math.max(1, readNumber(record.count) ?? 1);
-  }, 0);
-
-  return count > 0 ? count : undefined;
-}
-
-function readImageCountFromPlan(events: RunStepTraceEvent[]) {
-  const planEvent = events.findLast((event) => event.type === "plan.created");
-  const steps = Array.isArray(planEvent?.payload.normalizedPlan)
-    ? planEvent.payload.normalizedPlan
-    : Array.isArray(planEvent?.payload.rawPlan)
-      ? planEvent.payload.rawPlan
-      : [];
-  const count = steps.reduce((total, step) => {
-    const record = readRecord(step);
-    const expectedArtifacts = Array.isArray(record?.expectedArtifacts)
-      ? record.expectedArtifacts
-      : [];
-
-    return (
-      total +
-      expectedArtifacts.reduce((artifactTotal, artifact) => {
-        const artifactRecord = readRecord(artifact);
-        if (artifactRecord?.type !== "image") {
-          return artifactTotal;
-        }
-
-        return artifactTotal + Math.max(1, readNumber(artifactRecord.count) ?? 1);
-      }, 0)
-    );
-  }, 0);
-
-  return count > 0 ? count : undefined;
-}
-
-function readImageCountFromGenerateInput(events: RunStepTraceEvent[]) {
-  const toolInput = events
+  const generateInput = events
     .filter((event) => event.type === "tool.input")
     .findLast((event) => readToolName(event.payload.toolName) === "generate_image");
-  const input = readRecord(toolInput?.payload.input);
-  const count = readNumber(input?.resultCount);
+  if (!generateInput) {
+    return null;
+  }
+  const input = readRecord(generateInput.payload.input);
+  const requestedCount = readNumber(input?.resultCount);
 
-  return count && count > 0 ? Math.floor(count) : undefined;
+  return {
+    count: Math.max(1, requestedCount ? Math.floor(requestedCount) : 1),
+    preview: readImageRequestPreview(prompt),
+  };
 }
 
 function readImageRequestPreview(
@@ -990,42 +665,6 @@ function readImageRequestPreview(
     aspectRatio: orientationRatio,
     size: inferImageAreaFromPrompt(prompt),
   };
-}
-
-function inferImageCountFromPrompt(prompt: string) {
-  const arabicMatch = prompt.match(
-    /(?:生成|出|要|做|给我|create|generate|make)?\s*(\d{1,2})\s*(?:张|幅|个|款|版|组|images?|imgs?|pictures?|results?)/i
-  );
-  if (arabicMatch) {
-    return Number(arabicMatch[1]);
-  }
-
-  const chineseMatch = prompt.match(
-    /(?:生成|出|要|做|给我)?\s*([一二两三四五六七八九十])\s*(?:张|幅|个|款|版|组|图片|图|结果)/
-  );
-  if (chineseMatch) {
-    return chineseImageCountToNumber(chineseMatch[1]) ?? 1;
-  }
-
-  return 1;
-}
-
-function chineseImageCountToNumber(value: string) {
-  const numbers: Record<string, number> = {
-    一: 1,
-    二: 2,
-    两: 2,
-    三: 3,
-    四: 4,
-    五: 5,
-    六: 6,
-    七: 7,
-    八: 8,
-    九: 9,
-    十: 10,
-  };
-
-  return numbers[value];
 }
 
 function inferImageAreaFromPrompt(prompt: string) {
@@ -1388,13 +1027,11 @@ function buildAgentText(
   events: RunStepTraceEvent[],
   status: AgentRunStatus
 ): string | undefined {
-  const stepTexts = events
-    .filter((event) => event.type === "step.finished")
-    .map((event) => readString(event.payload.text)?.trim())
-    .filter((text): text is string => Boolean(text));
-
-  if (stepTexts.length) {
-    return stepTexts.join("\n\n");
+  const finalOutput = readString(
+    events.findLast((event) => event.type === "run.completed")?.payload.finalOutput
+  );
+  if (finalOutput) {
+    return finalOutput;
   }
 
   if (status === "success") {
@@ -1406,10 +1043,6 @@ function buildAgentText(
   if (events.some((event) => event.type === "tool.input")) {
     return "正在调用工具，结果会自动写入画布。";
   }
-  if (events.some((event) => event.type === "plan.created")) {
-    return "已生成运行计划，正在执行。";
-  }
-
   return undefined;
 }
 
@@ -1422,20 +1055,7 @@ function readRunError(events: RunStepTraceEvent[]) {
 }
 
 function readToolName(value: unknown) {
-  if (
-    value === "analyze_reference_images" ||
-    value === "expand_prompt" ||
-    value === "generate_image" ||
-    value === "generate_html" ||
-    value === "web.read" ||
-    value === "asset.analyze_context" ||
-    value === "web_search" ||
-    value === "write_document"
-  ) {
-    return value;
-  }
-
-  return null;
+  return readString(value) ?? null;
 }
 
 function readArtifactRef(value: unknown): ArtifactRef | null {
@@ -1494,8 +1114,7 @@ function readGraphPatch(
     candidate.type !== "createNode" &&
     candidate.type !== "updateNode" &&
     candidate.type !== "createEdge" &&
-    candidate.type !== "setNodeStatus" &&
-    candidate.type !== "attachArtifact"
+    candidate.type !== "setNodeStatus"
   ) {
     return null;
   }
@@ -1510,35 +1129,7 @@ function readCanvasOperationPatch(
   value: unknown,
   projectId: string | undefined
 ): GraphPatch | null {
-  const operation = readGraphPatch(value, projectId);
-  if (!operation) {
-    return null;
-  }
-
-  if (operation.type !== "attachArtifact") {
-    return operation;
-  }
-
-  const canvasOperation = value as CanvasOperation;
-  if (
-    canvasOperation.type !== "attachArtifact" ||
-    !canvasOperation.payload.artifactId
-  ) {
-    return operation;
-  }
-
-  return {
-    id: canvasOperation.id,
-    projectId: canvasOperation.projectId ?? projectId,
-    type: "attachArtifact",
-    payload: {
-      nodeId: canvasOperation.payload.nodeId,
-      artifact: canvasOperation.payload.artifact ?? {
-        id: canvasOperation.payload.artifactId,
-        type: "image",
-      },
-    },
-  };
+  return readGraphPatch(value as CanvasOperation, projectId);
 }
 
 function readString(value: unknown) {

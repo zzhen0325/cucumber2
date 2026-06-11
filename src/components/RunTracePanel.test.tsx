@@ -1,157 +1,50 @@
 import { describe, expect, it } from "vitest";
 
-import { summarizeRunTrace } from "./run-trace-summary";
-import type { RunStepTraceEvent } from "@/lib/graph-projection";
+import { getEventLabel, summarizeRunTrace } from "./run-trace-summary";
+import type { AgentEvent } from "@/types/runtime";
 
-describe("summarizeRunTrace", () => {
-  it("summarizes runtime routing, planning, retry, canvas, and evaluation events", () => {
-    const summary = summarizeRunTrace([
-      event("run.created", "run", {
-        prompt: "基于参考图生成海报",
-        selectedCapabilityIds: ["image.generate"],
+describe("run trace summary", () => {
+  it("summarizes the OpenAI Agents SDK event chain", () => {
+    const events: AgentEvent[] = [
+      event("run.created", { prompt: "生成图片" }),
+      event("agent.active", { agentName: "Cucumber Manager" }),
+      event("handoff.completed", { toAgent: "Cucumber Image Agent" }),
+      event("tool.input", { toolName: "generate_image" }, "generate_image"),
+      event("artifact.created", {
+        artifact: { id: "artifact-1", type: "image", title: "Result" },
       }),
-      event("intent.routed", "router", {
-        intent: {
-          primaryIntent: "generate_image",
-          routingReason: "User asked for image generation",
-          requiredTools: ["seedream.generateImage"],
-          task: { kind: "image_generation" },
-        },
-      }),
-      event("context.built", "context", {
-        context: {
-          availableTools: [{ id: "seedream.generateImage" }],
-          budget: { maxTokens: 1200, usedTokens: 460 },
-          omittedItems: [
-            {
-              nodeId: "doc-1",
-              omissionReason: "budget exceeded",
-              tokenEstimate: 180,
-            },
-          ],
-          selectedItems: [
-            {
-              nodeId: "image-1",
-              inclusionReason: "selected reference",
-              tokenEstimate: 120,
-            },
-          ],
-          trace: {
-            omittedCount: 1,
-            selectedCount: 2,
-            skillInjectionReason: "prompt skill selected",
-            toolExposureReason: "image tools exposed",
-          },
-        },
-      }),
-      event("plan.created", "planner", {
-        normalizedPlan: [
-          {
-            id: "step-generate",
-            label: "Generate image",
-            toolId: "seedream.generateImage",
-          },
-        ],
-        rawPlan: [
-          {
-            id: "draft-generate",
-            title: "Draft generate image",
-            toolId: "seedream.generateImage",
-          },
-        ],
-        validation: { ok: true },
-      }),
-      event("step.started", "step-generate", { label: "Generate image" }),
-      event("tool.input", "step-generate", {
-        toolName: "seedream.generateImage",
-      }),
-      event("retry.attempt", "step-generate", {
-        attempt: 1,
-        delayMs: 100,
-        reason: "upstream timeout",
-      }),
-      event("tool.output", "step-generate", {
-        durationMs: 420,
-        logs: [{ level: "info", message: "Generated image" }],
-        toolName: "seedream.generateImage",
-      }),
-      event("canvas.operation.proposed", "step-generate", {
-        operation: { id: "op-1", type: "createNode" },
-      }),
-      event("canvas.operation.applied", "step-generate", {
-        operationId: "op-1",
-      }),
-      event("evaluation.completed", "eval", {
-        evaluation: {
-          passed: false,
-          issues: ["low contrast"],
-          recommendedActions: ["regenerate"],
-        },
-      }),
-      event("run.completed", "run", { status: "completed" }),
+      event("tool.output", { toolName: "generate_image" }, "generate_image"),
+      event("run.completed", { finalOutput: "完成", artifactIds: ["artifact-1"] }),
+    ];
+
+    const summary = summarizeRunTrace(events);
+    expect(summary.runStatus).toBe("success");
+    expect(summary.finalOutput).toBe("完成");
+    expect(summary.agents).toHaveLength(1);
+    expect(summary.handoffs).toHaveLength(1);
+    expect(summary.artifacts).toEqual([
+      { id: "artifact-1", type: "image", title: "Result" },
     ]);
+    expect(summary.steps[0]).toMatchObject({ status: "success" });
+  });
 
-    expect(summary.runStatus).toBe("completed");
-    expect(summary.prompt).toBe("基于参考图生成海报");
-    expect(summary.intent).toMatchObject({
-      primaryIntent: "generate_image",
-      taskKind: "image_generation",
-      routingReason: "User asked for image generation",
-      requiredTools: ["seedream.generateImage"],
-    });
-    expect(summary.context).toMatchObject({
-      availableTools: "seedream.generateImage",
-      budget: "460/1200",
-      omittedCount: "1",
-      omittedReasons: "doc-1: budget exceeded: 180 tokens",
-      selectedCount: "2",
-      selectedReasons: "image-1: selected reference: 120 tokens",
-      skillInjectionReason: "prompt skill selected",
-      toolExposureReason: "image tools exposed",
-    });
-    expect(summary.plan).toMatchObject({
-      stepCount: "1",
-      toolIds: ["seedream.generateImage"],
-      validation: "valid",
-    });
-    expect(summary.plan.rawPlan).toContain("draft-generate");
-    expect(summary.plan.normalizedPlan).toContain("step-generate");
-    expect(summary.plan.validationDetail).toContain("\"ok\":true");
-    expect(summary.retryEvents).toHaveLength(1);
-    expect(summary.toolEvents[1]?.payload).toMatchObject({
-      durationMs: 420,
-      logs: [{ level: "info", message: "Generated image" }],
-    });
-    expect(summary.canvasOperationEvents.map((traceEvent) => traceEvent.type)).toEqual(
-      ["canvas.operation.proposed", "canvas.operation.applied"]
-    );
-    expect(summary.evaluation).toMatchObject({
-      passed: "no",
-      issues: "[\"low contrast\"]",
-      recommendedActions: "[\"regenerate\"]",
-    });
-    expect(summary.steps[0]).toMatchObject({
-      id: "step-generate",
-      label: "Generate image",
-      status: "success",
-      toolName: "seedream.generateImage",
-    });
+  it("labels all v2 events", () => {
+    expect(getEventLabel(event("handoff.requested", {}))).toBe("Handoff requested");
+    expect(getEventLabel(event("tool.error", {}))).toBe("Tool error");
   });
 });
 
 function event(
-  type: RunStepTraceEvent["type"],
-  stepId: string,
-  payload: Record<string, unknown>
-): RunStepTraceEvent {
+  type: AgentEvent["type"],
+  payload: Record<string, unknown>,
+  stepId = "run"
+): AgentEvent {
   return {
     projectId: "project-1",
     runNodeId: "run-1",
     stepId,
     type,
     payload,
-    createdAt: `2026-06-08T00:00:${String(eventCounter++).padStart(2, "0")}.000Z`,
+    createdAt: "2026-06-11T00:00:00.000Z",
   };
 }
-
-let eventCounter = 0;

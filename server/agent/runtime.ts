@@ -1,28 +1,27 @@
 import { Agent, Runner } from "@openai/agents";
 
-import type { RuntimeEventWriter } from "../runtime/events.ts";
-import { createRuntimeEventWriter } from "../runtime/events.ts";
-import { recordRunEvent } from "../supabase.ts";
 import type { CanvasOperation } from "../../src/types/runtime.ts";
 import { managerAgent } from "./agents/manager.agent.ts";
-import { resolveAgentModel } from "./model-config.ts";
-import type {
-  AgentRunInput,
-  AgentRuntime,
-  CucumberRunEvent,
-  ExecuteAgentRunV2Input,
+import {
+  buildAgentRunInput,
+  buildCucumberAgentContext,
+  type AgentRunInput,
+  type AgentRuntime,
+  type CucumberRunEvent,
+  type ExecuteAgentRunInput,
 } from "./context.ts";
-import { buildAgentRunInputV2, buildCucumberAgentContext } from "./context.ts";
+import {
+  createAgentEventWriter,
+  type AgentEventWriter,
+} from "./events/runtime-event-writer.ts";
 import { openAIStreamToCucumberEvents } from "./events/openai-stream-to-cucumber-events.ts";
+import { resolveAgentModel } from "./model-config.ts";
 
-const runner = new Runner({ workflowName: "Cucumber Agent V2" });
+const runner = new Runner({ workflowName: "Cucumber Agent" });
 
 export class OpenAIAgentsRuntime implements AgentRuntime {
   async *run(input: AgentRunInput): AsyncIterable<CucumberRunEvent> {
     const context = buildCucumberAgentContext(input);
-    // Resolve the model lazily, now that env vars are loaded. The same model is
-    // applied to every agent in the graph (manager + handoff specialists) so a
-    // handoff does not silently fall back to a different provider.
     const model = resolveAgentModel();
     if (model) {
       managerAgent.model = model;
@@ -32,31 +31,33 @@ export class OpenAIAgentsRuntime implements AgentRuntime {
         }
       }
     }
+
     const stream = await runner.run(managerAgent, buildManagerRunPrompt(input), {
       context,
       maxTurns: 8,
+      signal: input.signal,
       stream: true,
     });
-
     yield* openAIStreamToCucumberEvents(stream, context);
   }
 }
 
-export const openAIAgentsRuntime = new OpenAIAgentsRuntime();
+export const agentRuntime = new OpenAIAgentsRuntime();
 
-export async function executeOpenAIAgentsRunV2({
+export async function executeAgentRun({
   writer: streamWriter,
   ...input
-}: ExecuteAgentRunV2Input) {
-  const eventWriter = createRuntimeEventWriter({
+}: ExecuteAgentRunInput) {
+  const eventWriter = createAgentEventWriter({
     projectId: input.projectId,
     runNodeId: input.runNodeId,
     writer: streamWriter,
   });
-  const agentInput = buildAgentRunInputV2(input);
-  const textStreamId = `agent-v2-text-${crypto.randomUUID()}`;
+  const agentInput = buildAgentRunInput(input);
+  const textStreamId = `agent-text-${crypto.randomUUID()}`;
   let textStarted = false;
   let finalOutput: string | undefined;
+  let artifactIds: string[] = [];
 
   try {
     await eventWriter.writeEvent({
@@ -65,13 +66,11 @@ export async function executeOpenAIAgentsRunV2({
       stepId: "run",
       type: "run.created",
       payload: {
-        prompt: input.canvasContext.prompt,
-        promptNodeId: input.canvasContext.promptNodeId ?? null,
-        selectedNodeId: input.canvasContext.selectedNodeId ?? null,
-        upstreamContext: input.canvasContext.upstreamContext,
-        contextTrace: input.canvasContext.contextTrace,
+        prompt: agentInput.message,
+        promptNodeId: agentInput.promptNodeId,
+        selectedNodeId: agentInput.selectedNodeId,
+        upstreamContext: agentInput.upstreamContext,
         runtime: "openai-agents-sdk",
-        routing: "agent-v2 manager agent + proposal-first tools",
       },
     });
     await eventWriter.writeEvent({
@@ -79,10 +78,16 @@ export async function executeOpenAIAgentsRunV2({
       runNodeId: input.runNodeId,
       stepId: "input",
       type: "input.normalized",
-      payload: { input: agentInput, runtime: "openai-agents-sdk" },
+      payload: {
+        prompt: agentInput.message,
+        promptNodeId: agentInput.promptNodeId,
+        selectedNodeId: agentInput.selectedNodeId,
+        upstreamContext: agentInput.upstreamContext,
+        runtime: "openai-agents-sdk",
+      },
     });
 
-    for await (const event of openAIAgentsRuntime.run(agentInput)) {
+    for await (const event of agentRuntime.run(agentInput)) {
       if (event.type === "text_delta") {
         if (!textStarted) {
           textStarted = true;
@@ -90,6 +95,32 @@ export async function executeOpenAIAgentsRunV2({
           streamWriter.write({ type: "text-start", id: textStreamId });
         }
         streamWriter.write({ type: "text-delta", id: textStreamId, delta: event.text });
+        continue;
+      }
+
+      if (event.type === "agent_active") {
+        await eventWriter.writeEvent({
+          projectId: input.projectId,
+          runNodeId: input.runNodeId,
+          stepId: "agent",
+          type: "agent.active",
+          payload: { agentName: event.agentName, runtime: "openai-agents-sdk" },
+        });
+        continue;
+      }
+
+      if (event.type === "handoff_requested" || event.type === "handoff_completed") {
+        await eventWriter.writeEvent({
+          projectId: input.projectId,
+          runNodeId: input.runNodeId,
+          stepId: "handoff",
+          type: event.type === "handoff_requested" ? "handoff.requested" : "handoff.completed",
+          payload: {
+            fromAgent: event.fromAgent,
+            toAgent: event.toAgent,
+            runtime: "openai-agents-sdk",
+          },
+        });
         continue;
       }
 
@@ -115,23 +146,29 @@ export async function executeOpenAIAgentsRunV2({
         continue;
       }
 
-      if (event.type === "canvas_operation_proposed") {
-        await writeCanvasOperationEvents({
-          operations: event.operations,
-          projectId: input.projectId,
-          runNodeId: input.runNodeId,
-          type: "canvas.operation.proposed",
-          writer: eventWriter,
+      if (event.type === "tool_failed") {
+        await eventWriter.writeToolError({
+          stepId: event.toolName,
+          toolCallId: event.toolCallId ?? `${event.toolName}-${crypto.randomUUID()}`,
+          toolName: event.toolName,
+          input: event.input,
+          inputWritten: true,
+          errorText: event.message,
+          errorCode: "tool_failed",
+          metadata: { runtime: "openai-agents-sdk" },
         });
         continue;
       }
 
-      if (event.type === "canvas_operation_applied") {
+      if (event.type === "canvas_operation_proposed" || event.type === "canvas_operation_applied") {
         await writeCanvasOperationEvents({
           operations: event.operations,
           projectId: input.projectId,
           runNodeId: input.runNodeId,
-          type: "canvas.operation.applied",
+          type:
+            event.type === "canvas_operation_proposed"
+              ? "canvas.operation.proposed"
+              : "canvas.operation.applied",
           writer: eventWriter,
         });
         continue;
@@ -159,13 +196,13 @@ export async function executeOpenAIAgentsRunV2({
         await eventWriter.writeEvent({
           projectId: input.projectId,
           runNodeId: input.runNodeId,
-          stepId: "create_artifact",
+          stepId: "generate_image",
           type: "artifact.created",
           payload: {
             artifact: event.artifact,
             canvasNodeId: event.canvasNodeId,
             runtime: "openai-agents-sdk",
-            toolName: "create_artifact",
+            toolName: "generate_image",
           },
         });
         continue;
@@ -173,6 +210,8 @@ export async function executeOpenAIAgentsRunV2({
 
       if (event.type === "run_completed") {
         finalOutput = event.finalOutput;
+        artifactIds = event.artifactIds;
+        continue;
       }
 
       if (event.type === "error") {
@@ -180,63 +219,48 @@ export async function executeOpenAIAgentsRunV2({
       }
     }
 
-    if (textStarted) {
-      streamWriter.write({ type: "text-end", id: textStreamId });
-      streamWriter.write({ type: "finish-step" });
-    }
-
+    closeTextStream();
     await eventWriter.writeEvent({
       projectId: input.projectId,
       runNodeId: input.runNodeId,
       stepId: "run",
       type: "run.completed",
       payload: {
-        artifactIds: [],
+        artifactIds,
         finalOutput,
         runtime: "openai-agents-sdk",
         status: "completed",
       },
     });
-    await recordRunEvent({
-      projectId: input.projectId,
-      runNodeId: input.runNodeId,
-      prompt: input.canvasContext.prompt,
-      selectedNodeId: input.canvasContext.selectedNodeId ?? null,
-      upstreamContext: input.canvasContext.upstreamContext,
-      status: "success",
-      skillInput: agentInput,
-      skillOutput: { finalOutput, runtime: "openai-agents-sdk" },
-    });
   } catch (error) {
-    const message = getErrorMessage(error);
-    console.error("[agent-run-v2]", error);
-    if (textStarted) {
-      streamWriter.write({ type: "text-end", id: textStreamId });
-      streamWriter.write({ type: "finish-step" });
+    const aborted = input.signal?.aborted || isAbortError(error);
+    const message = aborted ? "Run stopped by user." : getErrorMessage(error);
+    if (!aborted) {
+      console.error("[agent-run]", error);
     }
+    closeTextStream();
     await eventWriter.writeEvent({
       projectId: input.projectId,
       runNodeId: input.runNodeId,
       stepId: "run",
       type: "run.failed",
       payload: {
-        errorCode: "agent_v2_failed",
+        errorCode: aborted ? "agent_run_aborted" : "agent_run_failed",
         errorText: message,
         runtime: "openai-agents-sdk",
         status: "failed",
       },
       errorText: message,
     });
-    await recordRunEvent({
-      projectId: input.projectId,
-      runNodeId: input.runNodeId,
-      prompt: input.canvasContext.prompt,
-      selectedNodeId: input.canvasContext.selectedNodeId ?? null,
-      upstreamContext: input.canvasContext.upstreamContext,
-      status: "error",
-      skillInput: agentInput,
-      errorText: message,
-    });
+  }
+
+  function closeTextStream() {
+    if (!textStarted) {
+      return;
+    }
+    streamWriter.write({ type: "text-end", id: textStreamId });
+    streamWriter.write({ type: "finish-step" });
+    textStarted = false;
   }
 }
 
@@ -251,7 +275,7 @@ async function writeCanvasOperationEvents({
   projectId: string;
   runNodeId: string;
   type: "canvas.operation.proposed" | "canvas.operation.applied";
-  writer: RuntimeEventWriter;
+  writer: AgentEventWriter;
 }) {
   for (const operation of operations) {
     await writer.writeEvent({
@@ -265,16 +289,33 @@ async function writeCanvasOperationEvents({
 }
 
 function buildManagerRunPrompt(input: AgentRunInput) {
+  const imageContext = input.upstreamContext
+    .filter((item) => item.type === "image")
+    .map(({ nodeId, type, prompt, summary, title, priority }) => ({
+      nodeId,
+      type,
+      prompt,
+      summary,
+      title,
+      priority,
+    }));
   return [
     `User request: ${input.message}`,
     `Project id: ${input.projectId}`,
     `Run node id: ${input.runNodeId}`,
-    `Selected node ids: ${input.selectedNodeIds?.join(", ") || "none"}`,
+    `Selected node ids: ${input.selectedNodeIds.join(", ") || "none"}`,
     `Canvas snapshot summary: ${input.canvasSnapshot.nodes.length} nodes, ${input.canvasSnapshot.edges.length} edges.`,
-    `Known upstream context: ${JSON.stringify(input.canvasContext.upstreamContext.slice(0, 12))}`,
+    `Trusted upstream context: ${JSON.stringify([
+      ...input.upstreamContext.filter((item) => item.type !== "image"),
+      ...imageContext,
+    ].slice(0, 12))}`,
   ].join("\n\n");
 }
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === "AbortError";
 }

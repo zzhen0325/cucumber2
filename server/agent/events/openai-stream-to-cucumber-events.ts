@@ -21,6 +21,7 @@ export async function* openAIStreamToCucumberEvents(
   let notify: (() => void) | null = null;
   let finished = false;
   let streamError: unknown = null;
+  const activeTools = new Map<string, { toolName: string; input?: unknown }>();
 
   const wake = () => {
     if (notify) {
@@ -39,6 +40,14 @@ export async function* openAIStreamToCucumberEvents(
   const pump = (async () => {
     try {
       for await (const event of stream) {
+        if (event.type === "agent_updated_stream_event") {
+          const agentName = readAgentName(event.agent);
+          if (agentName) {
+            push({ type: "agent_active", agentName });
+          }
+          continue;
+        }
+
         if (event.type === "raw_model_stream_event") {
           const delta = readTextDelta(event.data);
           if (delta) {
@@ -49,24 +58,49 @@ export async function* openAIStreamToCucumberEvents(
 
         if (event.type === "run_item_stream_event") {
           if (event.name === "tool_called") {
+            const toolCallId = readToolCallId(event.item) ?? crypto.randomUUID();
+            const toolName = readToolName(event.item) ?? "unknown_tool";
+            const input = readToolInput(event.item);
+            activeTools.set(toolCallId, { toolName, input });
             push({
               type: "tool_started",
-              toolCallId: readToolCallId(event.item),
-              toolName: readToolName(event.item) ?? "unknown_tool",
-              input: readToolInput(event.item),
+              toolCallId,
+              toolName,
+              input,
             });
           }
 
           if (event.name === "tool_output") {
+            const toolCallId = readToolCallId(event.item);
+            const activeTool = toolCallId ? activeTools.get(toolCallId) : undefined;
+            if (toolCallId) {
+              activeTools.delete(toolCallId);
+            }
             push({
               type: "tool_completed",
-              toolCallId: readToolCallId(event.item),
-              toolName: readToolName(event.item) ?? "unknown_tool",
+              toolCallId,
+              toolName: readToolName(event.item) ?? activeTool?.toolName ?? "unknown_tool",
               output: readToolOutput(event.item),
             });
             for (const pending of drainPendingEvents(context)) {
               push(pending);
             }
+          }
+
+          if (event.name === "handoff_requested") {
+            push({
+              type: "handoff_requested",
+              fromAgent: readAgentName(readRecordValue(event.item, "sourceAgent")),
+              toAgent: readAgentName(readRecordValue(event.item, "targetAgent")),
+            });
+          }
+
+          if (event.name === "handoff_occurred") {
+            push({
+              type: "handoff_completed",
+              fromAgent: readAgentName(readRecordValue(event.item, "sourceAgent")),
+              toAgent: readAgentName(readRecordValue(event.item, "targetAgent")),
+            });
           }
         }
       }
@@ -77,8 +111,23 @@ export async function* openAIStreamToCucumberEvents(
       if (stream.completed) {
         await stream.completed;
       }
-      push({ type: "run_completed", finalOutput: stringifyFinalOutput(stream.finalOutput) });
+      context.signal?.throwIfAborted();
+      push({
+        type: "run_completed",
+        artifactIds: context.producedArtifacts.map((artifact) => artifact.id),
+        finalOutput: stringifyFinalOutput(stream.finalOutput),
+      });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      for (const [toolCallId, tool] of activeTools) {
+        push({
+          type: "tool_failed",
+          toolCallId,
+          toolName: tool.toolName,
+          input: tool.input,
+          message,
+        });
+      }
       streamError = error;
     } finally {
       finished = true;
@@ -174,6 +223,24 @@ function readRawItem(item: unknown): Record<string, unknown> | null {
     return item.rawItem;
   }
   return item;
+}
+
+function readAgentName(value: unknown) {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  return typeof value.name === "string" ? value.name : undefined;
+}
+
+function readRecordValue(value: unknown, key: string) {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  if (key in value) {
+    return value[key];
+  }
+  const rawItem = readRawItem(value);
+  return rawItem?.[key];
 }
 
 function stringifyFinalOutput(output: unknown) {

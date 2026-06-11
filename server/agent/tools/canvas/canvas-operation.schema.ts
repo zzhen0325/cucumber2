@@ -55,35 +55,6 @@ export const canvasOperationInputSchema = z.discriminatedUnion("type", [
       error: z.string().optional(),
     }),
   }),
-  z.object({
-    id: z.string().min(1),
-    projectId: z.string().optional(),
-    type: z.literal("attachArtifact"),
-    payload: z.object({
-      nodeId: z.string().min(1),
-      artifactId: z.string().min(1),
-      artifact: z
-        .object({
-          id: z.string().min(1),
-          type: z.enum([
-            "image",
-            "file",
-            "doc",
-            "code",
-            "webpage",
-            "dataset",
-            "decision",
-            "tool_result",
-            "memory",
-          ]),
-          uri: z.string().optional(),
-          title: z.string().optional(),
-          metadata: jsonRecordSchema.optional(),
-          contentRef: z.string().optional(),
-        })
-        .optional(),
-    }),
-  }),
 ]);
 
 export const canvasOperationsInputSchema = z.object({
@@ -117,7 +88,7 @@ export const canvasOperationsJsonSchema = {
           },
           type: {
             type: "string",
-            enum: ["createNode", "updateNode", "createEdge", "setNodeStatus", "attachArtifact"],
+            enum: ["createNode", "updateNode", "createEdge", "setNodeStatus"],
           },
           projectId: { type: "string" },
           payload: {
@@ -125,10 +96,9 @@ export const canvasOperationsJsonSchema = {
             additionalProperties: true,
             description:
               "createNode -> { node: { id, type, position: { x, y }, data: { kind, ...fields } } }. " +
-              "Use type 'markdownNode' with data.kind 'markdown' (data.text holds the content) for text notes, " +
-              "or 'artifactNode' with data.kind 'artifact'. " +
-              "updateNode -> { nodeId, position?, data? }. createEdge -> { edge: { id, source, target } }. " +
-              "setNodeStatus -> { nodeId, status }. attachArtifact -> { nodeId, artifactId }.",
+              "Only complete stickyNoteNode/stickyNote or shapeNode/shape nodes are accepted. " +
+              "updateNode only accepts position changes. createEdge -> { edge: { id, source, target } }. " +
+              "setNodeStatus -> { nodeId, status }.",
           },
         },
       },

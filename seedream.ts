@@ -20,6 +20,7 @@ export type SeedreamGenerateInput = {
   // Optional callback invoked the moment each image finishes, so callers can
   // stream results to the UI instead of waiting for the whole batch.
   onImage?: (image: SeedreamGeneratedImage) => void;
+  signal?: AbortSignal;
 };
 
 export type SeedreamGeneratedImage = {
@@ -71,7 +72,8 @@ class SeedreamClient {
 
   async signedPost(
     action: "CVSync2AsyncSubmitTask" | "CVSync2AsyncGetResult",
-    body: Record<string, unknown>
+    body: Record<string, unknown>,
+    signal?: AbortSignal
   ): Promise<SignedPostResult> {
     const payload = JSON.stringify(body);
     const payloadHash = createHash("sha256").update(payload).digest("hex");
@@ -132,14 +134,16 @@ class SeedreamClient {
         "X-Content-Sha256": payloadHash,
         "X-Date": xDate,
       },
-      payload
+      payload,
+      signal
     );
 
     const parsed = parseJsonObject(response.text);
     return { status: response.status, body: parsed };
   }
 
-  async submitAndPoll(body: Record<string, unknown>) {
+  async submitAndPoll(body: Record<string, unknown>, signal?: AbortSignal) {
+    signal?.throwIfAborted();
     const traceId = createHash("sha256")
       .update(`${this.config.reqKey}:${JSON.stringify(body)}:${Date.now()}`)
       .digest("hex")
@@ -154,7 +158,7 @@ class SeedreamClient {
       })
     );
 
-    const submit = await this.submitWithRetry(body, tag);
+    const submit = await this.submitWithRetry(body, tag, signal);
 
     const taskId = getNestedString(submit.body, ["data", "task_id"]);
     if (!taskId) {
@@ -162,12 +166,12 @@ class SeedreamClient {
     }
 
     for (let attempt = 1; attempt <= 30; attempt++) {
-      await delay(attempt <= 10 ? 4_000 : 8_000);
+      await delay(attempt <= 10 ? 4_000 : 8_000, undefined, { signal });
       const result = await this.signedPost("CVSync2AsyncGetResult", {
         req_key: this.config.reqKey,
         task_id: taskId,
         req_json: JSON.stringify({ return_url: true }),
-      });
+      }, signal);
       const status = getNestedString(result.body, ["data", "status"]);
 
       console.log(
@@ -206,13 +210,15 @@ class SeedreamClient {
   // HTTP 429). Other failures propagate immediately.
   private async submitWithRetry(
     body: Record<string, unknown>,
-    tag: string
+    tag: string,
+    signal?: AbortSignal
   ): Promise<SignedPostResult> {
     for (let attempt = 0; ; attempt++) {
+      signal?.throwIfAborted();
       const submit = await this.signedPost("CVSync2AsyncSubmitTask", {
         req_key: this.config.reqKey,
         ...body,
-      });
+      }, signal);
       console.log(
         `${tag} submit_response`,
         JSON.stringify({
@@ -238,7 +244,7 @@ class SeedreamClient {
           `${tag} submit_retry`,
           JSON.stringify({ attempt, backoffMs: backoff })
         );
-        await delay(backoff);
+        await delay(backoff, undefined, { signal });
         continue;
       }
 
@@ -265,7 +271,7 @@ export async function generateSeedreamImage(
     config.maxConcurrency,
     config.staggerMs,
     async (request) => {
-      const result = await client.submitAndPoll(request.body);
+      const result = await client.submitAndPoll(request.body, input.signal);
       const urls = getNestedArray(result, ["data", "image_urls"]).filter(
         (item): item is string => typeof item === "string" && item.length > 0
       );
@@ -300,7 +306,8 @@ export async function generateSeedreamImage(
       }
 
       return images;
-    }
+    },
+    input.signal
   );
 
   return { images: imagesPerRequest.flat() };
@@ -353,7 +360,8 @@ async function mapWithConcurrency<T, R>(
   items: readonly T[],
   concurrency: number,
   staggerMs: number,
-  task: (item: T) => Promise<R>
+  task: (item: T) => Promise<R>,
+  signal?: AbortSignal
 ): Promise<R[]> {
   const results = new Array<R>(items.length);
   const limit = Math.max(1, Math.min(concurrency, items.length || 1));
@@ -363,6 +371,7 @@ async function mapWithConcurrency<T, R>(
 
   const worker = async () => {
     while (true) {
+      signal?.throwIfAborted();
       const index = nextIndex++;
       if (index >= items.length) {
         return;
@@ -373,7 +382,7 @@ async function mapWithConcurrency<T, R>(
         nextAllowedStart = startAt + staggerMs;
         const wait = startAt - now;
         if (wait > 0) {
-          await delay(wait);
+          await delay(wait, undefined, { signal });
         }
       }
       results[index] = await task(items[index]);
@@ -791,7 +800,8 @@ function parseJsonObject(text: string): Record<string, unknown> {
 function signedHttpsPost(
   url: string,
   headers: Record<string, string>,
-  body: string
+  body: string,
+  signal?: AbortSignal
 ): Promise<HttpsPostResult> {
   return new Promise((resolve, reject) => {
     const req = request(
@@ -800,6 +810,7 @@ function signedHttpsPost(
         method: "POST",
         headers,
         ca: readCustomCaFromEnv(),
+        signal,
         timeout: 120_000,
       },
       (res) => {

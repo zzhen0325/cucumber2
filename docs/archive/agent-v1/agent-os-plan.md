@@ -798,3 +798,6 @@ pnpm dev
 - 不自动写长期 memory，memory 必须来自明确事件或用户确认。
 - 不为了接入 AI Elements 替换现有 ReactFlow 状态源。
 - 不为了新架构牺牲当前图片生成、参考图 follow-up、错误可见和项目保存。
+# Archived Agent v1 Document
+
+> 归档于 2026-06-11。本文仅保留历史背景，不再是当前实现依据。当前 Agent 事实以 `server/agent/`、`README.md` 和根目录 `AGENTS.md` 为准。

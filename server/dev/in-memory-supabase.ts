@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
  * Activated *only* when `CUCUMBER_DEV_INMEMORY_DB=1`. It implements the narrow,
  * chainable query surface this codebase actually uses (from/select/insert/update/
  * upsert/delete + eq/is/gt/order/limit/single/maybeSingle/returns) so the real
- * server, real agent-v2 runtime and real frontend can run end-to-end without a
+ * server, real Agent runtime and real frontend can run end-to-end without a
  * provisioned cloud database.
  *
  * This is a local testing affordance, never wired into the production path: the

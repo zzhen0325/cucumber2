@@ -7,9 +7,7 @@ import {
   ListTree,
   Sparkles,
   UserRound,
-  WandSparkles,
   Wrench,
-  X,
 } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 import { useState } from "react";
@@ -22,7 +20,6 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { extractImagesFromToolOutput } from "@/lib/graph";
 import type {
   CanvasToolPart,
   RunNodeData,
@@ -44,7 +41,7 @@ export function RunNodeView({
       ? [data.toolPart]
       : [];
   const latestToolPart = toolParts.at(-1) ?? toolParts[0];
-  const title = getRunTitle(data.status, latestToolPart?.state, data.evaluation);
+  const title = getRunTitle(data.status, latestToolPart?.state);
   const toggleLabel = expanded ? "收起输出" : "展开输出";
   const summaryItems = data.summaryItems ?? [];
   const stepTimeline = getStepTimeline(data.stepTimeline, toolParts);
@@ -140,14 +137,9 @@ export function RunNodeView({
               )}
             </RunStreamGroup>
             {(summaryItems.length > 0 || stepTimeline.length > 0) && (
-              <RunStreamGroup icon={<ListTree size={11} />} title="运行计划">
+              <RunStreamGroup icon={<ListTree size={11} />} title="Agent 运行">
                 <PlanSummaryView items={summaryItems} />
                 <StepTimelineView steps={stepTimeline} />
-              </RunStreamGroup>
-            )}
-            {data.evaluation && (
-              <RunStreamGroup icon={<Sparkles size={11} />} title="质量检查">
-                <RunEvaluationView evaluation={data.evaluation} runNodeId={id} />
               </RunStreamGroup>
             )}
             {hasToolDetail &&
@@ -263,8 +255,6 @@ export function ToolPartView({
   const stateLabel = getToolStateLabel(toolPart.state);
   const detailLines = getToolDetailLines(toolPart, error);
   const isError = toolPart.state === "output-error";
-  const approvalId =
-    toolPart.state === "approval-requested" ? toolPart.approval?.id : undefined;
   const hasStructuredDetail =
     Boolean(toolPart.input) || Boolean(toolPart.output) || Boolean(toolPart.errorText);
 
@@ -279,9 +269,7 @@ export function ToolPartView({
           <span className="tool-call-action">
             {toolPart.state === "output-available"
               ? "完成"
-              : toolPart.state === "output-denied"
-                ? "拒绝"
-                : "调用"}
+              : "调用"}
           </span>
           <strong title={toolName}>{toolName}</strong>
           <span className={`tool-state ${toolPart.state}`}>
@@ -314,32 +302,6 @@ export function ToolPartView({
           </div>
         )}
       </CollapsibleContent>
-      {approvalId && (
-        <div className="tool-approval-actions">
-          <button
-            className="nodrag nopan"
-            onClick={(event) => {
-              event.stopPropagation();
-              dispatchToolApprovalResponse(approvalId, true);
-            }}
-            type="button"
-          >
-            <Check size={11} />
-            确认
-          </button>
-          <button
-            className="nodrag nopan secondary"
-            onClick={(event) => {
-              event.stopPropagation();
-              dispatchToolApprovalResponse(approvalId, false);
-            }}
-            type="button"
-          >
-            <X size={11} />
-            拒绝
-          </button>
-        </div>
-      )}
     </Collapsible>
   );
 }
@@ -371,43 +333,6 @@ function RunStatusIcon({ status }: { status: RunNodeData["status"] }) {
   return <Sparkles size={14} />;
 }
 
-function RunEvaluationView({
-  evaluation,
-  runNodeId,
-}: {
-  evaluation: NonNullable<RunNodeData["evaluation"]>;
-  runNodeId: string;
-}) {
-  return (
-    <div
-      className={evaluation.passed ? "run-evaluation passed" : "run-evaluation failed"}
-      title={getRunEvaluationTitle(evaluation)}
-    >
-      <span className="run-evaluation-label">
-        {evaluation.passed
-          ? "质量检查通过"
-          : `质量检查发现 ${evaluation.issueCount} 个问题`}
-      </span>
-      {!evaluation.passed && evaluation.recommendedActions[0] && (
-        <small>{evaluation.recommendedActions[0]}</small>
-      )}
-      {!evaluation.passed && (
-        <button
-          className="run-evaluation-action nodrag nopan"
-          onClick={(event) => {
-            event.stopPropagation();
-            dispatchRunRevisionRequest(runNodeId);
-          }}
-          type="button"
-        >
-          <WandSparkles size={11} />
-          {evaluation.needsRegeneration ? "准备重试" : "准备修正"}
-        </button>
-      )}
-    </div>
-  );
-}
-
 function getStepTimeline(
   timeline: RunNodeData["stepTimeline"],
   toolParts: CanvasToolPart[]
@@ -420,7 +345,7 @@ function getStepTimeline(
     id: `${part.type}-${index}`,
     label: getToolName(part),
     status:
-      part.state === "output-error" || part.state === "output-denied"
+      part.state === "output-error"
         ? ("error" as const)
         : part.state === "output-available"
           ? ("success" as const)
@@ -438,30 +363,10 @@ function dispatchOpenTrace(runNodeId: string) {
   );
 }
 
-function dispatchToolApprovalResponse(approvalId: string, approved: boolean) {
-  window.dispatchEvent(
-    new CustomEvent("cucumber:respond-tool-approval", {
-      detail: { approvalId, approved },
-    })
-  );
-}
-
-function dispatchRunRevisionRequest(runNodeId: string) {
-  window.dispatchEvent(
-    new CustomEvent("cucumber:prepare-run-revision", {
-      detail: { runNodeId },
-    })
-  );
-}
-
 function getRunTitle(
   status: RunNodeData["status"],
-  state?: CanvasToolPart["state"],
-  evaluation?: RunNodeData["evaluation"]
+  state?: CanvasToolPart["state"]
 ) {
-  if (evaluation && !evaluation.passed) {
-    return "质量检查未通过";
-  }
   if (status === "error" || state === "output-error") {
     return "生成失败";
   }
@@ -471,50 +376,24 @@ function getRunTitle(
   if (state === "input-available" || state === "output-available") {
     return "调用工具";
   }
-  if (state === "approval-requested") {
-    return "等待确认";
-  }
-  if (state === "approval-responded") {
-    return "继续执行";
-  }
   return "Thinking...";
-}
-
-function getRunEvaluationTitle(evaluation: NonNullable<RunNodeData["evaluation"]>) {
-  if (evaluation.passed) {
-    return "Evaluator passed";
-  }
-
-  const action = evaluation.recommendedActions[0];
-  return action
-    ? `Evaluator found ${evaluation.issueCount} issue(s): ${action}`
-    : `Evaluator found ${evaluation.issueCount} issue(s)`;
 }
 
 function getToolName(toolPart: CanvasToolPart) {
   const names: Record<string, string> = {
-    "tool-analyze_reference_images": "参考图分析",
-    "tool-asset_analyze_context": "素材分析",
-    "tool-asset.analyze_context": "素材分析",
-    "tool-expand_prompt": "提示词扩写",
-    "tool-generate_html": "生成 HTML",
     "tool-generate_image": "生成图片",
-    "tool-plan_agent_run": "规划运行",
+    "tool-propose_canvas_operations": "更新画布",
     "tool-runtime": "运行错误",
-    "tool-web_read": "读取网页",
-    "tool-web.read": "读取网页",
-    "tool-web_search": "搜索网页",
-    "tool-write_document": "写文档",
   };
 
   return names[toolPart.type] ?? toolPart.type.replace(/^tool-/, "");
 }
 
 function getToolStateIcon(state: CanvasToolPart["state"]) {
-  if (state === "output-available" || state === "approval-responded") {
+  if (state === "output-available") {
     return <Check size={11} />;
   }
-  if (state === "output-error" || state === "output-denied") {
+  if (state === "output-error") {
     return <CircleAlert size={11} />;
   }
   return <Sparkles size={11} />;
@@ -522,12 +401,9 @@ function getToolStateIcon(state: CanvasToolPart["state"]) {
 
 function getToolStateLabel(state: CanvasToolPart["state"]) {
   const labels: Record<CanvasToolPart["state"], string> = {
-    "approval-requested": "等待确认",
-    "approval-responded": "已确认",
     "input-available": "运行中",
     "input-streaming": "准备参数",
     "output-available": "输出完成",
-    "output-denied": "已拒绝",
     "output-error": "失败",
   };
 
@@ -541,147 +417,28 @@ function getToolDetailLines(toolPart: CanvasToolPart, error?: string) {
   if (toolPart.state === "output-available") {
     return [...getToolOutputLines(toolPart), ...getToolInputLines(toolPart.input)];
   }
-  if (toolPart.state === "output-denied") {
-    return ["工具调用被拒绝"];
-  }
-  if (toolPart.state === "approval-requested") {
-    return ["需要确认后继续执行"];
-  }
-  if (toolPart.state === "approval-responded") {
-    return [toolPart.approval?.approved === false ? "已拒绝执行" : "已确认执行"];
-  }
   return getToolInputLines(toolPart.input);
 }
 
 function getToolOutputLines(toolPart: CanvasToolPart) {
-  if (toolPart.type === "tool-analyze_reference_images") {
-    const output = toolPart.output as {
-      analysis?: unknown;
-      imageCount?: unknown;
-    };
-    const lines = [
-      typeof output?.imageCount === "number"
-        ? `参考图: ${output.imageCount} 张`
-        : "参考图分析完成",
-    ];
-
-    if (typeof output?.analysis === "string" && output.analysis.trim()) {
-      lines.push(`视觉摘要: ${output.analysis.trim()}`);
+  if (toolPart.type === "tool-generate_image") {
+    const output = toolPart.output as { generated?: unknown; artifactIds?: unknown };
+    if (typeof output?.generated === "number") {
+      return [`生成 ${output.generated} 张图片`];
     }
-
-    return lines;
+    if (Array.isArray(output?.artifactIds)) {
+      return [`生成 ${output.artifactIds.length} 张图片`];
+    }
   }
 
-  if (toolPart.type === "tool-expand_prompt") {
-    const output = toolPart.output as {
-      expandedPrompts?: unknown;
-      promptBatchMode?: unknown;
-    };
-    if (Array.isArray(output?.expandedPrompts)) {
-      const prompts = output.expandedPrompts.filter(
-        (prompt): prompt is string =>
-          typeof prompt === "string" && Boolean(prompt.trim())
-      );
-      if (prompts.length === 1) {
-        return [`扩写: ${prompts[0].trim()}`];
-      }
-      if (prompts.length > 1) {
-        return [`扩写: ${prompts.length} 条不同提示词`];
-      }
-    }
-
-    return ["扩写完成"];
+  if (toolPart.type === "tool-propose_canvas_operations") {
+    const output = toolPart.output as { accepted?: unknown; rejected?: unknown };
+    const accepted = Array.isArray(output?.accepted) ? output.accepted.length : 0;
+    const rejected = Array.isArray(output?.rejected) ? output.rejected.length : 0;
+    return [`画布操作: ${accepted} 已应用${rejected ? `, ${rejected} 已拒绝` : ""}`];
   }
 
-  if (toolPart.type === "tool-write_document") {
-    const output = toolPart.output as {
-      markdown?: unknown;
-      summary?: unknown;
-      title?: unknown;
-    };
-    if (typeof output?.title === "string" && output.title.trim()) {
-      return [`文档: ${output.title.trim()}`];
-    }
-    if (typeof output?.summary === "string" && output.summary.trim()) {
-      return [`摘要: ${output.summary.trim()}`];
-    }
-    if (typeof output?.markdown === "string" && output.markdown.trim()) {
-      return ["Markdown 文档已生成"];
-    }
-
-    return ["文档已生成"];
-  }
-
-  if (toolPart.type === "tool-generate_html") {
-    const output = toolPart.output as {
-      title?: unknown;
-      html?: unknown;
-      artifactId?: unknown;
-      summary?: unknown;
-    };
-    if (typeof output?.title === "string" && output.title.trim()) {
-      return [`HTML: ${output.title.trim()}`];
-    }
-    if (typeof output?.summary === "string" && output.summary.trim()) {
-      return [`摘要: ${output.summary.trim()}`];
-    }
-    if (typeof output?.html === "string" && output.html.trim()) {
-      return ["HTML 页面已生成"];
-    }
-    if (typeof output?.artifactId === "string" && output.artifactId.trim()) {
-      return ["页面产物已生成"];
-    }
-
-    return ["页面已生成"];
-  }
-
-  if (toolPart.type === "tool-web.read") {
-    const output = toolPart.output as { sources?: unknown };
-    const sourceCount = Array.isArray(output?.sources)
-      ? output.sources.length
-      : undefined;
-    return [
-      typeof sourceCount === "number"
-        ? `读取完成: ${sourceCount} 个网页`
-        : "网页读取完成",
-    ];
-  }
-
-  if (toolPart.type === "tool-asset.analyze_context") {
-    const output = toolPart.output as {
-      imageCount?: unknown;
-      summary?: unknown;
-    };
-    if (typeof output?.imageCount === "number") {
-      return [`素材分析: ${output.imageCount} 张图片`];
-    }
-    if (typeof output?.summary === "string" && output.summary.trim()) {
-      return [`素材摘要: ${output.summary.trim()}`];
-    }
-
-    return ["素材分析完成"];
-  }
-
-  if (toolPart.type === "tool-web_search") {
-    const output = toolPart.output as {
-      answer?: unknown;
-      sources?: unknown;
-    };
-    const sourceCount = Array.isArray(output?.sources)
-      ? output.sources.length
-      : undefined;
-    if (typeof sourceCount === "number") {
-      return [`搜索完成: ${sourceCount} 个来源`];
-    }
-    if (typeof output?.answer === "string" && output.answer.trim()) {
-      return [`搜索摘要: ${output.answer.trim()}`];
-    }
-
-    return ["搜索完成"];
-  }
-
-  const images = extractImagesFromToolOutput(toolPart.output);
-  return [images.length ? `输出 ${images.length} 张图片` : "输出已返回"];
+  return ["输出已返回"];
 }
 
 function getToolInputLines(input: unknown) {
@@ -691,49 +448,13 @@ function getToolInputLines(input: unknown) {
 
   const candidate = input as {
     prompt?: unknown;
-    brief?: unknown;
-    title?: unknown;
-    query?: unknown;
-    imageCount?: unknown;
-    modelProvider?: unknown;
-    skillSlug?: unknown;
-    prompts?: unknown;
-    promptBatchMode?: unknown;
     resultCount?: unknown;
-    upstreamContext?: unknown;
+    operations?: unknown;
   };
   const lines: string[] = [];
 
   if (typeof candidate.prompt === "string" && candidate.prompt.trim()) {
     lines.push(`输入: ${candidate.prompt.trim()}`);
-  }
-  if (typeof candidate.brief === "string" && candidate.brief.trim()) {
-    lines.push(`输入: ${candidate.brief.trim()}`);
-  }
-  if (typeof candidate.title === "string" && candidate.title.trim()) {
-    lines.push(`标题: ${candidate.title.trim()}`);
-  }
-  if (typeof candidate.query === "string" && candidate.query.trim()) {
-    lines.push(`查询: ${candidate.query.trim()}`);
-  }
-  if (typeof candidate.modelProvider === "string" && candidate.modelProvider.trim()) {
-    lines.push(`模型: ${candidate.modelProvider.trim()}`);
-  }
-  if (typeof candidate.skillSlug === "string" && candidate.skillSlug.trim()) {
-    lines.push(`Skill: ${candidate.skillSlug.trim()}`);
-  }
-  if (Array.isArray(candidate.prompts)) {
-    lines.push(`提示词: ${candidate.prompts.length} 条`);
-  }
-  if (
-    typeof candidate.promptBatchMode === "string" &&
-    candidate.promptBatchMode.trim()
-  ) {
-    lines.push(
-      candidate.promptBatchMode === "distinct_prompts"
-        ? "模式: 多提示词"
-        : "模式: 单提示词"
-    );
   }
   if (
     typeof candidate.resultCount === "number" &&
@@ -741,14 +462,8 @@ function getToolInputLines(input: unknown) {
   ) {
     lines.push(`目标: ${candidate.resultCount} 张图片`);
   }
-  if (
-    typeof candidate.imageCount === "number" &&
-    Number.isInteger(candidate.imageCount)
-  ) {
-    lines.push(`参考图: ${candidate.imageCount} 张`);
-  }
-  if (Array.isArray(candidate.upstreamContext)) {
-    lines.push(`上游上下文: ${candidate.upstreamContext.length} 项`);
+  if (Array.isArray(candidate.operations)) {
+    lines.push(`画布操作: ${candidate.operations.length} 项`);
   }
 
   return lines.length ? lines : ["工具参数已就绪"];

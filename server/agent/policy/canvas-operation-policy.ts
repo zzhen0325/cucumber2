@@ -1,15 +1,11 @@
-import type {
-  AgentCanvasNode,
-  AgentCanvasNodeData,
-  ArtifactRef,
-} from "../../src/types/canvas.ts";
-import type { CanvasOperation } from "../../src/types/runtime.ts";
+import type { AgentCanvasNode } from "../../../src/types/canvas.ts";
+import type { CanvasOperation } from "../../../src/types/runtime.ts";
 
 export type CanvasOperationPolicyInput = {
-  artifactIds?: string[];
   knownNodeIds?: string[];
   operations: CanvasOperation[];
   projectId: string;
+  runNodeId: string;
 };
 
 export type AcceptedCanvasOperation = {
@@ -26,43 +22,33 @@ export type CanvasOperationPolicyResult = {
   rejected: RejectedCanvasOperation[];
 };
 
-const validNodeTypeByKind: Record<AgentCanvasNodeData["kind"], string> = {
-  artifact: "artifactNode",
-  code: "codeNode",
-  decision: "decisionNode",
-  document: "documentNode",
-  imageResult: "imageResultNode",
-  markdown: "markdownNode",
-  memory: "memoryNode",
-  prompt: "promptNode",
-  run: "runNode",
+const validProposedNodeTypeByKind = {
   shape: "shapeNode",
   stickyNote: "stickyNoteNode",
-  toolResult: "toolResultNode",
-  webpage: "webpageNode",
-};
+} as const;
 
 const validRunStatuses = new Set(["queued", "running", "success", "error"]);
+const validShapeVariants = new Set(["rectangle", "ellipse", "diamond", "triangle", "pill", "frame"]);
+const validStickyNoteColors = new Set(["yellow", "green", "blue", "pink"]);
 
 export function validateCanvasOperations({
-  artifactIds = [],
   knownNodeIds = [],
   operations,
   projectId,
+  runNodeId,
 }: CanvasOperationPolicyInput): CanvasOperationPolicyResult {
   const accepted: AcceptedCanvasOperation[] = [];
   const rejected: RejectedCanvasOperation[] = [];
   const availableNodeIds = new Set(knownNodeIds);
   const seenOperationIds = new Set<string>();
-  const allowedArtifactIds = new Set(artifactIds);
 
   for (const operation of operations) {
     const normalizedOperation = normalizeOperationProject(operation, projectId);
     const reason = validateCanvasOperation({
-      allowedArtifactIds,
       availableNodeIds,
       operation: normalizedOperation,
       projectId,
+      runNodeId,
       seenOperationIds,
     });
 
@@ -82,16 +68,16 @@ export function validateCanvasOperations({
 }
 
 function validateCanvasOperation({
-  allowedArtifactIds,
   availableNodeIds,
   operation,
   projectId,
+  runNodeId,
   seenOperationIds,
 }: {
-  allowedArtifactIds: Set<string>;
   availableNodeIds: Set<string>;
   operation: CanvasOperation;
   projectId: string;
+  runNodeId: string;
   seenOperationIds: Set<string>;
 }) {
   if (!operation.id) {
@@ -112,11 +98,8 @@ function validateCanvasOperation({
     if (!availableNodeIds.has(targetNodeId)) {
       return "target_node_not_allowed";
     }
-    if (
-      operation.payload.data?.kind &&
-      !isValidNodeDataKind(operation.payload.data.kind)
-    ) {
-      return "invalid_node_kind";
+    if (operation.payload.data && Object.keys(operation.payload.data).length > 0) {
+      return "node_data_update_not_allowed";
     }
     return undefined;
   }
@@ -131,7 +114,7 @@ function validateCanvasOperation({
     return undefined;
   }
   if (operation.type === "setNodeStatus") {
-    if (!availableNodeIds.has(operation.payload.nodeId)) {
+    if (operation.payload.nodeId !== runNodeId) {
       return "target_node_not_allowed";
     }
     if (!validRunStatuses.has(operation.payload.status)) {
@@ -139,10 +122,6 @@ function validateCanvasOperation({
     }
     return undefined;
   }
-  if (operation.type === "attachArtifact") {
-    return validateAttachArtifact(operation, availableNodeIds, allowedArtifactIds);
-  }
-
   return "unknown_operation_type";
 }
 
@@ -162,29 +141,6 @@ function validateCreateNode(
   return undefined;
 }
 
-function validateAttachArtifact(
-  operation: Extract<CanvasOperation, { type: "attachArtifact" }>,
-  availableNodeIds: Set<string>,
-  allowedArtifactIds: Set<string>
-) {
-  const { artifact, artifactId, nodeId } = operation.payload;
-  const expectedArtifactNodeId = getArtifactNodeId(artifact ?? {
-    id: artifactId,
-    type: "image",
-  });
-
-  if (!availableNodeIds.has(nodeId) && nodeId !== expectedArtifactNodeId) {
-    return "target_node_not_allowed";
-  }
-  if (!allowedArtifactIds.has(artifactId)) {
-    return "artifact_not_produced_by_step";
-  }
-  if (artifact && artifact.id !== artifactId) {
-    return "artifact_id_mismatch";
-  }
-  return undefined;
-}
-
 function normalizeOperationProject(
   operation: CanvasOperation,
   projectId: string
@@ -193,20 +149,31 @@ function normalizeOperationProject(
 }
 
 function isValidNode(node: AgentCanvasNode) {
-  return (
-    Boolean(node.id) &&
-    Boolean(node.position) &&
-    isValidNodeDataKind(node.data.kind) &&
-    node.type === validNodeTypeByKind[node.data.kind]
-  );
+  if (!node.id || !node.position || !isRecord(node.data)) {
+    return false;
+  }
+
+  if (node.data.kind === "stickyNote") {
+    return (
+      node.type === validProposedNodeTypeByKind.stickyNote &&
+      typeof node.data.text === "string" &&
+      typeof node.data.createdAt === "string" &&
+      validStickyNoteColors.has(node.data.color)
+    );
+  }
+
+  if (node.data.kind === "shape") {
+    return (
+      node.type === validProposedNodeTypeByKind.shape &&
+      typeof node.data.label === "string" &&
+      typeof node.data.createdAt === "string" &&
+      validShapeVariants.has(node.data.shape)
+    );
+  }
+
+  return false;
 }
 
-function isValidNodeDataKind(
-  kind: unknown
-): kind is AgentCanvasNodeData["kind"] {
-  return typeof kind === "string" && kind in validNodeTypeByKind;
-}
-
-function getArtifactNodeId(artifact: Pick<ArtifactRef, "id" | "type">) {
-  return artifact.type === "image" ? `image-${artifact.id}` : `artifact-${artifact.id}`;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

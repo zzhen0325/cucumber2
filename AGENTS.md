@@ -1,47 +1,44 @@
 # Agent Guide
 
-本文件用于约束后续 Agent 或开发者在本仓库中的实现方式。任何改动都应先看实际代码，再更新文档；文档可以辅助理解，但不能替代代码事实。
+本文件约束本仓库后续实现。任何改动都先看实际代码；文档与代码不一致时，以代码为准并同步修正文档。
 
 ## Project Snapshot
 
-- 项目是一个 Infinite Canvas Agent Run MVP。
-- 前端使用 Vite、React、TypeScript、React Flow 和 AI Elements 组件。
-- 服务端使用 Hono Node server，主要入口是 `server/api.ts`。
-- Agent Run 旧入口是 `/api/agent-run`，通过 AI SDK UI message stream 返回 `generate_image` 工具状态。
-- Agent Run v2 入口是 `/api/agent-run-v2`，核心代码放在 `server/agent-v2/`，使用 OpenAI Agents SDK Runner + proposal-first tools。
-- 画布节点和边的核心类型在 `src/types/canvas.ts`；图结构和上下文收集逻辑在 `src/lib/graph.ts`。
+- Infinite Canvas Agent Run MVP。
+- 前端：Vite、React、TypeScript、React Flow、AI Elements。
+- 服务端：Hono，入口 `server/api.ts`。
+- 唯一 Agent runtime：`server/agent/`，使用 OpenAI Agents SDK Runner。
+- 唯一入口：`POST /api/agent-run`。
+- 停止入口：`DELETE /api/agent-run?projectId=...&runNodeId=...`。
+- 唯一 Trace 表：`agent_run_events`。
+- 画布类型：`src/types/canvas.ts`；事件与 operation 契约：`src/types/runtime.ts`。
 
 ## Working Rules
 
-- 先读代码，再做判断；遇到文档和代码不一致时，以代码为准，并在完成后更新相关文档。
-- 每个功能域必须有清晰、独立、唯一的职责边界
-- 保持改动小而完整：一个需求优先落在最少文件内，除非现有结构已经要求拆分。
-- 不引入新的状态模型来绕开现有画布数据；优先沿用 `AgentCanvasNode`、`AgentCanvasEdge`、`RunDraft` 和 `UpstreamContextItem`。
-- Agent 执行过程应在画布中可见：prompt、run、tool state、image result 和 follow-up branch 都应对应清晰的可视节点或状态。
-- 工具错误要直接呈现在 Run 节点中，不生成假图或占位成功结果。
-- Reactflow画布相关的功能，一定要优先看官方文档是否已有案例或推荐写法：<https://reactflow.dev/learn>
-- 后续 Agent 新增功能或出现问题需要解决时，一定要优先查看官方文档是否已有案例或推荐写法：<https://ai-sdk.dev/docs> 和 <https://ai-sdk.dev/docs/reference/ai-sdk-ui。>
-- 新增能力后，同步更新 `README.md` 或 `process.md` 中对应的运行方式、环境变量、变更记录。
-- 新增或调整 UI 前必须先阅读 `design.md`，新增 UI 元素的设计风格必须与当前界面统一。
-- 当提出加入新功能时，要从用户真实体验交互的视角完善考虑，不要只是代码没问题，但是视觉上或者操作交互上缺出现点不到或者别的低级问题。
-- 当文件超出1500行时，应该尽量控制代码体积，合理的进行拆分
-- 不做降级或兜底方案，将错误抛出
-- 测试时只运行相关的最小测试集。
-- 不做 legacy adapter，旧实现可以直接删除，不要增加复杂性。
-- Agent v2 必须坚持 proposal-first：OpenAI Agents SDK 决定“应该做什么”，Cucumber runtime/policy 决定“是否允许落到画布”；tool 不得直接改数据库或绕过 `CanvasOperation` 校验。
-- Agent v2 的前端切换通过 `VITE_AGENT_V2=1` 或 `localStorage.cucumber:agent-v2=1` 控制，默认保留 `/api/agent-run`。
-- Agent v2 specialist 拆分：Manager (`server/agent-v2/agents/manager.agent.ts`) 通过 SDK handoff 委派给 Image Agent (`server/agent-v2/agents/image.agent.ts`)。图片请求由 Image Agent 用 `generate_image` 工具（`server/agent-v2/tools/image/generate-image.tool.ts`）调用 Seedream 生成。
-- `generate_image` 不直接写库：它只调用 Seedream、把结果作为内存 `ArtifactRef` 推入 `context.pendingEvents`（`artifact_created`），由 runtime 发出 `artifact.created`，前端 `graph-projection` 自动渲染 image result 节点。参考图（`upstreamContext` 中的 image url）只转发给 Seedream，不暴露给模型。
-- handoff specialist 的 model 由 `runtime.ts` 统一惰性注入（与 manager 同一 provider），新增 specialist 时无需单独配置 model。
+- 每个功能域保持清晰、独立、唯一的职责边界。
+- 保持改动小而完整，不新增平行状态绕开 `AgentCanvasNode`、`AgentCanvasEdge` 和 `RunDraft`。
+- 不做 legacy adapter、降级或静默兜底；错误直接进入 Run 节点和 Trace。
+- Agent 执行必须在画布可见：prompt、run、Agent/handoff、tool、artifact、canvas operation 和 error 都由事件投影。
+- Agent 坚持 proposal-first：SDK 决定做什么，runtime policy 决定是否允许落到画布；tool 不直接写数据库。
+- 客户端不得提供可信 upstream context。提交前保存项目，服务端从持久化 nodes/edges 重建上下文。
+- `knownNodeIds` 只能来自项目快照和本轮 prompt/run 节点。
+- 图片 artifact 只能由 `generate_image` 产生；引用图 URL 只转发给 Seedream，不暴露给模型。
+- Manager 通过 handoff 委派给 Image Agent；specialist model 由 runtime 统一注入。
+- React Flow 改动先查看官方文档：<https://reactflow.dev/learn>。
+- Agent 改动先查看 Agents SDK 官方文档：<https://openai.github.io/openai-agents-js/>。
+- 流式 UI 改动先查看 AI SDK 官方文档：<https://ai-sdk.dev/docs>。
+- 新增能力同步更新 `README.md` 或 `process.md`；UI 改动先阅读 `design.md`。
+- 文件超过 1500 行时优先按职责拆分。
+- 只运行与改动相关的最小测试集。
 
-## Agent Canvas Behavior
+## Canvas Behavior
 
-- 根 prompt 从空画布开始，创建 prompt node -> run node -> image result node。
-- 选中 image result 后提交新 prompt，应创建 follow-up branch，并将上游 prompt/image context 传给服务端。
-- 上下文收集使用 `collectUpstreamContext`，按图结构从上游到当前节点排序。
-- `generate_image` 的输入应包含当前 prompt、可选 selectedNodeId 和 upstreamContext。
-- 服务端返回的 image URL 会被 `extractImagesFromToolOutput` 转成 image result nodes。
-- 对同一 image id 已渲染过的结果不要重复生成节点。
+- 根请求创建 prompt node -> run node -> image result node。
+- 选中结果后提交创建 follow-up branch。
+- 服务端上下文按图结构从上游到选中节点排序。
+- 同一 artifact id 不重复生成结果节点。
+- 工具错误写 `tool.error`，随后写 `run.failed`，不生成假成功结果。
+- `run.completed` 必须包含真实 `finalOutput` 和 artifact IDs。
 
 ## Commands
 
@@ -53,22 +50,20 @@ pnpm lint
 pnpm build
 ```
 
-本地默认地址：
-
-- Web: `http://localhost:5173`
-- API: `http://127.0.0.1:8787`
-- Health check: `http://127.0.0.1:8787/api/health`
+默认地址：Web `http://localhost:5173`，API `http://127.0.0.1:8787`，Health `http://127.0.0.1:8787/api/health`。
 
 ## Validation
 
-- 图结构、上下文、布局偏移、工具输出解析优先补充或运行 `src/lib/graph.test.ts`。
-- UI 改动至少运行 `pnpm build` 或 `pnpm lint` 中与改动相关的检查。
-- 涉及 Agent stream、Seedream、环境变量时，需要手动检查 `/api/health` 和 Run 节点错误展示。
-- 涉及 `useChat`、transport、UI message stream、tool usage、generative UI 等 AI SDK UI 能力时，先对照官方文档和示例，再落到本仓库代码。
+- 上下文、图结构和布局运行 `src/lib/graph.test.ts`、`server/agent/context.test.ts`。
+- SDK stream、handoff 和工具失败运行 `server/agent/events/*.test.ts`。
+- 事件投影运行 `src/lib/graph-projection.test.ts`、`src/lib/runtime-event-renderer.test.ts`。
+- 涉及 Agent、Seedream 或环境变量时检查 `/api/health` 和 Run 错误展示。
+- UI 改动至少运行 TypeScript、build、改动文件 ESLint，并用浏览器验收。
 
 ## Do Not
 
-- 不要把画布上下文只留在聊天文本里，关键执行链应回到画布。
-- 不要引入与 `design.md` 冲突的视觉语言。
-- 不要为了展示内部状态而污染默认 UI；需要诊断时放到明确的高级调试入口。
-
+- 不恢复 Agent v1、Skill、审批、Evaluator、客户端模型选择或附件提交。
+- 不接受客户端 upstream IDs、artifact 或 URL 作为可信上下文。
+- 不把关键执行状态只留在聊天文本。
+- 不引入与 `design.md` 冲突的视觉语言。
+- 不为了内部诊断污染默认 UI。

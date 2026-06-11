@@ -1,35 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { validateCanvasOperations } from "./canvas-operation-policy";
-import type { CanvasOperation } from "../../src/types/runtime";
+import type { CanvasOperation } from "../../../src/types/runtime";
 
 describe("canvas operation policy", () => {
-  it("accepts artifact attachment operations produced by the current step", () => {
-    const result = validateCanvasOperations({
-      artifactIds: ["artifact-1"],
-      knownNodeIds: ["run-1", "image-artifact-1"],
-      operations: [
-        {
-          id: "op-1",
-          type: "attachArtifact",
-          payload: {
-            nodeId: "image-artifact-1",
-            artifactId: "artifact-1",
-            artifact: {
-              id: "artifact-1",
-              type: "image",
-              uri: "https://cdn.example/1.png",
-            },
-          },
-        },
-      ],
-      projectId: "project-1",
-    });
-
-    expect(result.rejected).toEqual([]);
-    expect(result.accepted[0].operation.projectId).toBe("project-1");
-  });
-
   it("rejects operations for the wrong project", () => {
     const result = validateCanvasOperations({
       knownNodeIds: ["run-1"],
@@ -45,28 +19,29 @@ describe("canvas operation policy", () => {
         },
       ],
       projectId: "project-1",
+      runNodeId: "run-1",
     });
 
     expect(result.accepted).toEqual([]);
     expect(result.rejected[0].reason).toBe("operation_project_mismatch");
   });
 
-  it("rejects attachment operations that target unknown nodes", () => {
+  it("rejects updates that target unknown nodes", () => {
     const result = validateCanvasOperations({
-      artifactIds: ["artifact-1"],
       knownNodeIds: ["run-1"],
       operations: [
         {
           id: "op-1",
           projectId: "project-1",
-          type: "attachArtifact",
+          type: "updateNode",
           payload: {
             nodeId: "unknown-node",
-            artifactId: "artifact-1",
+            data: { kind: "prompt" },
           },
         },
       ],
       projectId: "project-1",
+      runNodeId: "run-1",
     });
 
     expect(result.rejected[0].reason).toBe("target_node_not_allowed");
@@ -90,6 +65,7 @@ describe("canvas operation policy", () => {
         },
       ],
       projectId: "project-1",
+      runNodeId: "run-1",
     });
 
     expect(result.rejected[0].reason).toBe("dangling_edge");
@@ -104,7 +80,7 @@ describe("canvas operation policy", () => {
           projectId: "project-1",
           type: "createNode",
           payload: {
-            node: promptNode("prompt-2"),
+            node: stickyNoteNode("note-2"),
           },
         },
         {
@@ -115,28 +91,104 @@ describe("canvas operation policy", () => {
             edge: {
               id: "edge-1",
               source: "prompt-1",
-              target: "prompt-2",
+              target: "note-2",
             },
           },
         },
       ],
       projectId: "project-1",
+      runNodeId: "run-1",
     });
 
     expect(result.rejected).toEqual([]);
     expect(result.accepted).toHaveLength(2);
   });
+
+  it("rejects artifact-backed and incomplete content nodes", () => {
+    const result = validateCanvasOperations({
+      knownNodeIds: ["run-1"],
+      operations: [
+        {
+          id: "op-node",
+          projectId: "project-1",
+          type: "createNode",
+          payload: {
+            node: {
+              id: "markdown-1",
+              type: "markdownNode",
+              position: { x: 0, y: 0 },
+              data: { kind: "markdown", content: "summary" },
+            } as never,
+          },
+        },
+      ],
+      projectId: "project-1",
+      runNodeId: "run-1",
+    });
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected[0].reason).toBe("invalid_node_kind");
+  });
+
+  it("rejects data mutation through updateNode", () => {
+    const result = validateCanvasOperations({
+      knownNodeIds: ["note-1"],
+      operations: [
+        {
+          id: "op-update",
+          projectId: "project-1",
+          type: "updateNode",
+          payload: { nodeId: "note-1", data: { text: "changed" } },
+        },
+      ],
+      projectId: "project-1",
+      runNodeId: "run-1",
+    });
+
+    expect(result.rejected[0].reason).toBe("node_data_update_not_allowed");
+  });
+
+  it("accepts a complete ellipse shape", () => {
+    const result = validateCanvasOperations({
+      knownNodeIds: ["run-1"],
+      operations: [
+        {
+          id: "op-shape",
+          projectId: "project-1",
+          type: "createNode",
+          payload: {
+            node: {
+              id: "shape-1",
+              type: "shapeNode",
+              position: { x: 10, y: 20 },
+              data: {
+                kind: "shape",
+                shape: "ellipse",
+                label: "圆形",
+                createdAt: "2026-06-11T00:00:00.000Z",
+              },
+            },
+          },
+        },
+      ],
+      projectId: "project-1",
+      runNodeId: "run-1",
+    });
+
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted).toHaveLength(1);
+  });
 });
 
-function promptNode(id: string): Extract<CanvasOperation, { type: "createNode" }>["payload"]["node"] {
+function stickyNoteNode(id: string): Extract<CanvasOperation, { type: "createNode" }>["payload"]["node"] {
   return {
     id,
-    type: "promptNode",
+    type: "stickyNoteNode",
     position: { x: 0, y: 0 },
     data: {
-      kind: "prompt",
-      prompt: "生成图片",
-      contextLabel: "Root",
+      kind: "stickyNote",
+      text: "画布摘要",
+      color: "yellow",
       createdAt: "2026-06-08T00:00:00.000Z",
     },
   };

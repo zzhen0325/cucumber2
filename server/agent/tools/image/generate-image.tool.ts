@@ -9,7 +9,7 @@ import {
   type SeedreamUpstreamContext,
 } from "../../../../seedream.ts";
 import type { ArtifactRef } from "../../../../src/types/canvas.ts";
-import type { PromptUpstreamContextItem } from "../../../prompts.ts";
+import type { UpstreamContextItem } from "../../../../src/types/canvas.ts";
 import type { CucumberAgentContext } from "../../context.ts";
 
 const generateImageInputSchema = z.object({
@@ -17,7 +17,7 @@ const generateImageInputSchema = z.object({
   resultCount: z.number().int().positive().optional(),
 });
 
-// Hand-written JSON schema (strict:false) to mirror the other agent-v2 tools.
+// Hand-written JSON schema (strict:false) to mirror the other Agent tools.
 const generateImageJsonSchema = {
   type: "object",
   additionalProperties: false,
@@ -45,7 +45,7 @@ export const generateImageTool = tool({
   // Let real failures (misconfiguration, image-service errors) propagate so the
   // runtime surfaces them as a failed run instead of returning a fake result.
   errorFunction: null,
-  async execute(rawArgs, runContext) {
+  async execute(rawArgs, runContext, details) {
     const context = requireCucumberContext(runContext?.context);
 
     const parsed = generateImageInputSchema.safeParse(rawArgs);
@@ -112,6 +112,7 @@ export const generateImageTool = tool({
       resultCount,
       promptBatchMode: "single_prompt",
       onImage: emitArtifact,
+      signal: details?.signal,
     });
 
     return {
@@ -137,7 +138,7 @@ function resolveResultCount(
 }
 
 export function toSeedreamUpstreamContext(
-  items: PromptUpstreamContextItem[]
+  items: UpstreamContextItem[]
 ): SeedreamUpstreamContext[] {
   return items.flatMap((item): SeedreamUpstreamContext[] => {
     if (item.type === "prompt") {

@@ -20,7 +20,6 @@ import {
   Check,
   Circle,
   CircleDot,
-  Cpu,
   Database,
   Diamond,
   FileText,
@@ -31,15 +30,12 @@ import {
   Image,
   Layers,
   MousePointer2,
-  Paperclip,
   Palette,
   Sparkles,
   Square,
   StickyNote,
   Type,
   Triangle,
-  WandSparkles,
-  X,
   ZoomIn,
   ZoomOut,
   type LucideIcon,
@@ -64,33 +60,15 @@ import { FileUploadOverlay } from "@/components/FileUploadOverlay";
 import { Node, NodeContent } from "@/components/ai-elements/node";
 import { ReplayBanner, RunTracePanel } from "@/components/RunTracePanel";
 import { RunNodeView } from "@/components/RunNodeView";
-import { SkillPanel } from "@/components/SkillPanel";
 import { useCanvasFileDrop } from "@/components/useCanvasFileDrop";
 import {
   PromptInput,
   PromptInputBody,
   PromptInputFooter,
-  PromptInputHeader,
   PromptInputSubmit,
   PromptInputTextarea,
-  usePromptInputAttachments,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  isModelProviderId,
-  loadModelProviders,
-  readStoredModelProvider,
-  storeModelProvider,
-  type ModelProviderId,
-  type ModelProviderSummary,
-} from "@/lib/model-providers";
 import {
   getCanvasLayoutSignature,
   layoutAgentCanvasGraph,
@@ -106,13 +84,7 @@ import {
   hasNodeContentChanged,
   toPersistableNodes,
 } from "@/lib/canvas-persistence";
-import {
-  buildRunRevisionPrompt,
-  collectUpstreamContext,
-  createRunDraft,
-  getRunRevisionAnchorNodeId,
-  getRunReferenceNodeId,
-} from "@/lib/graph";
+import { collectUpstreamContext, createRunDraft, getRunReferenceNodeId } from "@/lib/graph";
 import type { RunStepTraceEvent } from "@/lib/graph-projection";
 import {
   projectRuntimeEventsToCanvas,
@@ -131,7 +103,6 @@ import type {
   StickyNoteNodeData,
   WebpageNodeData,
 } from "@/types/canvas";
-import type { InputAttachment } from "@/types/runtime";
 
 const nodeTypes = {
   artifactNode: memo(ArtifactLikeNode),
@@ -183,14 +154,10 @@ type StreamedRuntimeEvents = ReturnType<typeof runtimeEventsFromMessages>;
 type AgentRunRequestBody = {
   projectId: string;
   runNodeId: string;
-  modelProvider: ModelProviderId;
-  attachments: InputAttachment[];
   canvasContext: {
     prompt: string;
     promptNodeId: string;
     selectedNodeId: string | null;
-    upstreamContext: ReturnType<typeof createRunDraft>["upstreamContext"];
-    contextTrace: ReturnType<typeof createRunDraft>["contextTrace"];
   };
 };
 
@@ -198,16 +165,6 @@ type CanvasWorkspaceProps = {
   projectId: string;
   onBack: () => void;
 };
-
-function getAgentRunEndpoint() {
-  if (import.meta.env.VITE_AGENT_V2 === "1") {
-    return "/api/agent-run-v2";
-  }
-  if (typeof window !== "undefined" && window.localStorage.getItem("cucumber:agent-v2") === "1") {
-    return "/api/agent-run-v2";
-  }
-  return "/api/agent-run";
-}
 
 type ManualCanvasTool = "stickyNote" | ShapeVariant;
 type CanvasTool = "select" | "hand" | ManualCanvasTool;
@@ -274,7 +231,6 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const [contextCount, setContextCount] = useState(0);
   const [storageStatus, setStorageStatus] = useState<StorageStatus>("loading");
   const [storageError, setStorageError] = useState<string | null>(null);
-  const [skillPanelOpen, setSkillPanelOpen] = useState(false);
   const [traceRunId, setTraceRunId] = useState<string | null>(null);
   const [traceEvents, setTraceEvents] = useState<RunStepTraceEvent[]>([]);
   const [traceLoading, setTraceLoading] = useState(false);
@@ -286,13 +242,8 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     nodes: AgentCanvasNode[];
     edges: AgentCanvasEdge[];
   } | null>(null);
-  const [modelProvider, setModelProvider] = useState<ModelProviderId>(
-    () => readStoredModelProvider() ?? "deepseek"
-  );
-  const [modelProviders, setModelProviders] = useState<ModelProviderSummary[]>([]);
-  const [modelProviderError, setModelProviderError] = useState<string | null>(null);
   const activeRunId = useRef<string | null>(null);
-  const activeRunRequest = useRef<AgentRunRequestBody | null>(null);
+  const stoppedRunIds = useRef(new Set<string>());
   const activeRunMessageStartIndex = useRef(0);
   const loadedProjectIdRef = useRef<string | null>(null);
   const streamedRuntimeEvents = useRef<StreamedRuntimeEvents>([]);
@@ -307,6 +258,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const projectVersionRef = useRef(0);
   const isSavingRef = useRef(false);
   const pendingSaveRef = useRef(false);
+  const saveWaitersRef = useRef<Array<(saved: boolean) => void>>([]);
   const prevSaveClassifyNodesRef = useRef<AgentCanvasNode[]>([]);
   const prevSaveClassifyTitleRef = useRef(projectTitle);
   const autoLayoutFrame = useRef<number | null>(null);
@@ -397,8 +349,51 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         },
       });
 
-      setNodes((current) => mergeProjectedNodes(current, projection.nodes));
-      setEdges((current) => mergeProjectedEdges(current, projection.edges));
+      const runWasStopped = stoppedRunIds.current.has(runId);
+      const stoppedPendingResultNodeIds = new Set(
+        [...nodesRef.current, ...projection.nodes].flatMap((node) =>
+          runWasStopped &&
+          node.data.kind === "imageResult" &&
+          node.data.runId === runId &&
+          (node.data.status ?? "loading") === "loading"
+            ? [node.id]
+            : []
+        )
+      );
+
+      setNodes((current) => {
+        const merged = mergeProjectedNodes(current, projection.nodes);
+        if (!runWasStopped) {
+          return merged;
+        }
+        return merged
+          .filter((node) => !stoppedPendingResultNodeIds.has(node.id))
+          .map((node) =>
+            node.id === runId && node.data.kind === "run"
+              ? {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    status: "error" as const,
+                    error: "运行已停止。",
+                  },
+                }
+              : node
+          );
+      });
+      setEdges((current) =>
+        mergeProjectedEdges(current, projection.edges)
+          .filter(
+            (edge) =>
+              !stoppedPendingResultNodeIds.has(edge.source) &&
+              !stoppedPendingResultNodeIds.has(edge.target)
+          )
+          .map((edge) =>
+            runWasStopped && edge.target === runId && edge.data?.active
+              ? { ...edge, data: { ...edge.data, active: false } }
+              : edge
+          )
+      );
     },
     [setEdges, setNodes]
   );
@@ -486,16 +481,60 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     [setEdges, setNodes]
   );
 
-  const {
-    addToolApprovalResponse,
-    messages,
-    sendMessage,
-    status,
-    error,
-    stop,
-  } = useChat({
+  const markRunStopped = useCallback(
+    (runId: string | null) => {
+      if (!runId) {
+        return;
+      }
+
+      stoppedRunIds.current.add(runId);
+
+      const pendingResultNodeIds = new Set(
+        nodesRef.current.flatMap((node) =>
+          node.data.kind === "imageResult" &&
+          node.data.runId === runId &&
+          (node.data.status ?? "loading") === "loading"
+            ? [node.id]
+            : []
+        )
+      );
+
+      setNodes((current) =>
+        current
+          .filter((node) => !pendingResultNodeIds.has(node.id))
+          .map((node) =>
+            node.id === runId && node.data.kind === "run"
+              ? {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    status: "error" as const,
+                    error: "运行已停止。",
+                  },
+                }
+              : node
+          )
+      );
+      setEdges((current) =>
+        current
+          .filter(
+            (edge) =>
+              !pendingResultNodeIds.has(edge.source) &&
+              !pendingResultNodeIds.has(edge.target)
+          )
+          .map((edge) =>
+            edge.target === runId && edge.data?.active
+              ? { ...edge, data: { ...edge.data, active: false } }
+              : edge
+          )
+      );
+    },
+    [setEdges, setNodes]
+  );
+
+  const { messages, sendMessage, status, error, stop } = useChat({
     transport: new DefaultChatTransport({
-      api: getAgentRunEndpoint(),
+      api: "/api/agent-run",
       credentials: "same-origin",
     }),
     onData: (dataPart) => {
@@ -510,17 +549,16 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       projectStreamedRuntimeEvents(
         runtimeEventsFromMessages(finalMessages, {
           runNodeId: runId,
-          projectId: loadedProjectIdRef.current ?? undefined,
-          prompt: activeRunRequest.current?.canvasContext.prompt,
-          promptNodeId: activeRunRequest.current?.canvasContext.promptNodeId,
-          selectedNodeId: activeRunRequest.current?.canvasContext.selectedNodeId,
-          includeLegacyToolParts: true,
           messageStartIndex: activeRunMessageStartIndex.current,
         }),
         { replace: true }
       );
 
-      if (!isAbort && !isDisconnect && !isError) {
+      if (isAbort) {
+        markRunStopped(runId);
+      } else if (isDisconnect) {
+        markRunError(runId, "Agent 连接已中断。");
+      } else if (!isError) {
         settleRunIfOutputReady(runId);
         window.requestAnimationFrame(() => {
           settleRunIfOutputReady(runId);
@@ -531,6 +569,31 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       markRunError(activeRunId.current, nextError.message);
     },
   });
+
+  const handleStop = useCallback(() => {
+    const runId = activeRunId.current;
+    void stop();
+    markRunStopped(runId);
+
+    const projectId = loadedProjectIdRef.current;
+    if (!projectId || !runId) {
+      return;
+    }
+
+    const query = new URLSearchParams({ projectId, runNodeId: runId });
+    void fetch(`/api/agent-run?${query}`, {
+      method: "DELETE",
+      credentials: "same-origin",
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+      })
+      .catch((stopError: unknown) => {
+        markRunError(runId, `停止 Agent 失败：${getClientError(stopError)}`);
+      });
+  }, [markRunError, markRunStopped, stop]);
 
   const selectedNodeIds = useMemo(
     () => nodes.filter((node) => node.selected).map((node) => node.id),
@@ -563,24 +626,10 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   }, [persistedSelectedNodeId]);
 
   const isBusy = status === "submitted" || status === "streaming";
-  const hasPendingApproval = useMemo(
-    () =>
-      nodes.some(
-        (node) =>
-          node.data.kind === "run" &&
-          (node.data.toolParts ?? [node.data.toolPart]).some(
-            (part) =>
-              part?.state === "approval-requested" &&
-              part.approval?.approved === undefined
-          )
-      ),
-    [nodes]
-  );
   const canSubmit =
     Boolean(loadedProjectId) &&
     storageStatus !== "loading" &&
     !storageError &&
-    !hasPendingApproval &&
     !isReplayMode;
   const canUploadFiles =
     Boolean(loadedProjectId) &&
@@ -611,32 +660,6 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   );
 
   useEffect(() => {
-    let ignore = false;
-
-    loadModelProviders()
-      .then(({ defaultProvider, providers }) => {
-        if (ignore) {
-          return;
-        }
-
-        setModelProviders(providers);
-        setModelProviderError(null);
-        if (!readStoredModelProvider()) {
-          setModelProvider(defaultProvider);
-        }
-      })
-      .catch((nextError: unknown) => {
-        if (!ignore) {
-          setModelProviderError(getClientError(nextError));
-        }
-      });
-
-    return () => {
-      ignore = true;
-    };
-  }, []);
-
-  useEffect(() => {
     const handleOpenTrace = (event: Event) => {
       const detail = (event as CustomEvent<{ runNodeId?: unknown }>).detail;
       if (typeof detail?.runNodeId === "string") {
@@ -655,54 +678,10 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   }, []);
 
   useEffect(() => {
-    const handlePrepareRunRevision = (event: Event) => {
-      if (isReplayMode || isBusy) {
-        return;
-      }
-
-      const detail = (
-        event as CustomEvent<{ runNodeId?: unknown }>
-      ).detail;
-      if (typeof detail?.runNodeId !== "string") {
-        return;
-      }
-
-      const runNode = nodes.find(
-        (node) => node.id === detail.runNodeId && node.data.kind === "run"
-      );
-      if (!runNode || runNode.data.kind !== "run" || runNode.data.evaluation?.passed) {
-        return;
-      }
-
-      const anchorNodeId = getRunRevisionAnchorNodeId(runNode.id, nodes, edges);
-      setPrompt(buildRunRevisionPrompt(runNode.data));
-      setNodes((current) =>
-        applySelectedNodeIds(current, anchorNodeId ? [anchorNodeId] : [])
-      );
-      window.requestAnimationFrame(() => {
-        document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus();
-      });
-    };
-
-    window.addEventListener(
-      "cucumber:prepare-run-revision",
-      handlePrepareRunRevision
-    );
-
-    return () => {
-      window.removeEventListener(
-        "cucumber:prepare-run-revision",
-        handlePrepareRunRevision
-      );
-    };
-  }, [edges, isBusy, isReplayMode, nodes, setNodes]);
-
-  useEffect(() => {
     let ignore = false;
 
     hasLoadedProject.current = false;
     activeRunId.current = null;
-    activeRunRequest.current = null;
     activeRunMessageStartIndex.current = 0;
     streamedRuntimeEvents.current = [];
 
@@ -818,7 +797,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         !currentProjectId ||
         isReplayModeRef.current
       ) {
-        return;
+        return false;
       }
 
       // Single-flight: never run two saves concurrently. A change arriving while a
@@ -826,7 +805,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       // strictly ordered and the latest snapshot always wins.
       if (isSavingRef.current) {
         pendingSaveRef.current = true;
-        return;
+        return new Promise<boolean>((resolve) => {
+          saveWaitersRef.current.push(resolve);
+        });
       }
 
       isSavingRef.current = true;
@@ -835,6 +816,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       }
 
       const maxConflictRetries = 3;
+      let saved = true;
 
       try {
         do {
@@ -877,13 +859,18 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           }
         } while (pendingSaveRef.current);
       } catch (nextError: unknown) {
+        saved = false;
         if (shouldReportStatus) {
           setStorageStatus("error");
           setStorageError(getClientError(nextError));
         }
       } finally {
         isSavingRef.current = false;
+        for (const resolve of saveWaitersRef.current.splice(0)) {
+          resolve(saved);
+        }
       }
+      return saved;
     },
     []
   );
@@ -994,55 +981,6 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   }, [error, markRunError]);
 
   useEffect(() => {
-    const handleApprovalResponse = (event: Event) => {
-      const detail = (
-        event as CustomEvent<{ approvalId?: unknown; approved?: unknown }>
-      ).detail;
-      if (
-        typeof detail?.approvalId !== "string" ||
-        typeof detail.approved !== "boolean"
-      ) {
-        return;
-      }
-
-      const requestBody = activeRunRequest.current;
-      const approvalId = detail.approvalId;
-      const approved = detail.approved;
-      if (!requestBody) {
-        markRunError(activeRunId.current, "审批上下文已失效，请重新提交。");
-        return;
-      }
-
-      void (async () => {
-        try {
-          await addToolApprovalResponse({
-            id: approvalId,
-            approved,
-            reason: approved ? "用户确认执行" : "用户拒绝执行",
-          });
-          await sendMessage(undefined, {
-            body: requestBody,
-          });
-        } catch (nextError) {
-          markRunError(activeRunId.current, getClientError(nextError));
-        }
-      })();
-    };
-
-    window.addEventListener(
-      "cucumber:respond-tool-approval",
-      handleApprovalResponse
-    );
-
-    return () => {
-      window.removeEventListener(
-        "cucumber:respond-tool-approval",
-        handleApprovalResponse
-      );
-    };
-  }, [addToolApprovalResponse, markRunError, sendMessage]);
-
-  useEffect(() => {
     const runId = activeRunId.current;
     if (!runId) {
       return;
@@ -1050,11 +988,6 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
     const runtimeEvents = runtimeEventsFromMessages(messages, {
       runNodeId: runId,
-      projectId: loadedProjectId ?? undefined,
-      prompt: activeRunRequest.current?.canvasContext.prompt,
-      promptNodeId: activeRunRequest.current?.canvasContext.promptNodeId,
-      selectedNodeId: activeRunRequest.current?.canvasContext.selectedNodeId,
-      includeLegacyToolParts: true,
       messageStartIndex: activeRunMessageStartIndex.current,
     });
     projectStreamedRuntimeEvents(runtimeEvents, { replace: true });
@@ -1152,7 +1085,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     ) => {
       event?.preventDefault();
       const value = (message.text || prompt).trim();
-      if (!value || isBusy || hasPendingApproval) {
+      if (!value || isBusy) {
         return;
       }
       if (!loadedProjectId) {
@@ -1175,27 +1108,29 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       const requestBody: AgentRunRequestBody = {
         projectId: loadedProjectId,
         runNodeId: draft.runNode.id,
-        modelProvider,
-        attachments: [
-          ...getAttachmentMetadata(message.files),
-          ...getWebpageLinkAttachments(value),
-        ],
         canvasContext: {
           prompt: value,
           promptNodeId: draft.promptNode.id,
           selectedNodeId: anchorId,
-          upstreamContext: draft.upstreamContext,
-          contextTrace: draft.contextTrace,
         },
       };
-      activeRunRequest.current = requestBody;
-
-      setNodes((current) => [
-        ...applySelectedNodeIds(current, []),
+      const nextNodes = [
+        ...applySelectedNodeIds(nodes, []),
         draft.promptNode,
         draft.runNode,
-      ]);
-      setEdges((current) => [...current, ...draft.edges]);
+      ];
+      const nextEdges = [...edges, ...draft.edges];
+      nodesRef.current = nextNodes;
+      edgesRef.current = nextEdges;
+      setNodes(nextNodes);
+      setEdges(nextEdges);
+
+      const saved = await saveProjectSnapshot();
+      if (!saved) {
+        markRunError(draft.runNode.id, "项目快照保存失败，Agent 未启动。");
+        return;
+      }
+
       setPrompt("");
 
       await sendMessage(
@@ -1207,28 +1142,19 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     },
     [
       edges,
-      hasPendingApproval,
       isBusy,
       loadedProjectId,
-      modelProvider,
+      markRunError,
       nodes,
       prompt,
       referenceNodeId,
+      saveProjectSnapshot,
       sendMessage,
       setEdges,
       setNodes,
       storageError,
     ]
   );
-
-  const handleModelProviderChange = useCallback((nextProvider: string) => {
-    if (!isModelProviderId(nextProvider)) {
-      return;
-    }
-
-    setModelProvider(nextProvider);
-    storeModelProvider(nextProvider);
-  }, []);
 
   const handleReplayTrace = useCallback(() => {
     if (!traceRunId || !loadedProjectId || !traceEvents.length) {
@@ -1411,25 +1337,15 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       <CanvasCreationPreview preview={creationPreview} />
 
       <TopBar
-        modelProvider={modelProvider}
-        modelProviderError={modelProviderError}
-        modelProviders={modelProviders}
         storageError={storageError}
         storageStatus={storageStatus}
         title={projectTitle}
         onBack={onBack}
-        onModelProviderChange={handleModelProviderChange}
       />
       <ToolRail activeTool={canvasTool} onToolChange={setCanvasTool} />
       <ViewportControls
         canAutoLayout={!isReplayMode && nodes.length > 0}
-        skillPanelOpen={skillPanelOpen}
         onAutoLayout={handleAutoLayout}
-        onToggleSkills={() => setSkillPanelOpen((current) => !current)}
-      />
-      <SkillPanel
-        open={skillPanelOpen}
-        onClose={() => setSkillPanelOpen(false)}
       />
       <RunTracePanel
         error={traceError}
@@ -1456,7 +1372,6 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       <Composer
         busy={isBusy}
         canSubmit={canSubmit}
-        approvalPending={hasPendingApproval}
         contextCount={contextCount}
         prompt={prompt}
         referenceContextCount={referenceContextCount}
@@ -1464,7 +1379,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         replayActive={isReplayMode}
         selectionCount={selectedNodeIds.length}
         setPrompt={setPrompt}
-        stop={stop}
+        stop={handleStop}
         onSubmit={handleSubmit}
       />
     </main>
@@ -1917,35 +1832,16 @@ async function hydrateProjectSnapshotFromLastRun(project: PersistedProject) {
 }
 
 function TopBar({
-  modelProvider,
-  modelProviderError,
-  modelProviders,
   storageError,
   storageStatus,
   title,
   onBack,
-  onModelProviderChange,
 }: {
-  modelProvider: ModelProviderId;
-  modelProviderError: string | null;
-  modelProviders: ModelProviderSummary[];
   storageError: string | null;
   storageStatus: StorageStatus;
   title: string;
   onBack: () => void;
-  onModelProviderChange: (provider: string) => void;
 }) {
-  const selectedProvider = modelProviders.find(
-    (provider) => provider.id === modelProvider
-  );
-  const providerTitle = modelProviderError
-    ? modelProviderError
-    : selectedProvider
-      ? `${selectedProvider.label} · ${selectedProvider.model} · ${
-          selectedProvider.configured ? "已配置" : "未配置"
-        }`
-      : "AI provider";
-
   return (
     <div className="top-bar">
       <button
@@ -1968,38 +1864,6 @@ function TopBar({
         <Database size={13} />
         {getStorageStatusLabel(storageStatus)}
       </span>
-      <Select value={modelProvider} onValueChange={onModelProviderChange}>
-        <SelectTrigger
-          aria-label="AI model provider"
-          className="provider-select-trigger"
-          size="sm"
-          title={providerTitle}
-        >
-          <Cpu size={13} />
-          <SelectValue placeholder="Model" />
-        </SelectTrigger>
-        <SelectContent align="start" className="provider-select-content">
-          {(modelProviders.length
-            ? modelProviders
-            : [
-                {
-                  id: modelProvider,
-                  label: modelProvider,
-                  configured: false,
-                  model: "loading",
-                  capabilities: { text: true, vision: false },
-                } satisfies ModelProviderSummary,
-              ]
-          ).map((provider) => (
-            <SelectItem key={provider.id} value={provider.id}>
-              <span>{provider.label}</span>
-              <span className={provider.configured ? "configured" : "unconfigured"}>
-                {provider.configured ? "已配置" : "未配置"}
-              </span>
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
     </div>
   );
 }
@@ -2044,14 +1908,10 @@ function ToolRail({
 
 function ViewportControls({
   canAutoLayout,
-  skillPanelOpen,
   onAutoLayout,
-  onToggleSkills,
 }: {
   canAutoLayout: boolean;
-  skillPanelOpen: boolean;
   onAutoLayout: () => void;
-  onToggleSkills: () => void;
 }) {
   return (
     <div className="viewport-controls">
@@ -2072,15 +1932,6 @@ function ViewportControls({
         type="button"
       >
         <Workflow size={14} />
-      </button>
-      <button
-        aria-label="Skills"
-        className={skillPanelOpen ? "active" : ""}
-        onClick={onToggleSkills}
-        title="Skills"
-        type="button"
-      >
-        <WandSparkles size={14} />
       </button>
       <span className="divider" />
       <button aria-label="Zoom out" disabled title="暂未开放" type="button">
@@ -2110,7 +1961,6 @@ function EmptyState({ visible }: { visible: boolean }) {
 function Composer({
   busy,
   canSubmit,
-  approvalPending,
   contextCount,
   prompt,
   referenceContextCount,
@@ -2123,7 +1973,6 @@ function Composer({
 }: {
   busy: boolean;
   canSubmit: boolean;
-  approvalPending: boolean;
   contextCount: number;
   prompt: string;
   referenceContextCount: number;
@@ -2155,6 +2004,7 @@ function Composer({
           : "未引用节点"}
       </div>
       <PromptInput
+        attachmentsEnabled={false}
         className="composer"
         onSubmit={(message, event) => onSubmit(message, event)}
       >
@@ -2164,8 +2014,6 @@ function Composer({
             placeholder={
               replayActive
                 ? "Run 回放模式为只读..."
-                : approvalPending
-                ? "请先处理 Run 节点中的确认..."
                 : !canSubmit
                 ? "项目连接失败，无法提交..."
                 : hasReference
@@ -2176,13 +2024,12 @@ function Composer({
             onChange={(event) => setPrompt(event.currentTarget.value)}
           />
         </PromptInputBody>
-        <ComposerAttachmentStrip />
         <PromptInputFooter className="composer-footer">
           <ComposerFooterStatus
             label={hasReference ? "继续基于引用节点生成分支" : footerContextLabel}
           />
           <PromptInputSubmit
-            disabled={!prompt.trim() || !canSubmit}
+            disabled={busy ? false : !prompt.trim() || !canSubmit}
             onStop={stop}
             status={busy ? "streaming" : "ready"}
           />
@@ -2192,57 +2039,13 @@ function Composer({
   );
 }
 
-function ComposerAttachmentStrip() {
-  const attachments = usePromptInputAttachments();
-
-  if (!attachments.files.length) {
-    return null;
-  }
-
-  return (
-    <PromptInputHeader className="composer-attachments">
-      {attachments.files.map((file) => (
-        <span className="composer-attachment-chip" key={file.id} title={file.filename}>
-          <span>{file.filename ?? "Attachment"}</span>
-          <button
-            aria-label={`移除附件 ${file.filename ?? ""}`.trim()}
-            className="nodrag nopan"
-            onClick={(event) => {
-              event.stopPropagation();
-              attachments.remove(file.id);
-            }}
-            title="移除附件"
-            type="button"
-          >
-            <X size={11} />
-          </button>
-        </span>
-      ))}
-    </PromptInputHeader>
-  );
-}
-
 function ComposerFooterStatus({
   label,
 }: {
   label: string;
 }) {
-  const attachments = usePromptInputAttachments();
-
   return (
     <span className="composer-footer-status">
-      <button
-        aria-label="添加附件"
-        className="composer-attachment-button nodrag nopan"
-        onClick={(event) => {
-          event.stopPropagation();
-          attachments.openFileDialog();
-        }}
-        title="添加附件"
-        type="button"
-      >
-        <Paperclip size={12} />
-      </button>
       <span>{label}</span>
     </span>
   );
@@ -2266,112 +2069,6 @@ function getReferenceNodeLabel(node?: AgentCanvasNode) {
   }
 
   return "";
-}
-
-function getAttachmentMetadata(files: PromptInputMessage["files"]): InputAttachment[] {
-  return files.map((file, index) => {
-    const name = file.filename?.trim() || `attachment-${index + 1}`;
-    const mimeType = file.mediaType || "application/octet-stream";
-    const isDataUrl = file.url.startsWith("data:");
-
-    return {
-      id: `composer-attachment-${index + 1}-${safeAttachmentId(name)}`,
-      kind: getAttachmentKind(mimeType, name),
-      name,
-      mimeType,
-      sizeBytes: isDataUrl ? estimateDataUrlSize(file.url) : undefined,
-      uri: isDataUrl ? undefined : file.url,
-      contentRef: isDataUrl
-        ? `composer-attachment://${encodeURIComponent(name)}`
-        : undefined,
-      preview: isDataUrl
-        ? `${mimeType} attachment captured as metadata`
-        : file.url,
-    };
-  });
-}
-
-function getWebpageLinkAttachments(promptText: string): InputAttachment[] {
-  const seen = new Set<string>();
-  const links: InputAttachment[] = [];
-
-  for (const token of promptText.split(/\s+/)) {
-    const normalized = parseWebpageUrl(token);
-    if (!normalized || seen.has(normalized.href)) {
-      continue;
-    }
-
-    seen.add(normalized.href);
-    links.push({
-      id: `webpage-${safeAttachmentId(normalized.href)}`,
-      kind: "webpage",
-      name: normalized.hostname,
-      uri: normalized.href,
-      contentRef: normalized.href,
-      preview: normalized.href,
-    });
-  }
-
-  return links;
-}
-
-function parseWebpageUrl(value: string) {
-  const trimmed = value.trim().replace(/[),.;，。；）]+$/u, "");
-  if (!/^https?:\/\//i.test(trimmed)) {
-    return null;
-  }
-
-  try {
-    return new URL(trimmed);
-  } catch {
-    return null;
-  }
-}
-
-function getAttachmentKind(
-  mimeType: string,
-  name: string
-): InputAttachment["kind"] {
-  const normalizedMime = mimeType.toLowerCase();
-  const extension = name.toLowerCase().split(".").at(-1) ?? "";
-
-  if (normalizedMime.startsWith("image/")) {
-    return "image";
-  }
-  if (
-    normalizedMime.includes("markdown") ||
-    normalizedMime.includes("document") ||
-    extension === "md"
-  ) {
-    return "doc";
-  }
-  if (
-    normalizedMime.includes("javascript") ||
-    normalizedMime.includes("typescript") ||
-    ["js", "jsx", "ts", "tsx", "css", "html", "json"].includes(extension)
-  ) {
-    return "code";
-  }
-  if (normalizedMime.includes("csv") || extension === "csv") {
-    return "dataset";
-  }
-  return "file";
-}
-
-function estimateDataUrlSize(url: string) {
-  const payload = url.split(",", 2)[1];
-  if (!payload) {
-    return undefined;
-  }
-  return Math.max(0, Math.floor((payload.length * 3) / 4));
-}
-
-function safeAttachmentId(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48) || "file";
 }
 
 function getStorageStatusLabel(status: StorageStatus) {

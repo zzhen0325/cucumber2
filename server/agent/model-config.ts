@@ -6,7 +6,7 @@ import {
 } from "@openai/agents";
 
 /**
- * Agent v2 runs on the OpenAI Agents SDK. The provider is decided once from the
+ * The Agent runtime uses the OpenAI Agents SDK. The provider is decided once from the
  * environment:
  *
  *   1. Doubao (Volcengine Ark) when `ARK_API_KEY` is set. Ark exposes an
@@ -16,7 +16,7 @@ import {
  *      `DEEPSEEK_API_KEY` is set. DeepSeek does not implement the Responses API,
  *      so a plain model string would resolve to `/responses` and 404 — we return
  *      an explicit `OpenAIChatCompletionsModel` instead.
- *   3. The SDK default (native OpenAI / ambient proxy) when neither is set.
+ *   3. Native OpenAI when `OPENAI_API_KEY` is set.
  *
  * Returning an explicit model instance (instead of toggling the global API mode)
  * keeps the chosen API surface deterministic. This is provider configuration,
@@ -25,6 +25,12 @@ import {
 type AgentModel = OpenAIResponsesModel | OpenAIChatCompletionsModel;
 
 let cached: AgentModel | undefined | null = null;
+
+export type AgentModelConfiguration = {
+  configured: boolean;
+  provider: "ark" | "deepseek" | "openai" | null;
+  model: string | null;
+};
 
 export function configureAgentModelProvider() {
   // Kept for call-site clarity; provider wiring happens lazily in resolveAgentModel().
@@ -61,9 +67,42 @@ export function resolveAgentModel(): AgentModel | undefined {
     return cached;
   }
 
-  // No provider key: fall back to the SDK default (native OpenAI / ambient proxy).
-  cached = undefined;
-  return undefined;
+  if (process.env.OPENAI_API_KEY?.trim()) {
+    cached = undefined;
+    return undefined;
+  }
+
+  throw new Error(
+    "Agent model is not configured. Set ARK_API_KEY, DEEPSEEK_API_KEY, or OPENAI_API_KEY."
+  );
+}
+
+export function getAgentModelConfiguration(): AgentModelConfiguration {
+  if (process.env.ARK_API_KEY?.trim()) {
+    return {
+      configured: true,
+      provider: "ark",
+      model: process.env.ARK_MODEL?.trim() || "doubao-seed-2-0-lite-260428",
+    };
+  }
+
+  if (process.env.DEEPSEEK_API_KEY?.trim()) {
+    return {
+      configured: true,
+      provider: "deepseek",
+      model: process.env.DEEPSEEK_MODEL?.trim() || "deepseek-v4-flash",
+    };
+  }
+
+  if (process.env.OPENAI_API_KEY?.trim()) {
+    return {
+      configured: true,
+      provider: "openai",
+      model: process.env.OPENAI_MODEL?.trim() || "sdk-default",
+    };
+  }
+
+  return { configured: false, provider: null, model: null };
 }
 
 function readArkOpenAICompatibleBaseUrl() {

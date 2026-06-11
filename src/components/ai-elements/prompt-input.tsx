@@ -490,6 +490,7 @@ export type PromptInputProps = Omit<
   HTMLAttributes<HTMLFormElement>,
   "onSubmit" | "onError"
 > & {
+  attachmentsEnabled?: boolean;
   // e.g., "image/*" or leave undefined for any
   accept?: string;
   multiple?: boolean;
@@ -513,6 +514,7 @@ export type PromptInputProps = Omit<
 
 export const PromptInput = ({
   className,
+  attachmentsEnabled = true,
   accept,
   multiple,
   globalDrop,
@@ -732,7 +734,7 @@ export const PromptInput = ({
   // Attach drop handlers on nearest form and document (opt-in)
   useEffect(() => {
     const form = formRef.current;
-    if (!form) {
+    if (!form || !attachmentsEnabled) {
       return;
     }
     if (globalDrop) {
@@ -759,10 +761,10 @@ export const PromptInput = ({
       form.removeEventListener("dragover", onDragOver);
       form.removeEventListener("drop", onDrop);
     };
-  }, [add, globalDrop]);
+  }, [add, attachmentsEnabled, globalDrop]);
 
   useEffect(() => {
-    if (!globalDrop) {
+    if (!globalDrop || !attachmentsEnabled) {
       return;
     }
 
@@ -785,7 +787,7 @@ export const PromptInput = ({
       document.removeEventListener("dragover", onDragOver);
       document.removeEventListener("drop", onDrop);
     };
-  }, [add, globalDrop]);
+  }, [add, attachmentsEnabled, globalDrop]);
 
   useEffect(
     () => () => {
@@ -861,8 +863,8 @@ export const PromptInput = ({
 
       try {
         // Convert blob URLs to data URLs asynchronously
-        const convertedFiles: FileUIPart[] = await Promise.all(
-          files.map(async ({ id: _id, ...item }) => {
+        const convertedFiles: FileUIPart[] = attachmentsEnabled
+          ? await Promise.all(files.map(async ({ id: _id, ...item }) => {
             if (item.url?.startsWith("blob:")) {
               const dataUrl = await convertBlobUrlToDataUrl(item.url);
               // If conversion failed, keep the original blob URL
@@ -872,8 +874,8 @@ export const PromptInput = ({
               };
             }
             return item;
-          })
-        );
+          }))
+          : [];
 
         const result = onSubmit({ files: convertedFiles, text }, event);
 
@@ -899,22 +901,24 @@ export const PromptInput = ({
         // Don't clear on error - user may want to retry
       }
     },
-    [usingProvider, controller, files, onSubmit, clear]
+    [attachmentsEnabled, usingProvider, controller, files, onSubmit, clear]
   );
 
   // Render with or without local provider
   const inner = (
     <>
-      <input
-        accept={accept}
-        aria-label="Upload files"
-        className="hidden"
-        multiple={multiple}
-        onChange={handleChange}
-        ref={inputRef}
-        title="Upload files"
-        type="file"
-      />
+      {attachmentsEnabled && (
+        <input
+          accept={accept}
+          aria-label="Upload files"
+          className="hidden"
+          multiple={multiple}
+          onChange={handleChange}
+          ref={inputRef}
+          title="Upload files"
+          type="file"
+        />
+      )}
       <form
         className={cn("w-full", className)}
         onSubmit={handleSubmit}

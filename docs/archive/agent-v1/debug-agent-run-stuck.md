@@ -31,3 +31,6 @@ Status: [OPEN]
 - Added temporary debug reporting around `/api/agent-run` request validation.
 - Added temporary debug reporting around `executeAgentRun` pre-run skill/tool-registry setup.
 - Added temporary debug reporting around `agent_runs` upsert.
+# Archived Agent v1 Debug Notes
+
+> 归档于 2026-06-11。本文描述的 v1 runtime 已删除，不再用于当前问题排查。当前 Agent 事实以 `server/agent/`、`README.md` 和根目录 `AGENTS.md` 为准。

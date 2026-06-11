@@ -1,16 +1,10 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { createInMemorySupabaseClient, isInMemoryDbEnabled } from "./dev/in-memory-supabase.ts";
-import { canEditSkill } from "./skill-access.ts";
 import { canAccessProject } from "./project-access.ts";
 import { getProjectSummaryStats } from "../src/lib/project-summary.ts";
-import type { RunStepEventInput, RunStepEventType } from "./run-kernel.ts";
-import type {
-  AgentCanvasEdge,
-  AgentCanvasNode,
-  AgentRunStatus,
-} from "../src/types/canvas.ts";
-import type { AgentRun, AgentStep } from "../src/types/runtime.ts";
+import type { AgentCanvasEdge, AgentCanvasNode } from "../src/types/canvas.ts";
+import type { AgentEvent, AgentEventType } from "../src/types/runtime.ts";
 
 export type AppUser = {
   id: string;
@@ -49,30 +43,15 @@ export class ProjectVersionConflictError extends Error {
   }
 }
 
-export type AgentRunStepEvent = {
+export type AgentEventRecord = {
   id: string;
   projectId: string;
   runNodeId: string;
   stepId: string;
-  type: RunStepEventType;
+  type: AgentEventType;
   payload: Record<string, unknown>;
   errorText: string | null;
   createdAt: string;
-};
-
-export type AgentSkill = {
-  id: string;
-  ownerUserId: string | null;
-  name: string;
-  slug: string;
-  description: string;
-  instructions: string;
-  config: Record<string, unknown>;
-  sourceManifest: Record<string, unknown>;
-  isPublic: boolean;
-  canEdit: boolean;
-  createdAt: string;
-  updatedAt: string;
 };
 
 type CreateUserInput = {
@@ -95,61 +74,6 @@ type UpdateProjectInput = {
   selectedNodeId?: string | null;
   lastRunId?: string | null;
   expectedVersion?: number;
-};
-
-type RunEventInput = {
-  projectId: string;
-  runNodeId: string;
-  prompt: string;
-  selectedNodeId?: string | null;
-  upstreamContext: unknown[];
-  status: AgentRunStatus;
-  skillInput?: unknown;
-  skillOutput?: unknown;
-  toolInput?: unknown;
-  toolOutput?: unknown;
-  errorText?: string | null;
-};
-
-type CreateSkillInput = {
-  ownerUserId: string;
-  name: string;
-  slug: string;
-  description: string;
-  instructions: string;
-  config: Record<string, unknown>;
-  sourceManifest: Record<string, unknown>;
-};
-
-type CreateArtifactInput = {
-  id: string;
-  projectId: string;
-  runNodeId: string;
-  type: string;
-  uri?: string | null;
-  title?: string | null;
-  metadata?: Record<string, unknown> | null;
-  contentRef?: string | null;
-  toolCallId?: string | null;
-  sourceNodeId?: string | null;
-};
-
-type UpsertAgentRunSnapshotInput = {
-  run: AgentRun;
-};
-
-type UpsertAgentRunStepsInput = {
-  projectId: string;
-  runNodeId: string;
-  steps: AgentStep[];
-};
-
-type UpdateSkillInput = {
-  skillId: string;
-  userId: string;
-  name?: string;
-  description?: string;
-  instructions?: string;
 };
 
 type UserRow = {
@@ -182,41 +106,12 @@ type ProjectRow = {
   updated_at: string;
 };
 
-type SkillRow = {
-  id: string;
-  owner_user_id: string | null;
-  name: string;
-  slug: string;
-  description: string;
-  instructions: string;
-  config: Record<string, unknown> | null;
-  source_manifest: Record<string, unknown> | null;
-  is_public: boolean;
-  deleted_at: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-type ArtifactRow = {
-  id: string;
-  project_id: string;
-  run_node_id: string;
-  type: string;
-  uri: string | null;
-  title: string | null;
-  metadata: Record<string, unknown> | null;
-  content_ref: string | null;
-  tool_call_id: string | null;
-  source_node_id: string | null;
-  created_at: string;
-};
-
-type RunStepEventRow = {
+type AgentEventRow = {
   id: string;
   project_id: string;
   run_node_id: string;
   step_id: string;
-  type: RunStepEventType;
+  type: AgentEventType;
   payload: Record<string, unknown> | null;
   error_text: string | null;
   created_at: string;
@@ -477,30 +372,7 @@ export async function softDeleteProject(projectId: string, userId: string) {
   return Boolean(data);
 }
 
-export async function recordRunEvent(input: RunEventInput) {
-  const client = getSupabaseClient();
-  const { error } = await client.from("agent_run_events").insert({
-    project_id: input.projectId,
-    run_node_id: input.runNodeId,
-    prompt: input.prompt,
-    selected_node_id: input.selectedNodeId ?? null,
-    upstream_context: input.upstreamContext,
-    status: input.status,
-    tool_input: input.skillInput
-      ? { skillInput: input.skillInput, toolInput: input.toolInput ?? null }
-      : input.toolInput ?? null,
-    tool_output: input.skillOutput
-      ? { skillOutput: input.skillOutput, toolOutput: input.toolOutput ?? null }
-      : input.toolOutput ?? null,
-    error_text: input.errorText ?? null,
-  });
-
-  if (error) {
-    throw error;
-  }
-}
-
-export async function recordRunStepEvent(input: RunStepEventInput) {
+export async function recordAgentEvent(input: AgentEvent) {
   const client = getSupabaseClient();
   const payload: Record<string, unknown> = {
     project_id: input.projectId,
@@ -515,72 +387,14 @@ export async function recordRunStepEvent(input: RunStepEventInput) {
     payload.created_at = input.createdAt;
   }
 
-  const { error } = await client.from("agent_run_step_events").insert(payload);
+  const { error } = await client.from("agent_run_events").insert(payload);
 
   if (error) {
     throw error;
   }
 }
 
-export async function upsertAgentRunSnapshot({
-  run,
-}: UpsertAgentRunSnapshotInput) {
-  const client = getSupabaseClient();
-  const { error } = await client.from("agent_runs").upsert({
-    id: run.id,
-    user_id: run.userId,
-    project_id: run.projectId,
-    run_node_id: run.input.metadata.runNodeId,
-    status: run.status,
-    input: run.input,
-    intent: run.intent ?? null,
-    built_context: run.context ?? null,
-    plan: run.plan ?? null,
-    artifacts: run.artifacts,
-    canvas_operations: run.canvasOperations,
-    errors: run.errors,
-    evaluation: run.evaluation ?? null,
-    trace: run.trace,
-    created_at: run.createdAt,
-    updated_at: run.updatedAt,
-  });
-
-  if (error) {
-    throw error;
-  }
-}
-
-export async function upsertAgentRunSteps({
-  projectId,
-  runNodeId,
-  steps,
-}: UpsertAgentRunStepsInput) {
-  if (!steps.length) {
-    return;
-  }
-
-  const client = getSupabaseClient();
-  const { error } = await client.from("agent_run_steps").upsert(
-    steps.map((step) => ({
-      id: step.id,
-      project_id: projectId,
-      run_node_id: runNodeId,
-      plan_step_id: step.planStepId,
-      status: step.status,
-      input: summarizeJson(step.input),
-      output: summarizeJson(step.output),
-      error: step.error ?? null,
-      started_at: step.startedAt ?? null,
-      completed_at: step.completedAt ?? null,
-    }))
-  );
-
-  if (error) {
-    throw error;
-  }
-}
-
-export async function listRunStepEventsForUser({
+export async function listAgentEventsForUser({
   projectId,
   runNodeId,
   userId,
@@ -596,178 +410,18 @@ export async function listRunStepEventsForUser({
 
   const client = getSupabaseClient();
   const { data, error } = await client
-    .from("agent_run_step_events")
+    .from("agent_run_events")
     .select("*")
     .eq("project_id", projectId)
     .eq("run_node_id", runNodeId)
     .order("created_at", { ascending: true })
-    .returns<RunStepEventRow[]>();
+    .returns<AgentEventRow[]>();
 
   if (error) {
     throw error;
   }
 
-  return data.map(mapRunStepEventRow);
-}
-
-export async function createArtifact(input: CreateArtifactInput) {
-  const client = getSupabaseClient();
-  const { data, error } = await client
-    .from("agent_artifacts")
-    .insert({
-      id: input.id,
-      project_id: input.projectId,
-      run_node_id: input.runNodeId,
-      type: input.type,
-      uri: input.uri ?? null,
-      title: input.title ?? null,
-      metadata: input.metadata ?? {},
-      content_ref: input.contentRef ?? null,
-      tool_call_id: input.toolCallId ?? null,
-      source_node_id: input.sourceNodeId ?? null,
-    })
-    .select()
-    .single<ArtifactRow>();
-
-  if (error) {
-    throw error;
-  }
-
-  return mapArtifactRow(data);
-}
-
-export async function listPublicSkillsForUser(userId: string) {
-  const client = getSupabaseClient();
-  const { data, error } = await client
-    .from("agent_skills")
-    .select("*")
-    .eq("is_public", true)
-    .is("deleted_at", null)
-    .order("updated_at", { ascending: false })
-    .returns<SkillRow[]>();
-
-  if (error) {
-    throw error;
-  }
-
-  return data.map((row) => mapSkillRow(row, userId));
-}
-
-export async function listLatestPublicSkills() {
-  const client = getSupabaseClient();
-  const { data, error } = await client
-    .from("agent_skills")
-    .select("*")
-    .eq("is_public", true)
-    .is("deleted_at", null)
-    .order("updated_at", { ascending: false })
-    .returns<SkillRow[]>();
-
-  if (error) {
-    throw error;
-  }
-
-  return data.map((row) => mapSkillRow(row, row.owner_user_id ?? ""));
-}
-
-export async function createSkill(input: CreateSkillInput) {
-  const client = getSupabaseClient();
-  const { data, error } = await client
-    .from("agent_skills")
-    .insert({
-      owner_user_id: input.ownerUserId,
-      name: input.name,
-      slug: input.slug,
-      description: input.description,
-      instructions: input.instructions,
-      config: input.config,
-      source_manifest: input.sourceManifest,
-      is_public: true,
-    })
-    .select()
-    .single<SkillRow>();
-
-  if (error) {
-    throw error;
-  }
-
-  return mapSkillRow(data, input.ownerUserId);
-}
-
-export async function updateSkillForUser(input: UpdateSkillInput) {
-  const existing = await getSkillRow(input.skillId);
-  if (!canEditSkill(input.userId, mapSkillAccess(existing))) {
-    return null;
-  }
-
-  const payload: Record<string, unknown> = {};
-  if (input.name !== undefined) {
-    payload.name = input.name;
-  }
-  if (input.description !== undefined) {
-    payload.description = input.description;
-  }
-  if (input.instructions !== undefined) {
-    payload.instructions = input.instructions;
-  }
-
-  const client = getSupabaseClient();
-  const { data, error } = await client
-    .from("agent_skills")
-    .update(payload)
-    .eq("id", input.skillId)
-    .eq("owner_user_id", input.userId)
-    .is("deleted_at", null)
-    .select()
-    .maybeSingle<SkillRow>();
-
-  if (error) {
-    throw error;
-  }
-
-  return data ? mapSkillRow(data, input.userId) : null;
-}
-
-export async function softDeleteSkillForUser(skillId: string, userId: string) {
-  const existing = await getSkillRow(skillId);
-  if (!canEditSkill(userId, mapSkillAccess(existing))) {
-    return false;
-  }
-
-  const client = getSupabaseClient();
-  const { data, error } = await client
-    .from("agent_skills")
-    .update({ deleted_at: new Date().toISOString() })
-    .eq("id", skillId)
-    .eq("owner_user_id", userId)
-    .is("deleted_at", null)
-    .select("id")
-    .maybeSingle<{ id: string }>();
-
-  if (error) {
-    throw error;
-  }
-
-  return Boolean(data);
-}
-
-export async function getLatestPublicSkillBySlug(slug: string) {
-  const client = getSupabaseClient();
-  const { data, error } = await client
-    .from("agent_skills")
-    .select("*")
-    .eq("slug", slug)
-    .eq("is_public", true)
-    .is("deleted_at", null)
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<SkillRow>();
-
-  if (error) {
-    throw error;
-  }
-
-  return data ? mapSkillRow(data, data.owner_user_id ?? "") : null;
+  return data.map(mapAgentEventRow);
 }
 
 async function getProjectRow(projectId: string) {
@@ -777,21 +431,6 @@ async function getProjectRow(projectId: string) {
     .select("*")
     .eq("id", projectId)
     .maybeSingle<ProjectRow>();
-
-  if (error) {
-    throw error;
-  }
-
-  return data;
-}
-
-async function getSkillRow(skillId: string) {
-  const client = getSupabaseClient();
-  const { data, error } = await client
-    .from("agent_skills")
-    .select("*")
-    .eq("id", skillId)
-    .maybeSingle<SkillRow>();
 
   if (error) {
     throw error;
@@ -840,23 +479,6 @@ function getSupabaseSecretKey() {
   );
 }
 
-function summarizeJson(value: unknown) {
-  if (value === undefined) {
-    return null;
-  }
-
-  const json = JSON.stringify(value);
-  if (json.length <= 16_000) {
-    return value;
-  }
-
-  return {
-    truncated: true,
-    originalBytes: Buffer.byteLength(json),
-    preview: json.slice(0, 16_000),
-  };
-}
-
 function mapUserRow(row: UserRow): AppUser {
   return {
     id: row.id,
@@ -872,17 +494,6 @@ function mapProjectAccess(row: ProjectRow | null) {
 
   return {
     userId: row.user_id,
-    deletedAt: row.deleted_at,
-  };
-}
-
-function mapSkillAccess(row: SkillRow | null) {
-  if (!row) {
-    return null;
-  }
-
-  return {
-    ownerUserId: row.owner_user_id,
     deletedAt: row.deleted_at,
   };
 }
@@ -927,40 +538,7 @@ function normalizeEdges(edges: unknown[]) {
   return Array.isArray(edges) ? (edges as AgentCanvasEdge[]) : [];
 }
 
-function mapSkillRow(row: SkillRow, userId: string): AgentSkill {
-  return {
-    id: row.id,
-    ownerUserId: row.owner_user_id,
-    name: row.name,
-    slug: row.slug,
-    description: row.description,
-    instructions: row.instructions,
-    config: row.config ?? {},
-    sourceManifest: row.source_manifest ?? {},
-    isPublic: row.is_public,
-    canEdit: canEditSkill(userId, mapSkillAccess(row)),
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function mapArtifactRow(row: ArtifactRow) {
-  return {
-    id: row.id,
-    projectId: row.project_id,
-    runNodeId: row.run_node_id,
-    type: row.type,
-    uri: row.uri ?? undefined,
-    title: row.title ?? undefined,
-    metadata: row.metadata ?? {},
-    contentRef: row.content_ref ?? undefined,
-    toolCallId: row.tool_call_id ?? undefined,
-    sourceNodeId: row.source_node_id ?? undefined,
-    createdAt: row.created_at,
-  };
-}
-
-function mapRunStepEventRow(row: RunStepEventRow): AgentRunStepEvent {
+function mapAgentEventRow(row: AgentEventRow): AgentEventRecord {
   return {
     id: row.id,
     projectId: row.project_id,

@@ -1,7 +1,7 @@
 import { tool } from "@openai/agents";
 
 import type { CanvasOperation } from "../../../../src/types/runtime.ts";
-import { validateCanvasOperations } from "../../../runtime/canvas-operation-policy.ts";
+import { validateCanvasOperations } from "../../policy/canvas-operation-policy.ts";
 import type { CucumberAgentContext } from "../../context.ts";
 import {
   canvasOperationsInputSchema,
@@ -29,10 +29,10 @@ export const proposeCanvasOperationsTool = tool({
 
     const operations = parsed.data.operations as CanvasOperation[];
     const validation = validateCanvasOperations({
-      artifactIds: context.producedArtifacts.map((artifact) => artifact.id),
       knownNodeIds: context.knownNodeIds,
       operations,
       projectId: context.projectId,
+      runNodeId: context.runNodeId,
     });
     const acceptedOperations = validation.accepted.map((item) => item.operation);
 

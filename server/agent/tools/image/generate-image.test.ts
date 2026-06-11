@@ -2,7 +2,7 @@ import { RunContext } from "@openai/agents";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CucumberAgentContext } from "../../context.ts";
-import type { PromptUpstreamContextItem } from "../../../prompts.ts";
+import type { UpstreamContextItem } from "../../../../src/types/canvas.ts";
 
 const generateSeedreamImage = vi.fn();
 const isSeedreamConfigured = vi.fn();
@@ -120,7 +120,7 @@ describe("generate_image tool", () => {
   });
 
   it("forwards only image and prompt upstream items to the image service", () => {
-    const items: PromptUpstreamContextItem[] = [
+    const items: UpstreamContextItem[] = [
       { nodeId: "p1", type: "prompt", prompt: "风格参考" },
       { nodeId: "i1", type: "image", imageUrl: "https://cdn.example/ref.png" },
       {

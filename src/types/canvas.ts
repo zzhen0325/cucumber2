@@ -79,32 +79,15 @@ export type CanvasToolState =
   | "input-streaming"
   | "input-available"
   | "output-available"
-  | "output-error"
-  | "approval-requested"
-  | "approval-responded"
-  | "output-denied";
+  | "output-error";
 
 export type CanvasToolPart = {
-  type:
-    | "tool-analyze_reference_images"
-    | "tool-expand_prompt"
-    | "tool-generate_image"
-    | "tool-generate_html"
-    | "tool-web.read"
-    | "tool-asset.analyze_context"
-    | "tool-web_search"
-    | "tool-write_document"
-    | "tool-runtime";
+  type: `tool-${string}`;
   state: CanvasToolState;
   toolCallId?: string;
   input?: unknown;
   output?: unknown;
   errorText?: string;
-  approval?: {
-    id: string;
-    approved?: boolean;
-    reason?: string;
-  };
 };
 
 export type RunStepTimelineItem = {
@@ -117,15 +100,8 @@ export type RunStepTimelineItem = {
   errorText?: string;
 };
 
-export type RunEvaluationSummary = {
-  passed: boolean;
-  issueCount: number;
-  recommendedActions: string[];
-  needsRegeneration: boolean;
-};
-
 export type RunSummaryItem = {
-  kind: "intent" | "context" | "plan" | "artifact";
+  kind: "agent" | "handoff" | "artifact" | "canvas";
   label: string;
   detail?: string;
 };
@@ -147,7 +123,6 @@ export type RunNodeData = {
   error?: string;
   stepTimeline?: RunStepTimelineItem[];
   decision?: string;
-  evaluation?: RunEvaluationSummary;
   summaryItems?: RunSummaryItem[];
   traceAvailable?: boolean;
 };

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildSeedreamRequestBodies,
+  generateSeedreamImage,
   inferSeedreamResultCount,
   inferSeedreamResultCountFromPrompts,
   type SeedreamConfig,
@@ -171,5 +172,22 @@ describe("seedream result count", () => {
         testSeedreamConfig
       )[0].body
     ).toMatchObject({ size: 4096 * 4096 });
+  });
+
+  it("aborts before making a Seedream request", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      generateSeedreamImage(
+        {
+          prompts: ["A gray square"],
+          resultCount: 1,
+          promptBatchMode: "single_prompt",
+          signal: controller.signal,
+        },
+        testSeedreamConfig
+      )
+    ).rejects.toMatchObject({ name: "AbortError" });
   });
 });

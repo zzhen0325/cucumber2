@@ -1,14 +1,24 @@
-import type { UIMessage } from "ai";
+import type { UIMessage, UIMessageStreamWriter } from "ai";
 
-import type { AgentCanvasEdge, AgentCanvasNode, ArtifactRef } from "../../src/types/canvas.ts";
+import { collectUpstreamContext } from "../../src/lib/graph.ts";
+import type {
+  AgentCanvasEdge,
+  AgentCanvasNode,
+  ArtifactRef,
+  UpstreamContextItem,
+} from "../../src/types/canvas.ts";
 import type { CanvasOperation } from "../../src/types/runtime.ts";
-import type { ModelProviderId } from "../model-providers.ts";
-import type { PromptCanvasContext, PromptUpstreamContextItem } from "../prompts.ts";
 import type { AgentProject } from "../supabase.ts";
 
 export type CanvasSnapshot = {
   nodes: AgentCanvasNode[];
   edges: AgentCanvasEdge[];
+};
+
+export type AgentRunRequestContext = {
+  prompt: string;
+  promptNodeId?: string | null;
+  selectedNodeId?: string | null;
 };
 
 export type AgentRunInput = {
@@ -18,18 +28,28 @@ export type AgentRunInput = {
   canvasId: string;
   runNodeId: string;
   message: string;
-  canvasContext: PromptCanvasContext;
+  promptNodeId: string | null;
+  selectedNodeId: string | null;
+  upstreamContext: UpstreamContextItem[];
   canvasSnapshot: CanvasSnapshot;
-  selectedNodeIds?: string[];
-  messages: UIMessage[];
-  modelProvider: ModelProviderId;
-  attachments?: unknown[];
+  selectedNodeIds: string[];
+  signal?: AbortSignal;
 };
 
 export type CucumberRunEvent =
   | { type: "text_delta"; text: string }
+  | { type: "agent_active"; agentName: string }
+  | { type: "handoff_requested"; fromAgent?: string; toAgent?: string }
+  | { type: "handoff_completed"; fromAgent?: string; toAgent?: string }
   | { type: "tool_started"; toolName: string; toolCallId?: string; input?: unknown }
   | { type: "tool_completed"; toolName: string; toolCallId?: string; output?: unknown }
+  | {
+      type: "tool_failed";
+      toolName: string;
+      toolCallId?: string;
+      input?: unknown;
+      message: string;
+    }
   | { type: "canvas_operation_proposed"; operations: CanvasOperation[] }
   | { type: "canvas_operation_applied"; operations: CanvasOperation[] }
   | {
@@ -37,10 +57,21 @@ export type CucumberRunEvent =
       rejections: Array<{ operation: CanvasOperation; reason: string }>;
     }
   | { type: "artifact_created"; artifact: ArtifactRef; canvasNodeId?: string }
-  | { type: "run_completed"; finalOutput?: string }
+  | { type: "run_completed"; finalOutput?: string; artifactIds: string[] }
   | { type: "error"; message: string };
 
-export type PendingCucumberEvent = Exclude<CucumberRunEvent, { type: "text_delta" | "run_completed" | "error" }>;
+export type PendingCucumberEvent = Exclude<
+  CucumberRunEvent,
+  | { type: "text_delta" }
+  | { type: "run_completed" }
+  | { type: "error" }
+  | { type: "agent_active" }
+  | { type: "handoff_requested" }
+  | { type: "handoff_completed" }
+  | { type: "tool_started" }
+  | { type: "tool_completed" }
+  | { type: "tool_failed" }
+>;
 
 export type CucumberAgentContext = {
   userId: string;
@@ -50,86 +81,85 @@ export type CucumberAgentContext = {
   runNodeId: string;
   canvasSnapshot: CanvasSnapshot;
   selectedNodeIds: string[];
+  signal?: AbortSignal;
   knownNodeIds: string[];
   producedArtifacts: ArtifactRef[];
   pendingEvents: PendingCucumberEvent[];
-  // Optional live event sink wired up by the runtime stream merger. When set,
-  // tools can emit events (e.g. each image the moment it finishes) that are
-  // streamed to the client immediately instead of being buffered in
-  // `pendingEvents` until the tool call returns.
   pushLiveEvent?: (event: PendingCucumberEvent) => void;
-  // Image-generation context. Reference image urls live in `upstreamContext`
-  // and are forwarded directly to the image service; they are never surfaced to
-  // the language model (see generate-image.tool.ts).
   prompt: string;
   selectedNodeId: string | null;
-  upstreamContext: PromptUpstreamContextItem[];
+  upstreamContext: UpstreamContextItem[];
 };
 
-export type ExecuteAgentRunV2Input = {
+export type ExecuteAgentRunInput = {
   userId: string;
   projectId: string;
   runNodeId: string;
-  canvasContext: PromptCanvasContext;
-  messages: UIMessage[];
-  modelProvider: ModelProviderId;
-  writer: import("ai").UIMessageStreamWriter<UIMessage>;
-  attachments?: unknown[];
-  projectSnapshot?: Pick<AgentProject, "id" | "nodes" | "edges">;
+  canvasContext: AgentRunRequestContext;
+  writer: UIMessageStreamWriter<UIMessage>;
+  projectSnapshot: Pick<AgentProject, "id" | "nodes" | "edges">;
+  signal?: AbortSignal;
 };
 
 export interface AgentRuntime {
   run(input: AgentRunInput): AsyncIterable<CucumberRunEvent>;
 }
 
-export function buildAgentRunInputV2({
-  attachments = [],
+export function buildAgentRunInput({
   canvasContext,
-  messages,
-  modelProvider,
   projectId,
   projectSnapshot,
   runNodeId,
+  signal,
   userId,
-}: Omit<ExecuteAgentRunV2Input, "writer">): AgentRunInput {
+}: Omit<ExecuteAgentRunInput, "writer">): AgentRunInput {
+  if (projectSnapshot.id !== projectId) {
+    throw new Error("Project snapshot does not match the requested project.");
+  }
+
+  const nodeIds = new Set(projectSnapshot.nodes.map((node) => node.id));
+  assertProjectNode(nodeIds, runNodeId, "Run node");
+
+  const promptNodeId = canvasContext.promptNodeId ?? null;
+  if (promptNodeId) {
+    assertProjectNode(nodeIds, promptNodeId, "Prompt node");
+  }
+
+  const selectedNodeId = canvasContext.selectedNodeId ?? null;
+  if (selectedNodeId) {
+    assertProjectNode(nodeIds, selectedNodeId, "Selected node");
+  }
+
+  const upstreamContext = collectUpstreamContext(
+    selectedNodeId,
+    projectSnapshot.nodes,
+    projectSnapshot.edges
+  );
+
   return {
-    attachments,
-    canvasContext,
     canvasId: projectId,
     canvasSnapshot: {
-      nodes: projectSnapshot?.nodes ?? [],
-      edges: projectSnapshot?.edges ?? [],
+      nodes: projectSnapshot.nodes,
+      edges: projectSnapshot.edges,
     },
     message: canvasContext.prompt,
-    messages,
-    modelProvider,
+    promptNodeId,
     projectId,
     runNodeId,
-    selectedNodeIds: [
-      canvasContext.selectedNodeId,
-      ...canvasContext.upstreamContext.map((item) => item.nodeId),
-    ].filter((id): id is string => Boolean(id)),
+    selectedNodeId,
+    selectedNodeIds: [selectedNodeId, ...upstreamContext.map((item) => item.nodeId)].filter(
+      (id): id is string => Boolean(id)
+    ),
+    signal,
+    upstreamContext,
     userId,
   };
 }
 
 export function buildCucumberAgentContext(input: AgentRunInput): CucumberAgentContext {
-  const knownNodeIds = new Set<string>();
-  for (const node of input.canvasSnapshot.nodes) {
-    knownNodeIds.add(node.id);
-  }
-  for (const edge of input.canvasSnapshot.edges) {
-    knownNodeIds.add(edge.source);
-    knownNodeIds.add(edge.target);
-  }
-  for (const item of input.canvasContext.upstreamContext) {
-    knownNodeIds.add(item.nodeId);
-  }
-  if (input.canvasContext.promptNodeId) {
-    knownNodeIds.add(input.canvasContext.promptNodeId);
-  }
-  if (input.canvasContext.selectedNodeId) {
-    knownNodeIds.add(input.canvasContext.selectedNodeId);
+  const knownNodeIds = new Set(input.canvasSnapshot.nodes.map((node) => node.id));
+  if (input.promptNodeId) {
+    knownNodeIds.add(input.promptNodeId);
   }
   knownNodeIds.add(input.runNodeId);
 
@@ -140,12 +170,19 @@ export function buildCucumberAgentContext(input: AgentRunInput): CucumberAgentCo
     pendingEvents: [],
     producedArtifacts: [],
     projectId: input.projectId,
-    prompt: input.canvasContext.prompt,
+    prompt: input.message,
     runNodeId: input.runNodeId,
-    selectedNodeId: input.canvasContext.selectedNodeId ?? null,
-    selectedNodeIds: input.selectedNodeIds ?? [],
-    upstreamContext: input.canvasContext.upstreamContext ?? [],
+    selectedNodeId: input.selectedNodeId,
+    selectedNodeIds: input.selectedNodeIds,
+    signal: input.signal,
+    upstreamContext: input.upstreamContext,
     userId: input.userId,
     workspaceId: input.workspaceId,
   };
+}
+
+function assertProjectNode(nodeIds: Set<string>, nodeId: string, label: string) {
+  if (!nodeIds.has(nodeId)) {
+    throw new Error(`${label} ${nodeId} is not part of the persisted project snapshot.`);
+  }
 }

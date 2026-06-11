@@ -12,12 +12,8 @@ import { cors } from "hono/cors";
 import { z } from "zod";
 
 import { isSeedreamConfigured } from "../seedream.ts";
-import {
-  getDefaultModelProviderId,
-  getModelProviderSummaries,
-  isArkConfigured,
-  modelProviderIds,
-} from "./model-providers.ts";
+import { executeAgentRun } from "./agent/index.ts";
+import { getAgentModelConfiguration } from "./agent/model-config.ts";
 import {
   createSessionToken,
   hashPassword,
@@ -29,7 +25,6 @@ import {
   claimUnownedProjects,
   createProject,
   createSession,
-  createSkill,
   createUser,
   deleteSession,
   getProjectForUser,
@@ -37,23 +32,18 @@ import {
   getUserByUsername,
   getUserCount,
   isSupabaseConfigured,
-  listRunStepEventsForUser,
-  listPublicSkillsForUser,
+  listAgentEventsForUser,
   listProjects,
-  softDeleteSkillForUser,
-  updateSkillForUser,
   softDeleteProject,
   updateProjectForUser,
   ProjectVersionConflictError,
   type AppUser,
 } from "./supabase.ts";
-import { parseSkillZip } from "./skill-parser.ts";
-import { executeOpenAIAgentsRunV2 } from "./agent-v2/index.ts";
-import { executeAgentRun } from "./runtime/executor.ts";
 
 loadServerEnv();
 
 const app = new Hono();
+const activeAgentRuns = new Map<string, AbortController>();
 const sessionCookieName = "cucumber_session";
 
 const authInputSchema = z.object({
@@ -61,53 +51,11 @@ const authInputSchema = z.object({
   password: z.string().min(1).max(200),
 });
 
-const upstreamContextSchema = z.object({
-  nodeId: z.string(),
-  type: z.enum([
-    "prompt",
-    "image",
-    "artifact",
-    "decision",
-    "memory",
-    "tool_result",
-    "doc",
-    "code",
-    "webpage",
-    "dataset",
-  ]),
-  prompt: z.string().optional(),
-  imageUrl: z.string().optional(),
-  summary: z.string().optional(),
-  title: z.string().optional(),
-  contentRef: z.string().optional(),
-  priority: z.number().optional(),
-  artifact: z
-    .object({
-      id: z.string(),
-      type: z.string(),
-      uri: z.string().optional(),
-      title: z.string().optional(),
-      metadata: z.record(z.string(), z.unknown()).optional(),
-      contentRef: z.string().optional(),
-    })
-    .optional(),
-});
-
 const canvasContextSchema = z.object({
-  prompt: z.string(),
+  prompt: z.string().trim().min(1),
   promptNodeId: z.string().nullable().optional(),
   selectedNodeId: z.string().nullable().optional(),
-  upstreamContext: z.array(upstreamContextSchema).default([]),
-  contextTrace: z
-    .object({
-      selectedNodeId: z.string().nullable().optional(),
-      budget: z.number().optional(),
-      omittedContextReason: z.string().optional(),
-      omittedNodeIds: z.array(z.string()).optional(),
-    })
-    .optional(),
 });
-const modelProviderSchema = z.enum(modelProviderIds);
 
 const projectCreateSchema = z.object({
   title: z.string().trim().min(1).max(120).default("Untitled"),
@@ -126,16 +74,6 @@ const projectPatchSchema = z
     message: "No project updates provided.",
   });
 
-const skillPatchSchema = z
-  .object({
-    name: z.string().trim().min(1).max(80).optional(),
-    description: z.string().trim().max(500).optional(),
-    instructions: z.string().trim().min(1).optional(),
-  })
-  .refine((value) => Object.keys(value).length > 0, {
-    message: "No skill updates provided.",
-  });
-
 app.use("*", cors());
 
 app.onError((error, c) => {
@@ -144,25 +82,17 @@ app.onError((error, c) => {
   return c.json({ error: apiError.message }, 500);
 });
 
-app.get("/api/health", (c) =>
-  c.json({
+app.get("/api/health", (c) => {
+  const agent = getAgentModelConfiguration();
+  return c.json({
     ok: true,
-    deepseekConfigured: Boolean(process.env.DEEPSEEK_API_KEY),
-    arkConfigured: isArkConfigured(),
+    agentConfigured: agent.configured,
+    agentProvider: agent.provider,
+    agentModel: agent.model,
     seedreamConfigured: isSeedreamConfigured(),
     supabaseConfigured: isSupabaseConfigured(),
-    model: process.env.DEEPSEEK_MODEL ?? "deepseek-v4-flash",
-    modelProviders: getModelProviderSummaries(),
-    defaultModelProvider: getDefaultModelProviderId(),
-  })
-);
-
-app.get("/api/model-providers", (c) =>
-  c.json({
-    defaultProvider: getDefaultModelProviderId(),
-    providers: getModelProviderSummaries(),
-  })
-);
+  });
+});
 
 app.post("/api/auth/register", async (c) => {
   const input = authInputSchema.parse(await c.req.json());
@@ -317,7 +247,7 @@ app.get("/api/projects/:projectId/runs/:runNodeId/trace", async (c) => {
 
   const projectId = z.string().uuid().parse(c.req.param("projectId"));
   const runNodeId = z.string().min(1).parse(c.req.param("runNodeId"));
-  const events = await listRunStepEventsForUser({
+  const events = await listAgentEventsForUser({
     projectId,
     runNodeId,
     userId: user.id,
@@ -330,87 +260,24 @@ app.get("/api/projects/:projectId/runs/:runNodeId/trace", async (c) => {
   return c.json({ events });
 });
 
-app.get("/api/skills", async (c) => {
+app.delete("/api/agent-run", async (c) => {
   const user = await requireUser(c);
   if (!user) {
     return unauthorized(c);
   }
 
-  const skills = await listPublicSkillsForUser(user.id);
-  return c.json({ skills });
-});
-
-app.post("/api/skills", async (c) => {
-  const user = await requireUser(c);
-  if (!user) {
-    return unauthorized(c);
+  const projectId = z.string().uuid().parse(c.req.query("projectId"));
+  const runNodeId = z.string().min(1).parse(c.req.query("runNodeId"));
+  const project = await getProjectForUser(projectId, user.id);
+  if (!project) {
+    return notFound(c);
   }
 
-  const formData = await c.req.formData();
-  const file = formData.get("file");
-  if (!isUploadedFile(file)) {
-    return c.json({ error: "请上传 skill zip 文件" }, 400);
-  }
-  if (!file.name.endsWith(".zip")) {
-    return c.json({ error: "Skill 文件必须是 .zip" }, 400);
-  }
-
-  let parsed: Awaited<ReturnType<typeof parseSkillZip>>;
-  try {
-    parsed = await parseSkillZip(await file.arrayBuffer());
-  } catch (error) {
-    return c.json({ error: getErrorMessage(error) }, 400);
-  }
-
-  const skill = await createSkill({
-    ownerUserId: user.id,
-    name: parsed.name,
-    slug: parsed.slug,
-    description: parsed.description,
-    instructions: parsed.instructions,
-    config: parsed.config,
-    sourceManifest: parsed.sourceManifest,
-  });
-
-  return c.json({ skill });
-});
-
-app.patch("/api/skills/:skillId", async (c) => {
-  const user = await requireUser(c);
-  if (!user) {
-    return unauthorized(c);
-  }
-
-  const skillId = z.string().uuid().parse(c.req.param("skillId"));
-  const input = skillPatchSchema.parse(await c.req.json());
-  const skill = await updateSkillForUser({
-    skillId,
-    userId: user.id,
-    name: input.name,
-    description: input.description,
-    instructions: input.instructions,
-  });
-
-  if (!skill) {
-    return c.json({ error: "无权编辑此 skill" }, 403);
-  }
-
-  return c.json({ skill });
-});
-
-app.delete("/api/skills/:skillId", async (c) => {
-  const user = await requireUser(c);
-  if (!user) {
-    return unauthorized(c);
-  }
-
-  const skillId = z.string().uuid().parse(c.req.param("skillId"));
-  const deleted = await softDeleteSkillForUser(skillId, user.id);
-  if (!deleted) {
-    return c.json({ error: "无权删除此 skill" }, 403);
-  }
-
-  return c.json({ ok: true });
+  const controller = activeAgentRuns.get(
+    getActiveAgentRunKey(user.id, projectId, runNodeId)
+  );
+  controller?.abort();
+  return c.json({ stopped: Boolean(controller) });
 });
 
 app.post("/api/agent-run", async (c) => {
@@ -422,10 +289,6 @@ app.post("/api/agent-run", async (c) => {
   const body = await c.req.json();
   const messages = (body.messages ?? []) as UIMessage[];
   const canvasContext = canvasContextSchema.parse(body.canvasContext ?? {});
-  const attachments = z.array(z.unknown()).default([]).parse(body.attachments);
-  const modelProvider = modelProviderSchema
-    .default(getDefaultModelProviderId())
-    .parse(body.modelProvider);
   const projectId = z.string().uuid().parse(body.projectId);
   const runNodeId = z.string().min(1).parse(body.runNodeId);
   const project = await getProjectForUser(projectId, user.id);
@@ -443,20 +306,31 @@ app.post("/api/agent-run", async (c) => {
     return notFound(c);
   }
 
+  const activeRunKey = getActiveAgentRunKey(user.id, projectId, runNodeId);
+  const controller = new AbortController();
+  activeAgentRuns.set(activeRunKey, controller);
+  const abortFromRequest = () => controller.abort(c.req.raw.signal.reason);
+  c.req.raw.signal.addEventListener("abort", abortFromRequest, { once: true });
+
   const stream = createUIMessageStream({
     originalMessages: messages,
     execute: async ({ writer }) => {
-      await executeAgentRun({
-        canvasContext,
-        attachments,
-        messages,
-        modelProvider,
-        projectId,
-        projectSnapshot: updatedProject,
-        runNodeId,
-        userId: user.id,
-        writer,
-      });
+      try {
+        await executeAgentRun({
+          canvasContext,
+          projectId,
+          projectSnapshot: updatedProject,
+          runNodeId,
+          signal: controller.signal,
+          userId: user.id,
+          writer,
+        });
+      } finally {
+        c.req.raw.signal.removeEventListener("abort", abortFromRequest);
+        if (activeAgentRuns.get(activeRunKey) === controller) {
+          activeAgentRuns.delete(activeRunKey);
+        }
+      }
     },
     onError: getErrorMessage,
   });
@@ -464,56 +338,13 @@ app.post("/api/agent-run", async (c) => {
   return createUIMessageStreamResponse({ stream });
 });
 
-app.post("/api/agent-run-v2", async (c) => {
-  const user = await requireUser(c);
-  if (!user) {
-    return unauthorized(c);
-  }
-
-  const body = await c.req.json();
-  const messages = (body.messages ?? []) as UIMessage[];
-  const canvasContext = canvasContextSchema.parse(body.canvasContext ?? {});
-  const attachments = z.array(z.unknown()).default([]).parse(body.attachments);
-  const modelProvider = modelProviderSchema
-    .default(getDefaultModelProviderId())
-    .parse(body.modelProvider);
-  const projectId = z.string().uuid().parse(body.projectId);
-  const runNodeId = z.string().min(1).parse(body.runNodeId);
-  const project = await getProjectForUser(projectId, user.id);
-
-  if (!project) {
-    return notFound(c);
-  }
-
-  const updatedProject = await updateProjectForUser({
-    projectId,
-    userId: user.id,
-    lastRunId: runNodeId,
-  });
-  if (!updatedProject) {
-    return notFound(c);
-  }
-
-  const stream = createUIMessageStream({
-    originalMessages: messages,
-    execute: async ({ writer }) => {
-      await executeOpenAIAgentsRunV2({
-        canvasContext,
-        attachments,
-        messages,
-        modelProvider,
-        projectId,
-        projectSnapshot: updatedProject,
-        runNodeId,
-        userId: user.id,
-        writer,
-      });
-    },
-    onError: getErrorMessage,
-  });
-
-  return createUIMessageStreamResponse({ stream });
-});
+function getActiveAgentRunKey(
+  userId: string,
+  projectId: string,
+  runNodeId: string
+) {
+  return `${userId}:${projectId}:${runNodeId}`;
+}
 
 const port = Number(process.env.API_PORT ?? 8787);
 
@@ -578,21 +409,6 @@ function loadServerEnv() {
   }
 }
 
-type UploadedFileLike = {
-  name: string;
-  arrayBuffer: () => Promise<ArrayBuffer>;
-};
-
-function isUploadedFile(value: unknown): value is UploadedFileLike {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      "arrayBuffer" in value &&
-      "name" in value &&
-      typeof value.name === "string"
-  );
-}
-
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -603,7 +419,7 @@ function getApiError(error: unknown) {
   const combined = `${message}\n${details}`;
 
   if (
-    combined.includes("agent_skills") &&
+    combined.includes("agent_run_events") &&
     (combined.includes("Could not find the table") ||
       combined.includes("schema cache") ||
       combined.includes("relation") ||
@@ -611,46 +427,7 @@ function getApiError(error: unknown) {
   ) {
     return {
       message:
-        "Skill 存储表未创建，请先应用 supabase/migrations/20260607002000_agent_skills.sql。",
-    };
-  }
-
-  if (
-    combined.includes("agent_run_step_events") &&
-    (combined.includes("Could not find the table") ||
-      combined.includes("schema cache") ||
-      combined.includes("relation") ||
-      combined.includes("does not exist"))
-  ) {
-    return {
-      message:
-        "Run step event 存储表未创建，请先应用 supabase/migrations/20260608003000_agent_run_step_events.sql。",
-    };
-  }
-
-  if (
-    (combined.includes("agent_runs") || combined.includes("agent_run_steps")) &&
-    (combined.includes("Could not find the table") ||
-      combined.includes("schema cache") ||
-      combined.includes("relation") ||
-      combined.includes("does not exist"))
-  ) {
-    return {
-      message:
-        "Agent Runtime 存储表未创建，请先应用 supabase/migrations/20260608005000_agent_runtime_core.sql。",
-    };
-  }
-
-  if (
-    combined.includes("agent_artifacts") &&
-    (combined.includes("Could not find the table") ||
-      combined.includes("schema cache") ||
-      combined.includes("relation") ||
-      combined.includes("does not exist"))
-  ) {
-    return {
-      message:
-        "Artifact 存储表未创建，请先应用 supabase/migrations/20260608004000_agent_artifacts.sql。",
+        "Agent event 存储表未创建，请应用最新 Supabase migrations。",
     };
   }
 
