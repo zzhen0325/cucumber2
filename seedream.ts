@@ -39,6 +39,9 @@ export type SeedreamConfig = {
   forceSingle: boolean;
   maxInputImages: number;
   maxOutputImages: number;
+  maxConcurrency: number;
+  staggerMs: number;
+  maxRetries: number;
   scale?: number;
 };
 
@@ -148,22 +151,7 @@ class SeedreamClient {
       })
     );
 
-    const submit = await this.signedPost("CVSync2AsyncSubmitTask", {
-      req_key: this.config.reqKey,
-      ...body,
-    });
-    console.log(
-      `${tag} submit_response`,
-      JSON.stringify({
-        reqKey: this.config.reqKey,
-        httpStatus: submit.status,
-        code: submit.body.code ?? null,
-        message:
-          typeof submit.body.message === "string" ? submit.body.message : null,
-        requestId: getRequestId(submit.body),
-      })
-    );
-    assertSeedreamOk("submit", submit);
+    const submit = await this.submitWithRetry(body, tag);
 
     const taskId = getNestedString(submit.body, ["data", "task_id"]);
     if (!taskId) {
@@ -209,6 +197,52 @@ class SeedreamClient {
 
     throw new Error(`Seedream task timed out: ${taskId}`);
   }
+
+  // Submit a task, retrying with exponential backoff when Seedream rejects the
+  // request because the account hit its API concurrency limit (code 50430 /
+  // HTTP 429). Other failures propagate immediately.
+  private async submitWithRetry(
+    body: Record<string, unknown>,
+    tag: string
+  ): Promise<SignedPostResult> {
+    for (let attempt = 0; ; attempt++) {
+      const submit = await this.signedPost("CVSync2AsyncSubmitTask", {
+        req_key: this.config.reqKey,
+        ...body,
+      });
+      console.log(
+        `${tag} submit_response`,
+        JSON.stringify({
+          reqKey: this.config.reqKey,
+          httpStatus: submit.status,
+          code: submit.body.code ?? null,
+          message:
+            typeof submit.body.message === "string"
+              ? submit.body.message
+              : null,
+          requestId: getRequestId(submit.body),
+          attempt,
+        })
+      );
+
+      if (
+        isSeedreamConcurrencyLimit(submit) &&
+        attempt < this.config.maxRetries
+      ) {
+        // Exponential backoff with jitter: 1s, 2s, 4s, 8s (+0-500ms).
+        const backoff = 1_000 * 2 ** attempt + Math.floor(Math.random() * 500);
+        console.log(
+          `${tag} submit_retry`,
+          JSON.stringify({ attempt, backoffMs: backoff })
+        );
+        await delay(backoff);
+        continue;
+      }
+
+      assertSeedreamOk("submit", submit);
+      return submit;
+    }
+  }
 }
 
 export async function generateSeedreamImage(
@@ -217,26 +251,38 @@ export async function generateSeedreamImage(
 ): Promise<{ images: SeedreamGeneratedImage[] }> {
   const requests = buildSeedreamRequestBodies(input, config);
   const client = new SeedreamClient(config);
-  const images: SeedreamGeneratedImage[] = [];
 
-  for (const request of requests) {
-    const result = await client.submitAndPoll(request.body);
-    const urls = getNestedArray(result, ["data", "image_urls"]).filter(
-      (item): item is string => typeof item === "string" && item.length > 0
-    );
-
-    if (!urls.length) {
-      throw new Error("Seedream returned no image URL.");
-    }
-    if (urls.length < request.resultCount) {
-      throw new Error(
-        `Seedream returned ${urls.length} image URL${
-          urls.length === 1 ? "" : "s"
-        }, but ${request.resultCount} were requested.`
+  // Fan out one task per request so every image is generated independently.
+  // Run them with a bounded concurrency and a stagger delay between submits to
+  // stay under the Seedream account's API concurrency limit (code 50430).
+  const imagesPerRequest = await mapWithConcurrency(
+    requests,
+    config.maxConcurrency,
+    config.staggerMs,
+    async (request) => {
+      const result = await client.submitAndPoll(request.body);
+      const urls = getNestedArray(result, ["data", "image_urls"]).filter(
+        (item): item is string => typeof item === "string" && item.length > 0
       );
-    }
 
-    for (const url of urls.slice(0, request.resultCount)) {
+      if (!urls.length) {
+        throw new Error("Seedream returned no image URL.");
+      }
+      if (urls.length < request.resultCount) {
+        throw new Error(
+          `Seedream returned ${urls.length} image URL${
+            urls.length === 1 ? "" : "s"
+          }, but ${request.resultCount} were requested.`
+        );
+      }
+
+      return { request, urls: urls.slice(0, request.resultCount) };
+    }
+  );
+
+  const images: SeedreamGeneratedImage[] = [];
+  for (const { request, urls } of imagesPerRequest) {
+    for (const url of urls) {
       const index = images.length + 1;
       const outputWidth = readPositiveNumber(request.body.width);
       const outputHeight = readPositiveNumber(request.body.height);
@@ -267,6 +313,44 @@ export async function generateSeedreamImage(
   return { images };
 }
 
+// Map over items with a bounded number of in-flight tasks. Submits are spaced
+// out by at least `staggerMs` via a shared gate so we never fire two requests
+// at the same instant. Results preserve input order.
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  staggerMs: number,
+  task: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  const limit = Math.max(1, Math.min(concurrency, items.length || 1));
+  let nextIndex = 0;
+  // Earliest timestamp (ms) at which the next task is allowed to start.
+  let nextAllowedStart = 0;
+
+  const worker = async () => {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= items.length) {
+        return;
+      }
+      if (staggerMs > 0) {
+        const now = Date.now();
+        const startAt = Math.max(now, nextAllowedStart);
+        nextAllowedStart = startAt + staggerMs;
+        const wait = startAt - now;
+        if (wait > 0) {
+          await delay(wait);
+        }
+      }
+      results[index] = await task(items[index]);
+    }
+  };
+
+  await Promise.all(Array.from({ length: limit }, () => worker()));
+  return results;
+}
+
 export function buildSeedreamRequestBodies(
   input: SeedreamGenerateInput,
   config: SeedreamConfig
@@ -279,10 +363,7 @@ export function buildSeedreamRequestBodies(
     (request) => {
       const geometry = resolveSeedreamGeometry(request.prompt, config);
       const body: Record<string, unknown> = {
-        prompt: withSeedreamResultCountInstruction(
-          request.prompt,
-          request.resultCount
-        ),
+        prompt: request.prompt,
         force_single:
           request.resultCount === 1 ? config.forceSingle : false,
         ...geometry,
@@ -324,17 +405,6 @@ export function inferSeedreamResultCountFromPrompts(
   return 1;
 }
 
-function withSeedreamResultCountInstruction(prompt: string, resultCount: number) {
-  if (resultCount === 1) {
-    return prompt;
-  }
-
-  return [
-    prompt,
-    `请基于以上同一个提示词生成 ${resultCount} 张独立图片结果。不要把多张结果合成在一张图里。`,
-  ].join("\n");
-}
-
 function resolveSeedreamPromptRequests(
   input: SeedreamGenerateInput,
   maxOutputImages: number
@@ -369,7 +439,14 @@ function resolveSeedreamPromptRequests(
     throw new Error("Seedream single prompt batch must include exactly one prompt.");
   }
 
-  return [{ prompt: prompts[0], promptIndex: 1, resultCount: input.resultCount }];
+  // Split the requested count into independent single-image requests so every
+  // image is generated by its own task. This keeps the results independent and
+  // lets the runtime fan them out in parallel.
+  return Array.from({ length: input.resultCount }, (_, index) => ({
+    prompt: prompts[0],
+    promptIndex: index + 1,
+    resultCount: 1,
+  }));
 }
 
 function resolveSeedreamGeometry(prompt: string, config: SeedreamConfig) {
@@ -569,6 +646,9 @@ function readSeedreamConfigFromEnv(): SeedreamConfig {
     forceSingle: process.env.SEEDREAM_FORCE_SINGLE !== "false",
     maxInputImages: readNumberEnv("SEEDREAM_MAX_INPUT_IMAGES", 14),
     maxOutputImages: readSeedreamMaxOutputImagesFromEnv(),
+    maxConcurrency: Math.max(1, readNumberEnv("SEEDREAM_MAX_CONCURRENCY", 2)),
+    staggerMs: Math.max(0, readNumberEnv("SEEDREAM_STAGGER_MS", 800)),
+    maxRetries: Math.max(0, readNumberEnv("SEEDREAM_MAX_RETRIES", 4)),
     scale: readOptionalNumberEnv("SEEDREAM_SCALE"),
   };
 }
@@ -754,6 +834,15 @@ function assertSeedreamOk(step: string, result: SignedPostResult) {
       }): ${message}`
     );
   }
+}
+
+function isSeedreamConcurrencyLimit(result: SignedPostResult): boolean {
+  if (result.status === 429 || result.body.code === 50430) {
+    return true;
+  }
+  const message =
+    typeof result.body.message === "string" ? result.body.message : "";
+  return /concurrent limit/i.test(message);
 }
 
 function getRequestId(source: Record<string, unknown>): string | undefined {

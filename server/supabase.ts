@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
+import { createInMemorySupabaseClient, isInMemoryDbEnabled } from "./dev/in-memory-supabase.ts";
 import { canEditSkill } from "./skill-access.ts";
 import { canAccessProject } from "./project-access.ts";
 import { getProjectSummaryStats } from "../src/lib/project-summary.ts";
@@ -224,7 +225,7 @@ type RunStepEventRow = {
 let cachedClient: SupabaseClient | null = null;
 
 export function isSupabaseConfigured() {
-  return Boolean(getSupabaseUrl() && getSupabaseSecretKey());
+  return isInMemoryDbEnabled() || Boolean(getSupabaseUrl() && getSupabaseSecretKey());
 }
 
 export async function getUserCount() {
@@ -441,7 +442,11 @@ export async function updateProjectForUser(input: UpdateProjectInput) {
     // With optimistic locking, a null row means the version no longer matches.
     // Surface the current server state so the caller can reconcile.
     if (input.expectedVersion !== undefined && existing) {
-      throw new ProjectVersionConflictError(mapProjectRow(existing));
+      const current = await getProjectRow(input.projectId);
+      if (!canAccessProject(input.userId, mapProjectAccess(current))) {
+        return null;
+      }
+      throw new ProjectVersionConflictError(mapProjectRow(current));
     }
     return null;
   }
@@ -797,6 +802,11 @@ async function getSkillRow(skillId: string) {
 
 function getSupabaseClient() {
   if (cachedClient) {
+    return cachedClient;
+  }
+
+  if (isInMemoryDbEnabled()) {
+    cachedClient = createInMemorySupabaseClient() as unknown as SupabaseClient;
     return cachedClient;
   }
 

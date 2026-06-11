@@ -198,6 +198,17 @@ type CanvasWorkspaceProps = {
   projectId: string;
   onBack: () => void;
 };
+
+function getAgentRunEndpoint() {
+  if (import.meta.env.VITE_AGENT_V2 === "1") {
+    return "/api/agent-run-v2";
+  }
+  if (typeof window !== "undefined" && window.localStorage.getItem("cucumber:agent-v2") === "1") {
+    return "/api/agent-run-v2";
+  }
+  return "/api/agent-run";
+}
+
 type ManualCanvasTool = "stickyNote" | ShapeVariant;
 type CanvasTool = "select" | "hand" | ManualCanvasTool;
 type ManualNodeTemplate =
@@ -484,7 +495,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     stop,
   } = useChat({
     transport: new DefaultChatTransport({
-      api: "/api/agent-run",
+      api: getAgentRunEndpoint(),
       credentials: "same-origin",
     }),
     onData: (dataPart) => {

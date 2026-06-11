@@ -36,6 +36,8 @@ const validNodeTypeByKind: Record<AgentCanvasNodeData["kind"], string> = {
   memory: "memoryNode",
   prompt: "promptNode",
   run: "runNode",
+  shape: "shapeNode",
+  stickyNote: "stickyNoteNode",
   toolResult: "toolResultNode",
   webpage: "webpageNode",
 };

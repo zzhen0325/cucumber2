@@ -20,6 +20,9 @@ const testSeedreamConfig: SeedreamConfig = {
   forceSingle: true,
   maxInputImages: 14,
   maxOutputImages: 4,
+  maxConcurrency: 2,
+  staggerMs: 0,
+  maxRetries: 4,
 };
 
 describe("seedream result count", () => {
@@ -52,7 +55,7 @@ describe("seedream result count", () => {
     );
   });
 
-  it("carries multi-image counts into the submitted Seedream prompt", () => {
+  it("splits multi-image single-prompt requests into independent tasks", () => {
     const requests = buildSeedreamRequestBodies(
       {
         prompts: ["A glossy cucumber campaign poster"],
@@ -61,17 +64,18 @@ describe("seedream result count", () => {
       },
       testSeedreamConfig
     );
-    const request = requests[0];
 
-    expect(requests).toHaveLength(1);
-    expect(request.resultCount).toBe(4);
-    expect(request.body).toMatchObject({
-      width: 1024,
-      height: 1024,
-      force_single: false,
-    });
-    expect(request.body.prompt).toContain("A glossy cucumber campaign poster");
-    expect(request.body.prompt).toContain("同一个提示词生成 4 张");
+    expect(requests).toHaveLength(4);
+    expect(requests.map((request) => request.resultCount)).toEqual([1, 1, 1, 1]);
+    expect(requests.map((request) => request.promptIndex)).toEqual([1, 2, 3, 4]);
+    for (const request of requests) {
+      expect(request.body).toMatchObject({
+        width: 1024,
+        height: 1024,
+        force_single: testSeedreamConfig.forceSingle,
+      });
+      expect(request.body.prompt).toBe("A glossy cucumber campaign poster");
+    }
   });
 
   it("splits distinct prompt batches into one Seedream request per prompt", () => {
@@ -135,7 +139,7 @@ describe("seedream result count", () => {
       "https://cdn.example/ref-1.png",
       "https://cdn.example/ref-2.png",
     ]);
-    expect(request.body.force_single).toBe(false);
+    expect(request.body.force_single).toBe(testSeedreamConfig.forceSingle);
     expect(request.body.scale).toBe(60);
     expect(request.body.width).not.toBe(testSeedreamConfig.width);
     expect(request.body.height).not.toBe(testSeedreamConfig.height);
