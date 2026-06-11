@@ -1,0 +1,36 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "43c592caeb4f670e478184b8661cd0ffb2341e3a",
+  "prompts": {},
+  "humans": {
+    "h_49a1fcd5ff42d1": {
+      "author": "zzhen0325 <26629213+zzhen0325@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {
+    "s_1f58fae620984f": {
+      "tool": "trae",
+      "conversation_id": "6a2a6e097aad7de389dd3c23",
+      "session_id": "6a2a6e097aad7de389dd3c23",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_1f58fae620984f::t_8ddabf316f90f3": {
+      "tool": "trae",
+      "conversation_id": "6a2a6e097aad7de389dd3c23",
+      "session_id": "6a2a6e097aad7de389dd3c23",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_1f58fae620984f::t_a595d421f9f460": {
+      "tool": "trae",
+      "conversation_id": "6a2a6e097aad7de389dd3c23",
+      "session_id": "6a2a6e097aad7de389dd3c23",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    }
+  }
+}
