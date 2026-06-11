@@ -33,9 +33,20 @@ export type AgentProject = {
   edges: AgentCanvasEdge[];
   selectedNodeId: string | null;
   lastRunId: string | null;
+  version: number;
   createdAt: string;
   updatedAt: string;
 };
+
+export class ProjectVersionConflictError extends Error {
+  readonly project: AgentProject;
+
+  constructor(project: AgentProject) {
+    super("Project version conflict.");
+    this.name = "ProjectVersionConflictError";
+    this.project = project;
+  }
+}
 
 export type AgentRunStepEvent = {
   id: string;
@@ -82,6 +93,7 @@ type UpdateProjectInput = {
   edges?: AgentCanvasEdge[];
   selectedNodeId?: string | null;
   lastRunId?: string | null;
+  expectedVersion?: number;
 };
 
 type RunEventInput = {
@@ -163,6 +175,7 @@ type ProjectRow = {
   edges: unknown[];
   selected_node_id: string | null;
   last_run_id: string | null;
+  version: number | null;
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
@@ -402,22 +415,38 @@ export async function updateProjectForUser(input: UpdateProjectInput) {
   if (input.lastRunId !== undefined) {
     payload.last_run_id = input.lastRunId;
   }
+  if (input.expectedVersion !== undefined) {
+    payload.version = input.expectedVersion + 1;
+  }
 
   const client = getSupabaseClient();
-  const { data, error } = await client
+  let query = client
     .from("agent_projects")
     .update(payload)
     .eq("id", input.projectId)
     .eq("user_id", input.userId)
-    .is("deleted_at", null)
-    .select()
-    .maybeSingle<ProjectRow>();
+    .is("deleted_at", null);
+
+  if (input.expectedVersion !== undefined) {
+    query = query.eq("version", input.expectedVersion);
+  }
+
+  const { data, error } = await query.select().maybeSingle<ProjectRow>();
 
   if (error) {
     throw error;
   }
 
-  return data ? mapProjectRow(data) : null;
+  if (!data) {
+    // With optimistic locking, a null row means the version no longer matches.
+    // Surface the current server state so the caller can reconcile.
+    if (input.expectedVersion !== undefined && existing) {
+      throw new ProjectVersionConflictError(mapProjectRow(existing));
+    }
+    return null;
+  }
+
+  return mapProjectRow(data);
 }
 
 export async function softDeleteProject(projectId: string, userId: string) {
@@ -874,6 +903,7 @@ function mapProjectRow(row: ProjectRow | null): AgentProject {
     edges: normalizeEdges(row.edges),
     selectedNodeId: row.selected_node_id,
     lastRunId: row.last_run_id,
+    version: row.version ?? 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

@@ -99,8 +99,13 @@ import {
   loadProject,
   loadRunTrace,
   updateProject,
+  ProjectVersionConflictError,
   type PersistedProject,
 } from "@/lib/project-storage";
+import {
+  hasNodeContentChanged,
+  toPersistableNodes,
+} from "@/lib/canvas-persistence";
 import {
   buildRunRevisionPrompt,
   collectUpstreamContext,
@@ -288,6 +293,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const persistedSelectedNodeIdRef = useRef<string | null>(null);
   const isReplayModeRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const projectVersionRef = useRef(0);
+  const isSavingRef = useRef(false);
+  const pendingSaveRef = useRef(false);
+  const prevSaveClassifyNodesRef = useRef<AgentCanvasNode[]>([]);
+  const prevSaveClassifyTitleRef = useRef(projectTitle);
   const autoLayoutFrame = useRef<number | null>(null);
   const autoLayoutSignatureRef = useRef<string | null>(null);
   const flowInstance = useRef<ReactFlowInstance<
@@ -685,16 +695,21 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     activeRunMessageStartIndex.current = 0;
     streamedRuntimeEvents.current = [];
 
+    const loadStartedAt = performance.now();
+
     loadProject(projectId)
       .then(async ({ project }) => {
         if (ignore) {
           return;
         }
 
+        const projectLoadedAt = performance.now();
         const hydratedSnapshot = await hydrateProjectSnapshotFromLastRun(project);
         if (ignore) {
           return;
         }
+
+        const hydratedAt = performance.now();
 
         setLoadedProjectId(project.id);
         setProjectTitle(project.title);
@@ -714,9 +729,23 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         setNodes(applySelectedNodeIds(hydratedSnapshot.nodes, nextSelectedNodeIds));
         setEdges(hydratedSnapshot.edges);
         activeRunId.current = project.lastRunId;
+        projectVersionRef.current = project.version;
         hasLoadedProject.current = true;
         setStorageStatus("saved");
         setStorageError(null);
+
+        if (import.meta.env.DEV) {
+          // Diagnostics for the slow-load investigation (DEV only, never ships).
+          console.info("[canvas-load]", {
+            projectId: project.id,
+            nodeCount: hydratedSnapshot.nodes.length,
+            edgeCount: hydratedSnapshot.edges.length,
+            payloadBytes: JSON.stringify(project).length,
+            fetchMs: Math.round(projectLoadedAt - loadStartedAt),
+            hydrateMs: Math.round(hydratedAt - projectLoadedAt),
+            totalMs: Math.round(performance.now() - loadStartedAt),
+          });
+        }
       })
       .catch((nextError: unknown) => {
         if (ignore) {
@@ -781,33 +810,68 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         return;
       }
 
+      // Single-flight: never run two saves concurrently. A change arriving while a
+      // save is in flight is coalesced into one trailing re-run so writes stay
+      // strictly ordered and the latest snapshot always wins.
+      if (isSavingRef.current) {
+        pendingSaveRef.current = true;
+        return;
+      }
+
+      isSavingRef.current = true;
       if (shouldReportStatus) {
         setStorageStatus("saving");
       }
 
-      try {
-        const { project } = await updateProject(
-          {
-            projectId: currentProjectId,
-            title: projectTitleRef.current,
-            nodes: nodesRef.current,
-            edges: edgesRef.current,
-            selectedNodeId: persistedSelectedNodeIdRef.current,
-            lastRunId: activeRunId.current,
-          },
-          options.keepalive ? { keepalive: true } : undefined
-        );
+      const maxConflictRetries = 3;
 
-        if (shouldReportStatus) {
-          setLoadedProjectId(project.id);
-          setStorageStatus("saved");
-          setStorageError(null);
-        }
+      try {
+        do {
+          pendingSaveRef.current = false;
+
+          for (let attempt = 0; ; attempt += 1) {
+            try {
+              const { project } = await updateProject(
+                {
+                  projectId: currentProjectId,
+                  title: projectTitleRef.current,
+                  nodes: toPersistableNodes(nodesRef.current),
+                  edges: edgesRef.current,
+                  selectedNodeId: persistedSelectedNodeIdRef.current,
+                  lastRunId: activeRunId.current,
+                  expectedVersion: projectVersionRef.current,
+                },
+                options.keepalive ? { keepalive: true } : undefined
+              );
+
+              projectVersionRef.current = project.version;
+              if (shouldReportStatus) {
+                setLoadedProjectId(project.id);
+                setStorageStatus("saved");
+                setStorageError(null);
+              }
+              break;
+            } catch (nextError: unknown) {
+              if (
+                nextError instanceof ProjectVersionConflictError &&
+                attempt < maxConflictRetries
+              ) {
+                // Re-align to the server version and retry with our latest local
+                // state (last-write-wins, but with an ordered version handshake).
+                projectVersionRef.current = nextError.project.version;
+                continue;
+              }
+              throw nextError;
+            }
+          }
+        } while (pendingSaveRef.current);
       } catch (nextError: unknown) {
         if (shouldReportStatus) {
           setStorageStatus("error");
           setStorageError(getClientError(nextError));
         }
+      } finally {
+        isSavingRef.current = false;
       }
     },
     []
@@ -843,6 +907,21 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       return;
     }
 
+    // Classify the change to pick a debounce window. Rapid content edits (typing
+    // in a markdown node, renaming the project) create fresh `data` objects, so we
+    // wait longer to avoid saving mid-keystroke. Position/selection changes only
+    // mutate structural fields (React Flow keeps the `data` reference), so a short
+    // window keeps drags responsive. Both still funnel through the single-flight
+    // save channel, so concurrency stays safe regardless of timing.
+    const prevNodes = prevSaveClassifyNodesRef.current;
+    const prevTitle = prevSaveClassifyTitleRef.current;
+    prevSaveClassifyNodesRef.current = nodes;
+    prevSaveClassifyTitleRef.current = projectTitle;
+
+    const isContentChange =
+      prevTitle !== projectTitle || hasNodeContentChanged(prevNodes, nodes);
+    const delay = isContentChange ? 800 : 250;
+
     if (saveTimer.current) {
       window.clearTimeout(saveTimer.current);
     }
@@ -851,7 +930,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     saveTimer.current = window.setTimeout(() => {
       saveTimer.current = null;
       void saveProjectSnapshot();
-    }, 420);
+    }, delay);
 
     return () => {
       if (saveTimer.current) {

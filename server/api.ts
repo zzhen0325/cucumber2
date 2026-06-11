@@ -44,6 +44,7 @@ import {
   updateSkillForUser,
   softDeleteProject,
   updateProjectForUser,
+  ProjectVersionConflictError,
   type AppUser,
 } from "./supabase.ts";
 import { parseSkillZip } from "./skill-parser.ts";
@@ -118,6 +119,7 @@ const projectPatchSchema = z
     edges: z.array(z.unknown()).optional(),
     selectedNodeId: z.string().nullable().optional(),
     lastRunId: z.string().nullable().optional(),
+    expectedVersion: z.number().int().nonnegative().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "No project updates provided.",
@@ -262,21 +264,33 @@ app.patch("/api/projects/:projectId", async (c) => {
 
   const projectId = z.string().uuid().parse(c.req.param("projectId"));
   const input = projectPatchSchema.parse(await c.req.json());
-  const project = await updateProjectForUser({
-    projectId,
-    userId: user.id,
-    title: input.title,
-    nodes: input.nodes as Parameters<typeof updateProjectForUser>[0]["nodes"],
-    edges: input.edges as Parameters<typeof updateProjectForUser>[0]["edges"],
-    selectedNodeId: input.selectedNodeId,
-    lastRunId: input.lastRunId,
-  });
 
-  if (!project) {
-    return notFound(c);
+  try {
+    const project = await updateProjectForUser({
+      projectId,
+      userId: user.id,
+      title: input.title,
+      nodes: input.nodes as Parameters<typeof updateProjectForUser>[0]["nodes"],
+      edges: input.edges as Parameters<typeof updateProjectForUser>[0]["edges"],
+      selectedNodeId: input.selectedNodeId,
+      lastRunId: input.lastRunId,
+      expectedVersion: input.expectedVersion,
+    });
+
+    if (!project) {
+      return notFound(c);
+    }
+
+    return c.json({ project });
+  } catch (error) {
+    if (error instanceof ProjectVersionConflictError) {
+      return c.json(
+        { error: error.message, code: "version_conflict", project: error.project },
+        409
+      );
+    }
+    throw error;
   }
-
-  return c.json({ project });
 });
 
 app.delete("/api/projects/:projectId", async (c) => {

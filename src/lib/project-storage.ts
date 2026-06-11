@@ -18,6 +18,7 @@ export type PersistedProject = {
   edges: AgentCanvasEdge[];
   selectedNodeId: string | null;
   lastRunId: string | null;
+  version: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -29,7 +30,18 @@ export type UpdateProjectInput = {
   edges?: AgentCanvasEdge[];
   selectedNodeId?: string | null;
   lastRunId?: string | null;
+  expectedVersion?: number;
 };
+
+export class ProjectVersionConflictError extends Error {
+  readonly project: PersistedProject;
+
+  constructor(project: PersistedProject) {
+    super("Project version conflict.");
+    this.name = "ProjectVersionConflictError";
+    this.project = project;
+  }
+}
 
 export async function loadProjects() {
   const response = await fetch("/api/projects", {
@@ -86,6 +98,15 @@ export async function updateProject(
     ...init,
     method: "PATCH",
   });
+
+  if (response.status === 409) {
+    const payload = (await response.json()) as {
+      error: string;
+      code?: string;
+      project: PersistedProject;
+    };
+    throw new ProjectVersionConflictError(payload.project);
+  }
 
   if (!response.ok) {
     throw new Error(await getResponseError(response));

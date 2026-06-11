@@ -17,6 +17,16 @@
 
 ## 2026-06-10
 
+### 画布持久化并发保护与写入/加载优化
+
+- 变更（丢节点修复）：`agent_projects` 新增 `version` 乐观锁列；`updateProjectForUser` 在传入 `expectedVersion` 时做 CAS（`.eq("version", expectedVersion)` + 自增），命中 0 行抛 `ProjectVersionConflictError` 并回带服务端最新快照；PATCH 路由把版本冲突映射为 409（`code: "version_conflict"` + project）。
+- 变更（前端串行化）：`saveProjectSnapshot` 改为单飞模型（`isSavingRef`/`pendingSaveRef`），保存期间的新改动合并为一次尾随重跑，杜绝并发与乱序覆盖；捕获 409 后对齐服务端 version 并最多重试 3 次（last-write-wins + 有序版本握手）。
+- 变更（保存提速）：新增 `src/lib/canvas-persistence.ts`，保存前用 `toPersistableNodes` 去掉 markdown 节点 `artifact.metadata.blockNoteBlocks` 的冗余拷贝（读取端始终优先 `data.blockNoteBlocks`，无损）；用 `hasNodeContentChanged`（基于 `data` 引用比较，零序列化）区分内容编辑（800ms 防抖）与位置/选中等结构变更（250ms 防抖）。
+- 变更（加载诊断）：加载流程新增 DEV-only 结构化计时日志（`[canvas-load]`：节点/边数、payload 字节、fetch/hydrate/total 毫秒），用于定位加载瓶颈，不污染生产 UI。
+- 文件：`supabase/migrations/20260610000000_agent_projects_version.sql`、`server/supabase.ts`、`server/api.ts`、`src/lib/project-storage.ts`、`src/lib/canvas-persistence.ts`、`src/components/CanvasWorkspace.tsx`、`persistence-refactor-plan.md`、`process.md`。
+- 验证：`pnpm test` 全绿（28 文件 188 测试）；`pnpm exec eslint` 对改动文件无报错；`pnpm exec tsc --noEmit -p tsconfig.app.json` 对改动文件无类型错误。
+- 备注：`pnpm lint` / `pnpm build` 仍被既有的 `src/components/BlockNoteMarkdownEditor.tsx`（`react-hooks/refs`）和 `server/runtime/canvas-operation-policy.ts`（缺 `stickyNote`/`shape` 映射）阻断，二者均与本次改动无关（已 `git stash` 复现确认）。阶段三 3.2 首屏懒加载待实测诊断数据后再按瓶颈实施。
+
 ### 参考图绕过语言模型并直传 Seedream
 
 - 变更：意图路由、上下文构建、结构化规划、prompt 扩写和主 Agent prompt 统一使用模型安全的画布上下文；图片节点只暴露 `referenceImageAvailable: true` 和文本元数据，不再序列化 `imageUrl`、data URL、artifact URI 或图片内容。
