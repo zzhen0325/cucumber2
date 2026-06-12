@@ -3,14 +3,12 @@ import { z } from "zod";
 
 import {
   generateSeedreamImage,
-  inferSeedreamResultCountFromPrompts,
   isSeedreamConfigured,
-  readSeedreamMaxOutputImagesFromEnv,
-  type SeedreamUpstreamContext,
+  readSeedreamConfigFromEnv,
 } from "../../../../seedream.ts";
 import type { ArtifactRef } from "../../../../src/types/canvas.ts";
-import type { UpstreamContextItem } from "../../../../src/types/canvas.ts";
 import type { CucumberAgentContext } from "../../context.ts";
+import { buildGenerateImageSeedreamInput } from "./generate-image.request.ts";
 
 const generateImageInputSchema = z.object({
   prompt: z.string().min(1).optional(),
@@ -69,15 +67,6 @@ export const generateImageTool = tool({
       return { error: "empty_prompt: no image prompt was provided." };
     }
 
-    const maxOutputImages = readSeedreamMaxOutputImagesFromEnv();
-    const resultCount = resolveResultCount(
-      parsed.data.resultCount,
-      prompt,
-      maxOutputImages
-    );
-
-    const upstreamContext = toSeedreamUpstreamContext(context.upstreamContext);
-
     const artifacts: ArtifactRef[] = [];
     const emitArtifact = (image: {
       id: string;
@@ -105,15 +94,20 @@ export const generateImageTool = tool({
       }
     };
 
-    await generateSeedreamImage({
-      prompts: [prompt],
-      selectedNodeId: context.selectedNodeId,
-      upstreamContext,
-      resultCount,
-      promptBatchMode: "single_prompt",
-      onImage: emitArtifact,
-      signal: details?.signal,
-    });
+    const config = readSeedreamConfigFromEnv();
+    await generateSeedreamImage(
+      buildGenerateImageSeedreamInput(
+        {
+          prompt,
+          requestedResultCount: parsed.data.resultCount,
+          upstreamContext: context.upstreamContext,
+          onImage: emitArtifact,
+          signal: details?.signal,
+        },
+        config
+      ),
+      config
+    );
 
     return {
       generated: artifacts.length,
@@ -122,54 +116,6 @@ export const generateImageTool = tool({
     };
   },
 });
-
-function resolveResultCount(
-  requested: number | undefined,
-  prompt: string,
-  maxOutputImages: number
-): number {
-  if (requested !== undefined) {
-    if (requested > maxOutputImages) {
-      throw new Error(`一次最多生成 ${maxOutputImages} 张图片。`);
-    }
-    return Math.max(1, Math.floor(requested));
-  }
-  return inferSeedreamResultCountFromPrompts([prompt], maxOutputImages);
-}
-
-export function toSeedreamUpstreamContext(
-  items: UpstreamContextItem[]
-): SeedreamUpstreamContext[] {
-  return items.flatMap((item): SeedreamUpstreamContext[] => {
-    if (item.type === "prompt") {
-      return [
-        {
-          nodeId: item.nodeId,
-          type: "prompt" as const,
-          prompt: item.prompt,
-          summary: item.summary,
-        },
-      ];
-    }
-
-    const imageUrl =
-      item.imageUrl ??
-      (item.artifact?.type === "image" ? item.artifact.uri : undefined);
-    if (!imageUrl) {
-      return [];
-    }
-
-    return [
-      {
-        nodeId: item.nodeId,
-        type: "image" as const,
-        prompt: item.prompt,
-        imageUrl,
-        summary: item.summary,
-      },
-    ];
-  });
-}
 
 function requireCucumberContext(context: unknown): CucumberAgentContext {
   if (!context || typeof context !== "object") {

@@ -26,10 +26,16 @@
 - Run 节点默认收起，仅展示 Agent 流式文字和工具调用摘要；详细 Agent/handoff/timeline 诊断继续通过 Trace 面板查看。
 - Run 节点内部滚动区使用 React Flow `nodrag`、`nopan`、`nowheel`，避免滚动文字或工具详情时拖动、平移画布。
 
+## 2026-06-12 Image Request Boundary
+
+- 新增 `server/agent/tools/image/generate-image.request.ts`，集中负责图片数量、尺寸/比例和 upstream 引用图归一化。
+- `generate_image` 工具只做 Agent tool 边界、artifact 事件和 Seedream provider 调用编排。
+- `seedream.ts` 收敛为 Seedream provider 执行层，保留配置读取、签名、提交/轮询、并发/重试、取消和 provider metadata。
+
 ## Verification
 
 - Context 越权和服务端重建：`server/agent/context.test.ts`
 - Agents SDK stream/handoff/tool failure：`server/agent/events/openai-stream-to-cucumber-events.test.ts`
-- Canvas policy 和图片工具：`server/agent/policy/*.test.ts`、`server/agent/tools/image/*.test.ts`
+- Canvas policy 和图片工具/请求归一化：`server/agent/policy/*.test.ts`、`server/agent/tools/image/*.test.ts`
 - Event projection：`src/lib/graph-projection.test.ts`、`src/lib/runtime-event-renderer.test.ts`
 - 基础检查：`pnpm exec tsc -b --pretty false`、`pnpm build`、相关 ESLint、浏览器验收

@@ -6,6 +6,23 @@ import type { UpstreamContextItem } from "../../../../src/types/canvas.ts";
 
 const generateSeedreamImage = vi.fn();
 const isSeedreamConfigured = vi.fn();
+const testSeedreamConfig = {
+  accessKeyId: "test-ak",
+  secretAccessKey: "test-sk",
+  reqKey: "jimeng_seedream46_cvtob",
+  host: "visual.volcengineapi.com",
+  region: "cn-north-1",
+  service: "cv",
+  version: "2022-08-31",
+  width: 1024,
+  height: 1024,
+  forceSingle: true,
+  maxInputImages: 14,
+  maxOutputImages: 4,
+  maxConcurrency: 2,
+  staggerMs: 0,
+  maxRetries: 4,
+};
 
 vi.mock("../../../../seedream.ts", async () => {
   const actual = await vi.importActual<typeof import("../../../../seedream.ts")>(
@@ -15,13 +32,13 @@ vi.mock("../../../../seedream.ts", async () => {
     ...actual,
     generateSeedreamImage: (...args: unknown[]) => generateSeedreamImage(...args),
     isSeedreamConfigured: () => isSeedreamConfigured(),
+    readSeedreamConfigFromEnv: () => testSeedreamConfig,
   };
 });
 
 // Imported after the mock is registered.
-const { generateImageTool, toSeedreamUpstreamContext } = await import(
-  "./generate-image.tool.ts"
-);
+const { generateImageTool } = await import("./generate-image.tool.ts");
+const { toSeedreamUpstreamContext } = await import("./generate-image.request.ts");
 
 function buildContext(
   overrides: Partial<CucumberAgentContext> = {}
@@ -91,9 +108,15 @@ describe("generate_image tool", () => {
 
     const callArg = generateSeedreamImage.mock.calls[0][0];
     expect(callArg).toMatchObject({
-      prompts: ["黄瓜海报"],
-      resultCount: 1,
+      totalRequestedImageCount: 1,
       promptBatchMode: "single_prompt",
+      requests: [
+        {
+          body: expect.objectContaining({ prompt: "黄瓜海报" }),
+          resultCount: 1,
+          promptIndex: 1,
+        },
+      ],
     });
   });
 
@@ -106,7 +129,9 @@ describe("generate_image tool", () => {
     const context = buildContext({ prompt: "默认提示词" });
     await invokeTool(context, {});
 
-    expect(generateSeedreamImage.mock.calls[0][0].prompts).toEqual(["默认提示词"]);
+    expect(generateSeedreamImage.mock.calls[0][0].requests[0].body.prompt).toBe(
+      "默认提示词"
+    );
   });
 
   it("throws when seedream is not configured (no silent fallback)", async () => {
