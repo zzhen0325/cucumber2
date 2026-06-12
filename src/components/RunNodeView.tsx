@@ -16,10 +16,12 @@ import { Node, NodeContent } from "@/components/ai-elements/node";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+  Tool,
+  ToolContent,
+  ToolHeader,
+  ToolInput,
+  ToolOutput,
+} from "@/components/ai-elements/tool";
 import type {
   CanvasToolPart,
   RunNodeData,
@@ -252,74 +254,19 @@ export function ToolPartView({
     toolPart.state !== "output-available" || toolPart.type === "tool-generate_image"
   );
   const toolName = getToolName(toolPart);
-  const stateLabel = getToolStateLabel(toolPart.state);
-  const detailLines = getToolDetailLines(toolPart, error);
-  const isError = toolPart.state === "output-error";
-  const hasStructuredDetail =
-    Boolean(toolPart.input) || Boolean(toolPart.output) || Boolean(toolPart.errorText);
+  const errorText =
+    toolPart.state === "output-error"
+      ? toolPart.errorText ?? error
+      : toolPart.errorText;
 
   return (
-    <Collapsible
-      className={isError ? "tool-call-row error" : "tool-call-row"}
-      open={open}
-      onOpenChange={setOpen}
-    >
-      <CollapsibleTrigger asChild>
-        <button className="tool-call-main nodrag nopan" type="button">
-          <span className="tool-call-action">
-            {toolPart.state === "output-available"
-              ? "完成"
-              : "调用"}
-          </span>
-          <strong title={toolName}>{toolName}</strong>
-          <span className={`tool-state ${toolPart.state}`}>
-            {getToolStateIcon(toolPart.state)}
-            {stateLabel}
-          </span>
-          <ChevronDown className="tool-call-chevron" size={12} />
-        </button>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="tool-call-content">
-        <div className="tool-call-detail">
-          {detailLines.map((line) => (
-            <small className="tool-detail-line" key={line} title={line}>
-              {line}
-            </small>
-          ))}
-        </div>
-        {hasStructuredDetail && (
-          <div className="tool-io-grid">
-            {toolPart.input !== undefined && (
-              <ToolJsonBlock label="参数" value={toolPart.input} />
-            )}
-            {(toolPart.output !== undefined || toolPart.errorText) && (
-              <ToolJsonBlock
-                error={isError}
-                label={isError ? "错误" : "结果"}
-                value={toolPart.errorText ?? toolPart.output}
-              />
-            )}
-          </div>
-        )}
-      </CollapsibleContent>
-    </Collapsible>
-  );
-}
-
-function ToolJsonBlock({
-  error,
-  label,
-  value,
-}: {
-  error?: boolean;
-  label: string;
-  value: unknown;
-}) {
-  return (
-    <div className={error ? "tool-json-block error" : "tool-json-block"}>
-      <span>{label}</span>
-      <pre>{formatToolValue(value)}</pre>
-    </div>
+    <Tool className="nodrag nopan" open={open} onOpenChange={setOpen}>
+      <ToolHeader state={toolPart.state} title={toolName} type={toolPart.type} />
+      <ToolContent>
+        {toolPart.input !== undefined && <ToolInput input={toolPart.input} />}
+        <ToolOutput errorText={errorText} output={toolPart.output} />
+      </ToolContent>
+    </Tool>
   );
 }
 
@@ -387,96 +334,4 @@ function getToolName(toolPart: CanvasToolPart) {
   };
 
   return names[toolPart.type] ?? toolPart.type.replace(/^tool-/, "");
-}
-
-function getToolStateIcon(state: CanvasToolPart["state"]) {
-  if (state === "output-available") {
-    return <Check size={11} />;
-  }
-  if (state === "output-error") {
-    return <CircleAlert size={11} />;
-  }
-  return <Sparkles size={11} />;
-}
-
-function getToolStateLabel(state: CanvasToolPart["state"]) {
-  const labels: Record<CanvasToolPart["state"], string> = {
-    "input-available": "运行中",
-    "input-streaming": "准备参数",
-    "output-available": "输出完成",
-    "output-error": "失败",
-  };
-
-  return labels[state];
-}
-
-function getToolDetailLines(toolPart: CanvasToolPart, error?: string) {
-  if (toolPart.state === "output-error") {
-    return [toolPart.errorText ?? error ?? "工具调用失败"];
-  }
-  if (toolPart.state === "output-available") {
-    return [...getToolOutputLines(toolPart), ...getToolInputLines(toolPart.input)];
-  }
-  return getToolInputLines(toolPart.input);
-}
-
-function getToolOutputLines(toolPart: CanvasToolPart) {
-  if (toolPart.type === "tool-generate_image") {
-    const output = toolPart.output as { generated?: unknown; artifactIds?: unknown };
-    if (typeof output?.generated === "number") {
-      return [`生成 ${output.generated} 张图片`];
-    }
-    if (Array.isArray(output?.artifactIds)) {
-      return [`生成 ${output.artifactIds.length} 张图片`];
-    }
-  }
-
-  if (toolPart.type === "tool-propose_canvas_operations") {
-    const output = toolPart.output as { accepted?: unknown; rejected?: unknown };
-    const accepted = Array.isArray(output?.accepted) ? output.accepted.length : 0;
-    const rejected = Array.isArray(output?.rejected) ? output.rejected.length : 0;
-    return [`画布操作: ${accepted} 已应用${rejected ? `, ${rejected} 已拒绝` : ""}`];
-  }
-
-  return ["输出已返回"];
-}
-
-function getToolInputLines(input: unknown) {
-  if (!input || typeof input !== "object") {
-    return ["等待工具参数"];
-  }
-
-  const candidate = input as {
-    prompt?: unknown;
-    resultCount?: unknown;
-    operations?: unknown;
-  };
-  const lines: string[] = [];
-
-  if (typeof candidate.prompt === "string" && candidate.prompt.trim()) {
-    lines.push(`输入: ${candidate.prompt.trim()}`);
-  }
-  if (
-    typeof candidate.resultCount === "number" &&
-    Number.isInteger(candidate.resultCount)
-  ) {
-    lines.push(`目标: ${candidate.resultCount} 张图片`);
-  }
-  if (Array.isArray(candidate.operations)) {
-    lines.push(`画布操作: ${candidate.operations.length} 项`);
-  }
-
-  return lines.length ? lines : ["工具参数已就绪"];
-}
-
-function formatToolValue(value: unknown) {
-  if (typeof value === "string") {
-    return value;
-  }
-
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
 }
