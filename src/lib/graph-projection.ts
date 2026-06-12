@@ -20,6 +20,7 @@ const DEFAULT_PROMPT_POSITION = { x: 260, y: 210 };
 const RUN_OFFSET_Y = 124;
 const ARTIFACT_NODE_GAP_Y = 162;
 const ARTIFACT_NODE_GAP_X = 257;
+const DIRECT_TEXT_RESULT_OFFSET_Y = 360;
 
 export type RunStepTraceEvent = AgentEvent;
 
@@ -260,6 +261,7 @@ export function projectRunTraceToCanvas({
       : projectedRunStatus;
   const toolParts = buildToolParts(orderedEvents, prompt);
   const agentText = buildAgentText(orderedEvents, runStatus, streamedAgentText);
+  const directTextResult = readDirectTextResult(orderedEvents);
   const promptNode: AgentCanvasNode = getExistingOrProjectedNode(
     existingNodes,
     promptNodeId,
@@ -336,6 +338,37 @@ export function projectRunTraceToCanvas({
 
   projectedNodes.push(...pendingImageProjection.resultNodes);
   projectedEdges.push(...pendingImageProjection.resultEdges);
+
+  if (directTextResult) {
+    const resultPromptNodeId = `prompt-result-${targetRunNodeId}`;
+    const resultPromptNode = getExistingOrProjectedNode(
+      existingNodes,
+      resultPromptNodeId,
+      {
+        id: resultPromptNodeId,
+        type: "promptNode",
+        position: getExistingPosition(existingNodes, resultPromptNodeId) ?? {
+          x: runNode.position.x,
+          y: runNode.position.y + DIRECT_TEXT_RESULT_OFFSET_Y,
+        },
+        data: {
+          kind: "prompt",
+          prompt: directTextResult.text,
+          contextLabel: "Agent reply",
+          createdAt: directTextResult.createdAt,
+        },
+      }
+    );
+    projectedNodes.push(resultPromptNode);
+    projectedEdges.push(
+      getExistingOrProjectedEdge(existingEdges, targetRunNodeId, resultPromptNodeId, {
+        id: `edge-${targetRunNodeId}-${resultPromptNodeId}`,
+        source: targetRunNodeId,
+        target: resultPromptNodeId,
+        type: "animated",
+      })
+    );
+  }
 
   for (const event of orderedEvents) {
     if (event.type === "artifact.created") {
@@ -1058,6 +1091,33 @@ function buildAgentText(
     return "正在调用工具，结果会自动写入画布。";
   }
   return undefined;
+}
+
+function readDirectTextResult(events: RunStepTraceEvent[]) {
+  const completed = events.findLast((event) => event.type === "run.completed");
+  const finalOutput = readString(completed?.payload.finalOutput);
+  if (!finalOutput) {
+    return undefined;
+  }
+
+  const hasCanvasArtifact = events.some((event) => event.type === "artifact.created");
+  const hasAppliedCanvasOperation = events.some(
+    (event) => event.type === "canvas.operation.applied"
+  );
+  const hasToolLifecycle = events.some(
+    (event) =>
+      event.type === "tool.input" ||
+      event.type === "tool.output" ||
+      event.type === "tool.error"
+  );
+  if (hasCanvasArtifact || hasAppliedCanvasOperation || hasToolLifecycle) {
+    return undefined;
+  }
+
+  return {
+    createdAt: completed?.createdAt ?? new Date(0).toISOString(),
+    text: finalOutput,
+  };
 }
 
 function readRunError(events: RunStepTraceEvent[]) {

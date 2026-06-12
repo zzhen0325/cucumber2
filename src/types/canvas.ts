@@ -138,7 +138,9 @@ export type ImageResultNodeData = {
   image: GeneratedImage;
   artifact?: ArtifactRef;
   prompt: string;
-  runId: string;
+  runId?: string;
+  sourceNodeId?: string;
+  operation?: "upscale";
   request?: ImageRequestPreview;
   status?: ImageResultStatus;
   upload?: LocalUploadState;

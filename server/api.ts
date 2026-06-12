@@ -11,7 +11,18 @@ import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { cors } from "hono/cors";
 import { z } from "zod";
 
-import { isSeedreamConfigured } from "../seedream.ts";
+import {
+  isSeedreamConfigured,
+  readSeedreamUpscaleConfigFromEnv,
+  upscaleSeedreamImage,
+} from "../seedream.ts";
+import type {
+  AgentCanvasEdge,
+  AgentCanvasNode,
+  ArtifactRef,
+  GeneratedImage,
+  ImageResultNodeData,
+} from "../src/types/canvas.ts";
 import { executeAgentRun } from "./agent/index.ts";
 import { getAgentModelConfiguration } from "./agent/model-config.ts";
 import {
@@ -45,6 +56,8 @@ import {
   createSignedAssetUpload,
   completeSignedAssetUpload,
   MAX_AGENT_ASSET_BYTES,
+  resolveStorageBackedImageContext,
+  storeGeneratedImageFromUrl,
 } from "./storage.ts";
 
 loadServerEnv();
@@ -116,6 +129,13 @@ const uploadCompleteSchema = z.object({
   summary: z.string().trim().max(500).optional(),
   title: z.string().trim().min(1).max(260).optional(),
   width: z.number().int().positive().optional(),
+});
+
+const imageUpscaleSchema = z.object({
+  expectedVersion: z.number().int().nonnegative().optional(),
+  resolution: z.enum(["4k", "8k"]).default("4k"),
+  scale: z.number().int().min(0).max(100).default(50),
+  sourceNodeId: z.string().trim().min(1).max(260),
 });
 
 app.use("*", cors());
@@ -368,6 +388,136 @@ app.post("/api/projects/:projectId/uploads/:uploadId/complete", async (c) => {
   });
 });
 
+app.post("/api/projects/:projectId/images/upscale", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const projectId = z.string().uuid().parse(c.req.param("projectId"));
+  const input = imageUpscaleSchema.parse(await c.req.json());
+  const project = await getProjectForUser(projectId, user.id);
+  if (!project) {
+    return notFound(c);
+  }
+
+  if (!isSeedreamConfigured()) {
+    return c.json(
+      {
+        error:
+          "Seedream image upscale is not configured. Set SEEDREAM_ACCESS_KEY_ID and SEEDREAM_SECRET_ACCESS_KEY.",
+      },
+      503
+    );
+  }
+
+  const sourceNode = project.nodes.find((node) => node.id === input.sourceNodeId);
+  const sourceCheck = getUpscaleSourceImage(sourceNode);
+  if (!sourceCheck.ok) {
+    return c.json({ error: sourceCheck.error }, 400);
+  }
+
+  const sourceNodeId = sourceCheck.node.id;
+  const [{ imageUrl }] = await resolveStorageBackedImageContext([
+    {
+      artifact: sourceCheck.artifact,
+      contentRef: sourceCheck.artifact.contentRef,
+      imageUrl: sourceCheck.artifact.uri ?? sourceCheck.image.url,
+      nodeId: sourceNodeId,
+      prompt: sourceCheck.prompt,
+      type: "image",
+    },
+  ]);
+
+  if (!imageUrl) {
+    return c.json({ error: "无法为选中图片生成服务端可读 URL。" }, 400);
+  }
+
+  const artifacts: ArtifactRef[] = [];
+  await upscaleSeedreamImage(
+    {
+      imageUrl,
+      onImage: async (image) => {
+        const storedArtifact = await storeGeneratedImageFromUrl({
+          artifactId: image.id,
+          metadata: {
+            ...image.metadata,
+            sourceArtifactId: sourceCheck.artifact.id,
+            sourceNodeId,
+            operation: "upscale",
+          },
+          projectId,
+          signal: c.req.raw.signal,
+          sourceNodeId,
+          sourceUrl: image.url,
+          title: image.title,
+          userId: user.id,
+        });
+        artifacts.push(storedArtifact);
+      },
+      resolution: input.resolution,
+      scale: input.scale,
+      signal: c.req.raw.signal,
+    },
+    readSeedreamUpscaleConfigFromEnv()
+  );
+
+  const artifact = artifacts[0];
+  if (!artifact?.uri) {
+    throw new Error("Seedream upscale did not produce a stored image artifact.");
+  }
+  const storedArtifact = { ...artifact, uri: artifact.uri };
+
+  const { node, edge, canvasPatch } = createUpscaleCanvasPatch({
+    artifact: storedArtifact,
+    resolution: input.resolution,
+    scale: input.scale,
+    sourceNode: sourceCheck.node,
+  });
+
+  try {
+    const updatedProject = await updateProjectForUser({
+      canvasPatch,
+      expectedVersion: input.expectedVersion,
+      projectId,
+      selectedNodeId: node.id,
+      userId: user.id,
+    });
+    if (!updatedProject) {
+      return notFound(c);
+    }
+
+    return c.json({
+      artifact,
+      canvasPatch,
+      edge,
+      node,
+      project: updatedProject,
+    });
+  } catch (error) {
+    if (error instanceof ProjectVersionConflictError) {
+      const updatedProject = await updateProjectForUser({
+        canvasPatch,
+        expectedVersion: error.project.version,
+        projectId,
+        selectedNodeId: node.id,
+        userId: user.id,
+      });
+      if (!updatedProject) {
+        return notFound(c);
+      }
+      return c.json({
+        artifact,
+        canvasPatch,
+        edge,
+        node,
+        project: updatedProject,
+      });
+    }
+    throw error;
+  }
+});
+
 app.get("/api/projects/:projectId/artifacts/:artifactId/content", async (c) => {
   const user = await requireUser(c);
   if (!user) {
@@ -474,6 +624,129 @@ function getActiveAgentRunKey(
   runNodeId: string
 ) {
   return `${userId}:${projectId}:${runNodeId}`;
+}
+
+function getUpscaleSourceImage(node: AgentCanvasNode | undefined):
+  | {
+      ok: true;
+      artifact: ArtifactRef;
+      image: GeneratedImage;
+      node: AgentCanvasNode & { data: ImageResultNodeData };
+      prompt: string;
+    }
+  | { ok: false; error: string } {
+  if (!node) {
+    return { ok: false, error: "图片节点不存在。" };
+  }
+  if (node.data.kind !== "imageResult") {
+    return { ok: false, error: "只能对图片节点执行高清放大。" };
+  }
+  if ((node.data.status ?? "ready") !== "ready" || !node.data.image.url) {
+    return { ok: false, error: "图片尚未准备完成，无法高清放大。" };
+  }
+
+  const artifact = node.data.artifact ?? node.data.image.artifact;
+  if (!artifact || artifact.type !== "image" || !artifact.contentRef) {
+    return {
+      ok: false,
+      error: "图片未保存到对象存储，无法由服务端安全放大。",
+    };
+  }
+
+  return {
+    ok: true,
+    artifact,
+    image: node.data.image,
+    node: node as AgentCanvasNode & { data: ImageResultNodeData },
+    prompt: node.data.prompt,
+  };
+}
+
+function createUpscaleCanvasPatch({
+  artifact,
+  resolution,
+  scale,
+  sourceNode,
+}: {
+  artifact: ArtifactRef & { uri: string };
+  resolution: "4k" | "8k";
+  scale: number;
+  sourceNode: AgentCanvasNode & { data: ImageResultNodeData };
+}) {
+  const resultNodeId = `image-${artifact.id}`;
+  const outgoingIndex = 0;
+  const width = getNodeNumericDimension(sourceNode, "width") ?? 240;
+  const height = getNodeNumericDimension(sourceNode, "height") ?? 240;
+  const image: GeneratedImage = {
+    artifact,
+    id: artifact.id,
+    metadata: artifact.metadata,
+    title: artifact.title ?? `Seedream ${resolution.toUpperCase()} upscale`,
+    url: artifact.uri,
+  };
+  const node: AgentCanvasNode = {
+    height,
+    id: resultNodeId,
+    position: {
+      x: sourceNode.position.x + outgoingIndex * 262,
+      y: sourceNode.position.y + 310,
+    },
+    selected: true,
+    type: "imageResultNode",
+    width,
+    data: {
+      artifact,
+      image,
+      kind: "imageResult",
+      operation: "upscale",
+      prompt: sourceNode.data.prompt,
+      request: {
+        aspectRatio: getImageAspectRatioLabel(sourceNode),
+      },
+      sourceNodeId: sourceNode.id,
+      status: "ready",
+    },
+  };
+  const edge: AgentCanvasEdge = {
+    id: `edge-${sourceNode.id}-${resultNodeId}`,
+    source: sourceNode.id,
+    target: resultNodeId,
+    type: "animated",
+  };
+  const canvasPatch = {
+    edgeUpserts: [edge],
+    nodeUpserts: [node],
+  };
+
+  return { canvasPatch, edge, node, scale };
+}
+
+function getNodeNumericDimension(
+  node: AgentCanvasNode,
+  dimension: "height" | "width"
+) {
+  const value = node[dimension] ?? node.measured?.[dimension];
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : null;
+}
+
+function getImageAspectRatioLabel(node: AgentCanvasNode & { data: ImageResultNodeData }) {
+  const width = readPositiveNumber(node.data.image.metadata?.width);
+  const height = readPositiveNumber(node.data.image.metadata?.height);
+  if (width && height) {
+    return `${width}:${height}`;
+  }
+
+  const nodeWidth = getNodeNumericDimension(node, "width");
+  const nodeHeight = getNodeNumericDimension(node, "height");
+  return nodeWidth && nodeHeight ? `${nodeWidth}:${nodeHeight}` : undefined;
+}
+
+function readPositiveNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : undefined;
 }
 
 const port = Number(process.env.API_PORT ?? 8787);

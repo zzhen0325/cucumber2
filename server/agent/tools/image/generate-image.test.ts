@@ -5,6 +5,7 @@ import type { CucumberAgentContext } from "../../context.ts";
 import type { UpstreamContextItem } from "../../../../src/types/canvas.ts";
 
 const generateSeedreamImage = vi.fn();
+const upscaleSeedreamImage = vi.fn();
 const isSeedreamConfigured = vi.fn();
 const resolveStorageBackedImageContext = vi.fn(async (items: UpstreamContextItem[]) =>
   items.map((item) =>
@@ -61,6 +62,11 @@ vi.mock("../../../../seedream.ts", async () => {
     generateSeedreamImage: (...args: unknown[]) => generateSeedreamImage(...args),
     isSeedreamConfigured: () => isSeedreamConfigured(),
     readSeedreamConfigFromEnv: () => testSeedreamConfig,
+    readSeedreamUpscaleConfigFromEnv: () => ({
+      ...testSeedreamConfig,
+      reqKey: "jimeng_i2i_seed3_tilesr_cvtob",
+    }),
+    upscaleSeedreamImage: (...args: unknown[]) => upscaleSeedreamImage(...args),
   };
 });
 
@@ -74,6 +80,7 @@ vi.mock("../../../storage.ts", () => ({
 
 // Imported after the mock is registered.
 const { generateImageTool } = await import("./generate-image.tool.ts");
+const { upscaleImageTool } = await import("./upscale-image.tool.ts");
 const { toSeedreamUpstreamContext } = await import("./generate-image.request.ts");
 
 function buildContext(
@@ -106,6 +113,7 @@ async function invokeTool(context: CucumberAgentContext, input: unknown) {
 describe("generate_image tool", () => {
   beforeEach(() => {
     generateSeedreamImage.mockReset();
+    upscaleSeedreamImage.mockReset();
     isSeedreamConfigured.mockReset();
     resolveStorageBackedImageContext.mockClear();
     storeGeneratedImageFromUrl.mockClear();
@@ -151,6 +159,7 @@ describe("generate_image tool", () => {
       {
         type: "artifact_created",
         artifact: expect.objectContaining({ id: "seedream-1", type: "image" }),
+        toolName: "generate_image",
       },
     ]);
 
@@ -251,4 +260,82 @@ describe("generate_image tool", () => {
     ]);
     expect(JSON.stringify(context.pendingEvents)).not.toContain("signed.example");
   });
+
+  it("upscales the selected image and emits artifact_created events without leaking urls", async () => {
+    isSeedreamConfigured.mockReturnValue(true);
+    upscaleSeedreamImage.mockImplementation(
+      async (input: { onImage?: (image: unknown) => void }) => {
+        const image = {
+          id: "seedream-upscale-1",
+          metadata: { operation: "upscale", resolution: "4k", scale: 50 },
+          title: "Seedream 4K upscale",
+          url: "https://cdn.example/upscaled.png",
+        };
+        await input.onImage?.(image);
+        return { images: [image] };
+      }
+    );
+
+    const context = buildContext({
+      selectedNodeId: "image-1",
+      upstreamContext: [
+        {
+          artifact: {
+            contentRef: "supabase://agent-assets/projects/project-1/uploads/ref.png",
+            id: "ref",
+            type: "image",
+            uri: "/api/projects/project-1/artifacts/ref/content",
+          },
+          contentRef: "supabase://agent-assets/projects/project-1/uploads/ref.png",
+          imageUrl: "/api/projects/project-1/artifacts/ref/content",
+          nodeId: "image-1",
+          type: "image",
+        },
+      ],
+    });
+    const result = await invokeUpscaleTool(context, {});
+
+    expect(result.upscaled).toBe(1);
+    expect(JSON.stringify(result)).not.toContain("cdn.example");
+    expect(upscaleSeedreamImage.mock.calls[0][0]).toMatchObject({
+      imageUrl: "https://signed.example/ref.png",
+    });
+    expect(storeGeneratedImageFromUrl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        artifactId: "seedream-upscale-1",
+        metadata: expect.objectContaining({
+          operation: "upscale",
+          sourceNodeId: "image-1",
+        }),
+        sourceNodeId: "image-1",
+        sourceUrl: "https://cdn.example/upscaled.png",
+      })
+    );
+    expect(context.pendingEvents).toEqual([
+      {
+        type: "artifact_created",
+        artifact: expect.objectContaining({
+          id: "seedream-upscale-1",
+          type: "image",
+        }),
+        toolName: "upscale_image",
+      },
+    ]);
+  });
+
+  it("fails upscale when no selected or single upstream image exists", async () => {
+    isSeedreamConfigured.mockReturnValue(true);
+    const context = buildContext();
+
+    await expect(invokeUpscaleTool(context, {})).rejects.toThrow(
+      /请选择一张图片/
+    );
+    expect(upscaleSeedreamImage).not.toHaveBeenCalled();
+  });
 });
+
+async function invokeUpscaleTool(context: CucumberAgentContext, input: unknown) {
+  const runContext = new RunContext(context);
+  const raw = await upscaleImageTool.invoke(runContext, JSON.stringify(input));
+  return typeof raw === "string" ? JSON.parse(raw) : raw;
+}

@@ -127,6 +127,76 @@ describe("agent event graph projection", () => {
     });
   });
 
+  it("creates a prompt result node for simple text replies", () => {
+    const projection = projectRunTraceToCanvas({
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", {
+          prompt: "黄瓜是什么？",
+          promptNodeId: "prompt-new",
+          selectedNodeId: null,
+        }),
+        event("run.completed", "run", {
+          finalOutput: "黄瓜是一种常见的葫芦科蔬菜。",
+          artifactIds: [],
+        }),
+      ],
+    });
+    const inputPrompt = projection.nodes.find((node) => node.id === "prompt-new");
+    const resultPrompt = projection.nodes.find(
+      (node) => node.id === "prompt-result-run-1"
+    );
+    const resultEdge = projection.edges.find(
+      (edge) => edge.source === "run-1" && edge.target === "prompt-result-run-1"
+    );
+
+    expect(inputPrompt?.data).toMatchObject({
+      kind: "prompt",
+      prompt: "黄瓜是什么？",
+    });
+    expect(inputPrompt?.data).not.toHaveProperty("response");
+    expect(resultPrompt?.type).toBe("promptNode");
+    expect(resultPrompt?.data).toMatchObject({
+      kind: "prompt",
+      prompt: "黄瓜是一种常见的葫芦科蔬菜。",
+      contextLabel: "Agent reply",
+    });
+    expect(resultEdge).toMatchObject({
+      source: "run-1",
+      target: "prompt-result-run-1",
+    });
+  });
+
+  it("does not create a prompt result node for artifact task final text", () => {
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", {
+          prompt: "生成图片",
+          promptNodeId: "prompt-1",
+          selectedNodeId: null,
+        }),
+        event("artifact.created", "generate_image", {
+          artifact: {
+            id: "artifact-2",
+            type: "image",
+            uri: "/api/projects/project-1/artifacts/artifact-2/content",
+          },
+        }),
+        event("run.completed", "run", {
+          finalOutput: "图片已生成",
+          artifactIds: ["artifact-2"],
+        }),
+      ],
+    });
+    const promptResult = projection.nodes.find(
+      (node) => node.id === "prompt-result-run-1"
+    );
+
+    expect(promptResult).toBeUndefined();
+  });
+
   it("uses streamed text without tool status placeholders while running", () => {
     const projection = projectRunTraceToCanvas({
       runNodeId: "run-1",

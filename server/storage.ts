@@ -49,10 +49,11 @@ type CompleteSignedAssetUploadInput = {
 type StoreGeneratedImageInput = {
   projectId: string;
   userId: string;
-  runNodeId: string;
+  runNodeId?: string | null;
   artifactId: string;
   title?: string;
   sourceUrl: string;
+  sourceNodeId?: string | null;
   metadata?: Record<string, unknown>;
   signal?: AbortSignal;
 };
@@ -183,7 +184,7 @@ export async function storeGeneratedImageFromUrl(
   const bytes = new Uint8Array(await response.arrayBuffer());
   assertAllowedAssetSize(bytes.byteLength);
 
-  const path = `projects/${input.projectId}/runs/${input.runNodeId}/artifacts/${sanitizePathSegment(
+  const path = `${getGeneratedImageStoragePrefix(input)}/${sanitizePathSegment(
     input.artifactId
   )}.${getExtensionForMimeType(mimeType)}`;
   const { error } = await getSupabaseClient()
@@ -218,6 +219,7 @@ export async function storeGeneratedImageFromUrl(
     projectId: input.projectId,
     runNodeId: input.runNodeId,
     sizeBytes: bytes.byteLength,
+    sourceNodeId: input.sourceNodeId,
     storagePath: path,
     title: input.title,
     type: "image",
@@ -230,6 +232,18 @@ export async function storeGeneratedImageFromUrl(
   }
 
   return toArtifactRef(record);
+}
+
+function getGeneratedImageStoragePrefix(input: StoreGeneratedImageInput) {
+  if (input.runNodeId) {
+    return `projects/${input.projectId}/runs/${sanitizePathSegment(
+      input.runNodeId
+    )}/artifacts`;
+  }
+
+  return `projects/${input.projectId}/operations/${sanitizePathSegment(
+    input.sourceNodeId ?? "direct"
+  )}/artifacts`;
 }
 
 export async function createSignedArtifactReadUrl(

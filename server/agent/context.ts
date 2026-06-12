@@ -56,7 +56,12 @@ export type CucumberRunEvent =
       type: "canvas_operation_rejected";
       rejections: Array<{ operation: CanvasOperation; reason: string }>;
     }
-  | { type: "artifact_created"; artifact: ArtifactRef; canvasNodeId?: string }
+  | {
+      type: "artifact_created";
+      artifact: ArtifactRef;
+      canvasNodeId?: string;
+      toolName?: string;
+    }
   | { type: "run_completed"; finalOutput?: string; artifactIds: string[] }
   | { type: "error"; message: string };
 

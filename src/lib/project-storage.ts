@@ -34,6 +34,21 @@ export type UpdateProjectInput = {
   expectedVersion?: number;
 };
 
+export type UpscaleProjectImageInput = {
+  expectedVersion?: number;
+  projectId: string;
+  resolution?: "4k" | "8k";
+  scale?: number;
+  sourceNodeId: string;
+};
+
+export type UpscaleProjectImageResult = {
+  canvasPatch: CanvasPatch;
+  edge: AgentCanvasEdge;
+  node: AgentCanvasNode;
+  project: PersistedProject;
+};
+
 export class ProjectVersionConflictError extends Error {
   readonly project: PersistedProject;
 
@@ -114,6 +129,33 @@ export async function updateProject(
   }
 
   return (await response.json()) as { project: PersistedProject };
+}
+
+export async function upscaleProjectImage(input: UpscaleProjectImageInput) {
+  const { projectId, ...body } = input;
+  const response = await fetch(`/api/projects/${projectId}/images/upscale`, {
+    body: JSON.stringify(body),
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+
+  if (response.status === 409) {
+    const payload = (await response.json()) as {
+      error: string;
+      code?: string;
+      project: PersistedProject;
+    };
+    throw new ProjectVersionConflictError(payload.project);
+  }
+
+  if (!response.ok) {
+    throw new Error(await getResponseError(response));
+  }
+
+  return (await response.json()) as UpscaleProjectImageResult;
 }
 
 export async function loadRunTrace(projectId: string, runNodeId: string) {

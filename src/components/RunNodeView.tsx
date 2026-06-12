@@ -167,7 +167,7 @@ export function RunNodeView({
                 </MessageResponse>
               ) : (
                 <Shimmer as="p" className="agent-text-output muted" duration={1.8}>
-                  Thinking...
+                  {/* Thinking... */}
                 </Shimmer>
               )}
             </div>
@@ -296,7 +296,7 @@ function getRunTitle(
     return "生成失败";
   }
   if (status === "success") {
-    return "生成完成";
+    return "DONE！😊";
   }
   if (state === "input-available" || state === "output-available") {
     return "调用工具";

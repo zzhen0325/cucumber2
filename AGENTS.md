@@ -22,7 +22,7 @@
 - Agent 坚持 proposal-first：SDK 决定做什么，runtime policy 决定是否允许落到画布；tool 不直接写数据库。
 - 客户端不得提供可信 upstream context。提交前保存项目，服务端从持久化 nodes/edges 重建上下文。
 - `knownNodeIds` 只能来自项目快照和本轮 prompt/run 节点。
-- 图片 artifact 只能由 `generate_image` 产生；引用图 URL 只转发给 Seedream，不暴露给模型。
+- 图片生成 artifact 由 `generate_image` 产生；高清放大 artifact 由 `upscale_image` 或图片 toolbar 直连接口产生。引用图 URL 只转发给 Seedream，不暴露给模型。
 - Manager 通过 handoff 委派给 Image Agent；specialist model 由 runtime 统一注入。
 - React Flow 改动先查看官方文档：<https://reactflow.dev/learn>。
 - Agent 改动先查看 Agents SDK 官方文档：<https://openai.github.io/openai-agents-js/>。
@@ -30,7 +30,7 @@
 - 新增能力同步更新 `README.md` 或 `process.md`；UI 改动先阅读 `design.md`。
 - 文件超过 1500 行时优先按职责拆分。
 - 只运行与改动相关的最小测试集。
-- 本地临时 QA 账号：用户名：zz  密码：123456
+- 测试用真实数据进行，本地临时 QA 账号：用户名：zz  密码：123456
 
 ## Canvas Behavior
 

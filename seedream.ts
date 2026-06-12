@@ -4,6 +4,7 @@ import { request } from "node:https";
 import { setTimeout as delay } from "node:timers/promises";
 
 export type SeedreamPromptBatchMode = "single_prompt" | "distinct_prompts";
+export type SeedreamUpscaleResolution = "4k" | "8k";
 
 export type SeedreamImageRequest = {
   body: Record<string, unknown>;
@@ -18,6 +19,14 @@ export type SeedreamGenerateInput = {
   promptBatchMode: SeedreamPromptBatchMode;
   // Optional callback invoked the moment each image finishes, so callers can
   // stream results to the UI instead of waiting for the whole batch.
+  onImage?: (image: SeedreamGeneratedImage) => void | Promise<void>;
+  signal?: AbortSignal;
+};
+
+export type SeedreamUpscaleInput = {
+  imageUrl: string;
+  resolution?: SeedreamUpscaleResolution;
+  scale?: number;
   onImage?: (image: SeedreamGeneratedImage) => void | Promise<void>;
   signal?: AbortSignal;
 };
@@ -312,6 +321,69 @@ export async function generateSeedreamImage(
   return { images: imagesPerRequest.flat() };
 }
 
+export async function upscaleSeedreamImage(
+  input: SeedreamUpscaleInput,
+  config = readSeedreamUpscaleConfigFromEnv()
+): Promise<{ images: SeedreamGeneratedImage[] }> {
+  const imageUrl = input.imageUrl.trim();
+  if (!imageUrl) {
+    throw new Error("Seedream upscale image URL is empty.");
+  }
+
+  const resolution = input.resolution ?? readSeedreamUpscaleResolutionFromEnv();
+  const scale = normalizeSeedreamUpscaleScale(input.scale);
+  const client = new SeedreamClient(config);
+  const result = await client.submitAndPoll(
+    buildSeedreamUpscaleTaskBody({ imageUrl, resolution, scale }),
+    input.signal
+  );
+  const urls = getNestedArray(result, ["data", "image_urls"]).filter(
+    (item): item is string => typeof item === "string" && item.length > 0
+  );
+
+  if (!urls.length) {
+    throw new Error("Seedream upscale returned no image URL.");
+  }
+
+  const image: SeedreamGeneratedImage = {
+    id: `seedream-upscale-${Date.now()}`,
+    url: urls[0],
+    title: `Seedream ${resolution.toUpperCase()} upscale`,
+    metadata: {
+      provider: "seedream",
+      reqKey: config.reqKey,
+      operation: "upscale",
+      resolution,
+      scale,
+      inputImageCount: 1,
+    },
+  };
+
+  await input.onImage?.(image);
+  return { images: [image] };
+}
+
+export function buildSeedreamUpscaleTaskBody({
+  imageUrl,
+  resolution = "4k",
+  scale = 50,
+}: {
+  imageUrl: string;
+  resolution?: SeedreamUpscaleResolution;
+  scale?: number;
+}) {
+  const normalizedUrl = imageUrl.trim();
+  if (!normalizedUrl) {
+    throw new Error("Seedream upscale image URL is empty.");
+  }
+
+  return {
+    image_urls: [normalizedUrl],
+    resolution,
+    scale: normalizeSeedreamUpscaleScale(scale),
+  };
+}
+
 function buildSeedreamGeneratedImage({
   url,
   index,
@@ -433,6 +505,14 @@ export function readSeedreamConfigFromEnv(): SeedreamConfig {
   };
 }
 
+export function readSeedreamUpscaleConfigFromEnv(): SeedreamConfig {
+  return {
+    ...readSeedreamConfigFromEnv(),
+    reqKey:
+      process.env.SEEDREAM_UPSCALE_REQ_KEY ?? "jimeng_i2i_seed3_tilesr_cvtob",
+  };
+}
+
 function readRequiredEnv(primary: string, fallback?: string) {
   const value = readOptionalEnv(primary, fallback);
   if (!value) {
@@ -465,6 +545,32 @@ function readOptionalNumberEnv(name: string) {
 
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function readSeedreamUpscaleResolutionFromEnv(): SeedreamUpscaleResolution {
+  return process.env.SEEDREAM_UPSCALE_RESOLUTION === "8k" ? "8k" : "4k";
+}
+
+function normalizeSeedreamUpscaleScale(value: number | undefined) {
+  if (value === undefined) {
+    return readSeedreamUpscaleScaleFromEnv();
+  }
+
+  if (!Number.isFinite(value)) {
+    throw new Error("Seedream upscale scale must be a finite number.");
+  }
+
+  return Math.min(100, Math.max(0, Math.round(value)));
+}
+
+function readSeedreamUpscaleScaleFromEnv() {
+  const raw = process.env.SEEDREAM_UPSCALE_SCALE;
+  if (!raw) {
+    return 50;
+  }
+
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? Math.min(100, Math.max(0, Math.round(parsed))) : 50;
 }
 
 function readPositiveNumber(value: unknown) {

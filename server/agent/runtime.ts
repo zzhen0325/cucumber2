@@ -230,16 +230,17 @@ export async function executeAgentRun({
       }
 
       if (event.type === "artifact_created") {
+        const toolName = event.toolName ?? "generate_image";
         await writeRunEvent({
           projectId: input.projectId,
           runNodeId: input.runNodeId,
-          stepId: "generate_image",
+          stepId: toolName,
           type: "artifact.created",
           payload: {
             artifact: event.artifact,
             canvasNodeId: event.canvasNodeId,
             runtime: "openai-agents-sdk",
-            toolName: "generate_image",
+            toolName,
           },
         });
         continue;

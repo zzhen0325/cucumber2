@@ -9,7 +9,7 @@ Infinite Canvas Agent Run MVP。前端使用 Vite、React、TypeScript、React F
 - API：`POST /api/agent-run`；停止运行使用同一路径的 `DELETE` 方法
 - 实现：`server/agent/`
 - 编排：Manager 通过 Agents SDK handoff 委派给 Image Agent
-- 图片工具：`generate_image` 调用 Seedream
+- 图片工具：`generate_image` 调用 Seedream 生成图片，`upscale_image` 调用 Seedream 智能超清
 - 画布变更：Agent 只能提出 `CanvasOperation`，由 runtime policy 校验后投影到画布
 - 流协议：AI SDK UI `createUIMessageStream` + `data-runtime-event`
 
@@ -38,6 +38,8 @@ pnpm dev
 - OpenAI：`OPENAI_API_KEY`，可选 `OPENAI_MODEL`
 
 图片生成还需要 `SEEDREAM_ACCESS_KEY_ID` 和 `SEEDREAM_SECRET_ACCESS_KEY`。项目、Trace 和对象存储 metadata 持久化需要 `SUPABASE_URL` 与 `SUPABASE_SECRET_KEY`。
+
+智能超清默认使用 `SEEDREAM_UPSCALE_REQ_KEY=jimeng_i2i_seed3_tilesr_cvtob`、`SEEDREAM_UPSCALE_RESOLUTION=4k` 和 `SEEDREAM_UPSCALE_SCALE=50`；toolbar 直连放大不创建 Agent Run，但会保存新的图片 artifact、节点和原图连线。
 
 浏览器直传 Supabase Storage 还需要公开环境变量：
 
@@ -77,6 +79,7 @@ pnpm dev
 - `POST /api/projects/:projectId/uploads/sign`
 - `POST /api/projects/:projectId/uploads/:uploadId/complete`
 - `GET /api/projects/:projectId/artifacts/:artifactId/content`
+- `POST /api/projects/:projectId/images/upscale`
 - `POST /api/agent-run`
 - `DELETE /api/agent-run?projectId=...&runNodeId=...`
 

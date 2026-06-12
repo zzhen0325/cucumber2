@@ -76,6 +76,88 @@ describe("agent run materializer", () => {
     });
     expect(next.nodes.some((node) => node.id === "manual-note")).toBe(true);
   });
+
+  it("materializes simple replies as a result prompt node", () => {
+    const project = projectSnapshot();
+    project.nodes.push(
+      {
+        id: "prompt-old",
+        type: "promptNode",
+        position: { x: -260, y: 0 },
+        data: {
+          kind: "prompt",
+          prompt: "旧问题",
+          contextLabel: "Previous request",
+          createdAt: "2026-06-12T00:00:00.000Z",
+        },
+      },
+      {
+        id: "prompt-new",
+        type: "promptNode",
+        position: { x: 260, y: 0 },
+        data: {
+          kind: "prompt",
+          prompt: "黄瓜是什么？",
+          contextLabel: "Root request",
+          createdAt: "2026-06-12T00:00:04.000Z",
+        },
+      },
+      {
+        id: "run-new",
+        type: "runNode",
+        position: { x: 260, y: 124 },
+        data: {
+          kind: "run",
+          prompt: "黄瓜是什么？",
+          status: "running",
+        },
+      }
+    );
+    project.edges.push({
+      id: "edge-prompt-new-run-new",
+      source: "prompt-new",
+      target: "run-new",
+      type: "animated",
+      data: { active: true },
+    });
+
+    const next = materializeSnapshot(
+      project,
+      [
+        event("run.created", {
+          prompt: "黄瓜是什么？",
+          promptNodeId: "prompt-new",
+          selectedNodeId: "prompt-old",
+        }, "run-new"),
+        event("run.completed", {
+          artifactIds: [],
+          finalOutput: "黄瓜是一种常见的葫芦科蔬菜。",
+        }, "run-new"),
+      ],
+      "run-new"
+    );
+
+    expect(next.nodes.find((node) => node.id === "prompt-new")?.data).toMatchObject({
+      kind: "prompt",
+      prompt: "黄瓜是什么？",
+    });
+    expect(next.nodes.find((node) => node.id === "prompt-new")?.data).not.toHaveProperty("response");
+    expect(next.nodes.find((node) => node.id === "prompt-old")?.data).toMatchObject({
+      kind: "prompt",
+      prompt: "旧问题",
+    });
+    expect(next.nodes.find((node) => node.id === "prompt-old")?.data).not.toHaveProperty("response");
+    expect(next.nodes.find((node) => node.id === "prompt-result-run-new")?.data).toMatchObject({
+      kind: "prompt",
+      prompt: "黄瓜是一种常见的葫芦科蔬菜。",
+      contextLabel: "Agent reply",
+    });
+    expect(
+      next.edges.find(
+        (edge) => edge.source === "run-new" && edge.target === "prompt-result-run-new"
+      )
+    ).toBeTruthy();
+  });
 });
 
 function projectSnapshot(): Pick<AgentProject, "edges" | "id" | "nodes"> {
@@ -127,10 +209,14 @@ function projectSnapshot(): Pick<AgentProject, "edges" | "id" | "nodes"> {
   };
 }
 
-function event(type: AgentEvent["type"], payload: AgentEvent["payload"]): AgentEvent {
+function event(
+  type: AgentEvent["type"],
+  payload: AgentEvent["payload"],
+  runNodeId = "run-1"
+): AgentEvent {
   return {
     projectId: "00000000-0000-4000-8000-000000000001",
-    runNodeId: "run-1",
+    runNodeId,
     stepId:
       type === "tool.input" || type === "artifact.created"
         ? "generate_image"

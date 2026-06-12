@@ -93,7 +93,11 @@ export const generateImageTool = tool({
       // Stream each image to the client the moment it lands so the canvas
       // renders results one-by-one. Falls back to `pendingEvents` (drained when
       // the tool returns) if no live sink is wired up.
-      const event = { type: "artifact_created" as const, artifact };
+      const event = {
+        type: "artifact_created" as const,
+        artifact,
+        toolName: "generate_image",
+      };
       if (context.pushLiveEvent) {
         context.pushLiveEvent(event);
       } else {

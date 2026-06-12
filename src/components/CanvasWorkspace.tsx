@@ -88,6 +88,7 @@ import {
 import {
   loadProject,
   loadRunTrace,
+  upscaleProjectImage,
   updateProject,
   ProjectVersionConflictError,
   type PersistedProject,
@@ -165,6 +166,11 @@ const ManualNodeEditingContext = createContext<{
   readOnly: true,
   onShapeLabelChange: () => undefined,
   onStickyTextChange: () => undefined,
+});
+const ImageNodeActionContext = createContext<{
+  onUpscale: (nodeId: string) => void;
+}>({
+  onUpscale: () => undefined,
 });
 
 type StorageStatus = "loading" | "saving" | "saved" | "error";
@@ -1193,6 +1199,139 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     };
   }, [creationPreview, setNodes]);
 
+  const handleUpscaleImageNode = useCallback(
+    async (sourceNodeId: string) => {
+      if (isReplayModeRef.current) {
+        return;
+      }
+      if (!loadedProjectId) {
+        setStorageStatus("error");
+        setStorageError("项目尚未加载完成");
+        return;
+      }
+
+      const sourceNode = nodesRef.current.find(
+        (node) => node.id === sourceNodeId
+      );
+      if (!sourceNode || sourceNode.data.kind !== "imageResult") {
+        setStorageStatus("error");
+        setStorageError("只能对图片节点执行高清放大。");
+        return;
+      }
+      if ((sourceNode.data.status ?? "ready") !== "ready" || !sourceNode.data.image.url) {
+        setStorageStatus("error");
+        setStorageError("图片尚未准备完成，无法高清放大。");
+        return;
+      }
+
+      const saved = await saveProjectSnapshot();
+      if (!saved) {
+        setStorageStatus("error");
+        setStorageError("项目快照保存失败，无法高清放大。");
+        return;
+      }
+
+      const pendingId = `image-upscale-pending-${Date.now().toString(36)}`;
+      const pendingEdgeId = `edge-${sourceNodeId}-${pendingId}`;
+      const pendingNode = createPendingUpscaleImageNode(sourceNode, pendingId);
+      const pendingEdge: AgentCanvasEdge = {
+        id: pendingEdgeId,
+        source: sourceNodeId,
+        target: pendingId,
+        type: "animated",
+      };
+      const withPendingNodes = [
+        ...applySelectedNodeIds(nodesRef.current, []),
+        { ...pendingNode, selected: true },
+      ];
+      const withPendingEdges = [...edgesRef.current, pendingEdge];
+      nodesRef.current = withPendingNodes;
+      edgesRef.current = withPendingEdges;
+      setNodes(withPendingNodes);
+      setEdges(withPendingEdges);
+      setStorageStatus("saving");
+      setStorageError(null);
+
+      try {
+        const result = await upscaleProjectImage({
+          expectedVersion: projectVersionRef.current,
+          projectId: loadedProjectId,
+          sourceNodeId,
+        });
+        projectVersionRef.current = result.project.version;
+        persistedSelectedNodeIdRef.current = result.node.id;
+
+        const savedSnapshot = getCurrentPersistableProjectSnapshot({
+          edges: result.project.edges,
+          lastRunId: result.project.lastRunId,
+          nodes: result.project.nodes,
+          selectedNodeId: result.project.selectedNodeId,
+          title: result.project.title,
+        });
+        lastSavedSnapshotDigestRef.current = savedSnapshot.digest;
+        lastSavedSnapshotRef.current = savedSnapshot;
+
+        setNodes((current) => {
+          const withoutPending = current.filter((node) => node.id !== pendingId);
+          const merged = mergeCanvasUpserts(
+            { edges: edgesRef.current, nodes: withoutPending },
+            { edges: [result.edge], nodes: [result.node] }
+          ).nodes;
+          const next = applySelectedNodeIds(merged, [result.node.id]);
+          nodesRef.current = next;
+          return next;
+        });
+        setEdges((current) => {
+          const withoutPending = current.filter((edge) => edge.id !== pendingEdgeId);
+          const next = mergeCanvasUpserts(
+            { edges: withoutPending, nodes: nodesRef.current },
+            { edges: [result.edge], nodes: [result.node] }
+          ).edges;
+          edgesRef.current = next;
+          return next;
+        });
+        setStorageStatus("saved");
+        setStorageError(null);
+      } catch (nextError: unknown) {
+        if (nextError instanceof ProjectVersionConflictError) {
+          projectVersionRef.current = nextError.project.version;
+        }
+        setNodes((current) => {
+          const next = current.map((node) =>
+            node.id === pendingId && node.data.kind === "imageResult"
+              ? {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    image: {
+                      ...node.data.image,
+                      title: "高清放大失败",
+                    },
+                    status: "error" as const,
+                    upload: {
+                      status: "error" as const,
+                      error: getClientError(nextError),
+                    },
+                  },
+                }
+              : node
+          );
+          nodesRef.current = next;
+          return next;
+        });
+        setStorageStatus("error");
+        setStorageError(`高清放大失败：${getClientError(nextError)}`);
+      }
+    },
+    [loadedProjectId, saveProjectSnapshot, setEdges, setNodes]
+  );
+  const imageNodeActions = useMemo(
+    () => ({
+      onUpscale: handleUpscaleImageNode,
+    }),
+    [handleUpscaleImageNode]
+  );
+
   const handleSubmit = useCallback(
     async (
       message: PromptInputMessage = { files: [], text: prompt },
@@ -1414,46 +1553,48 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
             onStickyTextChange: handleStickyTextChange,
           }}
         >
-          <Canvas<AgentCanvasNode, AgentCanvasEdge>
-            className={`agent-canvas canvas-tool-${canvasTool}${
-              isCreateTool ? " canvas-tool-create" : ""
-            }`}
-            colorMode="light"
-            edgeTypes={edgeTypes}
-            fitViewOptions={{ maxZoom: 1, padding: 0.32 }}
-            maxZoom={5}
-            minZoom={0.05}
-            nodeTypes={nodeTypes}
-            nodes={canvasNodes}
-            edges={canvasEdges}
-            onInit={handleCanvasInit}
-            onEdgesChange={isReplayMode ? undefined : onEdgesChange}
-            onNodesChange={isReplayMode ? undefined : handleNodesChange}
-            onMouseDown={handleCreationMouseDown}
-            onPaneClick={() => {
-              if (!isReplayMode && !isHandTool && !isCreateTool) {
-                setNodes((current) => applySelectedNodeIds(current, []));
-              }
-            }}
-            selectionMode={SelectionMode.Partial}
-            nodesDraggable={!isReplayMode && !isHandTool && !isCreateTool}
-            nodesConnectable={false}
-            panOnDrag={isHandTool}
-            selectionOnDrag={!isHandTool && !isCreateTool}
-            proOptions={{ hideAttribution: true }}
-          >
-            <CanvasAutoFit
-              fitRequest={layoutFitRequest}
-              nodeCount={canvasNodes.length}
-            />
-            <Controls position="bottom-right" showInteractive={false} />
-            <MiniMap
-              pannable
-              zoomable
-              position="top-right"
-              className="canvas-minimap"
-            />
-          </Canvas>
+          <ImageNodeActionContext.Provider value={imageNodeActions}>
+            <Canvas<AgentCanvasNode, AgentCanvasEdge>
+              className={`agent-canvas canvas-tool-${canvasTool}${
+                isCreateTool ? " canvas-tool-create" : ""
+              }`}
+              colorMode="light"
+              edgeTypes={edgeTypes}
+              fitViewOptions={{ maxZoom: 1, padding: 0.32 }}
+              maxZoom={5}
+              minZoom={0.05}
+              nodeTypes={nodeTypes}
+              nodes={canvasNodes}
+              edges={canvasEdges}
+              onInit={handleCanvasInit}
+              onEdgesChange={isReplayMode ? undefined : onEdgesChange}
+              onNodesChange={isReplayMode ? undefined : handleNodesChange}
+              onMouseDown={handleCreationMouseDown}
+              onPaneClick={() => {
+                if (!isReplayMode && !isHandTool && !isCreateTool) {
+                  setNodes((current) => applySelectedNodeIds(current, []));
+                }
+              }}
+              selectionMode={SelectionMode.Partial}
+              nodesDraggable={!isReplayMode && !isHandTool && !isCreateTool}
+              nodesConnectable={false}
+              panOnDrag={isHandTool}
+              selectionOnDrag={!isHandTool && !isCreateTool}
+              proOptions={{ hideAttribution: true }}
+            >
+              <CanvasAutoFit
+                fitRequest={layoutFitRequest}
+                nodeCount={canvasNodes.length}
+              />
+              <Controls position="bottom-right" showInteractive={false} />
+              <MiniMap
+                pannable
+                zoomable
+                position="top-right"
+                className="canvas-minimap"
+              />
+            </Canvas>
+          </ImageNodeActionContext.Provider>
         </ManualNodeEditingContext.Provider>
       </MarkdownNodeEditingContext.Provider>
       <CanvasCreationPreview preview={creationPreview} />
@@ -2637,10 +2778,12 @@ function summarizeMarkdownForCanvasNode(content: string) {
 
 function ImageResultNode({
   data,
+  id,
   selected,
   width,
   height,
 }: NodeProps<FlowNode<ImageResultNodeData, "imageResultNode">>) {
+  const { onUpscale } = useContext(ImageNodeActionContext);
   const status = data.status ?? (data.image.url ? "ready" : "loading");
   const requestLabel = formatImageRequestLabel(data.request);
   const [isPreviewOpen, setPreviewOpen] = useState(false);
@@ -2711,6 +2854,19 @@ function ImageResultNode({
             <Maximize2 size={14} />
           </button>
           <button
+            aria-label="高清放大图片"
+            onClick={(event) => {
+              stopNodeToolbarEvent(event);
+              onUpscale(id);
+            }}
+            onMouseDown={stopNodeToolbarEvent}
+            onPointerDown={stopNodeToolbarEvent}
+            title="高清放大"
+            type="button"
+          >
+            <Sparkles size={14} />
+          </button>
+          <button
             aria-label="下载图片"
             onClick={(event) => {
               stopNodeToolbarEvent(event);
@@ -2770,7 +2926,13 @@ function ImageResultNode({
         {selected && isReady && <NodeFooterLike image={data.image} />}
         {data.upload && (
           <span className={`upload-state image-upload-state ${data.upload.status}`}>
-            {data.upload.status === "error" ? "上传失败" : "上传中"}
+            {data.operation === "upscale"
+              ? data.upload.status === "error"
+                ? "放大失败"
+                : "放大中"
+              : data.upload.status === "error"
+                ? "上传失败"
+                : "上传中"}
           </span>
         )}
       </Node>
@@ -2792,6 +2954,53 @@ function stopNodeToolbarEvent(
   event: ReactMouseEvent<HTMLElement> | ReactPointerEvent<HTMLElement>
 ) {
   event.stopPropagation();
+}
+
+function createPendingUpscaleImageNode(
+  sourceNode: AgentCanvasNode,
+  pendingId: string
+): AgentCanvasNode {
+  const width = getNodeDimension(sourceNode, "width") ?? 240;
+  const height = getNodeDimension(sourceNode, "height") ?? 240;
+  return {
+    height,
+    id: pendingId,
+    position: {
+      x: sourceNode.position.x,
+      y: sourceNode.position.y + 310,
+    },
+    type: "imageResultNode",
+    width,
+    data: {
+      image: {
+        id: pendingId,
+        metadata: {
+          operation: "upscale",
+        },
+        title: "高清放大中",
+        url: "",
+      },
+      kind: "imageResult",
+      operation: "upscale",
+      prompt:
+        sourceNode.data.kind === "imageResult" ? sourceNode.data.prompt : "",
+      sourceNodeId: sourceNode.id,
+      status: "loading",
+      upload: {
+        status: "uploading",
+      },
+    },
+  };
+}
+
+function getNodeDimension(
+  node: AgentCanvasNode,
+  dimension: "height" | "width"
+) {
+  const value = node[dimension] ?? node.measured?.[dimension];
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : null;
 }
 
 async function downloadImageAsset(image: GeneratedImage) {
@@ -2818,12 +3027,7 @@ async function copyImageAsset(image: GeneratedImage): Promise<"copied" | "link">
 
   if (clipboard?.write && typeof ClipboardItem !== "undefined") {
     try {
-      const response = await fetch(image.url);
-      if (!response.ok) {
-        throw new Error(`Image copy failed (${response.status}).`);
-      }
-
-      const blob = await response.blob();
+      const blob = await fetchImageBlob(image.url, 900);
       const mimeType = blob.type || "image/png";
       if (mimeType.startsWith("image/")) {
         await clipboard.write([new ClipboardItem({ [mimeType]: blob })]);
@@ -2836,6 +3040,26 @@ async function copyImageAsset(image: GeneratedImage): Promise<"copied" | "link">
 
   await copyTextToClipboard(image.url);
   return "link";
+}
+
+async function fetchImageBlob(url: string, timeoutMs?: number) {
+  const controller = timeoutMs ? new AbortController() : undefined;
+  const timeoutId = controller
+    ? window.setTimeout(() => controller.abort(), timeoutMs)
+    : undefined;
+
+  try {
+    const response = await fetch(url, { signal: controller?.signal });
+    if (!response.ok) {
+      throw new Error(`Image fetch failed (${response.status}).`);
+    }
+
+    return await response.blob();
+  } finally {
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+    }
+  }
 }
 
 async function copyTextToClipboard(text: string) {

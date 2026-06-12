@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildSeedreamUpscaleTaskBody,
   generateSeedreamImage,
   type SeedreamConfig,
   type SeedreamGenerateInput,
@@ -25,6 +26,45 @@ const testSeedreamConfig: SeedreamConfig = {
 };
 
 describe("seedream provider", () => {
+  it("builds Seedream upscale requests with 4K defaults", () => {
+    expect(
+      buildSeedreamUpscaleTaskBody({ imageUrl: " https://cdn.example/input.png " })
+    ).toEqual({
+      image_urls: ["https://cdn.example/input.png"],
+      resolution: "4k",
+      scale: 50,
+    });
+  });
+
+  it("builds Seedream upscale requests with 8K and custom scale", () => {
+    expect(
+      buildSeedreamUpscaleTaskBody({
+        imageUrl: "https://cdn.example/input.png",
+        resolution: "8k",
+        scale: 87,
+      })
+    ).toEqual({
+      image_urls: ["https://cdn.example/input.png"],
+      resolution: "8k",
+      scale: 87,
+    });
+  });
+
+  it("clamps Seedream upscale scale to the supported range", () => {
+    expect(
+      buildSeedreamUpscaleTaskBody({
+        imageUrl: "https://cdn.example/input.png",
+        scale: 140,
+      }).scale
+    ).toBe(100);
+    expect(
+      buildSeedreamUpscaleTaskBody({
+        imageUrl: "https://cdn.example/input.png",
+        scale: -5,
+      }).scale
+    ).toBe(0);
+  });
+
   it("aborts before making a Seedream request", async () => {
     const controller = new AbortController();
     controller.abort();
