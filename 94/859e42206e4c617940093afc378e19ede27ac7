@@ -1,0 +1,29 @@
+src/components/RunNodeView.tsx
+  s_2d00058afdcd72::t_e58dfe2a0d3dd9 232-269
+server/agent/prompts/image.instructions.ts
+  h_49a1fcd5ff42d1 6-7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "94859e42206e4c617940093afc378e19ede27ac7",
+  "prompts": {},
+  "humans": {
+    "h_49a1fcd5ff42d1": {
+      "author": "zzhen0325 <26629213+zzhen0325@users.noreply.github.com>"
+    }
+  },
+  "sessions": {
+    "s_2d00058afdcd72": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a2abab5175f3689f49c878b",
+        "model": "openrouter-3o__dev",
+        "display_model_name": "openrouter-3o"
+      },
+      "human_author": "zzhen0325 <26629213+zzhen0325@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
