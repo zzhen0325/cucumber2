@@ -85,6 +85,78 @@ describe("agent event graph projection", () => {
     });
   });
 
+  it("keeps prompt expansion and image generation as separate visible tools", () => {
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", {
+          prompt: "黄瓜海报",
+          promptNodeId: "prompt-1",
+        }),
+        event("tool.input", "expand_image_prompt", {
+          toolCallId: "call-expand",
+          toolName: "expand_image_prompt",
+          input: { prompt: "黄瓜海报" },
+        }),
+        event("tool.output", "expand_image_prompt", {
+          toolCallId: "call-expand",
+          toolName: "expand_image_prompt",
+          output: {
+            expandedPrompt:
+              "一张清爽的黄瓜饮品海报，16:9 横版构图，明亮自然光。",
+            skillId: "skill-1",
+            skillName: "imagegen-prompt-expander",
+          },
+        }),
+        event("tool.input", "generate_image", {
+          toolCallId: "call-image",
+          toolName: "generate_image",
+          input: {
+            prompt: "一张清爽的黄瓜饮品海报，16:9 横版构图，明亮自然光。",
+            resultCount: 1,
+          },
+        }),
+        event("artifact.created", "generate_image", {
+          artifact: {
+            id: "artifact-1",
+            metadata: {
+              prompt: "一张清爽的黄瓜饮品海报，16:9 横版构图，明亮自然光。",
+              sourcePrompt: "黄瓜海报",
+            },
+            type: "image",
+            uri: "/api/projects/project-1/artifacts/artifact-1/content",
+          },
+        }),
+        event("run.completed", "run", {
+          finalOutput: "图片已生成",
+          artifactIds: ["artifact-1"],
+        }),
+      ],
+    });
+    const run = projection.nodes.find((node) => node.id === "run-1");
+    const image = projection.nodes.find((node) => node.data.kind === "imageResult");
+
+    expect(run?.data).toMatchObject({
+      kind: "run",
+      toolParts: [
+        expect.objectContaining({
+          type: "tool-expand_image_prompt",
+          state: "output-available",
+        }),
+        expect.objectContaining({
+          type: "tool-generate_image",
+          state: "input-available",
+        }),
+      ],
+    });
+    expect(image?.data).toMatchObject({
+      kind: "imageResult",
+      prompt: "一张清爽的黄瓜饮品海报，16:9 横版构图，明亮自然光。",
+      request: expect.objectContaining({ aspectRatio: "16:9" }),
+    });
+  });
+
   it("keeps streamed text when tool input arrives", () => {
     const projection = projectRunTraceToCanvas({
       runNodeId: "run-1",
@@ -284,7 +356,7 @@ function event(
     type,
     payload,
     errorText,
-    createdAt: `2026-06-11T00:00:0${sequence++}.000Z`,
+    createdAt: `2026-06-11T00:00:${String(sequence++).padStart(2, "0")}.000Z`,
   };
 }
 

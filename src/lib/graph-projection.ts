@@ -664,10 +664,11 @@ function readExpectedImageRequest(
   }
   const input = readRecord(generateInput.payload.input);
   const requestedCount = readNumber(input?.resultCount);
+  const imagePrompt = readString(input?.prompt) ?? prompt;
 
   return {
     count: Math.max(1, requestedCount ? Math.floor(requestedCount) : 1),
-    preview: readImageRequestPreview(prompt),
+    preview: readImageRequestPreview(imagePrompt),
   };
 }
 
@@ -767,6 +768,7 @@ function createArtifactCanvasNode({
   const existingPosition = getExistingPosition(existingNodes, nodeId);
 
   if (artifact.type === "image" && artifact.uri) {
+    const prompt = readArtifactPrompt(sourceEvent, artifact);
     const image: GeneratedImage = {
       id: artifact.id,
       url: artifact.uri,
@@ -785,7 +787,7 @@ function createArtifactCanvasNode({
         kind: "imageResult",
         artifact,
         image,
-        prompt: readString(sourceEvent.payload.prompt) ?? "",
+        prompt,
         request,
         runId: runNode.id,
         status: "ready",
@@ -798,7 +800,7 @@ function createArtifactCanvasNode({
   const baseData = {
     artifact,
     createdAt: sourceEvent.createdAt,
-    prompt: readString(sourceEvent.payload.prompt),
+    prompt: readArtifactPrompt(sourceEvent, artifact),
     runId: runNode.id,
     summary: getArtifactSummary(artifact),
     title,
@@ -1155,6 +1157,18 @@ function readArtifactRef(value: unknown): ArtifactRef | null {
         : undefined,
     contentRef: readString(candidate.contentRef),
   };
+}
+
+function readArtifactPrompt(
+  sourceEvent: RunStepTraceEvent,
+  artifact: ArtifactRef
+) {
+  return (
+    readString(sourceEvent.payload.prompt) ??
+    readString(artifact.metadata?.prompt) ??
+    readString(artifact.metadata?.sourcePrompt) ??
+    ""
+  );
 }
 
 function readArtifactType(value: unknown): ArtifactRef["type"] | null {

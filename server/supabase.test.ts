@@ -1,9 +1,14 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
 import {
+  createAgentSkillDefinition,
   createProject,
+  getAgentSkillDefinition,
+  getDefaultAgentSkillDefinition,
   listProjects,
   ProjectVersionConflictError,
+  softDeleteAgentSkillDefinition,
+  updateAgentSkillDefinition,
   updateProjectForUser,
 } from "./supabase";
 import type { AgentCanvasEdge, AgentCanvasNode } from "../src/types/canvas";
@@ -69,6 +74,73 @@ describe("project canvas patches", () => {
     ).rejects.toBeInstanceOf(ProjectVersionConflictError);
   });
 });
+
+describe("agent skill definitions", () => {
+  beforeAll(() => {
+    process.env.CUCUMBER_DEV_INMEMORY_DB = "1";
+  });
+
+  it("keeps one enabled default per image prompt-expansion purpose", async () => {
+    const first = await createAgentSkillDefinition(skillInput("skill-default-a"));
+    const second = await createAgentSkillDefinition(skillInput("skill-default-b"));
+
+    expect(first.isDefault).toBe(true);
+    expect(second.isDefault).toBe(true);
+    await expect(getAgentSkillDefinition(first.id)).resolves.toMatchObject({
+      isDefault: false,
+    });
+    await expect(
+      getDefaultAgentSkillDefinition({
+        agentScope: "image",
+        purpose: "prompt_expansion",
+      })
+    ).resolves.toMatchObject({ id: second.id, name: "skill-default-b" });
+
+    const disabled = await updateAgentSkillDefinition({
+      id: second.id,
+      enabled: false,
+    });
+    expect(disabled).toMatchObject({ enabled: false, isDefault: false });
+    await expect(
+      getDefaultAgentSkillDefinition({
+        agentScope: "image",
+        purpose: "prompt_expansion",
+      })
+    ).resolves.toBeNull();
+  });
+
+  it("soft-deletes skills from list/detail helpers", async () => {
+    const skill = await createAgentSkillDefinition({
+      ...skillInput("skill-delete-me"),
+      isDefault: false,
+    });
+
+    await expect(softDeleteAgentSkillDefinition(skill.id)).resolves.toBe(true);
+    await expect(getAgentSkillDefinition(skill.id)).resolves.toBeNull();
+  });
+});
+
+function skillInput(name: string) {
+  const skillMd = `---
+name: ${name}
+description: Expand compact prompts.
+---
+
+# ${name}
+
+Return one expanded image prompt.
+`;
+  return {
+    body: `# ${name}\n\nReturn one expanded image prompt.`,
+    description: "Expand compact prompts.",
+    enabled: true,
+    frontmatter: { description: "Expand compact prompts.", name },
+    isDefault: true,
+    name,
+    skillMd,
+    sourceType: "manual" as const,
+  };
+}
 
 function imageNode(id: string): AgentCanvasNode {
   return {

@@ -5,6 +5,7 @@ import { HomePage } from "@/components/HomePage";
 import { ProjectListPage } from "@/components/ProjectListPage";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { AppSidebar, type WorkspaceView } from "@/components/AppSidebar";
+import { SkillsPage } from "@/components/SkillsPage";
 import type { AppUser } from "@/lib/auth-storage";
 import {
   createProject,
@@ -161,7 +162,7 @@ export function WorkspaceShell({
             onPromptSubmit={handlePromptSubmit}
             onViewAll={() => setView("projects")}
           />
-        ) : (
+        ) : view === "projects" ? (
           <ProjectListPage
             projects={projects}
             loading={loading}
@@ -171,6 +172,8 @@ export function WorkspaceShell({
             onRequestDelete={requestDelete}
             onRename={handleRename}
           />
+        ) : (
+          <SkillsPage />
         )}
       </main>
 

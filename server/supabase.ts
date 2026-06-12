@@ -11,6 +11,11 @@ import type {
   CanvasPatch,
 } from "../src/types/canvas.ts";
 import type { AgentEvent, AgentEventType } from "../src/types/runtime.ts";
+import type {
+  AgentSkillPurpose,
+  AgentSkillScope,
+  AgentSkillSourceType,
+} from "./agent/skills/skill-parser.ts";
 
 export type AppUser = {
   id: string;
@@ -82,6 +87,27 @@ export type AgentArtifactRecord = {
   createdAt: string;
 };
 
+export type AgentSkillDefinitionSummary = {
+  id: string;
+  name: string;
+  description: string;
+  agentScope: AgentSkillScope;
+  purpose: AgentSkillPurpose;
+  enabled: boolean;
+  isDefault: boolean;
+  sourceType: AgentSkillSourceType;
+  sourceManifest: Record<string, unknown>;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AgentSkillDefinition = AgentSkillDefinitionSummary & {
+  body: string;
+  frontmatter: Record<string, unknown>;
+  skillMd: string;
+};
+
 type CreateUserInput = {
   username: string;
   passwordHash: string;
@@ -103,6 +129,25 @@ type UpdateProjectInput = {
   selectedNodeId?: string | null;
   lastRunId?: string | null;
   expectedVersion?: number;
+};
+
+type SaveAgentSkillDefinitionInput = {
+  agentScope?: AgentSkillScope;
+  body: string;
+  createdBy?: string | null;
+  description: string;
+  enabled?: boolean;
+  frontmatter: Record<string, unknown>;
+  isDefault?: boolean;
+  name: string;
+  purpose?: AgentSkillPurpose;
+  skillMd: string;
+  sourceManifest?: Record<string, unknown>;
+  sourceType?: AgentSkillSourceType;
+};
+
+type UpdateAgentSkillDefinitionInput = Partial<SaveAgentSkillDefinitionInput> & {
+  id: string;
 };
 
 type UserRow = {
@@ -177,6 +222,25 @@ type AgentArtifactRow = {
   origin: AgentArtifactOrigin | null;
   created_by: string | null;
   created_at: string;
+};
+
+type AgentSkillDefinitionRow = {
+  id: string;
+  name: string;
+  description: string;
+  skill_md: string;
+  body: string;
+  frontmatter: Record<string, unknown> | null;
+  agent_scope: AgentSkillScope;
+  purpose: AgentSkillPurpose;
+  enabled: boolean;
+  is_default: boolean;
+  source_type: AgentSkillSourceType;
+  source_manifest: Record<string, unknown> | null;
+  created_by: string | null;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type RegisterAgentArtifactInput = {
@@ -471,6 +535,204 @@ export async function softDeleteProject(projectId: string, userId: string) {
   return Boolean(data);
 }
 
+export async function listAgentSkillDefinitions() {
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("agent_skill_definitions")
+    .select("*")
+    .is("deleted_at", null)
+    .order("updated_at", { ascending: false })
+    .returns<AgentSkillDefinitionRow[]>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data.map(mapAgentSkillDefinitionSummaryRow);
+}
+
+export async function getAgentSkillDefinition(id: string) {
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("agent_skill_definitions")
+    .select("*")
+    .eq("id", id)
+    .is("deleted_at", null)
+    .maybeSingle<AgentSkillDefinitionRow>();
+
+  if (error) {
+    throw error;
+  }
+  if (!data) {
+    return null;
+  }
+
+  return mapAgentSkillDefinitionRow(data);
+}
+
+export async function getDefaultAgentSkillDefinition({
+  agentScope,
+  purpose,
+}: {
+  agentScope: AgentSkillScope;
+  purpose: AgentSkillPurpose;
+}) {
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("agent_skill_definitions")
+    .select("*")
+    .eq("agent_scope", agentScope)
+    .eq("purpose", purpose)
+    .eq("enabled", true)
+    .eq("is_default", true)
+    .is("deleted_at", null)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<AgentSkillDefinitionRow>();
+
+  if (error) {
+    throw error;
+  }
+  if (!data) {
+    return null;
+  }
+
+  return mapAgentSkillDefinitionRow(data);
+}
+
+export async function createAgentSkillDefinition(
+  input: SaveAgentSkillDefinitionInput
+) {
+  const agentScope = input.agentScope ?? "image";
+  const purpose = input.purpose ?? "prompt_expansion";
+  const enabled = input.isDefault ? true : input.enabled ?? true;
+
+  if (input.isDefault) {
+    await clearDefaultAgentSkillDefinition({ agentScope, purpose });
+  }
+
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("agent_skill_definitions")
+    .insert({
+      agent_scope: agentScope,
+      body: input.body,
+      created_by: input.createdBy ?? null,
+      description: input.description,
+      enabled,
+      frontmatter: input.frontmatter,
+      is_default: input.isDefault ?? false,
+      name: input.name,
+      purpose,
+      skill_md: input.skillMd,
+      source_manifest: input.sourceManifest ?? {},
+      source_type: input.sourceType ?? "manual",
+    })
+    .select()
+    .single<AgentSkillDefinitionRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  return mapAgentSkillDefinitionRow(data);
+}
+
+export async function updateAgentSkillDefinition(
+  input: UpdateAgentSkillDefinitionInput
+) {
+  const existing = await getAgentSkillDefinitionRow(input.id);
+  if (!existing) {
+    return null;
+  }
+
+  const agentScope = input.agentScope ?? existing.agent_scope;
+  const purpose = input.purpose ?? existing.purpose;
+  const payload: Record<string, unknown> = {
+    agent_scope: agentScope,
+    purpose,
+  };
+
+  if (input.body !== undefined) payload.body = input.body;
+  if (input.description !== undefined) payload.description = input.description;
+  if (input.enabled !== undefined) payload.enabled = input.enabled;
+  if (input.frontmatter !== undefined) payload.frontmatter = input.frontmatter;
+  if (input.name !== undefined) payload.name = input.name;
+  if (input.skillMd !== undefined) payload.skill_md = input.skillMd;
+  if (input.sourceManifest !== undefined) {
+    payload.source_manifest = input.sourceManifest;
+  }
+  if (input.sourceType !== undefined) payload.source_type = input.sourceType;
+
+  if (input.enabled === false) {
+    payload.is_default = false;
+  }
+  if (input.isDefault !== undefined) {
+    payload.is_default = input.isDefault;
+  }
+  if (payload.is_default === true) {
+    payload.enabled = true;
+    await clearDefaultAgentSkillDefinition({
+      agentScope,
+      exceptId: input.id,
+      purpose,
+    });
+  }
+
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("agent_skill_definitions")
+    .update(payload)
+    .eq("id", input.id)
+    .is("deleted_at", null)
+    .select()
+    .maybeSingle<AgentSkillDefinitionRow>();
+
+  if (error) {
+    throw error;
+  }
+  if (!data) {
+    return null;
+  }
+
+  return mapAgentSkillDefinitionRow(data);
+}
+
+export async function upsertAgentSkillDefinitionByName(
+  input: SaveAgentSkillDefinitionInput
+) {
+  const existing = await getAgentSkillDefinitionRowByName(input.name);
+  if (!existing) {
+    return createAgentSkillDefinition(input);
+  }
+
+  return updateAgentSkillDefinition({
+    ...input,
+    id: existing.id,
+  });
+}
+
+export async function softDeleteAgentSkillDefinition(id: string) {
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("agent_skill_definitions")
+    .update({
+      deleted_at: new Date().toISOString(),
+      enabled: false,
+      is_default: false,
+    })
+    .eq("id", id)
+    .is("deleted_at", null)
+    .select("id")
+    .maybeSingle<{ id: string }>();
+
+  if (error) {
+    throw error;
+  }
+
+  return Boolean(data);
+}
+
 export async function recordAgentEvent(input: AgentEvent) {
   const client = getSupabaseClient();
   const payload: Record<string, unknown> = {
@@ -612,6 +874,78 @@ async function getProjectRow(projectId: string) {
   return data;
 }
 
+async function getAgentSkillDefinitionRow(id: string) {
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("agent_skill_definitions")
+    .select("*")
+    .eq("id", id)
+    .is("deleted_at", null)
+    .maybeSingle<AgentSkillDefinitionRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function getAgentSkillDefinitionRowByName(name: string) {
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("agent_skill_definitions")
+    .select("*")
+    .eq("name", name)
+    .is("deleted_at", null)
+    .maybeSingle<AgentSkillDefinitionRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function clearDefaultAgentSkillDefinition({
+  agentScope,
+  exceptId,
+  purpose,
+}: {
+  agentScope: AgentSkillScope;
+  exceptId?: string;
+  purpose: AgentSkillPurpose;
+}) {
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("agent_skill_definitions")
+    .select("id")
+    .eq("agent_scope", agentScope)
+    .eq("purpose", purpose)
+    .eq("enabled", true)
+    .eq("is_default", true)
+    .is("deleted_at", null)
+    .returns<Array<{ id: string }>>();
+
+  if (error) {
+    throw error;
+  }
+
+  const ids = data
+    .map((row) => row.id)
+    .filter((id) => !exceptId || id !== exceptId);
+  await Promise.all(
+    ids.map(async (id) => {
+      const { error: updateError } = await client
+        .from("agent_skill_definitions")
+        .update({ is_default: false })
+        .eq("id", id);
+      if (updateError) {
+        throw updateError;
+      }
+    })
+  );
+}
+
 export function getSupabaseClient() {
   if (cachedClient) {
     return cachedClient;
@@ -740,5 +1074,35 @@ function mapAgentArtifactRow(row: AgentArtifactRow): AgentArtifactRecord {
     origin: row.origin ?? "user_upload",
     createdBy: row.created_by,
     createdAt: row.created_at,
+  };
+}
+
+function mapAgentSkillDefinitionSummaryRow(
+  row: AgentSkillDefinitionRow
+): AgentSkillDefinitionSummary {
+  return {
+    id: row.id,
+    agentScope: row.agent_scope,
+    createdAt: row.created_at,
+    createdBy: row.created_by,
+    description: row.description,
+    enabled: row.enabled,
+    isDefault: row.is_default,
+    name: row.name,
+    purpose: row.purpose,
+    sourceManifest: row.source_manifest ?? {},
+    sourceType: row.source_type,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapAgentSkillDefinitionRow(
+  row: AgentSkillDefinitionRow
+): AgentSkillDefinition {
+  return {
+    ...mapAgentSkillDefinitionSummaryRow(row),
+    body: row.body,
+    frontmatter: row.frontmatter ?? {},
+    skillMd: row.skill_md,
   };
 }

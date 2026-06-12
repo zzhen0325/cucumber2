@@ -174,7 +174,13 @@ function resolveSeedreamPromptRequests(
     throw new Error(`一次最多生成 ${maxOutputImages} 张图片。`);
   }
 
-  const prompts = input.prompts.map(normalizeImagePrompt).filter(Boolean);
+  const prompts = input.prompts
+    .map((prompt) =>
+      input.promptBatchMode === "single_prompt" && input.resultCount > 1
+        ? normalizeSingleImagePrompt(prompt)
+        : normalizeImagePrompt(prompt)
+    )
+    .filter(Boolean);
   if (!prompts.length) {
     throw new Error("Seedream image prompt is empty.");
   }
@@ -347,6 +353,30 @@ function findExplicitImageCount(prompt: string) {
   }
 
   return null;
+}
+
+function normalizeSingleImagePrompt(prompt: string) {
+  return normalizeImagePrompt(
+    stripBatchImageCountInstruction(normalizeImagePrompt(prompt))
+  );
+}
+
+function stripBatchImageCountInstruction(prompt: string) {
+  const stripped = prompt
+    .replace(
+      /(?:一次\s*)?(?:生成|出|要|做|给我|create|generate|make)?\s*(?:一|1)\s*组\s*(?:\d{1,2}|[一二两三四五六七八九十])\s*(?:张|幅|个|款|版|images?|imgs?|pictures?|results?)(?:\s*(?:图片|图像|图|照片))?\s*(?:of\s+)?/gi,
+      ""
+    )
+    .replace(
+      /(?:一次\s*)?(?:生成|出|要|做|给我|create|generate|make)?\s*(?:\d{1,2}|[一二两三四五六七八九十])\s*(?:张|幅|个|款|版|组|images?|imgs?|pictures?|results?)(?:\s*(?:图片|图像|图|照片))?\s*(?:of\s+)?/gi,
+      ""
+    )
+    .replace(/^(?:的|of)\s*/i, "")
+    .replace(/\s+(?:的|of)$/i, "")
+    .replace(/^[\s,，:：;；.。-]+/, "")
+    .replace(/[\s,，:：;；.。-]+$/, "");
+
+  return normalizeImagePrompt(stripped) || prompt;
 }
 
 function chineseImageCountToNumber(value: string) {

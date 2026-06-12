@@ -25,6 +25,8 @@ import type {
 } from "../src/types/canvas.ts";
 import { executeAgentRun } from "./agent/index.ts";
 import { getAgentModelConfiguration } from "./agent/model-config.ts";
+import { importAgentSkillZip } from "./agent/skills/skill-import.ts";
+import { parseAgentSkillMarkdown } from "./agent/skills/skill-parser.ts";
 import {
   createSessionToken,
   hashPassword,
@@ -34,10 +36,12 @@ import {
 } from "./auth.ts";
 import {
   claimUnownedProjects,
+  createAgentSkillDefinition,
   createProject,
   createSession,
   createUser,
   deleteSession,
+  getAgentSkillDefinition,
   getProjectForUser,
   getAgentArtifactForUser,
   getSessionUser,
@@ -45,9 +49,13 @@ import {
   getUserCount,
   isSupabaseConfigured,
   listAgentEventsForUser,
+  listAgentSkillDefinitions,
   listProjects,
+  softDeleteAgentSkillDefinition,
   softDeleteProject,
+  updateAgentSkillDefinition,
   updateProjectForUser,
+  upsertAgentSkillDefinitionByName,
   ProjectVersionConflictError,
   type AppUser,
 } from "./supabase.ts";
@@ -138,6 +146,38 @@ const imageUpscaleSchema = z.object({
   sourceNodeId: z.string().trim().min(1).max(260),
 });
 
+const skillDefinitionScopeSchema = z.enum(["image"]).default("image");
+const skillDefinitionPurposeSchema = z
+  .enum(["prompt_expansion"])
+  .default("prompt_expansion");
+
+const skillCreateSchema = z.object({
+  agentScope: skillDefinitionScopeSchema,
+  enabled: z.boolean().default(true),
+  isDefault: z.boolean().default(false),
+  purpose: skillDefinitionPurposeSchema,
+  skillMd: z.string().trim().min(1).max(60_000),
+});
+
+const skillUpdateSchema = z
+  .object({
+    agentScope: skillDefinitionScopeSchema.optional(),
+    enabled: z.boolean().optional(),
+    isDefault: z.boolean().optional(),
+    purpose: skillDefinitionPurposeSchema.optional(),
+    skillMd: z.string().trim().min(1).max(60_000).optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "No skill updates provided.",
+  });
+
+const skillImportSchema = z.object({
+  enabled: z.boolean().default(true),
+  fileName: z.string().trim().min(1).max(260),
+  isDefault: z.boolean().default(true),
+  zipBase64: z.string().trim().min(1),
+});
+
 app.use("*", cors());
 
 app.onError((error, c) => {
@@ -223,6 +263,131 @@ app.get("/api/projects", async (c) => {
 
   const projects = await listProjects(user.id);
   return c.json({ projects });
+});
+
+app.get("/api/agent-skills", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const skills = await listAgentSkillDefinitions();
+  return c.json({ skills });
+});
+
+app.get("/api/agent-skills/:skillId", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const skillId = z.string().uuid().parse(c.req.param("skillId"));
+  const skill = await getAgentSkillDefinition(skillId);
+  if (!skill) {
+    return c.json({ error: "Skill 不存在" }, 404);
+  }
+
+  return c.json({ skill });
+});
+
+app.post("/api/agent-skills", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const input = skillCreateSchema.parse(await c.req.json());
+  const parsed = parseAgentSkillMarkdown(input.skillMd);
+  const skill = await createAgentSkillDefinition({
+    agentScope: input.agentScope,
+    body: parsed.body,
+    createdBy: user.id,
+    description: parsed.description,
+    enabled: input.enabled,
+    frontmatter: parsed.frontmatter,
+    isDefault: input.isDefault,
+    name: parsed.name,
+    purpose: input.purpose,
+    skillMd: parsed.skillMd,
+    sourceManifest: { source: "manual" },
+    sourceType: "manual",
+  });
+
+  return c.json({ skill });
+});
+
+app.post("/api/agent-skills/import", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const input = skillImportSchema.parse(await c.req.json());
+  const imported = await importAgentSkillZip(
+    Buffer.from(input.zipBase64, "base64"),
+    input.fileName
+  );
+  const skill = await upsertAgentSkillDefinitionByName({
+    agentScope: "image",
+    body: imported.body,
+    createdBy: user.id,
+    description: imported.description,
+    enabled: input.enabled,
+    frontmatter: imported.frontmatter,
+    isDefault: input.isDefault,
+    name: imported.name,
+    purpose: "prompt_expansion",
+    skillMd: imported.skillMd,
+    sourceManifest: imported.sourceManifest,
+    sourceType: "zip",
+  });
+
+  return c.json({ skill });
+});
+
+app.patch("/api/agent-skills/:skillId", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const skillId = z.string().uuid().parse(c.req.param("skillId"));
+  const input = skillUpdateSchema.parse(await c.req.json());
+  const parsed = input.skillMd ? parseAgentSkillMarkdown(input.skillMd) : null;
+  const skill = await updateAgentSkillDefinition({
+    id: skillId,
+    agentScope: input.agentScope,
+    body: parsed?.body,
+    description: parsed?.description,
+    enabled: input.enabled,
+    frontmatter: parsed?.frontmatter,
+    isDefault: input.isDefault,
+    name: parsed?.name,
+    purpose: input.purpose,
+    skillMd: parsed?.skillMd,
+    sourceManifest: parsed ? { source: "manual_edit" } : undefined,
+    sourceType: parsed ? "manual" : undefined,
+  });
+  if (!skill) {
+    return c.json({ error: "Skill 不存在" }, 404);
+  }
+
+  return c.json({ skill });
+});
+
+app.delete("/api/agent-skills/:skillId", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const skillId = z.string().uuid().parse(c.req.param("skillId"));
+  const deleted = await softDeleteAgentSkillDefinition(skillId);
+  if (!deleted) {
+    return c.json({ error: "Skill 不存在" }, 404);
+  }
+
+  return c.json({ ok: true });
 });
 
 app.post("/api/projects", async (c) => {
@@ -831,6 +996,19 @@ function getApiError(error: unknown) {
     return {
       message:
         "Agent event 存储表未创建，请应用最新 Supabase migrations。",
+    };
+  }
+
+  if (
+    combined.includes("agent_skill_definitions") &&
+    (combined.includes("Could not find the table") ||
+      combined.includes("schema cache") ||
+      combined.includes("relation") ||
+      combined.includes("does not exist"))
+  ) {
+    return {
+      message:
+        "Agent Skill 存储表未创建，请应用最新 Supabase migrations。",
     };
   }
 

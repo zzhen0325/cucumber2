@@ -56,12 +56,21 @@
 - 上游图片引用对 Manager prompt 仍隐藏真实 URL；调用 Seedream 前，服务端仅根据 `supabase://agent-assets/...` 临时签发 provider 可读 URL。
 - 私有预览统一走 `/api/projects/:projectId/artifacts/:artifactId/content`，服务端校验项目权限后 302 到短期 signed read URL。
 
+## 2026-06-12 Cloud Skill Management
+
+- 新增 `agent_skill_definitions` 作为当前 OpenAI Agents SDK runtime 的全局技能表；不恢复 Agent v1 Skill API、审批或执行器。
+- 当前版本只支持 Image Agent 的 instruction-only `image/prompt_expansion` 技能；zip 导入只读取一个非隐藏 `SKILL.md`，显式拒绝 `scripts/`。
+- 新增 `/api/agent-skills` CRUD 和 `/api/agent-skills/import`，所有接口要求登录；列表不返回完整 `skillMd`，详情返回完整内容用于编辑。
+- 管理工作台新增“技能”页，可创建、编辑、启停、设默认、软删除和导入 zip。
+- Image Agent 新增 `expand_image_prompt` tool；仅当存在启用的默认 `image/prompt_expansion` 技能时暴露。短、关键词式或视觉细节不足的新图片请求会先扩写，再把 `expandedPrompt` 传给 `generate_image`。
+- `generate_image` 的工具输出和 artifact metadata 保留实际 Seedream prompt，同时保留原始 run prompt，供 Trace 和图片结果节点追溯。
+
 ## Verification
 
 - Context 越权和服务端重建：`server/agent/context.test.ts`
 - Agents SDK stream/handoff/tool failure：`server/agent/events/openai-stream-to-cucumber-events.test.ts`
 - Agent Run 快照物化：`server/agent/materialize-run.test.ts`
-- Canvas policy 和图片工具/请求归一化：`server/agent/policy/*.test.ts`、`server/agent/tools/image/*.test.ts`
+- Canvas policy、技能解析/导入和图片工具/请求归一化：`server/agent/policy/*.test.ts`、`server/agent/skills/*.test.ts`、`server/agent/tools/image/*.test.ts`
 - Event projection：`src/lib/graph-projection.test.ts`、`src/lib/runtime-event-renderer.test.ts`
 - 项目摘要统计：`src/lib/project-summary.test.ts`
 - 对象存储上传和引用签名：`src/lib/file-upload.test.ts`、`server/storage.test.ts`

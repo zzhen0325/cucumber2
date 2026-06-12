@@ -137,6 +137,7 @@ describe("generate_image tool", () => {
     const result = await invokeTool(context, { prompt: "黄瓜海报", resultCount: 1 });
 
     expect(result.generated).toBe(1);
+    expect(result.prompt).toBe("黄瓜海报");
     expect(JSON.stringify(result)).not.toContain("cdn.example");
 
     expect(context.producedArtifacts).toHaveLength(1);
@@ -150,6 +151,10 @@ describe("generate_image tool", () => {
     expect(storeGeneratedImageFromUrl).toHaveBeenCalledWith(
       expect.objectContaining({
         artifactId: "seedream-1",
+        metadata: expect.objectContaining({
+          prompt: "黄瓜海报",
+          sourcePrompt: "生成一张黄瓜海报",
+        }),
         projectId: "project-1",
         runNodeId: "run-1",
         sourceUrl: "https://cdn.example/1.png",
@@ -158,7 +163,14 @@ describe("generate_image tool", () => {
     expect(context.pendingEvents).toEqual([
       {
         type: "artifact_created",
-        artifact: expect.objectContaining({ id: "seedream-1", type: "image" }),
+        artifact: expect.objectContaining({
+          id: "seedream-1",
+          metadata: expect.objectContaining({
+            prompt: "黄瓜海报",
+            sourcePrompt: "生成一张黄瓜海报",
+          }),
+          type: "image",
+        }),
         toolName: "generate_image",
       },
     ]);
@@ -189,6 +201,23 @@ describe("generate_image tool", () => {
     expect(generateSeedreamImage.mock.calls[0][0].requests[0].body.prompt).toBe(
       "默认提示词"
     );
+  });
+
+  it("does not send batch count instructions to each Seedream image request", async () => {
+    isSeedreamConfigured.mockReturnValue(true);
+    generateSeedreamImage.mockResolvedValue({ images: [] });
+
+    const context = buildContext();
+    await invokeTool(context, { prompt: "生成四张小狗的图", resultCount: 4 });
+
+    const callArg = generateSeedreamImage.mock.calls[0][0];
+    expect(callArg.totalRequestedImageCount).toBe(4);
+    expect(callArg.requests).toHaveLength(4);
+    expect(
+      callArg.requests.map(
+        (request: { body: { prompt: string } }) => request.body.prompt
+      )
+    ).toEqual(["小狗的图", "小狗的图", "小狗的图", "小狗的图"]);
   });
 
   it("throws when seedream is not configured (no silent fallback)", async () => {

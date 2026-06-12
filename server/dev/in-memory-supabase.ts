@@ -63,6 +63,18 @@ function withDefaults(table: string, value: Row): Row {
     if (row.origin == null) row.origin = "user_upload";
     if (row.created_by === undefined) row.created_by = null;
   }
+  if (table === "agent_skill_definitions") {
+    if (row.agent_scope === undefined) row.agent_scope = "image";
+    if (row.purpose === undefined) row.purpose = "prompt_expansion";
+    if (row.enabled === undefined) row.enabled = true;
+    if (row.is_default === undefined) row.is_default = false;
+    if (row.source_type === undefined) row.source_type = "manual";
+    if (row.source_manifest == null) row.source_manifest = {};
+    if (row.frontmatter == null) row.frontmatter = {};
+    if (row.created_by === undefined) row.created_by = null;
+    if (row.deleted_at === undefined) row.deleted_at = null;
+    if (row.updated_at == null) row.updated_at = nowIso();
+  }
   return row;
 }
 
@@ -243,6 +255,9 @@ class InMemoryQuery implements PromiseLike<{ data: unknown; error: null; count?:
       for (const r of target) {
         Object.assign(r, this.values as Row);
         if (this.name === "agent_projects") {
+          r.updated_at = nowIso();
+        }
+        if (this.name === "agent_skill_definitions") {
           r.updated_at = nowIso();
         }
       }

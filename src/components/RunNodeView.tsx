@@ -306,6 +306,7 @@ function getRunTitle(
 
 function getToolName(toolPart: CanvasToolPart) {
   const names: Record<string, string> = {
+    "tool-expand_image_prompt": "扩写提示词",
     "tool-generate_image": "生成图片",
     "tool-propose_canvas_operations": "更新画布",
     "tool-runtime": "运行错误",

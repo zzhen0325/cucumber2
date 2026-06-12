@@ -80,7 +80,11 @@ export const generateImageTool = tool({
     }) => {
       const artifact = await storeGeneratedImageFromUrl({
         artifactId: image.id,
-        metadata: image.metadata,
+        metadata: {
+          ...image.metadata,
+          prompt,
+          sourcePrompt: context.prompt,
+        },
         projectId: context.projectId,
         runNodeId: context.runNodeId,
         signal: details?.signal,
@@ -126,6 +130,7 @@ export const generateImageTool = tool({
     return {
       generated: artifacts.length,
       artifactIds: artifacts.map((artifact) => artifact.id),
+      prompt,
       note: "Images rendered to the canvas. Image URLs are intentionally omitted from your context.",
     };
   },

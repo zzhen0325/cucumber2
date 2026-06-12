@@ -9,7 +9,8 @@ Infinite Canvas Agent Run MVP。前端使用 Vite、React、TypeScript、React F
 - API：`POST /api/agent-run`；停止运行使用同一路径的 `DELETE` 方法
 - 实现：`server/agent/`
 - 编排：Manager 通过 Agents SDK handoff 委派给 Image Agent
-- 图片工具：`generate_image` 调用 Seedream 生成图片，`upscale_image` 调用 Seedream 智能超清
+- 图片工具：`expand_image_prompt` 按默认技能扩写短提示词，`generate_image` 调用 Seedream 生成图片，`upscale_image` 调用 Seedream 智能超清
+- 技能系统：`agent_skill_definitions` 存储全局 Agent Skill；当前只支持 Image Agent 的 instruction-only prompt expansion skill
 - 画布变更：Agent 只能提出 `CanvasOperation`，由 runtime policy 校验后投影到画布
 - 流协议：AI SDK UI `createUIMessageStream` + `data-runtime-event`
 
@@ -57,6 +58,7 @@ pnpm dev
 - `agent_projects`：项目标题、画布 nodes/edges、选中节点和 `last_run_id`
 - `agent_run_events`：唯一 Agent Trace 事件表
 - `agent_artifacts`：artifact metadata、对象存储 bucket/path 和稳定 content ref
+- `agent_skill_definitions`：全局技能定义、`SKILL.md`、启用状态和默认选择
 - `app_users`、`app_sessions`：本地账号和会话
 
 对象存储：
@@ -80,10 +82,13 @@ pnpm dev
 - `POST /api/projects/:projectId/uploads/:uploadId/complete`
 - `GET /api/projects/:projectId/artifacts/:artifactId/content`
 - `POST /api/projects/:projectId/images/upscale`
+- `GET /api/agent-skills`、`GET /api/agent-skills/:skillId`
+- `POST /api/agent-skills`、`POST /api/agent-skills/import`
+- `PATCH /api/agent-skills/:skillId`、`DELETE /api/agent-skills/:skillId`
 - `POST /api/agent-run`
 - `DELETE /api/agent-run?projectId=...&runNodeId=...`
 
-已删除 `/api/agent-run-v2`、`/api/model-providers` 和全部 `/api/skills`。
+已删除 `/api/agent-run-v2`、`/api/model-providers` 和全部旧 `/api/skills`。新 `/api/agent-skills` 属于当前 OpenAI Agents SDK runtime，不恢复 Agent v1 Skill 栈。
 
 ## Validation
 

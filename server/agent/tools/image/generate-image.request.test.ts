@@ -78,6 +78,45 @@ describe("generate image request normalization", () => {
     }
   });
 
+  it("removes batch count instructions from each single-image Seedream prompt", () => {
+    const requests = buildSeedreamRequestBodies(
+      {
+        prompts: ["一次生成四张图片：小狗的图"],
+        resultCount: 4,
+        promptBatchMode: "single_prompt",
+      },
+      testSeedreamConfig
+    );
+
+    expect(requests).toHaveLength(4);
+    expect(requests.map((request) => request.body.prompt)).toEqual([
+      "小狗的图",
+      "小狗的图",
+      "小狗的图",
+      "小狗的图",
+    ]);
+  });
+
+  it("keeps geometry hints while removing multi-image count text", () => {
+    const requests = buildSeedreamRequestBodies(
+      {
+        prompts: ["create 3 images of a 16:9 2K puppy poster"],
+        resultCount: 3,
+        promptBatchMode: "single_prompt",
+      },
+      testSeedreamConfig
+    );
+
+    expect(requests.map((request) => request.body.prompt)).toEqual([
+      "a 16:9 2K puppy poster",
+      "a 16:9 2K puppy poster",
+      "a 16:9 2K puppy poster",
+    ]);
+    expect(
+      (requests[0].body.width as number) / (requests[0].body.height as number)
+    ).toBeCloseTo(16 / 9, 2);
+  });
+
   it("splits distinct prompt batches into one Seedream request per prompt", () => {
     const requests = buildSeedreamRequestBodies(
       {

@@ -1,6 +1,7 @@
 import { Agent } from "@openai/agents";
 
 import type { CucumberAgentContext } from "../context.ts";
+import { expandImagePromptTool } from "../tools/image/expand-image-prompt.tool.ts";
 import { generateImageTool } from "../tools/image/generate-image.tool.ts";
 import { upscaleImageTool } from "../tools/image/upscale-image.tool.ts";
 import { imageInstructions } from "../prompts/image.instructions.ts";
@@ -13,5 +14,5 @@ export const imageAgent = new Agent<CucumberAgentContext>({
   handoffDescription:
     "Image specialist. Delegate here for any request that needs images generated, created, edited, or upscaled (with or without reference images on the canvas).",
   instructions: imageInstructions,
-  tools: [generateImageTool, upscaleImageTool],
+  tools: [expandImagePromptTool, generateImageTool, upscaleImageTool],
 });
