@@ -1,8 +1,27 @@
 import { getResponseError } from "@/lib/api-client";
 
-export type AgentSkillScope = "image";
-export type AgentSkillPurpose = "prompt_expansion";
+export type AgentSkillScope = string;
+export type AgentSkillPurpose = string;
 export type AgentSkillSourceType = "manual" | "seed" | "zip";
+
+export type AgentSkillTriggers = {
+  keywords: string[];
+  canvasKinds: string[];
+};
+
+export type AgentSkillBindings = {
+  tools: string[];
+  agents: string[];
+};
+
+export type AgentSkillScriptManifest = {
+  name: string;
+  path?: string;
+  runtime: "node" | "python";
+  description: string;
+  input?: unknown;
+  output?: unknown;
+};
 
 export type AgentSkillDefinitionSummary = {
   id: string;
@@ -10,6 +29,14 @@ export type AgentSkillDefinitionSummary = {
   description: string;
   agentScope: AgentSkillScope;
   purpose: AgentSkillPurpose;
+  tags: string[];
+  triggers: AgentSkillTriggers;
+  bindings: AgentSkillBindings;
+  scripts: AgentSkillScriptManifest[];
+  packageBucket: string | null;
+  packagePath: string | null;
+  packageSha256: string | null;
+  packageSizeBytes: number | null;
   enabled: boolean;
   isDefault: boolean;
   sourceType: AgentSkillSourceType;

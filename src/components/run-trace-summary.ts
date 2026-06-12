@@ -32,6 +32,20 @@ export function summarizeRunTrace(events: RunStepTraceEvent[]) {
     ),
     prompt: readString(created?.payload.prompt),
     runStatus: failed ? "error" : completed ? "success" : "running",
+    skillEvents: events.filter(
+      (event) =>
+        event.type === "skill.retrieved" ||
+        event.type === "skill.activated" ||
+        event.type === "skill.script.started" ||
+        event.type === "skill.script.completed" ||
+        event.type === "skill.script.failed"
+    ),
+    skills: events.flatMap((event) => {
+      if (event.type === "skill.activated" && isTraceSkill(event.payload.skill)) {
+        return [event.payload.skill];
+      }
+      return [];
+    }),
     steps: buildTraceSteps(events),
     toolEvents: events.filter(
       (event) =>
@@ -55,6 +69,11 @@ export function getEventLabel(event: RunStepTraceEvent) {
     "run.completed": "Run completed",
     "run.created": "Run created",
     "run.failed": "Run failed",
+    "skill.activated": "Skill activated",
+    "skill.retrieved": "Skills retrieved",
+    "skill.script.completed": "Skill script completed",
+    "skill.script.failed": "Skill script failed",
+    "skill.script.started": "Skill script started",
     "tool.error": "Tool error",
     "tool.input": "Tool input",
     "tool.output": "Tool output",
@@ -87,14 +106,29 @@ function buildTraceSteps(events: RunStepTraceEvent[]) {
     { id: string; label: string; status: "running" | "success" | "error"; toolName?: string }
   >();
   for (const event of events) {
-    if (event.type !== "tool.input" && event.type !== "tool.output" && event.type !== "tool.error") {
+    if (
+      event.type !== "tool.input" &&
+      event.type !== "tool.output" &&
+      event.type !== "tool.error" &&
+      event.type !== "skill.script.started" &&
+      event.type !== "skill.script.completed" &&
+      event.type !== "skill.script.failed"
+    ) {
       continue;
     }
-    const toolName = readString(event.payload.toolName) ?? event.stepId;
+    const toolName =
+      event.type.startsWith("skill.script.")
+        ? readString(event.payload.scriptName) ?? event.stepId
+        : readString(event.payload.toolName) ?? event.stepId;
     steps.set(event.stepId, {
       id: event.stepId,
       label: toolName,
-      status: event.type === "tool.error" ? "error" : event.type === "tool.output" ? "success" : "running",
+      status:
+        event.type === "tool.error" || event.type === "skill.script.failed"
+          ? "error"
+          : event.type === "tool.output" || event.type === "skill.script.completed"
+            ? "success"
+            : "running",
       toolName,
     });
   }
@@ -107,6 +141,15 @@ function isTraceArtifact(value: unknown): value is { id: string; type: string; t
       typeof value === "object" &&
       typeof (value as { id?: unknown }).id === "string" &&
       typeof (value as { type?: unknown }).type === "string"
+  );
+}
+
+function isTraceSkill(value: unknown): value is { id: string; name: string; purpose?: string } {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as { id?: unknown }).id === "string" &&
+      typeof (value as { name?: unknown }).name === "string"
   );
 }
 

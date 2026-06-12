@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CucumberAgentContext } from "../../context.ts";
 
 const mocks = vi.hoisted(() => ({
-  getDefaultAgentSkillDefinition: vi.fn(),
   resolveAgentModel: vi.fn(),
   runnerRun: vi.fn(),
 }));
@@ -30,12 +29,6 @@ vi.mock("@openai/agents", async () => {
   };
 });
 
-vi.mock("../../../supabase.ts", () => ({
-  getDefaultAgentSkillDefinition: (
-    input: Parameters<typeof mocks.getDefaultAgentSkillDefinition>[0]
-  ) => mocks.getDefaultAgentSkillDefinition(input),
-}));
-
 vi.mock("../../model-config.ts", () => ({
   resolveAgentModel: () => mocks.resolveAgentModel(),
 }));
@@ -44,23 +37,22 @@ const { expandImagePromptTool } = await import("./expand-image-prompt.tool.ts");
 
 describe("expand_image_prompt tool", () => {
   beforeEach(() => {
-    mocks.getDefaultAgentSkillDefinition.mockReset();
     mocks.resolveAgentModel.mockReset();
     mocks.runnerRun.mockReset();
   });
 
-  it("is enabled only when an enabled default image prompt skill exists", async () => {
-    const isEnabled = expandImagePromptTool.isEnabled as unknown as () => Promise<boolean>;
+  it("is enabled only when an image prompt skill is activated", async () => {
+    const isEnabled = expandImagePromptTool.isEnabled as unknown as (
+      runContext: RunContext<CucumberAgentContext>,
+      agent: unknown
+    ) => Promise<boolean>;
 
-    mocks.getDefaultAgentSkillDefinition.mockResolvedValueOnce(null);
-    await expect(isEnabled()).resolves.toBe(false);
+    await expect(isEnabled(new RunContext(agentContext({ activatedSkills: [] })), {})).resolves.toBe(false);
 
-    mocks.getDefaultAgentSkillDefinition.mockResolvedValueOnce(skill());
-    await expect(isEnabled()).resolves.toBe(true);
+    await expect(isEnabled(new RunContext(agentContext()), {})).resolves.toBe(true);
   });
 
-  it("runs the default skill and returns one expanded prompt", async () => {
-    mocks.getDefaultAgentSkillDefinition.mockResolvedValue(skill());
+  it("runs the activated skill and returns one expanded prompt", async () => {
     mocks.runnerRun.mockResolvedValue({
       finalOutput: "```text\n清爽黄瓜饮品海报，16:9 横版，自然光。\n```",
     });
@@ -92,7 +84,6 @@ describe("expand_image_prompt tool", () => {
   });
 
   it("propagates expander failures instead of returning fake success", async () => {
-    mocks.getDefaultAgentSkillDefinition.mockResolvedValue(skill());
     mocks.runnerRun.mockRejectedValue(new Error("model failed"));
 
     await expect(
@@ -106,16 +97,32 @@ describe("expand_image_prompt tool", () => {
 
 function skill() {
   return {
+    agentScope: "image",
+    bindings: { agents: [], tools: ["expand_image_prompt"] },
+    frontmatter: {},
     id: "skill-1",
     name: "imagegen-prompt-expander",
     description: "Expand compact prompts.",
     body: "Expand one image prompt.",
     enabled: true,
     isDefault: true,
+    packageBucket: null,
+    packagePath: null,
+    packageSha256: null,
+    packageSizeBytes: null,
+    purpose: "prompt_expansion",
+    reasons: ["test"],
+    score: 10,
+    scripts: [],
+    skillMd: "---\nname: imagegen-prompt-expander\n---\nBody",
+    tags: [],
+    triggers: { canvasKinds: [], keywords: [] },
   };
 }
 
-function agentContext(): CucumberAgentContext {
+function agentContext(
+  overrides: Partial<CucumberAgentContext> = {}
+): CucumberAgentContext {
   return {
     userId: "user-1",
     projectId: "project-1",
@@ -124,10 +131,13 @@ function agentContext(): CucumberAgentContext {
     canvasSnapshot: { nodes: [], edges: [] },
     selectedNodeIds: [],
     knownNodeIds: [],
+    activatedSkills: [skill()],
     producedArtifacts: [],
     pendingEvents: [],
     prompt: "黄瓜海报",
     selectedNodeId: null,
+    skillCandidates: [],
     upstreamContext: [],
+    ...overrides,
   };
 }

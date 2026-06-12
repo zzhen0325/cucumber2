@@ -1,18 +1,47 @@
 import { parse as parseYaml } from "yaml";
 
-export type AgentSkillScope = "image";
-export type AgentSkillPurpose = "prompt_expansion";
+export type AgentSkillScope = string;
+export type AgentSkillPurpose = string;
 export type AgentSkillSourceType = "manual" | "seed" | "zip";
 
+export type AgentSkillTriggers = {
+  keywords: string[];
+  canvasKinds: string[];
+};
+
+export type AgentSkillBindings = {
+  tools: string[];
+  agents: string[];
+};
+
+export type AgentSkillScriptRuntime = "node" | "python";
+
+export type AgentSkillScriptManifest = {
+  name: string;
+  path: string;
+  runtime: AgentSkillScriptRuntime;
+  description: string;
+  input?: unknown;
+  output?: unknown;
+};
+
 export type ParsedAgentSkill = {
+  agentScope: AgentSkillScope;
   body: string;
+  bindings: AgentSkillBindings;
   description: string;
   frontmatter: Record<string, unknown>;
   name: string;
+  purpose: AgentSkillPurpose;
+  scripts: AgentSkillScriptManifest[];
   skillMd: string;
+  tags: string[];
+  triggers: AgentSkillTriggers;
 };
 
 const skillNamePattern = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
+const scriptNamePattern = /^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$/;
+const frontmatterTokenPattern = /^[a-z0-9][a-z0-9_./:-]{0,79}$/i;
 
 export function parseAgentSkillMarkdown(markdown: string): ParsedAgentSkill {
   const skillMd = markdown.replace(/^\uFEFF/, "").trim();
@@ -36,9 +65,19 @@ export function parseAgentSkillMarkdown(markdown: string): ParsedAgentSkill {
 
   const name = readFrontmatterString(parsedFrontmatter, "name");
   const description = readFrontmatterString(parsedFrontmatter, "description");
+  const agentScope =
+    readFrontmatterString(parsedFrontmatter, "agent_scope") || "general";
+  const purpose =
+    readFrontmatterString(parsedFrontmatter, "purpose") || "general";
+  const tags = readStringArray(parsedFrontmatter.tags, "tags");
+  const triggers = parseTriggers(parsedFrontmatter.triggers);
+  const bindings = parseBindings(parsedFrontmatter.bindings);
+  const scripts = parseScripts(parsedFrontmatter.scripts);
   const body = lines.slice(closingIndex + 1).join("\n").trim();
 
   validateSkillName(name);
+  validateFrontmatterToken(agentScope, "agent_scope");
+  validateFrontmatterToken(purpose, "purpose");
   if (!description) {
     throw new Error("SKILL.md frontmatter must include description.");
   }
@@ -50,11 +89,17 @@ export function parseAgentSkillMarkdown(markdown: string): ParsedAgentSkill {
   }
 
   return {
+    agentScope,
     body,
+    bindings,
     description,
     frontmatter: parsedFrontmatter,
     name,
+    purpose,
+    scripts,
     skillMd,
+    tags,
+    triggers,
   };
 }
 
@@ -72,6 +117,159 @@ function readFrontmatterString(
 ) {
   const value = frontmatter[key];
   return typeof value === "string" ? value.trim() : "";
+}
+
+function parseTriggers(value: unknown): AgentSkillTriggers {
+  if (value === undefined || value === null) {
+    return { canvasKinds: [], keywords: [] };
+  }
+  if (!isRecord(value)) {
+    throw new Error("SKILL.md triggers must be a YAML object.");
+  }
+
+  return {
+    canvasKinds: readStringArray(
+      value.canvas_kinds ?? value.canvasKinds,
+      "triggers.canvas_kinds"
+    ),
+    keywords: readStringArray(value.keywords, "triggers.keywords"),
+  };
+}
+
+function parseBindings(value: unknown): AgentSkillBindings {
+  if (value === undefined || value === null) {
+    return { agents: [], tools: [] };
+  }
+  if (!isRecord(value)) {
+    throw new Error("SKILL.md bindings must be a YAML object.");
+  }
+
+  return {
+    agents: readStringArray(value.agents, "bindings.agents"),
+    tools: readStringArray(value.tools, "bindings.tools"),
+  };
+}
+
+function parseScripts(value: unknown): AgentSkillScriptManifest[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error("SKILL.md scripts must be a YAML array.");
+  }
+
+  const seenNames = new Set<string>();
+  return value.map((entry, index) => {
+    if (!isRecord(entry)) {
+      throw new Error(`SKILL.md scripts[${index}] must be a YAML object.`);
+    }
+
+    const name = readRequiredEntryString(entry, "name", `scripts[${index}].name`);
+    const scriptPath = normalizeScriptPath(
+      readRequiredEntryString(entry, "path", `scripts[${index}].path`)
+    );
+    const runtime = readRequiredEntryString(
+      entry,
+      "runtime",
+      `scripts[${index}].runtime`
+    );
+    const description = readRequiredEntryString(
+      entry,
+      "description",
+      `scripts[${index}].description`
+    );
+
+    if (!scriptNamePattern.test(name) || name.includes("__")) {
+      throw new Error(
+        `Script name ${name} must be 1-64 lowercase letters, numbers, underscores, or hyphens.`
+      );
+    }
+    if (seenNames.has(name)) {
+      throw new Error(`Duplicate script name ${name}.`);
+    }
+    seenNames.add(name);
+    if (runtime !== "node" && runtime !== "python") {
+      throw new Error(`Script ${name} runtime must be node or python.`);
+    }
+    validateScriptExtension(scriptPath, runtime);
+    if (description.length > 1024) {
+      throw new Error(`Script ${name} description must be 1024 characters or fewer.`);
+    }
+
+    return {
+      description,
+      input: entry.input,
+      name,
+      output: entry.output,
+      path: scriptPath,
+      runtime,
+    };
+  });
+}
+
+export function normalizeScriptPath(rawPath: string) {
+  const path = rawPath.trim().replace(/\\/g, "/");
+  const parts = path.split("/").filter(Boolean);
+  if (
+    !path ||
+    path.startsWith("/") ||
+    parts.includes("..") ||
+    parts.includes(".") ||
+    parts[0] !== "scripts"
+  ) {
+    throw new Error("Script path must stay under scripts/ without traversal.");
+  }
+  return parts.join("/");
+}
+
+function validateScriptExtension(path: string, runtime: string) {
+  if (runtime === "node" && !/\.(?:mjs|js)$/.test(path)) {
+    throw new Error("Node skill scripts must use .mjs or .js.");
+  }
+  if (runtime === "python" && !/\.py$/.test(path)) {
+    throw new Error("Python skill scripts must use .py.");
+  }
+}
+
+function readRequiredEntryString(
+  entry: Record<string, unknown>,
+  key: string,
+  label: string
+) {
+  const value = entry[key];
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`SKILL.md ${label} is required.`);
+  }
+  return value.trim();
+}
+
+function readStringArray(value: unknown, label: string) {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`SKILL.md ${label} must be an array of strings.`);
+  }
+
+  const result: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string" || !item.trim()) {
+      throw new Error(`SKILL.md ${label} must be an array of non-empty strings.`);
+    }
+    const normalized = item.trim();
+    if (!result.includes(normalized)) {
+      result.push(normalized);
+    }
+  }
+  return result;
+}
+
+function validateFrontmatterToken(value: string, label: string) {
+  if (!frontmatterTokenPattern.test(value)) {
+    throw new Error(
+      `SKILL.md ${label} must be 1-80 letters, numbers, underscores, dots, slashes, colons, or hyphens.`
+    );
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

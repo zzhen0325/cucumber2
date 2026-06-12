@@ -1,9 +1,9 @@
 import { Agent, Runner, tool } from "@openai/agents";
 import { z } from "zod";
 
-import { getDefaultAgentSkillDefinition } from "../../../supabase.ts";
 import type { CucumberAgentContext } from "../../context.ts";
 import { resolveAgentModel } from "../../model-config.ts";
+import type { ActivatedAgentSkill } from "../../skills/types.ts";
 
 const expandImagePromptInputSchema = z.object({
   prompt: z.string().min(1),
@@ -39,9 +39,9 @@ export const expandImagePromptTool = tool({
   parameters: expandImagePromptJsonSchema as never,
   strict: false,
   errorFunction: null,
-  isEnabled: async () => {
-    const skill = await getDefaultPromptExpansionSkill();
-    return Boolean(skill);
+  isEnabled: async ({ runContext }) => {
+    const context = requireCucumberContext(runContext.context);
+    return Boolean(getActivatedPromptExpansionSkill(context));
   },
   async execute(rawArgs, runContext, details) {
     const context = requireCucumberContext(runContext?.context);
@@ -54,11 +54,11 @@ export const expandImagePromptTool = tool({
       };
     }
 
-    const skill = await getDefaultPromptExpansionSkill();
+    const skill = getActivatedPromptExpansionSkill(context);
     if (!skill) {
       return {
         error:
-          "prompt_expansion_skill_missing: no enabled default image prompt-expansion skill is configured.",
+          "prompt_expansion_skill_missing: call activate_skill for an image prompt-expansion candidate before expand_image_prompt.",
       };
     }
 
@@ -137,11 +137,15 @@ function stripMarkdownFence(text: string) {
     .trim();
 }
 
-function getDefaultPromptExpansionSkill() {
-  return getDefaultAgentSkillDefinition({
-    agentScope: "image",
-    purpose: "prompt_expansion",
-  });
+function getActivatedPromptExpansionSkill(
+  context: CucumberAgentContext
+): ActivatedAgentSkill | undefined {
+  return context.activatedSkills.find(
+    (skill) =>
+      skill.agentScope === "image" &&
+      (skill.purpose === "prompt_expansion" ||
+        skill.bindings.tools.includes("expand_image_prompt"))
+  );
 }
 
 function requireCucumberContext(context: unknown): CucumberAgentContext {

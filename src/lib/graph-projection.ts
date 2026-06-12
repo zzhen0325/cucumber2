@@ -614,6 +614,22 @@ function buildRunSummaryItems(events: RunStepTraceEvent[]): RunSummaryItem[] {
     });
   }
 
+  const skills = events.flatMap((event) => {
+    if (event.type !== "skill.activated") {
+      return [];
+    }
+    const skill = readRecord(event.payload.skill);
+    const name = readString(skill?.name);
+    return name ? [name] : [];
+  });
+  if (skills.length) {
+    items.push({
+      kind: "skill",
+      label: "技能",
+      detail: [...new Set(skills)].join("，"),
+    });
+  }
+
   const artifactTypes = events.flatMap((event) => {
     if (event.type !== "artifact.created") {
       return [];

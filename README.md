@@ -8,9 +8,9 @@ Infinite Canvas Agent Run MVP。前端使用 Vite、React、TypeScript、React F
 
 - API：`POST /api/agent-run`；停止运行使用同一路径的 `DELETE` 方法
 - 实现：`server/agent/`
-- 编排：Manager 通过 Agents SDK handoff 委派给 Image Agent
-- 图片工具：`expand_image_prompt` 按默认技能扩写短提示词，`generate_image` 调用 Seedream 生成图片，`upscale_image` 调用 Seedream 智能超清
-- 技能系统：`agent_skill_definitions` 存储全局 Agent Skill；当前只支持 Image Agent 的 instruction-only prompt expansion skill
+- 编排：每次运行创建独立 Manager/Image Agent；Manager 通过 Agents SDK handoff 委派给 Image Agent
+- 图片工具：`expand_image_prompt` 只使用已激活的 image prompt-expansion skill，`generate_image` 调用 Seedream 生成图片，`upscale_image` 调用 Seedream 智能超清
+- Agent OS 技能流：服务端从持久化画布重建可信上下文，检索启用技能的 metadata，首轮只注入 skill cards；模型必须调用 `activate_skill` 才能读取完整 `SKILL.md`，脚本只能通过 `run_skill_script` 执行
 - 画布变更：Agent 只能提出 `CanvasOperation`，由 runtime policy 校验后投影到画布
 - 流协议：AI SDK UI `createUIMessageStream` + `data-runtime-event`
 
@@ -64,8 +64,10 @@ pnpm dev
 对象存储：
 
 - bucket：`agent-assets`，private，单文件上限 50MB
+- bucket：`agent-skill-packages`，private，单包上限 5MB，仅存储导入的技能 zip 包
 - 用户上传路径：`projects/{projectId}/uploads/{uploadId}/{fileName}`
 - 生成图片路径：`projects/{projectId}/runs/{runNodeId}/artifacts/{artifactId}.{ext}`
+- 技能包路径：`skills/{skillName}/{sha256}.zip`
 - 画布只保存 `/api/projects/:projectId/artifacts/:artifactId/content` 和 `supabase://agent-assets/...` 稳定引用；实际读取由服务端校验权限后签发短期 URL。
 - 画布保存使用 `canvasPatch` 增量写入 `nodes/edges` JSON；打开项目仍读取完整快照。
 
@@ -89,6 +91,18 @@ pnpm dev
 - `DELETE /api/agent-run?projectId=...&runNodeId=...`
 
 已删除 `/api/agent-run-v2`、`/api/model-providers` 和全部旧 `/api/skills`。新 `/api/agent-skills` 属于当前 OpenAI Agents SDK runtime，不恢复 Agent v1 Skill 栈。
+
+## Agent Skill Contract
+
+`SKILL.md` 必须包含 YAML frontmatter：
+
+- 必填：`name`、`description`
+- 可选：`agent_scope`、`purpose`、`tags`、`triggers.keywords`、`triggers.canvas_kinds`、`bindings.tools`、`bindings.agents`
+- 可选脚本：`scripts[]`，每项声明 `name`、`path`、`runtime: node|python`、`description`、JSON input/output 期望
+
+zip 导入只接受一个 `SKILL.md` 和声明过的 `scripts/**/*.mjs|*.js|*.py`，拒绝路径穿越、未声明脚本、重复脚本名、超 5MB 包和不支持文件。脚本从 `agent-skill-packages` 下载，校验 SHA-256 后在临时目录中通过 `sandbox-exec` 执行，JSON stdin/stdout，15 秒超时，空 secret 环境；没有 sandbox 支持时直接失败并写入 Trace。
+
+Trace 新增 `skill.retrieved`、`skill.activated`、`skill.script.started`、`skill.script.completed`、`skill.script.failed`。Run Trace 面板显示 Skills 区；Run 节点摘要只显示技能名称，不展示 package path。
 
 ## Validation
 

@@ -308,8 +308,11 @@ function getToolName(toolPart: CanvasToolPart) {
   const names: Record<string, string> = {
     "tool-expand_image_prompt": "扩写提示词",
     "tool-generate_image": "生成图片",
+    "tool-activate_skill": "激活技能",
     "tool-propose_canvas_operations": "更新画布",
+    "tool-run_skill_script": "运行技能脚本",
     "tool-runtime": "运行错误",
+    "tool-upscale_image": "高清放大",
   };
 
   return names[toolPart.type] ?? toolPart.type.replace(/^tool-/, "");

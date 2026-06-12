@@ -84,6 +84,19 @@ export function RunTracePanel({
             <EventList events={[...summary.agents, ...summary.handoffs]} />
           </TraceSection>
 
+          <TraceSection title="Skills">
+            <div className="trace-chip-row">
+              {summary.skills.map((skill) => (
+                <span className="trace-chip" key={skill.id}>
+                  {skill.name}
+                  {skill.purpose ? ` · ${skill.purpose}` : ""}
+                </span>
+              ))}
+              {!summary.skills.length && <span className="trace-muted">无</span>}
+            </div>
+            <EventList events={summary.skillEvents} />
+          </TraceSection>
+
           <TraceSection title="Tools">
             <div className="trace-step-list">
               {summary.steps.map((step) => (

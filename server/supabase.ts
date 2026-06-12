@@ -12,9 +12,12 @@ import type {
 } from "../src/types/canvas.ts";
 import type { AgentEvent, AgentEventType } from "../src/types/runtime.ts";
 import type {
+  AgentSkillBindings,
   AgentSkillPurpose,
   AgentSkillScope,
+  AgentSkillScriptManifest,
   AgentSkillSourceType,
+  AgentSkillTriggers,
 } from "./agent/skills/skill-parser.ts";
 
 export type AppUser = {
@@ -93,6 +96,14 @@ export type AgentSkillDefinitionSummary = {
   description: string;
   agentScope: AgentSkillScope;
   purpose: AgentSkillPurpose;
+  tags: string[];
+  triggers: AgentSkillTriggers;
+  bindings: AgentSkillBindings;
+  scripts: AgentSkillScriptManifest[];
+  packageBucket: string | null;
+  packagePath: string | null;
+  packageSha256: string | null;
+  packageSizeBytes: number | null;
   enabled: boolean;
   isDefault: boolean;
   sourceType: AgentSkillSourceType;
@@ -134,16 +145,24 @@ type UpdateProjectInput = {
 type SaveAgentSkillDefinitionInput = {
   agentScope?: AgentSkillScope;
   body: string;
+  bindings?: AgentSkillBindings;
   createdBy?: string | null;
   description: string;
   enabled?: boolean;
   frontmatter: Record<string, unknown>;
   isDefault?: boolean;
   name: string;
+  packageBucket?: string | null;
+  packagePath?: string | null;
+  packageSha256?: string | null;
+  packageSizeBytes?: number | null;
   purpose?: AgentSkillPurpose;
+  scripts?: AgentSkillScriptManifest[];
   skillMd: string;
   sourceManifest?: Record<string, unknown>;
   sourceType?: AgentSkillSourceType;
+  tags?: string[];
+  triggers?: AgentSkillTriggers;
 };
 
 type UpdateAgentSkillDefinitionInput = Partial<SaveAgentSkillDefinitionInput> & {
@@ -233,6 +252,14 @@ type AgentSkillDefinitionRow = {
   frontmatter: Record<string, unknown> | null;
   agent_scope: AgentSkillScope;
   purpose: AgentSkillPurpose;
+  tags: string[] | null;
+  triggers: AgentSkillTriggers | null;
+  bindings: AgentSkillBindings | null;
+  scripts: AgentSkillScriptManifest[] | null;
+  package_bucket: string | null;
+  package_path: string | null;
+  package_sha256: string | null;
+  package_size_bytes: number | null;
   enabled: boolean;
   is_default: boolean;
   source_type: AgentSkillSourceType;
@@ -603,8 +630,8 @@ export async function getDefaultAgentSkillDefinition({
 export async function createAgentSkillDefinition(
   input: SaveAgentSkillDefinitionInput
 ) {
-  const agentScope = input.agentScope ?? "image";
-  const purpose = input.purpose ?? "prompt_expansion";
+  const agentScope = input.agentScope ?? "general";
+  const purpose = input.purpose ?? "general";
   const enabled = input.isDefault ? true : input.enabled ?? true;
 
   if (input.isDefault) {
@@ -617,16 +644,24 @@ export async function createAgentSkillDefinition(
     .insert({
       agent_scope: agentScope,
       body: input.body,
+      bindings: input.bindings ?? { agents: [], tools: [] },
       created_by: input.createdBy ?? null,
       description: input.description,
       enabled,
       frontmatter: input.frontmatter,
       is_default: input.isDefault ?? false,
       name: input.name,
+      package_bucket: input.packageBucket ?? null,
+      package_path: input.packagePath ?? null,
+      package_sha256: input.packageSha256 ?? null,
+      package_size_bytes: input.packageSizeBytes ?? null,
       purpose,
+      scripts: input.scripts ?? [],
       skill_md: input.skillMd,
       source_manifest: input.sourceManifest ?? {},
       source_type: input.sourceType ?? "manual",
+      tags: input.tags ?? [],
+      triggers: input.triggers ?? { canvasKinds: [], keywords: [] },
     })
     .select()
     .single<AgentSkillDefinitionRow>();
@@ -654,15 +689,25 @@ export async function updateAgentSkillDefinition(
   };
 
   if (input.body !== undefined) payload.body = input.body;
+  if (input.bindings !== undefined) payload.bindings = input.bindings;
   if (input.description !== undefined) payload.description = input.description;
   if (input.enabled !== undefined) payload.enabled = input.enabled;
   if (input.frontmatter !== undefined) payload.frontmatter = input.frontmatter;
   if (input.name !== undefined) payload.name = input.name;
+  if (input.packageBucket !== undefined) payload.package_bucket = input.packageBucket;
+  if (input.packagePath !== undefined) payload.package_path = input.packagePath;
+  if (input.packageSha256 !== undefined) payload.package_sha256 = input.packageSha256;
+  if (input.packageSizeBytes !== undefined) {
+    payload.package_size_bytes = input.packageSizeBytes;
+  }
+  if (input.scripts !== undefined) payload.scripts = input.scripts;
   if (input.skillMd !== undefined) payload.skill_md = input.skillMd;
   if (input.sourceManifest !== undefined) {
     payload.source_manifest = input.sourceManifest;
   }
   if (input.sourceType !== undefined) payload.source_type = input.sourceType;
+  if (input.tags !== undefined) payload.tags = input.tags;
+  if (input.triggers !== undefined) payload.triggers = input.triggers;
 
   if (input.enabled === false) {
     payload.is_default = false;
@@ -1083,15 +1128,23 @@ function mapAgentSkillDefinitionSummaryRow(
   return {
     id: row.id,
     agentScope: row.agent_scope,
+    bindings: row.bindings ?? { agents: [], tools: [] },
     createdAt: row.created_at,
     createdBy: row.created_by,
     description: row.description,
     enabled: row.enabled,
     isDefault: row.is_default,
     name: row.name,
+    packageBucket: null,
+    packagePath: null,
+    packageSha256: row.package_sha256 ?? null,
+    packageSizeBytes: row.package_size_bytes ?? null,
     purpose: row.purpose,
+    scripts: row.scripts ?? [],
     sourceManifest: row.source_manifest ?? {},
     sourceType: row.source_type,
+    tags: row.tags ?? [],
+    triggers: row.triggers ?? { canvasKinds: [], keywords: [] },
     updatedAt: row.updated_at,
   };
 }
@@ -1103,6 +1156,8 @@ function mapAgentSkillDefinitionRow(
     ...mapAgentSkillDefinitionSummaryRow(row),
     body: row.body,
     frontmatter: row.frontmatter ?? {},
+    packageBucket: row.package_bucket ?? null,
+    packagePath: row.package_path ?? null,
     skillMd: row.skill_md,
   };
 }

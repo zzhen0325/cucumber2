@@ -131,12 +131,14 @@ description: Expand compact prompts.
 Return one expanded image prompt.
 `;
   return {
+    agentScope: "image" as const,
     body: `# ${name}\n\nReturn one expanded image prompt.`,
     description: "Expand compact prompts.",
     enabled: true,
     frontmatter: { description: "Expand compact prompts.", name },
     isDefault: true,
     name,
+    purpose: "prompt_expansion" as const,
     skillMd,
     sourceType: "manual" as const,
   };

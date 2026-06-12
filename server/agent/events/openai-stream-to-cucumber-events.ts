@@ -120,6 +120,9 @@ export async function* openAIStreamToCucumberEvents(
       });
     } catch (error) {
       const message = getAgentErrorMessage(error);
+      for (const pending of drainPendingEvents(context)) {
+        push(pending);
+      }
       for (const [toolCallId, tool] of activeTools) {
         push({
           type: "tool_failed",

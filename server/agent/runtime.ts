@@ -1,8 +1,8 @@
-import { Agent, Runner } from "@openai/agents";
+import { Runner } from "@openai/agents";
 
 import type { AgentEvent } from "../../src/types/runtime.ts";
 import type { CanvasOperation } from "../../src/types/runtime.ts";
-import { managerAgent } from "./agents/manager.agent.ts";
+import { createManagerAgent } from "./agents/manager.agent.ts";
 import {
   buildAgentRunInput,
   buildCucumberAgentContext,
@@ -22,21 +22,18 @@ import {
   shouldMaterializeRunEvent,
 } from "./materialize-run.ts";
 import { resolveAgentModel } from "./model-config.ts";
+import { retrieveRelevantAgentSkills } from "./skills/skill-retrieval.ts";
 
 const runner = new Runner({ workflowName: "Cucumber Agent" });
 
 export class OpenAIAgentsRuntime implements AgentRuntime {
   async *run(input: AgentRunInput): AsyncIterable<CucumberRunEvent> {
     const context = buildCucumberAgentContext(input);
+    context.skillCandidates = await retrieveRelevantAgentSkills(input);
+    yield { type: "skill_retrieved", candidates: context.skillCandidates };
+
     const model = resolveAgentModel();
-    if (model) {
-      managerAgent.model = model;
-      for (const handoff of managerAgent.handoffs) {
-        if (handoff instanceof Agent) {
-          handoff.model = model;
-        }
-      }
-    }
+    const managerAgent = createManagerAgent({ model });
 
     const stream = await runner.run(managerAgent, buildManagerRunPrompt(input), {
       context,
@@ -134,6 +131,75 @@ export async function executeAgentRun({
           stepId: "agent",
           type: "agent.active",
           payload: { agentName: event.agentName, runtime: "openai-agents-sdk" },
+        });
+        continue;
+      }
+
+      if (event.type === "skill_retrieved") {
+        await writeRunEvent({
+          projectId: input.projectId,
+          runNodeId: input.runNodeId,
+          stepId: "skill-retrieval",
+          type: "skill.retrieved",
+          payload: {
+            candidates: event.candidates.map((skill) => ({
+              agentScope: skill.agentScope,
+              bindings: skill.bindings,
+              description: skill.description,
+              id: skill.id,
+              isDefault: skill.isDefault,
+              name: skill.name,
+              purpose: skill.purpose,
+              reasons: skill.reasons,
+              score: skill.score,
+              scripts: skill.scripts,
+              tags: skill.tags,
+              triggers: skill.triggers,
+            })),
+            runtime: "openai-agents-sdk",
+          },
+        });
+        continue;
+      }
+
+      if (event.type === "skill_activated") {
+        await writeRunEvent({
+          projectId: input.projectId,
+          runNodeId: input.runNodeId,
+          stepId: "activate_skill",
+          type: "skill.activated",
+          payload: {
+            runtime: "openai-agents-sdk",
+            skill: event.skill,
+          },
+        });
+        continue;
+      }
+
+      if (
+        event.type === "skill_script_started" ||
+        event.type === "skill_script_completed" ||
+        event.type === "skill_script_failed"
+      ) {
+        await writeRunEvent({
+          projectId: input.projectId,
+          runNodeId: input.runNodeId,
+          stepId: `skill-script:${event.scriptName}`,
+          type:
+            event.type === "skill_script_started"
+              ? "skill.script.started"
+              : event.type === "skill_script_completed"
+                ? "skill.script.completed"
+                : "skill.script.failed",
+          payload: {
+            input: "input" in event ? event.input : undefined,
+            output: "output" in event ? event.output : undefined,
+            runtime: "openai-agents-sdk",
+            scriptName: event.scriptName,
+            skillId: event.skillId,
+            skillName: event.skillName,
+          },
+          errorText: "message" in event ? event.message : undefined,
         });
         continue;
       }

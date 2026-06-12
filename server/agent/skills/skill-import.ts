@@ -1,28 +1,35 @@
+import { createHash } from "node:crypto";
 import path from "node:path";
 import JSZip from "jszip";
 
-import { parseAgentSkillMarkdown, type ParsedAgentSkill } from "./skill-parser.ts";
+import {
+  normalizeScriptPath,
+  parseAgentSkillMarkdown,
+  type AgentSkillScriptManifest,
+  type ParsedAgentSkill,
+} from "./skill-parser.ts";
 
 export type ImportedAgentSkill = ParsedAgentSkill & {
+  packageBytes: Uint8Array;
+  packageSha256: string;
+  packageSizeBytes: number;
   sourceManifest: Record<string, unknown>;
 };
+
+export const MAX_AGENT_SKILL_PACKAGE_BYTES = 5 * 1024 * 1024;
 
 export async function importAgentSkillZip(
   bytes: Buffer | Uint8Array,
   fileName: string
 ): Promise<ImportedAgentSkill> {
+  assertPackageSize(bytes.byteLength);
   const zip = await JSZip.loadAsync(bytes);
   const entries = Object.values(zip.files);
   const visibleFiles = entries.filter(
     (entry) => !entry.dir && !isIgnoredZipPath(entry.name)
   );
-  const scriptFiles = visibleFiles.filter((entry) =>
-    entry.name.split("/").includes("scripts")
-  );
-  if (scriptFiles.length) {
-    throw new Error(
-      "Skill packages with scripts are not supported yet. Remove scripts/ before importing."
-    );
+  for (const entry of visibleFiles) {
+    assertSafeZipPath(entry.name);
   }
 
   const skillFiles = visibleFiles.filter(
@@ -39,16 +46,112 @@ export async function importAgentSkillZip(
   const skillEntry = skillFiles[0];
   const markdown = await skillEntry.async("string");
   const parsed = parseAgentSkillMarkdown(markdown);
+  const rootPrefix = getRootPrefix(skillEntry.name);
+  const declaredScripts = new Map(parsed.scripts.map((script) => [script.path, script]));
+
+  validateVisibleFiles({
+    declaredScripts,
+    rootPrefix,
+    skillPath: skillEntry.name,
+    visibleFiles: visibleFiles.map((entry) => entry.name),
+  });
+
+  const packageBytes = toUint8Array(bytes);
+  const packageSha256 = createHash("sha256").update(packageBytes).digest("hex");
 
   return {
     ...parsed,
+    packageBytes,
+    packageSha256,
+    packageSizeBytes: packageBytes.byteLength,
     sourceManifest: {
       fileCount: visibleFiles.length,
       fileName,
+      packageSha256,
+      packageSizeBytes: packageBytes.byteLength,
+      scripts: summarizeScripts(parsed.scripts),
       skillPath: skillEntry.name,
       source: "zip",
     },
   };
+}
+
+function validateVisibleFiles({
+  declaredScripts,
+  rootPrefix,
+  skillPath,
+  visibleFiles,
+}: {
+  declaredScripts: Map<string, AgentSkillScriptManifest>;
+  rootPrefix: string;
+  skillPath: string;
+  visibleFiles: string[];
+}) {
+  const normalizedVisible = new Set(visibleFiles.map((file) => normalizeZipPath(file)));
+  const scriptPaths = new Set<string>();
+
+  for (const file of normalizedVisible) {
+    if (file === skillPath) {
+      continue;
+    }
+
+    if (!file.startsWith(rootPrefix)) {
+      throw new Error("Skill zip files must stay under the SKILL.md package root.");
+    }
+
+    const relativePath = file.slice(rootPrefix.length);
+    const normalizedScriptPath = normalizeScriptPath(relativePath);
+    if (!declaredScripts.has(normalizedScriptPath)) {
+      throw new Error(`Skill script ${relativePath} is not declared in SKILL.md.`);
+    }
+    scriptPaths.add(normalizedScriptPath);
+  }
+
+  for (const script of declaredScripts.values()) {
+    const packagePath = `${rootPrefix}${script.path}`;
+    if (!normalizedVisible.has(packagePath) || !scriptPaths.has(script.path)) {
+      throw new Error(`Declared script ${script.path} is missing from the zip.`);
+    }
+  }
+}
+
+function assertPackageSize(sizeBytes: number) {
+  if (sizeBytes > MAX_AGENT_SKILL_PACKAGE_BYTES) {
+    throw new Error("Skill package exceeds the 5MB package limit.");
+  }
+}
+
+function assertSafeZipPath(rawPath: string) {
+  const normalized = normalizeZipPath(rawPath);
+  const parts = normalized.split("/").filter(Boolean);
+  if (
+    rawPath.includes("\\") ||
+    normalized.startsWith("/") ||
+    parts.includes("..") ||
+    parts.includes(".")
+  ) {
+    throw new Error("Skill zip contains an unsafe path.");
+  }
+}
+
+function normalizeZipPath(rawPath: string) {
+  return rawPath.replace(/\\/g, "/").split("/").filter(Boolean).join("/");
+}
+
+function getRootPrefix(skillPath: string) {
+  const normalized = normalizeZipPath(skillPath);
+  const dirname = path.posix.dirname(normalized);
+  return dirname === "." ? "" : `${dirname}/`;
+}
+
+function summarizeScripts(scripts: AgentSkillScriptManifest[]) {
+  return scripts.map(({ description, input, name, output, runtime }) => ({
+    description,
+    input,
+    name,
+    output,
+    runtime,
+  }));
 }
 
 function isIgnoredZipPath(rawPath: string) {
@@ -56,4 +159,11 @@ function isIgnoredZipPath(rawPath: string) {
   return parts.some(
     (part) => part === "__MACOSX" || part === ".DS_Store" || part.startsWith("._")
   );
+}
+
+function toUint8Array(bytes: Buffer | Uint8Array) {
+  if (bytes instanceof Buffer) {
+    return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  }
+  return bytes;
 }

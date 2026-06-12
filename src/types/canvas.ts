@@ -107,7 +107,7 @@ export type RunStepTimelineItem = {
 };
 
 export type RunSummaryItem = {
-  kind: "agent" | "handoff" | "artifact" | "canvas";
+  kind: "agent" | "handoff" | "skill" | "artifact" | "canvas";
   label: string;
   detail?: string;
 };

@@ -65,6 +65,7 @@ import {
   completeSignedAssetUpload,
   MAX_AGENT_ASSET_BYTES,
   resolveStorageBackedImageContext,
+  storeAgentSkillPackage,
   storeGeneratedImageFromUrl,
 } from "./storage.ts";
 
@@ -146,16 +147,14 @@ const imageUpscaleSchema = z.object({
   sourceNodeId: z.string().trim().min(1).max(260),
 });
 
-const skillDefinitionScopeSchema = z.enum(["image"]).default("image");
-const skillDefinitionPurposeSchema = z
-  .enum(["prompt_expansion"])
-  .default("prompt_expansion");
+const skillDefinitionScopeSchema = z.string().trim().min(1).max(80);
+const skillDefinitionPurposeSchema = z.string().trim().min(1).max(80);
 
 const skillCreateSchema = z.object({
-  agentScope: skillDefinitionScopeSchema,
+  agentScope: skillDefinitionScopeSchema.optional(),
   enabled: z.boolean().default(true),
   isDefault: z.boolean().default(false),
-  purpose: skillDefinitionPurposeSchema,
+  purpose: skillDefinitionPurposeSchema.optional(),
   skillMd: z.string().trim().min(1).max(60_000),
 });
 
@@ -298,19 +297,26 @@ app.post("/api/agent-skills", async (c) => {
 
   const input = skillCreateSchema.parse(await c.req.json());
   const parsed = parseAgentSkillMarkdown(input.skillMd);
+  if (parsed.scripts.length) {
+    return c.json({ error: "带脚本的技能必须通过 zip 包导入。" }, 400);
+  }
   const skill = await createAgentSkillDefinition({
-    agentScope: input.agentScope,
+    agentScope: input.agentScope ?? parsed.agentScope,
     body: parsed.body,
+    bindings: parsed.bindings,
     createdBy: user.id,
     description: parsed.description,
     enabled: input.enabled,
     frontmatter: parsed.frontmatter,
     isDefault: input.isDefault,
     name: parsed.name,
-    purpose: input.purpose,
+    purpose: input.purpose ?? parsed.purpose,
+    scripts: parsed.scripts,
     skillMd: parsed.skillMd,
     sourceManifest: { source: "manual" },
     sourceType: "manual",
+    tags: parsed.tags,
+    triggers: parsed.triggers,
   });
 
   return c.json({ skill });
@@ -327,19 +333,35 @@ app.post("/api/agent-skills/import", async (c) => {
     Buffer.from(input.zipBase64, "base64"),
     input.fileName
   );
+  const packageLocation = await storeAgentSkillPackage({
+    bytes: imported.packageBytes,
+    packageSha256: imported.packageSha256,
+    skillName: imported.name,
+  });
   const skill = await upsertAgentSkillDefinitionByName({
-    agentScope: "image",
+    agentScope: imported.agentScope,
     body: imported.body,
+    bindings: imported.bindings,
     createdBy: user.id,
     description: imported.description,
     enabled: input.enabled,
     frontmatter: imported.frontmatter,
     isDefault: input.isDefault,
     name: imported.name,
-    purpose: "prompt_expansion",
+    packageBucket: packageLocation.bucket,
+    packagePath: packageLocation.path,
+    packageSha256: imported.packageSha256,
+    packageSizeBytes: imported.packageSizeBytes,
+    purpose: imported.purpose,
+    scripts: imported.scripts,
     skillMd: imported.skillMd,
-    sourceManifest: imported.sourceManifest,
+    sourceManifest: {
+      ...imported.sourceManifest,
+      packageBucket: packageLocation.bucket,
+    },
     sourceType: "zip",
+    tags: imported.tags,
+    triggers: imported.triggers,
   });
 
   return c.json({ skill });
@@ -354,19 +376,26 @@ app.patch("/api/agent-skills/:skillId", async (c) => {
   const skillId = z.string().uuid().parse(c.req.param("skillId"));
   const input = skillUpdateSchema.parse(await c.req.json());
   const parsed = input.skillMd ? parseAgentSkillMarkdown(input.skillMd) : null;
+  if (parsed?.scripts.length) {
+    return c.json({ error: "带脚本的技能必须通过 zip 包导入。" }, 400);
+  }
   const skill = await updateAgentSkillDefinition({
     id: skillId,
-    agentScope: input.agentScope,
+    agentScope: input.agentScope ?? parsed?.agentScope,
     body: parsed?.body,
+    bindings: parsed?.bindings,
     description: parsed?.description,
     enabled: input.enabled,
     frontmatter: parsed?.frontmatter,
     isDefault: input.isDefault,
     name: parsed?.name,
-    purpose: input.purpose,
+    purpose: input.purpose ?? parsed?.purpose,
+    scripts: parsed?.scripts,
     skillMd: parsed?.skillMd,
     sourceManifest: parsed ? { source: "manual_edit" } : undefined,
     sourceType: parsed ? "manual" : undefined,
+    tags: parsed?.tags,
+    triggers: parsed?.triggers,
   });
   if (!skill) {
     return c.json({ error: "Skill 不存在" }, 404);

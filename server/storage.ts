@@ -12,7 +12,9 @@ import {
 } from "./supabase.ts";
 
 export const AGENT_ASSETS_BUCKET = "agent-assets";
+export const AGENT_SKILL_PACKAGES_BUCKET = "agent-skill-packages";
 export const MAX_AGENT_ASSET_BYTES = 50 * 1024 * 1024;
+export const MAX_AGENT_SKILL_PACKAGE_BYTES = 5 * 1024 * 1024;
 export const SIGNED_ASSET_READ_TTL_SECONDS = 10 * 60;
 
 export type UploadAssetKind =
@@ -56,6 +58,12 @@ type StoreGeneratedImageInput = {
   sourceNodeId?: string | null;
   metadata?: Record<string, unknown>;
   signal?: AbortSignal;
+};
+
+type StoreAgentSkillPackageInput = {
+  bytes: Uint8Array;
+  packageSha256: string;
+  skillName: string;
 };
 
 export function getStorageContentRef(bucket: string, path: string) {
@@ -234,6 +242,57 @@ export async function storeGeneratedImageFromUrl(
   return toArtifactRef(record);
 }
 
+export async function storeAgentSkillPackage(input: StoreAgentSkillPackageInput) {
+  assertAllowedSkillPackageSize(input.bytes.byteLength);
+  const path = `skills/${sanitizePathSegment(input.skillName)}/${input.packageSha256}.zip`;
+  const { error } = await getSupabaseClient()
+    .storage
+    .from(AGENT_SKILL_PACKAGES_BUCKET)
+    .upload(path, input.bytes, {
+      cacheControl: "31536000",
+      contentType: "application/zip",
+      upsert: true,
+    });
+
+  if (error) {
+    throw error;
+  }
+
+  return {
+    bucket: AGENT_SKILL_PACKAGES_BUCKET,
+    path,
+  };
+}
+
+export async function downloadAgentSkillPackage({
+  bucket,
+  path,
+}: {
+  bucket: string;
+  path: string;
+}) {
+  if (bucket !== AGENT_SKILL_PACKAGES_BUCKET) {
+    throw new Error("Skill package bucket is not allowed.");
+  }
+
+  const { data, error } = await getSupabaseClient()
+    .storage
+    .from(bucket)
+    .download(path);
+
+  if (error) {
+    throw error;
+  }
+  if (!data) {
+    throw new Error("Supabase did not return skill package bytes.");
+  }
+
+  const arrayBuffer = await data.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuffer);
+  assertAllowedSkillPackageSize(bytes.byteLength);
+  return bytes;
+}
+
 function getGeneratedImageStoragePrefix(input: StoreGeneratedImageInput) {
   if (input.runNodeId) {
     return `projects/${input.projectId}/runs/${sanitizePathSegment(
@@ -339,6 +398,15 @@ function assertAllowedAssetSize(sizeBytes: number) {
   }
   if (sizeBytes > MAX_AGENT_ASSET_BYTES) {
     throw new Error("Asset exceeds the 50MB upload limit.");
+  }
+}
+
+function assertAllowedSkillPackageSize(sizeBytes: number) {
+  if (!Number.isFinite(sizeBytes) || sizeBytes < 0) {
+    throw new Error("Skill package size is invalid.");
+  }
+  if (sizeBytes > MAX_AGENT_SKILL_PACKAGE_BYTES) {
+    throw new Error("Skill package exceeds the 5MB package limit.");
   }
 }
 

@@ -64,8 +64,16 @@ function withDefaults(table: string, value: Row): Row {
     if (row.created_by === undefined) row.created_by = null;
   }
   if (table === "agent_skill_definitions") {
-    if (row.agent_scope === undefined) row.agent_scope = "image";
-    if (row.purpose === undefined) row.purpose = "prompt_expansion";
+    if (row.agent_scope === undefined) row.agent_scope = "general";
+    if (row.purpose === undefined) row.purpose = "general";
+    if (row.tags == null) row.tags = [];
+    if (row.triggers == null) row.triggers = { canvasKinds: [], keywords: [] };
+    if (row.bindings == null) row.bindings = { agents: [], tools: [] };
+    if (row.scripts == null) row.scripts = [];
+    if (row.package_bucket === undefined) row.package_bucket = null;
+    if (row.package_path === undefined) row.package_path = null;
+    if (row.package_sha256 === undefined) row.package_sha256 = null;
+    if (row.package_size_bytes === undefined) row.package_size_bytes = null;
     if (row.enabled === undefined) row.enabled = true;
     if (row.is_default === undefined) row.is_default = false;
     if (row.source_type === undefined) row.source_type = "manual";
@@ -372,6 +380,38 @@ class InMemoryStorageBucket {
     return {
       data: {
         signedUrl: `http://127.0.0.1/__inmemory-storage/${this.bucket}/${encodeURIComponent(path)}?signed=1`,
+      },
+      error: null,
+    };
+  }
+
+  async download(path: string) {
+    const object = this.objects.get(this.key(path));
+    if (!object) {
+      return { data: null, error: new Error("Object not found") };
+    }
+
+    return {
+      data: {
+        async arrayBuffer() {
+          if (object.body instanceof Uint8Array) {
+            return object.body.buffer.slice(
+              object.body.byteOffset,
+              object.body.byteOffset + object.body.byteLength
+            );
+          }
+          if (object.body instanceof ArrayBuffer) {
+            return object.body;
+          }
+          if (typeof object.body === "string") {
+            const buffer = Buffer.from(object.body);
+            return buffer.buffer.slice(
+              buffer.byteOffset,
+              buffer.byteOffset + buffer.byteLength
+            );
+          }
+          return new ArrayBuffer(0);
+        },
       },
       error: null,
     };

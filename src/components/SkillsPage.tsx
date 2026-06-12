@@ -27,15 +27,26 @@ import {
 import { cn, formatDate } from "@/lib/utils";
 
 const NEW_SKILL_TEMPLATE = `---
-name: imagegen-prompt-expander
-description: Expand short image-generation ideas into polished visual prompts for the Image Agent.
+name: canvas-helper
+description: Help the Manager reason about a focused canvas workflow.
+agent_scope: general
+purpose: canvas
+tags:
+  - canvas
+triggers:
+  keywords:
+    - canvas
+  canvas_kinds:
+    - prompt
+bindings:
+  tools:
+    - propose_canvas_operations
+  agents: []
 ---
 
-# Imagegen Prompt Expander
+# Canvas Helper
 
-Expand a compact user image request into one complete image-generation prompt.
-
-Return only the expanded prompt. Include subject, composition, medium/style, lighting, palette, mood, background, quality details, and any constraints that preserve the user's original intent.
+Follow the user's request and keep all canvas changes proposal-first.
 `;
 
 type DraftState = {
@@ -271,7 +282,7 @@ export function SkillsPage({ className }: SkillsPageProps) {
             技能
           </h1>
           <p className="mt-1 text-xs text-muted-foreground">
-            全局 Image Agent 技能
+            Agent OS 全局技能
           </p>
         </div>
 
@@ -379,7 +390,7 @@ export function SkillsPage({ className }: SkillsPageProps) {
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
                 {isNew
-                  ? "保存后可被 Image Agent 调用"
+                  ? "保存后可被 Agent OS 检索"
                   : selectedSummary?.description ?? selectedSkill?.description}
               </p>
             </div>
@@ -446,8 +457,12 @@ export function SkillsPage({ className }: SkillsPageProps) {
 
           <div className="grid gap-3 p-4">
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <Badge variant="outline">image</Badge>
-              <Badge variant="outline">prompt_expansion</Badge>
+              <Badge variant="outline">
+                {selectedSummary?.agentScope ?? selectedSkill?.agentScope ?? "general"}
+              </Badge>
+              <Badge variant="outline">
+                {selectedSummary?.purpose ?? selectedSkill?.purpose ?? "general"}
+              </Badge>
               {selectedSkill?.sourceType && (
                 <Badge variant="outline">{sourceLabel(selectedSkill.sourceType)}</Badge>
               )}
@@ -458,6 +473,47 @@ export function SkillsPage({ className }: SkillsPageProps) {
                 </span>
               )}
             </div>
+
+            {selectedSkill && (
+              <div className="grid gap-2 rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground sm:grid-cols-2">
+                <MetaRow label="Tags" value={selectedSkill.tags.join(", ")} />
+                <MetaRow
+                  label="Triggers"
+                  value={[
+                    ...selectedSkill.triggers.keywords,
+                    ...selectedSkill.triggers.canvasKinds.map((kind) => `canvas:${kind}`),
+                  ].join(", ")}
+                />
+                <MetaRow
+                  label="Tools"
+                  value={selectedSkill.bindings.tools.join(", ")}
+                />
+                <MetaRow
+                  label="Agents"
+                  value={selectedSkill.bindings.agents.join(", ")}
+                />
+                <MetaRow
+                  label="Scripts"
+                  value={
+                    selectedSkill.scripts.length
+                      ? selectedSkill.scripts
+                          .map((script) => `${script.name} (${script.runtime})`)
+                          .join(", ")
+                      : ""
+                  }
+                />
+                <MetaRow
+                  label="Package"
+                  value={
+                    selectedSkill.packageSha256
+                      ? `${selectedSkill.packageSha256.slice(0, 12)} · ${formatBytes(
+                          selectedSkill.packageSizeBytes
+                        )}`
+                      : ""
+                  }
+                />
+              </div>
+            )}
 
             <Textarea
               value={draft.skillMd}
@@ -493,6 +549,19 @@ function renderScope(skill: AgentSkillDefinitionSummary) {
   return `${skill.agentScope} · ${skill.purpose}`;
 }
 
+function MetaRow({ label, value }: { label: string; value?: string }) {
+  return (
+    <div className="min-w-0">
+      <span className="block text-[11px] uppercase tracking-normal text-muted-foreground/80">
+        {label}
+      </span>
+      <strong className="mt-0.5 block truncate font-normal text-foreground" title={value}>
+        {value || "无"}
+      </strong>
+    </div>
+  );
+}
+
 function sourceLabel(sourceType: AgentSkillDefinitionSummary["sourceType"]) {
   if (sourceType === "zip") {
     return "zip";
@@ -505,4 +574,17 @@ function sourceLabel(sourceType: AgentSkillDefinitionSummary["sourceType"]) {
 
 function getClientError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function formatBytes(value: number | null) {
+  if (!value) {
+    return "0 B";
+  }
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
