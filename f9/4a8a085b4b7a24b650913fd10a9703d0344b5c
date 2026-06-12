@@ -1,0 +1,18 @@
+src/index.css
+  h_49a1fcd5ff42d1 58-78
+src/components/RunNodeView.tsx
+  h_49a1fcd5ff42d1 170
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "f94a8a085b4b7a24b650913fd10a9703d0344b5c",
+  "prompts": {},
+  "humans": {
+    "h_49a1fcd5ff42d1": {
+      "author": "zzhen0325 <26629213+zzhen0325@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
