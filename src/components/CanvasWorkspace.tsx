@@ -85,6 +85,11 @@ import {
   toPersistableNodes,
 } from "@/lib/canvas-persistence";
 import { collectUpstreamContext, createRunDraft, getRunReferenceNodeId } from "@/lib/graph";
+import {
+  diffCanvasPatch,
+  hasCanvasPatchChanges,
+  mergeCanvasUpserts,
+} from "@/lib/canvas-patch";
 import type { RunStepTraceEvent } from "@/lib/graph-projection";
 import {
   agentTextFromMessages,
@@ -261,6 +266,8 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const isSavingRef = useRef(false);
   const pendingSaveRef = useRef(false);
   const saveWaitersRef = useRef<Array<(saved: boolean) => void>>([]);
+  const lastSavedSnapshotDigestRef = useRef<string | null>(null);
+  const lastSavedSnapshotRef = useRef<PersistableProjectSnapshot | null>(null);
   const prevSaveClassifyNodesRef = useRef<AgentCanvasNode[]>([]);
   const prevSaveClassifyTitleRef = useRef(projectTitle);
   const autoLayoutFrame = useRef<number | null>(null);
@@ -366,7 +373,10 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       );
 
       setNodes((current) => {
-        const merged = mergeProjectedNodes(current, projection.nodes);
+        const merged = mergeCanvasUpserts(
+          { edges: edgesRef.current, nodes: current },
+          { edges: projection.edges, nodes: projection.nodes }
+        ).nodes;
         if (!runWasStopped) {
           return merged;
         }
@@ -386,7 +396,10 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           );
       });
       setEdges((current) =>
-        mergeProjectedEdges(current, projection.edges)
+        mergeCanvasUpserts(
+          { edges: current, nodes: nodesRef.current },
+          { edges: projection.edges, nodes: projection.nodes }
+        ).edges
           .filter(
             (edge) =>
               !stoppedPendingResultNodeIds.has(edge.source) &&
@@ -624,6 +637,10 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         : 0,
     [edges, nodes, referenceNodeId]
   );
+  const hasLocalUploadNodes = useMemo(
+    () => nodes.some(hasLocalUploadState),
+    [nodes]
+  );
   const persistedSelectedNodeId = referenceNodeId ?? null;
   useEffect(() => {
     persistedSelectedNodeIdRef.current = persistedSelectedNodeId;
@@ -634,7 +651,8 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     Boolean(loadedProjectId) &&
     storageStatus !== "loading" &&
     !storageError &&
-    !isReplayMode;
+    !isReplayMode &&
+    !hasLocalUploadNodes;
   const canUploadFiles =
     Boolean(loadedProjectId) &&
     storageStatus !== "loading" &&
@@ -643,8 +661,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const fileDrop = useCanvasFileDrop({
     canUploadFiles,
     nodes,
+    projectId: loadedProjectId,
+    setEdges,
     setNodes,
   });
+  const { showUploadError } = fileDrop;
 
   const handleCanvasInit = useCallback(
     (instance: ReactFlowInstance<AgentCanvasNode, AgentCanvasEdge>) => {
@@ -689,23 +710,18 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     activeRunMessageStartIndex.current = 0;
     streamedRuntimeEvents.current = [];
     streamedAgentTextByRunId.current.clear();
+    lastSavedSnapshotDigestRef.current = null;
+    lastSavedSnapshotRef.current = null;
 
     const loadStartedAt = performance.now();
 
     loadProject(projectId)
-      .then(async ({ project }) => {
+      .then(({ project }) => {
         if (ignore) {
           return;
         }
 
         const projectLoadedAt = performance.now();
-        const hydratedSnapshot = await hydrateProjectSnapshotFromLastRun(project);
-        if (ignore) {
-          return;
-        }
-
-        const hydratedAt = performance.now();
-
         setLoadedProjectId(project.id);
         setProjectTitle(project.title);
         setTraceRunId(null);
@@ -714,17 +730,26 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         setTraceLoading(false);
         setReplaySnapshot(null);
         const nextSelectedNodeIds = getInitialSelectedNodeIds(
-          hydratedSnapshot.nodes,
+          project.nodes,
           project.selectedNodeId
         );
         autoLayoutSignatureRef.current = getCanvasLayoutSignature(
-          hydratedSnapshot.nodes,
-          hydratedSnapshot.edges
+          project.nodes,
+          project.edges
         );
-        setNodes(applySelectedNodeIds(hydratedSnapshot.nodes, nextSelectedNodeIds));
-        setEdges(hydratedSnapshot.edges);
+        setNodes(applySelectedNodeIds(project.nodes, nextSelectedNodeIds));
+        setEdges(project.edges);
         activeRunId.current = project.lastRunId;
         projectVersionRef.current = project.version;
+        const loadedSnapshot = getCurrentPersistableProjectSnapshot({
+          edges: project.edges,
+          lastRunId: project.lastRunId,
+          nodes: project.nodes,
+          selectedNodeId: project.selectedNodeId,
+          title: project.title,
+        });
+        lastSavedSnapshotDigestRef.current = loadedSnapshot.digest;
+        lastSavedSnapshotRef.current = loadedSnapshot;
         hasLoadedProject.current = true;
         setStorageStatus("saved");
         setStorageError(null);
@@ -733,14 +758,32 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           // Diagnostics for the slow-load investigation (DEV only, never ships).
           console.info("[canvas-load]", {
             projectId: project.id,
-            nodeCount: hydratedSnapshot.nodes.length,
-            edgeCount: hydratedSnapshot.edges.length,
+            nodeCount: project.nodes.length,
+            edgeCount: project.edges.length,
             payloadBytes: JSON.stringify(project).length,
             fetchMs: Math.round(projectLoadedAt - loadStartedAt),
-            hydrateMs: Math.round(hydratedAt - projectLoadedAt),
             totalMs: Math.round(performance.now() - loadStartedAt),
           });
         }
+
+        hydrateProjectSnapshotFromLastRun(project).then((hydratedSnapshot) => {
+          if (ignore || !hydratedSnapshot) {
+            return;
+          }
+
+          setNodes((current) =>
+            mergeCanvasUpserts(
+              { edges: edgesRef.current, nodes: current },
+              hydratedSnapshot
+            ).nodes
+          );
+          setEdges((current) =>
+            mergeCanvasUpserts(
+              { edges: current, nodes: nodesRef.current },
+              hydratedSnapshot
+            ).edges
+          );
+        });
       })
       .catch((nextError: unknown) => {
         if (ignore) {
@@ -805,6 +848,21 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         return false;
       }
 
+      const initialSnapshot = getCurrentPersistableProjectSnapshot({
+        edges: edgesRef.current,
+        lastRunId: activeRunId.current,
+        nodes: nodesRef.current,
+        selectedNodeId: persistedSelectedNodeIdRef.current,
+        title: projectTitleRef.current,
+      });
+      if (initialSnapshot.digest === lastSavedSnapshotDigestRef.current) {
+        if (shouldReportStatus) {
+          setStorageStatus("saved");
+          setStorageError(null);
+        }
+        return true;
+      }
+
       // Single-flight: never run two saves concurrently. A change arriving while a
       // save is in flight is coalesced into one trailing re-run so writes stay
       // strictly ordered and the latest snapshot always wins.
@@ -826,23 +884,57 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       try {
         do {
           pendingSaveRef.current = false;
+          const snapshot = getCurrentPersistableProjectSnapshot({
+            edges: edgesRef.current,
+            lastRunId: activeRunId.current,
+            nodes: nodesRef.current,
+            selectedNodeId: persistedSelectedNodeIdRef.current,
+            title: projectTitleRef.current,
+          });
+          if (snapshot.digest === lastSavedSnapshotDigestRef.current) {
+            if (shouldReportStatus) {
+              setStorageStatus("saved");
+              setStorageError(null);
+            }
+            break;
+          }
 
           for (let attempt = 0; ; attempt += 1) {
             try {
+              const previousSnapshot = lastSavedSnapshotRef.current ?? {
+                edges: [],
+                lastRunId: null,
+                nodes: [],
+                selectedNodeId: null,
+                title: "",
+              };
+              const canvasPatch = diffCanvasPatch(previousSnapshot, snapshot);
               const { project } = await updateProject(
                 {
                   projectId: currentProjectId,
-                  title: projectTitleRef.current,
-                  nodes: toPersistableNodes(nodesRef.current),
-                  edges: edgesRef.current,
-                  selectedNodeId: persistedSelectedNodeIdRef.current,
-                  lastRunId: activeRunId.current,
+                  title:
+                    snapshot.title === previousSnapshot.title
+                      ? undefined
+                      : snapshot.title,
+                  canvasPatch: hasCanvasPatchChanges(canvasPatch)
+                    ? canvasPatch
+                    : undefined,
+                  selectedNodeId:
+                    snapshot.selectedNodeId === previousSnapshot.selectedNodeId
+                      ? undefined
+                      : snapshot.selectedNodeId,
+                  lastRunId:
+                    snapshot.lastRunId === previousSnapshot.lastRunId
+                      ? undefined
+                      : snapshot.lastRunId,
                   expectedVersion: projectVersionRef.current,
                 },
                 options.keepalive ? { keepalive: true } : undefined
               );
 
               projectVersionRef.current = project.version;
+              lastSavedSnapshotDigestRef.current = snapshot.digest;
+              lastSavedSnapshotRef.current = snapshot;
               if (shouldReportStatus) {
                 setLoadedProjectId(project.id);
                 setStorageStatus("saved");
@@ -887,7 +979,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         saveTimer.current = null;
       }
 
-      void saveProjectSnapshot({ keepalive: true, reportStatus: false });
+      void saveProjectSnapshot({ reportStatus: false });
     };
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
@@ -1104,6 +1196,10 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         setStorageError("项目尚未加载完成");
         return;
       }
+      if (hasLocalUploadNodes) {
+        showUploadError("请等待文件上传完成后再启动 Agent。");
+        return;
+      }
       if (storageError) {
         return;
       }
@@ -1154,6 +1250,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     },
     [
       edges,
+      hasLocalUploadNodes,
       isBusy,
       loadedProjectId,
       markRunError,
@@ -1164,6 +1261,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       sendMessage,
       setEdges,
       setNodes,
+      showUploadError,
       storageError,
     ]
   );
@@ -1604,28 +1702,6 @@ function getDescendantNodeIds(nodeId: string, edges: AgentCanvasEdge[]) {
   return descendants;
 }
 
-function mergeProjectedNodes(
-  current: AgentCanvasNode[],
-  projected: AgentCanvasNode[]
-) {
-  const projectedIds = new Set(projected.map((node) => node.id));
-  return [
-    ...current.filter((node) => !projectedIds.has(node.id)),
-    ...projected,
-  ];
-}
-
-function mergeProjectedEdges(
-  current: AgentCanvasEdge[],
-  projected: AgentCanvasEdge[]
-) {
-  const projectedIds = new Set(projected.map((edge) => edge.id));
-  return [
-    ...current.filter((edge) => !projectedIds.has(edge.id)),
-    ...projected,
-  ];
-}
-
 function hasReadyRunOutput(nodes: AgentCanvasNode[], runId: string) {
   const runNode = nodes.find(
     (node) => node.id === runId && node.data.kind === "run"
@@ -1811,20 +1887,78 @@ function getDefaultShapeDimensions(shape: ShapeVariant) {
   return { width: 200, height: 140 };
 }
 
-async function hydrateProjectSnapshotFromLastRun(project: PersistedProject) {
+function getCurrentPersistableProjectSnapshot({
+  edges,
+  lastRunId,
+  nodes,
+  selectedNodeId,
+  title,
+}: {
+  edges: AgentCanvasEdge[];
+  lastRunId: string | null;
+  nodes: AgentCanvasNode[];
+  selectedNodeId: string | null;
+  title: string;
+}) {
+  const persistableNodes = toPersistableNodes(nodes);
+  const persistableNodeIds = new Set(persistableNodes.map((node) => node.id));
+  const persistableEdges = edges.filter(
+    (edge) =>
+      persistableNodeIds.has(edge.source) && persistableNodeIds.has(edge.target)
+  );
+
+  return {
+    digest: getProjectSnapshotDigest({
+      edges: persistableEdges,
+      lastRunId,
+      nodes: persistableNodes,
+      selectedNodeId,
+      title,
+    }),
+    edges: persistableEdges,
+    lastRunId,
+    nodes: persistableNodes,
+    selectedNodeId,
+    title,
+  };
+}
+
+type PersistableProjectSnapshot = ReturnType<
+  typeof getCurrentPersistableProjectSnapshot
+>;
+
+function getProjectSnapshotDigest({
+  edges,
+  lastRunId,
+  nodes,
+  selectedNodeId,
+  title,
+}: {
+  edges: AgentCanvasEdge[];
+  lastRunId: string | null;
+  nodes: AgentCanvasNode[];
+  selectedNodeId: string | null;
+  title: string;
+}) {
+  return JSON.stringify({ edges, lastRunId, nodes, selectedNodeId, title });
+}
+
+async function hydrateProjectSnapshotFromLastRun(
+  project: PersistedProject
+): Promise<{ nodes: AgentCanvasNode[]; edges: AgentCanvasEdge[] } | null> {
   const snapshot = {
     nodes: project.nodes,
     edges: project.edges,
   };
 
   if (!project.lastRunId) {
-    return snapshot;
+    return null;
   }
 
   try {
     const { events } = await loadRunTrace(project.id, project.lastRunId);
     if (!events.length) {
-      return snapshot;
+      return null;
     }
 
     const projection = projectRuntimeEventsToCanvas({
@@ -1834,13 +1968,54 @@ async function hydrateProjectSnapshotFromLastRun(project: PersistedProject) {
       existingSnapshot: snapshot,
     });
 
+    if (
+      !shouldMergeHydratedSnapshot({
+        currentEdges: project.edges,
+        currentNodes: project.nodes,
+        projectedEdges: projection.edges,
+        projectedNodes: projection.nodes,
+      })
+    ) {
+      return null;
+    }
+
     return {
       nodes: projection.nodes,
       edges: projection.edges,
     };
   } catch {
-    return snapshot;
+    return null;
   }
+}
+
+function shouldMergeHydratedSnapshot({
+  currentEdges,
+  currentNodes,
+  projectedEdges,
+  projectedNodes,
+}: {
+  currentEdges: AgentCanvasEdge[];
+  currentNodes: AgentCanvasNode[];
+  projectedEdges: AgentCanvasEdge[];
+  projectedNodes: AgentCanvasNode[];
+}) {
+  const nodesById = new Map(currentNodes.map((node) => [node.id, node]));
+  for (const projectedNode of projectedNodes) {
+    const currentNode = nodesById.get(projectedNode.id);
+    if (!currentNode || JSON.stringify(currentNode) !== JSON.stringify(projectedNode)) {
+      return true;
+    }
+  }
+
+  const edgesById = new Map(currentEdges.map((edge) => [edge.id, edge]));
+  for (const projectedEdge of projectedEdges) {
+    const currentEdge = edgesById.get(projectedEdge.id);
+    if (!currentEdge || JSON.stringify(currentEdge) !== JSON.stringify(projectedEdge)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function TopBar({
@@ -2247,6 +2422,11 @@ function ArtifactLikeNode({ data, selected, width, height }: ArtifactLikeNodePro
             {summary}
           </p>
         )}
+        {data.upload && (
+          <span className={`upload-state ${data.upload.status}`}>
+            {data.upload.status === "error" ? "上传失败" : "上传中"}
+          </span>
+        )}
       </NodeContent>
     </Node>
   );
@@ -2474,8 +2654,17 @@ function ImageResultNode({
         )}
       </div>
       {selected && status === "ready" && <NodeFooterLike image={data.image} />}
+      {data.upload && (
+        <span className={`upload-state image-upload-state ${data.upload.status}`}>
+          {data.upload.status === "error" ? "上传失败" : "上传中"}
+        </span>
+      )}
     </Node>
   );
+}
+
+function hasLocalUploadState(node: AgentCanvasNode) {
+  return "upload" in node.data && Boolean(node.data.upload);
 }
 
 function getResizableNodeStyle(

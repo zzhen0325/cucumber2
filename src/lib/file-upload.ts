@@ -14,6 +14,32 @@ export type UploadedFilePreviewKind =
   | "dataset"
   | "file";
 
+export type UploadedFileForStorage = {
+  dimensions?: { width: number; height: number } | null;
+  file: File;
+  kind: UploadedFilePreviewKind;
+  metadata: Record<string, unknown>;
+  preview: string;
+  summary: string;
+  title: string;
+  uploadedAt: string;
+};
+
+export type ResolveUploadedFileArtifact = (
+  upload: UploadedFileForStorage
+) => Promise<ArtifactRef>;
+
+export type PreparedCanvasUpload = {
+  localNode: AgentCanvasNode;
+  objectUrl?: string;
+  upload: UploadedFileForStorage;
+};
+
+type CreateCanvasNodesFromFilesOptions = {
+  resolveUploadedFile: ResolveUploadedFileArtifact;
+  uploadedAt?: string;
+};
+
 const NODE_WIDTH = 240;
 const IMAGE_NODE_HEIGHT = 240;
 const IMAGE_NODE_MIN_SIDE = 24;
@@ -112,13 +138,16 @@ export async function createCanvasNodesFromFiles(
   files: readonly File[],
   origin: CanvasPosition,
   existingNodes: readonly AgentCanvasNode[],
-  uploadedAt = new Date().toISOString()
+  options: CreateCanvasNodesFromFilesOptions
 ) {
   const resultNodes: AgentCanvasNode[] = [];
   let cursorX = origin.x;
+  const uploadedAt = options.uploadedAt ?? new Date().toISOString();
 
   for (const file of files) {
-    const node = await createCanvasNodeFromFile(file, uploadedAt);
+    const upload = await prepareUploadedFile(file, uploadedAt);
+    const artifact = await options.resolveUploadedFile(upload);
+    const node = createCanvasNodeFromUploadedFile(upload, artifact);
     const size = getNodeSize(node);
     const position = resolveNonOverlappingPosition(
       { x: cursorX, y: origin.y, width: size.width, height: size.height },
@@ -130,6 +159,44 @@ export async function createCanvasNodesFromFiles(
   }
 
   return resultNodes;
+}
+
+export async function prepareLocalCanvasUploads(
+  files: readonly File[],
+  origin: CanvasPosition,
+  existingNodes: readonly AgentCanvasNode[],
+  options: { createLocalId?: () => string; uploadedAt?: string } = {}
+): Promise<PreparedCanvasUpload[]> {
+  const result: PreparedCanvasUpload[] = [];
+  let cursorX = origin.x;
+  const uploadedAt = options.uploadedAt ?? new Date().toISOString();
+  const createLocalId =
+    options.createLocalId ??
+    (() =>
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+
+  for (const file of files) {
+    const upload = await prepareUploadedFile(file, uploadedAt);
+    const objectUrl =
+      upload.kind === "image" ? URL.createObjectURL(upload.file) : undefined;
+    const node = createLocalCanvasNodeFromUploadedFile(
+      upload,
+      `local-upload-${createLocalId()}`,
+      objectUrl
+    );
+    const size = getNodeSize(node);
+    const position = resolveNonOverlappingPosition(
+      { x: cursorX, y: origin.y, width: size.width, height: size.height },
+      [...existingNodes, ...result.map((item) => item.localNode)]
+    );
+
+    result.push({ localNode: { ...node, position }, objectUrl, upload });
+    cursorX = position.x + size.width + UPLOAD_NODE_GAP;
+  }
+
+  return result;
 }
 
 export function classifyUploadedFile(
@@ -173,37 +240,49 @@ export function classifyUploadedFile(
   return "file";
 }
 
-async function createCanvasNodeFromFile(
+export async function prepareUploadedFile(
   file: File,
   uploadedAt: string
-): Promise<AgentCanvasNode> {
+): Promise<UploadedFileForStorage> {
   const kind = classifyUploadedFile(file);
   const title = file.name.trim() || "Untitled file";
-  const artifactId = createUploadId(kind, title);
   const baseMetadata = getBaseUploadMetadata(file, uploadedAt);
+  const dimensions =
+    kind === "image" ? readImageDimensions(await file.arrayBuffer(), file.type) : null;
+  const metadata = {
+    ...baseMetadata,
+    ...(dimensions
+      ? {
+          height: dimensions.height,
+          width: dimensions.width,
+        }
+      : {}),
+  };
+  const text = shouldReadText(file, kind) ? await file.text() : "";
+  const preview = text ? trimText(text, TEXT_PREVIEW_LIMIT) : "";
+  const summary = getUploadSummary(file, kind, preview);
 
-  if (kind === "image") {
-    const imagePreview = await createUploadedImagePreview(file);
-    const metadata = {
-      ...baseMetadata,
-      ...(imagePreview.dimensions
-        ? {
-            height: imagePreview.dimensions.height,
-            width: imagePreview.dimensions.width,
-          }
-        : {}),
-    };
-    const nodeDimensions = getImageNodeDimensions(imagePreview.dimensions);
-    const artifact: ArtifactRef = {
-      id: artifactId,
-      type: "image",
-      uri: imagePreview.dataUrl,
-      title,
-      metadata,
-    };
+  return {
+    dimensions,
+    file,
+    kind,
+    metadata,
+    preview,
+    summary,
+    title,
+    uploadedAt,
+  };
+}
 
+export function createCanvasNodeFromUploadedFile(
+  upload: UploadedFileForStorage,
+  artifact: ArtifactRef
+): AgentCanvasNode {
+  if (upload.kind === "image") {
+    const nodeDimensions = getImageNodeDimensions(upload.dimensions ?? null);
+    const imageUrl = artifact.uri ?? artifact.contentRef ?? "";
     return {
-      id: `image-${artifactId}`,
+      id: `image-${artifact.id}`,
       type: "imageResultNode",
       position: { x: 0, y: 0 },
       ...nodeDimensions,
@@ -211,88 +290,61 @@ async function createCanvasNodeFromFile(
         kind: "imageResult",
         artifact,
         image: {
-          id: artifactId,
-          url: imagePreview.dataUrl,
-          title,
-          metadata,
+          id: artifact.id,
+          url: imageUrl,
+          title: artifact.title ?? upload.title,
+          metadata: artifact.metadata,
           artifact,
         },
-        prompt: `上传文件: ${title}`,
+        prompt: `上传文件: ${upload.title}`,
         runId: "local-upload",
       },
     };
   }
 
-  const metadata = baseMetadata;
-
-  const text = shouldReadText(file, kind) ? await file.text() : "";
-  const preview = text ? trimText(text, TEXT_PREVIEW_LIMIT) : "";
-  const summary = getUploadSummary(file, kind, preview);
-
-  if (kind === "markdown") {
-    const content = text.trim()
-      ? trimText(text, MARKDOWN_CONTENT_LIMIT)
-      : `${title}\n\n${summary}`;
-    const artifact: ArtifactRef = {
-      id: artifactId,
-      type: "doc",
-      title,
-      metadata: {
-        ...metadata,
-        format: "markdown",
-        markdown: content,
-        preview: summarizeInlineText(content),
-      },
-    };
+  if (upload.kind === "markdown") {
+    const content = upload.preview.trim()
+      ? trimText(upload.preview, MARKDOWN_CONTENT_LIMIT)
+      : `${upload.title}\n\n${upload.summary}`;
 
     return {
-      id: `markdown-${artifactId}`,
+      id: `markdown-${artifact.id}`,
       type: "markdownNode",
       position: { x: 0, y: 0 },
       data: {
         kind: "markdown",
         artifact,
         content,
-        createdAt: uploadedAt,
+        createdAt: upload.uploadedAt,
         summary: summarizeInlineText(content),
-        title,
+        title: artifact.title ?? upload.title,
       },
     };
   }
 
-  const artifact = getArtifactForUpload({
-    artifactId,
-    file,
-    kind,
-    metadata: {
-      ...metadata,
-      preview,
-    },
-    title,
-  });
   const baseData = {
     artifact,
-    createdAt: uploadedAt,
-    summary,
-    title,
+    createdAt: upload.uploadedAt,
+    summary: upload.summary,
+    title: artifact.title ?? upload.title,
   };
 
-  if (kind === "code") {
+  if (upload.kind === "code") {
     return {
-      id: `code-${artifactId}`,
+      id: `code-${artifact.id}`,
       type: "codeNode",
       position: { x: 0, y: 0 },
       data: {
         ...baseData,
         kind: "code",
-        language: getFileExtension(file.name) || undefined,
+        language: getFileExtension(upload.file.name) || undefined,
       },
     };
   }
 
-  if (kind === "webpage") {
+  if (upload.kind === "webpage") {
     return {
-      id: `webpage-${artifactId}`,
+      id: `webpage-${artifact.id}`,
       type: "webpageNode",
       position: { x: 0, y: 0 },
       data: {
@@ -302,9 +354,9 @@ async function createCanvasNodeFromFile(
     };
   }
 
-  if (kind === "document") {
+  if (upload.kind === "document") {
     return {
-      id: `document-${artifactId}`,
+      id: `document-${artifact.id}`,
       type: "documentNode",
       position: { x: 0, y: 0 },
       data: {
@@ -315,7 +367,7 @@ async function createCanvasNodeFromFile(
   }
 
   return {
-    id: `artifact-${artifactId}`,
+    id: `artifact-${artifact.id}`,
     type: "artifactNode",
     position: { x: 0, y: 0 },
     data: {
@@ -325,37 +377,45 @@ async function createCanvasNodeFromFile(
   };
 }
 
-function getArtifactForUpload({
-  artifactId,
-  file,
-  kind,
-  metadata,
-  title,
-}: {
-  artifactId: string;
-  file: File;
-  kind: Exclude<UploadedFilePreviewKind, "image" | "markdown">;
-  metadata: Record<string, unknown>;
-  title: string;
-}): ArtifactRef {
+export function createLocalCanvasNodeFromUploadedFile(
+  upload: UploadedFileForStorage,
+  localId: string,
+  localPreviewUrl?: string
+): AgentCanvasNode {
   const typeByKind = {
     code: "code",
     dataset: "dataset",
     document: "doc",
     file: "file",
+    image: "image",
+    markdown: "doc",
     webpage: "webpage",
-  } satisfies Record<
-    Exclude<UploadedFilePreviewKind, "image" | "markdown">,
-    ArtifactRef["type"]
-  >;
+  } satisfies Record<UploadedFilePreviewKind, ArtifactRef["type"]>;
+  const localArtifact: ArtifactRef = {
+    contentRef: `local-upload://${localId}`,
+    id: localId,
+    metadata: {
+      ...upload.metadata,
+      localOnly: true,
+      summary: upload.summary,
+    },
+    title: upload.title,
+    type: typeByKind[upload.kind],
+    uri: localPreviewUrl,
+  };
+  const node = createCanvasNodeFromUploadedFile(upload, localArtifact);
 
   return {
-    id: artifactId,
-    type: typeByKind[kind],
-    title,
-    contentRef: `local-upload://${encodeURIComponent(file.name)}`,
-    metadata,
-  };
+    ...node,
+    id: node.id.replace(localId, localId),
+    data: {
+      ...node.data,
+      upload: {
+        localPreviewUrl,
+        status: "uploading",
+      },
+    },
+  } as AgentCanvasNode;
 }
 
 function getBaseUploadMetadata(file: File, uploadedAt: string) {
@@ -501,22 +561,6 @@ function rectsOverlap(a: CanvasRect, b: CanvasRect) {
     a.y < b.y + b.height &&
     a.y + a.height > b.y
   );
-}
-
-async function readFileAsDataUrl(file: File) {
-  const mimeType = file.type || "application/octet-stream";
-  const buffer = await file.arrayBuffer();
-
-  return `data:${mimeType};base64,${arrayBufferToBase64(buffer)}`;
-}
-
-async function createUploadedImagePreview(file: File) {
-  const [buffer, dataUrl] = await Promise.all([file.arrayBuffer(), readFileAsDataUrl(file)]);
-
-  return {
-    dataUrl,
-    dimensions: readImageDimensions(buffer, file.type),
-  };
 }
 
 function getImageNodeDimensions(
@@ -672,29 +716,6 @@ function readUint24(view: DataView, offset: number) {
   return view.getUint8(offset) | (view.getUint8(offset + 1) << 8) | (view.getUint8(offset + 2) << 16);
 }
 
-function arrayBufferToBase64(buffer: ArrayBuffer) {
-  const bytes = new Uint8Array(buffer);
-  const alphabet =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  let output = "";
-
-  for (let index = 0; index < bytes.length; index += 3) {
-    const first = bytes[index];
-    const second = bytes[index + 1];
-    const third = bytes[index + 2];
-
-    output += alphabet[first >> 2];
-    output += alphabet[((first & 3) << 4) | ((second ?? 0) >> 4)];
-    output +=
-      index + 1 < bytes.length
-        ? alphabet[((second & 15) << 2) | ((third ?? 0) >> 6)]
-        : "=";
-    output += index + 2 < bytes.length ? alphabet[(third ?? 0) & 63] : "=";
-  }
-
-  return output;
-}
-
 function trimText(text: string, limit: number) {
   if (text.length <= limit) {
     return text;
@@ -729,16 +750,4 @@ function getFileExtension(name: string) {
   }
 
   return filename.slice(dotIndex + 1).toLowerCase();
-}
-
-function createUploadId(kind: UploadedFilePreviewKind, title: string) {
-  const safeTitle = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 32);
-
-  return `upload-${kind}-${safeTitle || "file"}-${Date.now().toString(36)}-${Math.random()
-    .toString(36)
-    .slice(2, 8)}`;
 }

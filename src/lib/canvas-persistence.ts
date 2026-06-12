@@ -13,22 +13,27 @@ import type { AgentCanvasNode } from "@/types/canvas";
 export function toPersistableNodes(
   nodes: AgentCanvasNode[]
 ): AgentCanvasNode[] {
-  return nodes.map((node) => {
+  return nodes.flatMap((node) => {
+    if (hasLocalUploadState(node)) {
+      return [];
+    }
+
     if (node.data.kind !== "markdown") {
-      return node;
+      return [stripUploadState(node)];
     }
 
     const metadata = node.data.artifact.metadata;
     if (!metadata || !("blockNoteBlocks" in metadata)) {
-      return node;
+      return [stripUploadState(node)];
     }
 
     const { blockNoteBlocks: metadataBlocks, ...restMetadata } = metadata;
 
-    return {
+    return [{
       ...node,
       data: {
         ...node.data,
+        upload: undefined,
         blockNoteBlocks:
           node.data.blockNoteBlocks ?? (metadataBlocks as unknown[] | undefined),
         artifact: {
@@ -36,8 +41,26 @@ export function toPersistableNodes(
           metadata: restMetadata,
         },
       },
-    };
+    }];
   });
+}
+
+function hasLocalUploadState(node: AgentCanvasNode) {
+  return "upload" in node.data && Boolean(node.data.upload);
+}
+
+function stripUploadState(node: AgentCanvasNode): AgentCanvasNode {
+  if (!("upload" in node.data) || !node.data.upload) {
+    return node;
+  }
+
+  return {
+    ...node,
+    data: {
+      ...node.data,
+      upload: undefined,
+    },
+  } as AgentCanvasNode;
 }
 
 /**
@@ -67,4 +90,3 @@ export function hasNodeContentChanged(
 
   return false;
 }
-

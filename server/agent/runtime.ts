@@ -1,5 +1,6 @@
 import { Agent, Runner } from "@openai/agents";
 
+import type { AgentEvent } from "../../src/types/runtime.ts";
 import type { CanvasOperation } from "../../src/types/runtime.ts";
 import { managerAgent } from "./agents/manager.agent.ts";
 import {
@@ -15,6 +16,10 @@ import {
   type AgentEventWriter,
 } from "./events/runtime-event-writer.ts";
 import { openAIStreamToCucumberEvents } from "./events/openai-stream-to-cucumber-events.ts";
+import {
+  materializeAgentRunSnapshot,
+  shouldMaterializeRunEvent,
+} from "./materialize-run.ts";
 import { resolveAgentModel } from "./model-config.ts";
 
 const runner = new Runner({ workflowName: "Cucumber Agent" });
@@ -58,9 +63,32 @@ export async function executeAgentRun({
   let textStarted = false;
   let finalOutput: string | undefined;
   let artifactIds: string[] = [];
+  const runEvents: AgentEvent[] = [];
+
+  const trackEvent = async (event: AgentEvent) => {
+    runEvents.push(event);
+    if (shouldMaterializeRunEvent(event.type)) {
+      await flushAndMaterializeRun();
+    }
+    return event;
+  };
+
+  const writeRunEvent = async (
+    event: Omit<AgentEvent, "createdAt"> & { createdAt?: string }
+  ) => trackEvent(await eventWriter.writeEvent(event));
+
+  const flushAndMaterializeRun = async () => {
+    await eventWriter.flush();
+    await materializeAgentRunSnapshot({
+      events: runEvents,
+      projectId: input.projectId,
+      runNodeId: input.runNodeId,
+      userId: input.userId,
+    });
+  };
 
   try {
-    await eventWriter.writeEvent({
+    await writeRunEvent({
       projectId: input.projectId,
       runNodeId: input.runNodeId,
       stepId: "run",
@@ -73,7 +101,7 @@ export async function executeAgentRun({
         runtime: "openai-agents-sdk",
       },
     });
-    await eventWriter.writeEvent({
+    await writeRunEvent({
       projectId: input.projectId,
       runNodeId: input.runNodeId,
       stepId: "input",
@@ -99,7 +127,7 @@ export async function executeAgentRun({
       }
 
       if (event.type === "agent_active") {
-        await eventWriter.writeEvent({
+        await writeRunEvent({
           projectId: input.projectId,
           runNodeId: input.runNodeId,
           stepId: "agent",
@@ -110,7 +138,7 @@ export async function executeAgentRun({
       }
 
       if (event.type === "handoff_requested" || event.type === "handoff_completed") {
-        await eventWriter.writeEvent({
+        await writeRunEvent({
           projectId: input.projectId,
           runNodeId: input.runNodeId,
           stepId: "handoff",
@@ -125,43 +153,49 @@ export async function executeAgentRun({
       }
 
       if (event.type === "tool_started") {
-        await eventWriter.writeToolInput({
-          stepId: event.toolName,
-          toolCallId: event.toolCallId ?? `${event.toolName}-${crypto.randomUUID()}`,
-          toolName: event.toolName,
-          toolInput: event.input ?? {},
-          metadata: { runtime: "openai-agents-sdk" },
-        });
+        await trackEvent(
+          await eventWriter.writeToolInput({
+            stepId: event.toolName,
+            toolCallId: event.toolCallId ?? `${event.toolName}-${crypto.randomUUID()}`,
+            toolName: event.toolName,
+            toolInput: event.input ?? {},
+            metadata: { runtime: "openai-agents-sdk" },
+          })
+        );
         continue;
       }
 
       if (event.type === "tool_completed") {
-        await eventWriter.writeToolOutput({
-          stepId: event.toolName,
-          toolCallId: event.toolCallId ?? `${event.toolName}-${crypto.randomUUID()}`,
-          toolName: event.toolName,
-          output: event.output ?? {},
-          metadata: { runtime: "openai-agents-sdk" },
-        });
+        await trackEvent(
+          await eventWriter.writeToolOutput({
+            stepId: event.toolName,
+            toolCallId: event.toolCallId ?? `${event.toolName}-${crypto.randomUUID()}`,
+            toolName: event.toolName,
+            output: event.output ?? {},
+            metadata: { runtime: "openai-agents-sdk" },
+          })
+        );
         continue;
       }
 
       if (event.type === "tool_failed") {
-        await eventWriter.writeToolError({
-          stepId: event.toolName,
-          toolCallId: event.toolCallId ?? `${event.toolName}-${crypto.randomUUID()}`,
-          toolName: event.toolName,
-          input: event.input,
-          inputWritten: true,
-          errorText: event.message,
-          errorCode: "tool_failed",
-          metadata: { runtime: "openai-agents-sdk" },
-        });
+        await trackEvent(
+          await eventWriter.writeToolError({
+            stepId: event.toolName,
+            toolCallId: event.toolCallId ?? `${event.toolName}-${crypto.randomUUID()}`,
+            toolName: event.toolName,
+            input: event.input,
+            inputWritten: true,
+            errorText: event.message,
+            errorCode: "tool_failed",
+            metadata: { runtime: "openai-agents-sdk" },
+          })
+        );
         continue;
       }
 
       if (event.type === "canvas_operation_proposed" || event.type === "canvas_operation_applied") {
-        await writeCanvasOperationEvents({
+        const writtenEvents = await writeCanvasOperationEvents({
           operations: event.operations,
           projectId: input.projectId,
           runNodeId: input.runNodeId,
@@ -171,12 +205,15 @@ export async function executeAgentRun({
               : "canvas.operation.applied",
           writer: eventWriter,
         });
+        for (const writtenEvent of writtenEvents) {
+          await trackEvent(writtenEvent);
+        }
         continue;
       }
 
       if (event.type === "canvas_operation_rejected") {
         for (const rejected of event.rejections) {
-          await eventWriter.writeEvent({
+          await writeRunEvent({
             projectId: input.projectId,
             runNodeId: input.runNodeId,
             stepId: "canvas-policy",
@@ -193,7 +230,7 @@ export async function executeAgentRun({
       }
 
       if (event.type === "artifact_created") {
-        await eventWriter.writeEvent({
+        await writeRunEvent({
           projectId: input.projectId,
           runNodeId: input.runNodeId,
           stepId: "generate_image",
@@ -220,7 +257,8 @@ export async function executeAgentRun({
     }
 
     closeTextStream();
-    await eventWriter.writeEvent({
+    await eventWriter.flush();
+    await writeRunEvent({
       projectId: input.projectId,
       runNodeId: input.runNodeId,
       stepId: "run",
@@ -239,7 +277,7 @@ export async function executeAgentRun({
       console.error("[agent-run]", error);
     }
     closeTextStream();
-    await eventWriter.writeEvent({
+    const failedEvent = await eventWriter.writeEvent({
       projectId: input.projectId,
       runNodeId: input.runNodeId,
       stepId: "run",
@@ -251,6 +289,22 @@ export async function executeAgentRun({
         status: "failed",
       },
       errorText: message,
+    });
+    runEvents.push(failedEvent);
+    await eventWriter.flush().catch((flushError: unknown) => {
+      if (!aborted) {
+        console.error("[agent-run:persist]", flushError);
+      }
+    });
+    await materializeAgentRunSnapshot({
+      events: runEvents,
+      projectId: input.projectId,
+      runNodeId: input.runNodeId,
+      userId: input.userId,
+    }).catch((materializeError: unknown) => {
+      if (!aborted) {
+        console.error("[agent-run:materialize]", materializeError);
+      }
     });
   }
 
@@ -277,15 +331,19 @@ async function writeCanvasOperationEvents({
   type: "canvas.operation.proposed" | "canvas.operation.applied";
   writer: AgentEventWriter;
 }) {
+  const writtenEvents: AgentEvent[] = [];
   for (const operation of operations) {
-    await writer.writeEvent({
-      projectId,
-      runNodeId,
-      stepId: "propose_canvas_operations",
-      type,
-      payload: { operation, runtime: "openai-agents-sdk" },
-    });
+    writtenEvents.push(
+      await writer.writeEvent({
+        projectId,
+        runNodeId,
+        stepId: "propose_canvas_operations",
+        type,
+        payload: { operation, runtime: "openai-agents-sdk" },
+      })
+    );
   }
+  return writtenEvents;
 }
 
 function buildManagerRunPrompt(input: AgentRunInput) {

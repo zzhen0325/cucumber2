@@ -32,10 +32,29 @@
 - `generate_image` 工具只做 Agent tool 边界、artifact 事件和 Seedream provider 调用编排。
 - `seedream.ts` 收敛为 Seedream provider 执行层，保留配置读取、签名、提交/轮询、并发/重试、取消和 provider metadata。
 
+## 2026-06-12 Project Persistence
+
+- 项目列表只读取 `agent_projects` 的摘要列，不再拉取完整 `nodes/edges` JSON；`node_count`、`image_count`、`snapshot_bytes` 由服务端保存快照时同步维护。
+- 打开画布时先渲染已保存项目快照，`lastRun` Trace 只在后台补齐缺失或状态不完整的 Run 分支。
+- Agent runtime 持续写 `agent_run_events`，并在 artifact、canvas operation 和终态事件后由 runtime materializer 将可见 Run 分支物化回 `agent_projects.nodes/edges`。
+- 前端保存继续使用 version handshake 和单飞队列；无变化快照通过 digest 跳过 PATCH，变化快照通过 `canvasPatch` 增量提交节点/边 upsert/delete。
+
+## 2026-06-12 Object Storage
+
+- Supabase Storage private bucket `agent-assets` 成为用户上传和 Seedream 生成图片的对象存储边界；画布快照只保存稳定 `ArtifactRef`、`contentRef` 和同源 content API URL。
+- 用户拖拽文件会先插入本地预览节点并后台上传；浏览器使用 Supabase signed upload token 直传，再调用 `/complete` 写入 `agent_artifacts`，成功后用真实 artifact 节点替换本地节点。
+- 本地上传中/失败的节点不会进入项目持久化或 Agent upstream context；上传失败会留在画布上展示错误状态。
+- `generate_image` 收到 Seedream URL 后由服务端下载并上传到 `agent-assets`，随后才发 `artifact.created`；转存失败会走 `tool.error`/`run.failed`，不会生成假成功结果节点。
+- 上游图片引用对 Manager prompt 仍隐藏真实 URL；调用 Seedream 前，服务端仅根据 `supabase://agent-assets/...` 临时签发 provider 可读 URL。
+- 私有预览统一走 `/api/projects/:projectId/artifacts/:artifactId/content`，服务端校验项目权限后 302 到短期 signed read URL。
+
 ## Verification
 
 - Context 越权和服务端重建：`server/agent/context.test.ts`
 - Agents SDK stream/handoff/tool failure：`server/agent/events/openai-stream-to-cucumber-events.test.ts`
+- Agent Run 快照物化：`server/agent/materialize-run.test.ts`
 - Canvas policy 和图片工具/请求归一化：`server/agent/policy/*.test.ts`、`server/agent/tools/image/*.test.ts`
 - Event projection：`src/lib/graph-projection.test.ts`、`src/lib/runtime-event-renderer.test.ts`
+- 项目摘要统计：`src/lib/project-summary.test.ts`
+- 对象存储上传和引用签名：`src/lib/file-upload.test.ts`、`server/storage.test.ts`
 - 基础检查：`pnpm exec tsc -b --pretty false`、`pnpm build`、相关 ESLint、浏览器验收

@@ -1,7 +1,7 @@
 import {
   createImageResultNodes,
   createPendingImageResultNodes,
-} from "@/lib/graph";
+} from "./graph";
 import type {
   AgentCanvasEdge,
   AgentCanvasNode,
@@ -13,8 +13,8 @@ import type {
   ImageRequestPreview,
   RunStepTimelineItem,
   RunSummaryItem,
-} from "@/types/canvas";
-import type { AgentEvent, CanvasOperation } from "@/types/runtime";
+} from "../types/canvas";
+import type { AgentEvent, CanvasOperation } from "../types/runtime";
 
 const DEFAULT_PROMPT_POSITION = { x: 260, y: 210 };
 const RUN_OFFSET_Y = 124;

@@ -793,12 +793,13 @@ function contextItemsFromNode(
 
   if (node.data.kind === "imageResult") {
     const artifact = node.data.artifact ?? node.data.image.artifact;
+    const imageUrl = artifact?.uri ?? node.data.image.url;
     return [
       {
         nodeId: node.id,
         type: "image",
         prompt: node.data.prompt,
-        imageUrl: node.data.image.url,
+        imageUrl,
         summary: node.data.image.title ?? "Generated image",
         artifact,
         title: node.data.image.title,

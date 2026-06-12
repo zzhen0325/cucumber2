@@ -1,12 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   classifyUploadedFile,
   createCanvasNodesFromFiles,
+  prepareLocalCanvasUploads,
+  type UploadedFileForStorage,
 } from "./file-upload";
-import type { AgentCanvasNode } from "@/types/canvas";
+import { toPersistableNodes } from "./canvas-persistence";
+import type { AgentCanvasNode, ArtifactRef } from "@/types/canvas";
 
 describe("file upload canvas nodes", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("classifies files into supported canvas preview kinds", () => {
     expect(
       classifyUploadedFile(new File([""], "reference.png", { type: "image/png" }))
@@ -25,11 +32,12 @@ describe("file upload canvas nodes", () => {
     ).toBe("document");
   });
 
-  it("creates image result nodes with a persistent data URL preview", async () => {
+  it("creates image result nodes with storage-backed previews", async () => {
     const [node] = await createCanvasNodesFromFiles(
       [new File([createFakePngBytes(1600, 900)], "reference.png", { type: "image/png" })],
       { x: 10, y: 20 },
-      []
+      [],
+      { resolveUploadedFile: resolveTestUpload }
     );
 
     expect(node).toMatchObject({
@@ -48,7 +56,11 @@ describe("file upload canvas nodes", () => {
 
     expect(node.width).toBe(240);
     expect(node.height).toBe(135);
-    expect(node.data.image.url).toContain("data:image/png;base64,");
+    expect(node.data.image.url).toBe(
+      "/api/projects/project-1/artifacts/upload-image-reference-png/content"
+    );
+    expect(JSON.stringify(node)).not.toContain("data:image/png");
+    expect(JSON.stringify(node)).not.toContain("local-upload://");
     expect(node.data.artifact?.type).toBe("image");
     expect(node.data.image.metadata).toMatchObject({ width: 1600, height: 900 });
   });
@@ -57,7 +69,8 @@ describe("file upload canvas nodes", () => {
     const [node] = await createCanvasNodesFromFiles(
       [new File(["# 方案\n\n上传预览"], "brief.md", { type: "text/markdown" })],
       { x: 30, y: 40 },
-      []
+      [],
+      { resolveUploadedFile: resolveTestUpload }
     );
 
     expect(node).toMatchObject({
@@ -84,7 +97,8 @@ describe("file upload canvas nodes", () => {
         new File(["name,count\ncucumber,2"], "data.csv", { type: "text/csv" }),
       ],
       { x: 0, y: 0 },
-      []
+      [],
+      { resolveUploadedFile: resolveTestUpload }
     );
 
     expect(nodes[0]).toMatchObject({
@@ -110,10 +124,61 @@ describe("file upload canvas nodes", () => {
     const [node] = await createCanvasNodesFromFiles(
       [new File(["hello"], "notes.txt", { type: "text/plain" })],
       { x: 0, y: 0 },
-      [existingImageNode()]
+      [existingImageNode()],
+      { resolveUploadedFile: resolveTestUpload }
     );
 
     expect(node.position.x).toBeGreaterThan(0);
+  });
+
+  it("creates optimistic local image nodes before storage upload completes", async () => {
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:local-reference");
+
+    const [prepared] = await prepareLocalCanvasUploads(
+      [new File([createFakePngBytes(1600, 900)], "reference.png", { type: "image/png" })],
+      { x: 10, y: 20 },
+      [],
+      {
+        createLocalId: () => "image-1",
+        uploadedAt: "2026-06-12T00:00:00.000Z",
+      }
+    );
+
+    expect(prepared.localNode).toMatchObject({
+      position: { x: 10, y: 20 },
+      data: {
+        kind: "imageResult",
+        upload: {
+          localPreviewUrl: "blob:local-reference",
+          status: "uploading",
+        },
+      },
+    });
+
+    if (prepared.localNode.data.kind !== "imageResult") {
+      throw new Error("Expected image result node");
+    }
+    expect(prepared.localNode.data.image.url).toBe("blob:local-reference");
+    expect(prepared.localNode.data.artifact?.contentRef).toBe(
+      "local-upload://local-upload-image-1"
+    );
+  });
+
+  it("excludes local upload nodes from persisted snapshots", async () => {
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:local-reference");
+
+    const [prepared] = await prepareLocalCanvasUploads(
+      [new File([createFakePngBytes(1600, 900)], "reference.png", { type: "image/png" })],
+      { x: 0, y: 0 },
+      [],
+      { createLocalId: () => "image-1" }
+    );
+
+    const persistableNodes = toPersistableNodes([prepared.localNode]);
+
+    expect(persistableNodes).toEqual([]);
+    expect(JSON.stringify(persistableNodes)).not.toContain("blob:local-reference");
+    expect(JSON.stringify(persistableNodes)).not.toContain("local-upload://");
   });
 });
 
@@ -131,6 +196,43 @@ function existingImageNode(): AgentCanvasNode {
       prompt: "existing",
       runId: "run-1",
     },
+  };
+}
+
+async function resolveTestUpload(
+  upload: UploadedFileForStorage
+): Promise<ArtifactRef> {
+  const id = `upload-${upload.kind}-${upload.title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")}`;
+  const typeByKind = {
+    code: "code",
+    dataset: "dataset",
+    document: "doc",
+    file: "file",
+    image: "image",
+    markdown: "doc",
+    webpage: "webpage",
+  } satisfies Record<UploadedFileForStorage["kind"], ArtifactRef["type"]>;
+  const metadata = {
+    ...upload.metadata,
+    format: upload.kind === "markdown" ? "markdown" : undefined,
+    storageBucket: "agent-assets",
+    storagePath: `projects/project-1/uploads/test/${upload.title}`,
+    summary: upload.summary,
+  };
+
+  return {
+    contentRef: `supabase://agent-assets/projects/project-1/uploads/test/${upload.title}`,
+    id,
+    metadata,
+    title: upload.title,
+    type: typeByKind[upload.kind],
+    uri:
+      upload.kind === "image"
+        ? `/api/projects/project-1/artifacts/${id}/content`
+        : undefined,
   };
 }
 

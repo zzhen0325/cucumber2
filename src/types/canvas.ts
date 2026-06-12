@@ -22,6 +22,12 @@ export type ArtifactRef = {
   contentRef?: string;
 };
 
+export type LocalUploadState = {
+  status: "uploading" | "error";
+  error?: string;
+  localPreviewUrl?: string;
+};
+
 export type UpstreamContextType =
   | "prompt"
   | "image"
@@ -135,6 +141,7 @@ export type ImageResultNodeData = {
   runId: string;
   request?: ImageRequestPreview;
   status?: ImageResultStatus;
+  upload?: LocalUploadState;
 };
 
 export type StickyNoteNodeData = {
@@ -166,6 +173,7 @@ export type ArtifactBackedNodeData = {
   prompt?: string;
   runId?: string;
   createdAt?: string;
+  upload?: LocalUploadState;
 };
 
 export type ArtifactNodeData = ArtifactBackedNodeData & {
@@ -225,6 +233,13 @@ export type AgentCanvasNodeData =
 
 export type AgentCanvasNode = Node<AgentCanvasNodeData>;
 export type AgentCanvasEdge = Edge<{ active?: boolean }>;
+
+export type CanvasPatch = {
+  nodeUpserts?: AgentCanvasNode[];
+  nodeDeletes?: string[];
+  edgeUpserts?: AgentCanvasEdge[];
+  edgeDeletes?: string[];
+};
 
 export type RunDraft = {
   promptNode: AgentCanvasNode;

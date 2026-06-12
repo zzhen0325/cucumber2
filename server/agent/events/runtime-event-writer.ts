@@ -4,6 +4,7 @@ import type { AgentEvent } from "../../../src/types/runtime.ts";
 import { recordAgentEvent } from "../../supabase.ts";
 
 export type AgentEventWriter = {
+  flush: () => Promise<void>;
   writeEvent: (event: Omit<AgentEvent, "createdAt"> & { createdAt?: string }) => Promise<AgentEvent>;
   writeToolInput: (input: {
     stepId: string;
@@ -11,14 +12,14 @@ export type AgentEventWriter = {
     toolName: string;
     toolInput: unknown;
     metadata?: Record<string, string>;
-  }) => Promise<void>;
+  }) => Promise<AgentEvent>;
   writeToolOutput: (input: {
     stepId: string;
     toolCallId: string;
     toolName: string;
     output: unknown;
     metadata?: Record<string, string>;
-  }) => Promise<void>;
+  }) => Promise<AgentEvent>;
   writeToolError: (input: {
     stepId: string;
     toolCallId: string;
@@ -28,7 +29,7 @@ export type AgentEventWriter = {
     errorText: string;
     errorCode?: string;
     metadata?: Record<string, string>;
-  }) => Promise<void>;
+  }) => Promise<AgentEvent>;
 };
 
 export function createAgentEventWriter({
@@ -40,7 +41,17 @@ export function createAgentEventWriter({
   runNodeId: string;
   writer: UIMessageStreamWriter<UIMessage>;
 }): AgentEventWriter {
+  const pendingPersistence: Promise<void>[] = [];
+  const persistenceErrors: unknown[] = [];
+
   return {
+    async flush() {
+      await Promise.all(pendingPersistence);
+      if (persistenceErrors.length) {
+        throw persistenceErrors[0];
+      }
+    },
+
     async writeEvent(input) {
       const event: AgentEvent = {
         ...input,
@@ -49,13 +60,17 @@ export function createAgentEventWriter({
         createdAt: input.createdAt ?? new Date().toISOString(),
       };
 
-      await recordAgentEvent(event);
       writer.write({
         type: "data-runtime-event",
         id: getAgentEventStreamId(event),
         data: event,
         transient: false,
       });
+      pendingPersistence.push(
+        recordAgentEvent(event).catch((error: unknown) => {
+          persistenceErrors.push(error);
+        })
+      );
       return event;
     },
 
@@ -67,7 +82,7 @@ export function createAgentEventWriter({
         input: input.toolInput,
         toolMetadata: input.metadata,
       });
-      await this.writeEvent({
+      return this.writeEvent({
         projectId,
         runNodeId,
         stepId: input.stepId,
@@ -87,7 +102,7 @@ export function createAgentEventWriter({
         toolCallId: input.toolCallId,
         output: input.output,
       });
-      await this.writeEvent({
+      return this.writeEvent({
         projectId,
         runNodeId,
         stepId: input.stepId,
@@ -117,7 +132,7 @@ export function createAgentEventWriter({
               errorText: input.errorText,
             }
       );
-      await this.writeEvent({
+      return this.writeEvent({
         projectId,
         runNodeId,
         stepId: input.stepId,

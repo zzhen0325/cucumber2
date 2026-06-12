@@ -2,8 +2,14 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { createInMemorySupabaseClient, isInMemoryDbEnabled } from "./dev/in-memory-supabase.ts";
 import { canAccessProject } from "./project-access.ts";
-import { getProjectSummaryStats } from "../src/lib/project-summary.ts";
-import type { AgentCanvasEdge, AgentCanvasNode } from "../src/types/canvas.ts";
+import { applyCanvasPatch, hasCanvasPatchChanges } from "../src/lib/canvas-patch.ts";
+import { getProjectSnapshotStats } from "../src/lib/project-summary.ts";
+import type {
+  AgentCanvasEdge,
+  AgentCanvasNode,
+  ArtifactType,
+  CanvasPatch,
+} from "../src/types/canvas.ts";
 import type { AgentEvent, AgentEventType } from "../src/types/runtime.ts";
 
 export type AppUser = {
@@ -54,6 +60,28 @@ export type AgentEventRecord = {
   createdAt: string;
 };
 
+export type AgentArtifactOrigin = "user_upload" | "seedream_generated";
+
+export type AgentArtifactRecord = {
+  id: string;
+  projectId: string;
+  runNodeId: string | null;
+  type: ArtifactType;
+  uri: string | null;
+  title: string | null;
+  metadata: Record<string, unknown>;
+  contentRef: string | null;
+  toolCallId: string | null;
+  sourceNodeId: string | null;
+  bucketId: string | null;
+  storagePath: string | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  origin: AgentArtifactOrigin;
+  createdBy: string | null;
+  createdAt: string;
+};
+
 type CreateUserInput = {
   username: string;
   passwordHash: string;
@@ -71,6 +99,7 @@ type UpdateProjectInput = {
   title?: string;
   nodes?: AgentCanvasNode[];
   edges?: AgentCanvasEdge[];
+  canvasPatch?: CanvasPatch;
   selectedNodeId?: string | null;
   lastRunId?: string | null;
   expectedVersion?: number;
@@ -98,6 +127,9 @@ type ProjectRow = {
   title: string;
   nodes: unknown[];
   edges: unknown[];
+  node_count: number | null;
+  image_count: number | null;
+  snapshot_bytes: number | null;
   selected_node_id: string | null;
   last_run_id: string | null;
   version: number | null;
@@ -105,6 +137,16 @@ type ProjectRow = {
   created_at: string;
   updated_at: string;
 };
+
+type ProjectSummaryRow = Pick<
+  ProjectRow,
+  | "created_at"
+  | "id"
+  | "image_count"
+  | "node_count"
+  | "title"
+  | "updated_at"
+>;
 
 type AgentEventRow = {
   id: string;
@@ -115,6 +157,46 @@ type AgentEventRow = {
   payload: Record<string, unknown> | null;
   error_text: string | null;
   created_at: string;
+};
+
+type AgentArtifactRow = {
+  id: string;
+  project_id: string;
+  run_node_id: string | null;
+  type: ArtifactType;
+  uri: string | null;
+  title: string | null;
+  metadata: Record<string, unknown> | null;
+  content_ref: string | null;
+  tool_call_id: string | null;
+  source_node_id: string | null;
+  bucket_id: string | null;
+  storage_path: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  origin: AgentArtifactOrigin | null;
+  created_by: string | null;
+  created_at: string;
+};
+
+export type RegisterAgentArtifactInput = {
+  id: string;
+  projectId: string;
+  userId?: string;
+  runNodeId?: string | null;
+  type: ArtifactType;
+  uri?: string | null;
+  title?: string | null;
+  metadata?: Record<string, unknown>;
+  contentRef?: string | null;
+  toolCallId?: string | null;
+  sourceNodeId?: string | null;
+  bucketId?: string | null;
+  storagePath?: string | null;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
+  origin: AgentArtifactOrigin;
+  createdBy?: string | null;
 };
 
 let cachedClient: SupabaseClient | null = null;
@@ -252,11 +334,11 @@ export async function listProjects(userId: string) {
   const client = getSupabaseClient();
   const { data, error } = await client
     .from("agent_projects")
-    .select("*")
+    .select("id,title,node_count,image_count,created_at,updated_at")
     .eq("user_id", userId)
     .is("deleted_at", null)
     .order("updated_at", { ascending: false })
-    .returns<ProjectRow[]>();
+    .returns<ProjectSummaryRow[]>();
 
   if (error) {
     throw error;
@@ -291,19 +373,36 @@ export async function getProjectForUser(projectId: string, userId: string) {
 
 export async function updateProjectForUser(input: UpdateProjectInput) {
   const existing = await getProjectRow(input.projectId);
-  if (!canAccessProject(input.userId, mapProjectAccess(existing))) {
+  if (!existing || !canAccessProject(input.userId, mapProjectAccess(existing))) {
     return null;
   }
 
   const payload: Record<string, unknown> = {};
+  const baseSnapshot = {
+    edges: input.edges ?? normalizeEdges(existing.edges),
+    nodes: input.nodes ?? normalizeNodes(existing.nodes),
+  };
+  const nextSnapshot = hasCanvasPatchChanges(input.canvasPatch)
+    ? applyCanvasPatch(baseSnapshot, input.canvasPatch)
+    : baseSnapshot;
   if (input.title !== undefined) {
     payload.title = input.title;
   }
-  if (input.nodes !== undefined) {
-    payload.nodes = input.nodes;
+  if (input.nodes !== undefined || hasCanvasPatchChanges(input.canvasPatch)) {
+    payload.nodes = nextSnapshot.nodes;
   }
-  if (input.edges !== undefined) {
-    payload.edges = input.edges;
+  if (input.edges !== undefined || hasCanvasPatchChanges(input.canvasPatch)) {
+    payload.edges = nextSnapshot.edges;
+  }
+  if (
+    input.nodes !== undefined ||
+    input.edges !== undefined ||
+    hasCanvasPatchChanges(input.canvasPatch)
+  ) {
+    const stats = getProjectSnapshotStats(nextSnapshot);
+    payload.node_count = stats.nodeCount;
+    payload.image_count = stats.imageCount;
+    payload.snapshot_bytes = stats.snapshotBytes;
   }
   if (input.selectedNodeId !== undefined) {
     payload.selected_node_id = input.selectedNodeId;
@@ -424,6 +523,80 @@ export async function listAgentEventsForUser({
   return data.map(mapAgentEventRow);
 }
 
+export async function registerAgentArtifact(input: RegisterAgentArtifactInput) {
+  if (input.userId) {
+    const existing = await getProjectRow(input.projectId);
+    if (!canAccessProject(input.userId, mapProjectAccess(existing))) {
+      return null;
+    }
+  }
+
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("agent_artifacts")
+    .upsert(
+      {
+        id: input.id,
+        project_id: input.projectId,
+        run_node_id: input.runNodeId ?? null,
+        type: input.type,
+        uri: input.uri ?? null,
+        title: input.title ?? null,
+        metadata: input.metadata ?? {},
+        content_ref: input.contentRef ?? null,
+        tool_call_id: input.toolCallId ?? null,
+        source_node_id: input.sourceNodeId ?? null,
+        bucket_id: input.bucketId ?? null,
+        storage_path: input.storagePath ?? null,
+        mime_type: input.mimeType ?? null,
+        size_bytes: input.sizeBytes ?? null,
+        origin: input.origin,
+        created_by: input.createdBy ?? input.userId ?? null,
+      },
+      { onConflict: "id" }
+    )
+    .select()
+    .single<AgentArtifactRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  return mapAgentArtifactRow(data);
+}
+
+export async function getAgentArtifactForUser({
+  artifactId,
+  projectId,
+  userId,
+}: {
+  artifactId: string;
+  projectId: string;
+  userId: string;
+}) {
+  const existing = await getProjectRow(projectId);
+  if (!canAccessProject(userId, mapProjectAccess(existing))) {
+    return null;
+  }
+
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("agent_artifacts")
+    .select("*")
+    .eq("id", artifactId)
+    .eq("project_id", projectId)
+    .maybeSingle<AgentArtifactRow>();
+
+  if (error) {
+    throw error;
+  }
+  if (!data) {
+    return null;
+  }
+
+  return mapAgentArtifactRow(data);
+}
+
 async function getProjectRow(projectId: string) {
   const client = getSupabaseClient();
   const { data, error } = await client
@@ -439,7 +612,7 @@ async function getProjectRow(projectId: string) {
   return data;
 }
 
-function getSupabaseClient() {
+export function getSupabaseClient() {
   if (cachedClient) {
     return cachedClient;
   }
@@ -498,15 +671,12 @@ function mapProjectAccess(row: ProjectRow | null) {
   };
 }
 
-function mapProjectSummaryRow(row: ProjectRow): ProjectSummary {
-  const nodes = normalizeNodes(row.nodes);
-  const stats = getProjectSummaryStats(nodes);
-
+function mapProjectSummaryRow(row: ProjectSummaryRow): ProjectSummary {
   return {
     id: row.id,
     title: row.title,
-    nodeCount: stats.nodeCount,
-    imageCount: stats.imageCount,
+    nodeCount: row.node_count ?? 0,
+    imageCount: row.image_count ?? 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -547,6 +717,28 @@ function mapAgentEventRow(row: AgentEventRow): AgentEventRecord {
     type: row.type,
     payload: row.payload ?? {},
     errorText: row.error_text,
+    createdAt: row.created_at,
+  };
+}
+
+function mapAgentArtifactRow(row: AgentArtifactRow): AgentArtifactRecord {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    runNodeId: row.run_node_id,
+    type: row.type,
+    uri: row.uri,
+    title: row.title,
+    metadata: row.metadata ?? {},
+    contentRef: row.content_ref,
+    toolCallId: row.tool_call_id,
+    sourceNodeId: row.source_node_id,
+    bucketId: row.bucket_id,
+    storagePath: row.storage_path,
+    mimeType: row.mime_type,
+    sizeBytes: row.size_bytes,
+    origin: row.origin ?? "user_upload",
+    createdBy: row.created_by,
     createdAt: row.created_at,
   };
 }

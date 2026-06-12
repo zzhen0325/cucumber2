@@ -18,7 +18,7 @@ export type SeedreamGenerateInput = {
   promptBatchMode: SeedreamPromptBatchMode;
   // Optional callback invoked the moment each image finishes, so callers can
   // stream results to the UI instead of waiting for the whole batch.
-  onImage?: (image: SeedreamGeneratedImage) => void;
+  onImage?: (image: SeedreamGeneratedImage) => void | Promise<void>;
   signal?: AbortSignal;
 };
 
@@ -301,7 +301,7 @@ export async function generateSeedreamImage(
       );
 
       for (const image of images) {
-        input.onImage?.(image);
+        await input.onImage?.(image);
       }
 
       return images;

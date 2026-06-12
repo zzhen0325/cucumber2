@@ -17,9 +17,11 @@ describe("agent event graph projection", () => {
         }),
         event("artifact.created", "generate_image", {
           artifact: {
+            contentRef:
+              "supabase://agent-assets/projects/project-1/runs/run-1/artifacts/artifact-1.png",
             id: "artifact-1",
             type: "image",
-            uri: "https://cdn.example/image.png",
+            uri: "/api/projects/project-1/artifacts/artifact-1/content",
           },
         }),
         event("run.completed", "run", {
@@ -41,6 +43,9 @@ describe("agent event graph projection", () => {
       kind: "imageResult",
       status: "ready",
       artifact: { id: "artifact-1" },
+      image: {
+        url: "/api/projects/project-1/artifacts/artifact-1/content",
+      },
     });
   });
 

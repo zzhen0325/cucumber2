@@ -22,9 +22,11 @@ describe("agent context", () => {
       "image-1",
     ]);
     expect(input.upstreamContext[1]).toMatchObject({
+      contentRef: "supabase://agent-assets/projects/project-1/runs/run-1/artifacts/artifact-1.png",
       type: "image",
-      imageUrl: "https://trusted.example/image.png",
+      imageUrl: "/api/projects/project-1/artifacts/artifact-1/content",
     });
+    expect(JSON.stringify(input.upstreamContext)).not.toContain("signed");
   });
 
   it("rejects selected nodes outside the persisted project", () => {
@@ -90,9 +92,15 @@ function snapshot() {
         status: "ready",
         image: { id: "image-1", url: "https://trusted.example/image.png" },
         artifact: {
+          contentRef:
+            "supabase://agent-assets/projects/project-1/runs/run-1/artifacts/artifact-1.png",
           id: "artifact-1",
+          metadata: {
+            storageBucket: "agent-assets",
+            storagePath: "projects/project-1/runs/run-1/artifacts/artifact-1.png",
+          },
           type: "image",
-          uri: "https://trusted.example/image.png",
+          uri: "/api/projects/project-1/artifacts/artifact-1/content",
         },
       },
     },

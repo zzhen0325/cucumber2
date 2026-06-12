@@ -1207,6 +1207,22 @@
   -webkit-line-clamp: 3;
 }
 
+.upload-state {
+  width: fit-content;
+  border-radius: 999px;
+  background: rgba(41, 191, 78, 0.12);
+  color: #174222;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  padding: 2px 8px;
+}
+
+.upload-state.error {
+  background: rgba(229, 72, 77, 0.1);
+  color: #9d2025;
+}
+
 .markdown-card {
   width: 420px;
   height: 360px;
@@ -1463,6 +1479,13 @@
   height: 240px;
   min-height: 24px;
   overflow: visible;
+}
+
+.image-upload-state {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
 }
 
 .result-image-frame {

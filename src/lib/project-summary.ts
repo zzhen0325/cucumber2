@@ -3,6 +3,10 @@ export type ProjectSummaryStats = {
   imageCount: number;
 };
 
+export type ProjectSnapshotStats = ProjectSummaryStats & {
+  snapshotBytes: number;
+};
+
 export function getProjectSummaryStats(nodes: unknown[]): ProjectSummaryStats {
   let imageCount = 0;
 
@@ -18,6 +22,19 @@ export function getProjectSummaryStats(nodes: unknown[]): ProjectSummaryStats {
   };
 }
 
+export function getProjectSnapshotStats({
+  edges,
+  nodes,
+}: {
+  edges: unknown[];
+  nodes: unknown[];
+}): ProjectSnapshotStats {
+  return {
+    ...getProjectSummaryStats(nodes),
+    snapshotBytes: getJsonByteLength({ edges, nodes }),
+  };
+}
+
 function isImageResultNodeLike(node: unknown) {
   if (!node || typeof node !== "object") {
     return false;
@@ -25,4 +42,8 @@ function isImageResultNodeLike(node: unknown) {
 
   const candidate = node as { data?: { kind?: unknown } };
   return candidate.data?.kind === "imageResult";
+}
+
+function getJsonByteLength(value: unknown) {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
 }

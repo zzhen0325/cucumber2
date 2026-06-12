@@ -7,6 +7,10 @@ import {
   readSeedreamConfigFromEnv,
 } from "../../../../seedream.ts";
 import type { ArtifactRef } from "../../../../src/types/canvas.ts";
+import {
+  resolveStorageBackedImageContext,
+  storeGeneratedImageFromUrl,
+} from "../../../storage.ts";
 import type { CucumberAgentContext } from "../../context.ts";
 import { buildGenerateImageSeedreamInput } from "./generate-image.request.ts";
 
@@ -68,19 +72,22 @@ export const generateImageTool = tool({
     }
 
     const artifacts: ArtifactRef[] = [];
-    const emitArtifact = (image: {
+    const emitArtifact = async (image: {
       id: string;
       url: string;
       title?: string;
       metadata?: Record<string, unknown>;
     }) => {
-      const artifact: ArtifactRef = {
-        id: image.id,
-        type: "image",
-        uri: image.url,
-        title: image.title,
+      const artifact = await storeGeneratedImageFromUrl({
+        artifactId: image.id,
         metadata: image.metadata,
-      };
+        projectId: context.projectId,
+        runNodeId: context.runNodeId,
+        signal: details?.signal,
+        sourceUrl: image.url,
+        title: image.title,
+        userId: context.userId,
+      });
       context.producedArtifacts.push(artifact);
       artifacts.push(artifact);
       // Stream each image to the client the moment it lands so the canvas
@@ -95,12 +102,15 @@ export const generateImageTool = tool({
     };
 
     const config = readSeedreamConfigFromEnv();
+    const upstreamContext = await resolveStorageBackedImageContext(
+      context.upstreamContext
+    );
     await generateSeedreamImage(
       buildGenerateImageSeedreamInput(
         {
           prompt,
           requestedResultCount: parsed.data.resultCount,
-          upstreamContext: context.upstreamContext,
+          upstreamContext,
           onImage: emitArtifact,
           signal: details?.signal,
         },

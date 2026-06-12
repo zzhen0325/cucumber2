@@ -28,6 +28,7 @@ import {
   createUser,
   deleteSession,
   getProjectForUser,
+  getAgentArtifactForUser,
   getSessionUser,
   getUserByUsername,
   getUserCount,
@@ -39,6 +40,12 @@ import {
   ProjectVersionConflictError,
   type AppUser,
 } from "./supabase.ts";
+import {
+  createSignedArtifactReadUrl,
+  createSignedAssetUpload,
+  completeSignedAssetUpload,
+  MAX_AGENT_ASSET_BYTES,
+} from "./storage.ts";
 
 loadServerEnv();
 
@@ -66,6 +73,14 @@ const projectPatchSchema = z
     title: z.string().trim().min(1).max(120).optional(),
     nodes: z.array(z.unknown()).optional(),
     edges: z.array(z.unknown()).optional(),
+    canvasPatch: z
+      .object({
+        nodeUpserts: z.array(z.unknown()).optional(),
+        nodeDeletes: z.array(z.string()).optional(),
+        edgeUpserts: z.array(z.unknown()).optional(),
+        edgeDeletes: z.array(z.string()).optional(),
+      })
+      .optional(),
     selectedNodeId: z.string().nullable().optional(),
     lastRunId: z.string().nullable().optional(),
     expectedVersion: z.number().int().nonnegative().optional(),
@@ -73,6 +88,35 @@ const projectPatchSchema = z
   .refine((value) => Object.keys(value).length > 0, {
     message: "No project updates provided.",
   });
+
+const uploadAssetKindSchema = z.enum([
+  "image",
+  "markdown",
+  "code",
+  "document",
+  "webpage",
+  "dataset",
+  "file",
+]);
+
+const uploadSignSchema = z.object({
+  fileName: z.string().trim().min(1).max(260),
+  mimeType: z.string().trim().max(160).optional(),
+  sizeBytes: z.number().int().nonnegative().max(MAX_AGENT_ASSET_BYTES),
+});
+
+const uploadCompleteSchema = z.object({
+  bucket: z.string().trim().min(1),
+  fileName: z.string().trim().min(1).max(260),
+  height: z.number().int().positive().optional(),
+  kind: uploadAssetKindSchema,
+  mimeType: z.string().trim().max(160).default("application/octet-stream"),
+  path: z.string().trim().min(1).max(1024),
+  sizeBytes: z.number().int().nonnegative().max(MAX_AGENT_ASSET_BYTES),
+  summary: z.string().trim().max(500).optional(),
+  title: z.string().trim().min(1).max(260).optional(),
+  width: z.number().int().positive().optional(),
+});
 
 app.use("*", cors());
 
@@ -203,6 +247,8 @@ app.patch("/api/projects/:projectId", async (c) => {
       title: input.title,
       nodes: input.nodes as Parameters<typeof updateProjectForUser>[0]["nodes"],
       edges: input.edges as Parameters<typeof updateProjectForUser>[0]["edges"],
+      canvasPatch:
+        input.canvasPatch as Parameters<typeof updateProjectForUser>[0]["canvasPatch"],
       selectedNodeId: input.selectedNodeId,
       lastRunId: input.lastRunId,
       expectedVersion: input.expectedVersion,
@@ -258,6 +304,90 @@ app.get("/api/projects/:projectId/runs/:runNodeId/trace", async (c) => {
   }
 
   return c.json({ events });
+});
+
+app.post("/api/projects/:projectId/uploads/sign", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const projectId = z.string().uuid().parse(c.req.param("projectId"));
+  const project = await getProjectForUser(projectId, user.id);
+  if (!project) {
+    return notFound(c);
+  }
+
+  const input = uploadSignSchema.parse(await c.req.json());
+  const upload = await createSignedAssetUpload({
+    fileName: input.fileName,
+    projectId,
+    sizeBytes: input.sizeBytes,
+  });
+
+  return c.json({ upload });
+});
+
+app.post("/api/projects/:projectId/uploads/:uploadId/complete", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const projectId = z.string().uuid().parse(c.req.param("projectId"));
+  const uploadId = z.string().uuid().parse(c.req.param("uploadId"));
+  const project = await getProjectForUser(projectId, user.id);
+  if (!project) {
+    return notFound(c);
+  }
+
+  const input = uploadCompleteSchema.parse(await c.req.json());
+  const artifact = await completeSignedAssetUpload({
+    bucket: input.bucket,
+    fileName: input.fileName,
+    height: input.height,
+    kind: input.kind,
+    mimeType: input.mimeType,
+    path: input.path,
+    projectId,
+    sizeBytes: input.sizeBytes,
+    summary: input.summary,
+    title: input.title,
+    uploadId,
+    userId: user.id,
+    width: input.width,
+  });
+
+  return c.json({
+    artifact,
+    nodeData: {
+      artifact,
+      summary: artifact.metadata?.summary,
+      title: artifact.title,
+    },
+  });
+});
+
+app.get("/api/projects/:projectId/artifacts/:artifactId/content", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const projectId = z.string().uuid().parse(c.req.param("projectId"));
+  const artifactId = z.string().min(1).max(260).parse(c.req.param("artifactId"));
+  const artifact = await getAgentArtifactForUser({
+    artifactId,
+    projectId,
+    userId: user.id,
+  });
+
+  if (!artifact) {
+    return notFound(c);
+  }
+
+  const signedUrl = await createSignedArtifactReadUrl(artifact);
+  return c.redirect(signedUrl, 302);
 });
 
 app.delete("/api/agent-run", async (c) => {

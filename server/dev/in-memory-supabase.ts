@@ -38,6 +38,9 @@ function withDefaults(table: string, value: Row): Row {
     if (row.version == null) row.version = 0;
     if (row.nodes == null) row.nodes = [];
     if (row.edges == null) row.edges = [];
+    if (row.node_count == null) row.node_count = 0;
+    if (row.image_count == null) row.image_count = 0;
+    if (row.snapshot_bytes == null) row.snapshot_bytes = 0;
     if (row.selected_node_id === undefined) row.selected_node_id = null;
     if (row.last_run_id === undefined) row.last_run_id = null;
     if (row.user_id === undefined) row.user_id = null;
@@ -45,11 +48,27 @@ function withDefaults(table: string, value: Row): Row {
   if (table === "app_sessions" && row.last_seen_at === undefined) {
     row.last_seen_at = null;
   }
+  if (table === "agent_artifacts") {
+    if (row.run_node_id === undefined) row.run_node_id = null;
+    if (row.uri === undefined) row.uri = null;
+    if (row.title === undefined) row.title = null;
+    if (row.metadata == null) row.metadata = {};
+    if (row.content_ref === undefined) row.content_ref = null;
+    if (row.tool_call_id === undefined) row.tool_call_id = null;
+    if (row.source_node_id === undefined) row.source_node_id = null;
+    if (row.bucket_id === undefined) row.bucket_id = null;
+    if (row.storage_path === undefined) row.storage_path = null;
+    if (row.mime_type === undefined) row.mime_type = null;
+    if (row.size_bytes === undefined) row.size_bytes = null;
+    if (row.origin == null) row.origin = "user_upload";
+    if (row.created_by === undefined) row.created_by = null;
+  }
   return row;
 }
 
 class InMemoryDb {
   tables: Record<string, Row[]> = {};
+  storage = new InMemoryStorage();
 
   table(name: string) {
     return (this.tables[name] ??= []);
@@ -232,21 +251,133 @@ class InMemoryQuery implements PromiseLike<{ data: unknown; error: null; count?:
 
     if (this.op === "upsert") {
       const arr = Array.isArray(this.values) ? this.values : [this.values as Row];
+      const touched: Row[] = [];
       for (const v of arr) {
         const existing = v.id != null ? rows.find((r) => r.id === v.id) : undefined;
         if (existing) {
           Object.assign(existing, v);
+          touched.push(existing);
         } else {
-          rows.push(withDefaults(this.name, v));
+          const row = withDefaults(this.name, v);
+          rows.push(row);
+          touched.push(row);
         }
       }
-      return { data: null, error: null };
+      return this.wantRows ? this.finalizeRows(touched) : { data: null, error: null };
     }
 
     // delete
     this.db.tables[this.name] = rows.filter((r) => !this.matchesRow(r));
     return { data: null, error: null };
   }
+}
+
+type StoredObject = {
+  body: unknown;
+  contentType: string;
+  size: number;
+  updatedAt: string;
+};
+
+class InMemoryStorage {
+  private objects = new Map<string, StoredObject>();
+
+  from(bucket: string) {
+    return new InMemoryStorageBucket(this.objects, bucket);
+  }
+}
+
+class InMemoryStorageBucket {
+  private objects: Map<string, StoredObject>;
+  private bucket: string;
+
+  constructor(objects: Map<string, StoredObject>, bucket: string) {
+    this.objects = objects;
+    this.bucket = bucket;
+  }
+
+  async createSignedUploadUrl(path: string) {
+    return {
+      data: {
+        path,
+        signedUrl: `http://127.0.0.1/__inmemory-storage/${this.bucket}/${encodeURIComponent(path)}`,
+        token: `inmemory:${this.bucket}:${path}`,
+      },
+      error: null,
+    };
+  }
+
+  async upload(
+    path: string,
+    body: unknown,
+    options?: { contentType?: string; upsert?: boolean }
+  ) {
+    const key = this.key(path);
+    if (!options?.upsert && this.objects.has(key)) {
+      return { data: null, error: new Error("Asset Already Exists") };
+    }
+
+    this.objects.set(key, {
+      body,
+      contentType: options?.contentType ?? "application/octet-stream",
+      size: getObjectSize(body),
+      updatedAt: nowIso(),
+    });
+
+    return {
+      data: { fullPath: `${this.bucket}/${path}`, path },
+      error: null,
+    };
+  }
+
+  async info(path: string) {
+    const object = this.objects.get(this.key(path));
+    if (!object) {
+      return { data: null, error: new Error("Object not found") };
+    }
+
+    return {
+      data: {
+        metadata: {
+          mimetype: object.contentType,
+          size: object.size,
+        },
+        name: path.split("/").at(-1) ?? path,
+        updated_at: object.updatedAt,
+      },
+      error: null,
+    };
+  }
+
+  async createSignedUrl(path: string) {
+    if (!this.objects.has(this.key(path))) {
+      return { data: null, error: new Error("Object not found") };
+    }
+
+    return {
+      data: {
+        signedUrl: `http://127.0.0.1/__inmemory-storage/${this.bucket}/${encodeURIComponent(path)}?signed=1`,
+      },
+      error: null,
+    };
+  }
+
+  private key(path: string) {
+    return `${this.bucket}/${path}`;
+  }
+}
+
+function getObjectSize(body: unknown) {
+  if (body instanceof Uint8Array) {
+    return body.byteLength;
+  }
+  if (body instanceof ArrayBuffer) {
+    return body.byteLength;
+  }
+  if (typeof body === "string") {
+    return Buffer.byteLength(body);
+  }
+  return 0;
 }
 
 let cachedDb: InMemoryDb | null = null;
@@ -258,5 +389,6 @@ export function createInMemorySupabaseClient() {
     from(name: string) {
       return db.from(name);
     },
+    storage: db.storage,
   };
 }

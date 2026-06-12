@@ -37,7 +37,14 @@ pnpm dev
 - DeepSeek：`DEEPSEEK_API_KEY`，可选 `DEEPSEEK_MODEL`、`DEEPSEEK_BASE_URL`
 - OpenAI：`OPENAI_API_KEY`，可选 `OPENAI_MODEL`
 
-图片生成还需要 `SEEDREAM_ACCESS_KEY_ID` 和 `SEEDREAM_SECRET_ACCESS_KEY`。项目和 Trace 持久化需要 `SUPABASE_URL` 与 `SUPABASE_SECRET_KEY`。
+图片生成还需要 `SEEDREAM_ACCESS_KEY_ID` 和 `SEEDREAM_SECRET_ACCESS_KEY`。项目、Trace 和对象存储 metadata 持久化需要 `SUPABASE_URL` 与 `SUPABASE_SECRET_KEY`。
+
+浏览器直传 Supabase Storage 还需要公开环境变量：
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_PUBLISHABLE_KEY`，或兼容旧命名的 `VITE_SUPABASE_ANON_KEY`
+
+不要把 `SUPABASE_SECRET_KEY` / service role key 暴露到前端。
 
 `GET /api/health` 返回 `agentConfigured`、`agentProvider`、`agentModel`、`seedreamConfigured` 和 `supabaseConfigured`。
 
@@ -47,7 +54,16 @@ pnpm dev
 
 - `agent_projects`：项目标题、画布 nodes/edges、选中节点和 `last_run_id`
 - `agent_run_events`：唯一 Agent Trace 事件表
+- `agent_artifacts`：artifact metadata、对象存储 bucket/path 和稳定 content ref
 - `app_users`、`app_sessions`：本地账号和会话
+
+对象存储：
+
+- bucket：`agent-assets`，private，单文件上限 50MB
+- 用户上传路径：`projects/{projectId}/uploads/{uploadId}/{fileName}`
+- 生成图片路径：`projects/{projectId}/runs/{runNodeId}/artifacts/{artifactId}.{ext}`
+- 画布只保存 `/api/projects/:projectId/artifacts/:artifactId/content` 和 `supabase://agent-assets/...` 稳定引用；实际读取由服务端校验权限后签发短期 URL。
+- 画布保存使用 `canvasPatch` 增量写入 `nodes/edges` JSON；打开项目仍读取完整快照。
 
 `supabase/migrations/20260611000000_agent_v2_cutover.sql` 会删除 Agent v1 Trace、Skill 和旧 runtime 表，只保留 `run.created.payload.runtime = 'openai-agents-sdk'` 的 Trace，并保留所有项目画布 nodes/edges。该迁移不可逆。
 
@@ -56,8 +72,11 @@ pnpm dev
 - `GET /api/health`
 - `POST /api/auth/register`、`POST /api/auth/login`、`POST /api/auth/logout`
 - `GET /api/projects`、`POST /api/projects`
-- `GET /api/projects/:projectId`、`PATCH /api/projects/:projectId`、`DELETE /api/projects/:projectId`
+- `GET /api/projects/:projectId`、`PATCH /api/projects/:projectId`（支持 `canvasPatch` 增量 upsert/delete）、`DELETE /api/projects/:projectId`
 - `GET /api/projects/:projectId/runs/:runNodeId/trace`
+- `POST /api/projects/:projectId/uploads/sign`
+- `POST /api/projects/:projectId/uploads/:uploadId/complete`
+- `GET /api/projects/:projectId/artifacts/:artifactId/content`
 - `POST /api/agent-run`
 - `DELETE /api/agent-run?projectId=...&runNodeId=...`
 

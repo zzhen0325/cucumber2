@@ -6,6 +6,34 @@ import type { UpstreamContextItem } from "../../../../src/types/canvas.ts";
 
 const generateSeedreamImage = vi.fn();
 const isSeedreamConfigured = vi.fn();
+const resolveStorageBackedImageContext = vi.fn(async (items: UpstreamContextItem[]) =>
+  items.map((item) =>
+    item.artifact?.contentRef?.startsWith("supabase://")
+      ? { ...item, imageUrl: "https://signed.example/ref.png" }
+      : item
+  )
+);
+const storeGeneratedImageFromUrl = vi.fn(
+  async (input: {
+    artifactId: string;
+    metadata?: Record<string, unknown>;
+    projectId: string;
+    runNodeId: string;
+    sourceUrl: string;
+    title?: string;
+  }) => ({
+    contentRef: `supabase://agent-assets/projects/${input.projectId}/runs/${input.runNodeId}/artifacts/${input.artifactId}.png`,
+    id: input.artifactId,
+    metadata: {
+      ...input.metadata,
+      storageBucket: "agent-assets",
+      storagePath: `projects/${input.projectId}/runs/${input.runNodeId}/artifacts/${input.artifactId}.png`,
+    },
+    title: input.title,
+    type: "image" as const,
+    uri: `/api/projects/${input.projectId}/artifacts/${input.artifactId}/content`,
+  })
+);
 const testSeedreamConfig = {
   accessKeyId: "test-ak",
   secretAccessKey: "test-sk",
@@ -35,6 +63,14 @@ vi.mock("../../../../seedream.ts", async () => {
     readSeedreamConfigFromEnv: () => testSeedreamConfig,
   };
 });
+
+vi.mock("../../../storage.ts", () => ({
+  resolveStorageBackedImageContext: (items: UpstreamContextItem[]) =>
+    resolveStorageBackedImageContext(items),
+  storeGeneratedImageFromUrl: (
+    input: Parameters<typeof storeGeneratedImageFromUrl>[0]
+  ) => storeGeneratedImageFromUrl(input),
+}));
 
 // Imported after the mock is registered.
 const { generateImageTool } = await import("./generate-image.tool.ts");
@@ -71,6 +107,8 @@ describe("generate_image tool", () => {
   beforeEach(() => {
     generateSeedreamImage.mockReset();
     isSeedreamConfigured.mockReset();
+    resolveStorageBackedImageContext.mockClear();
+    storeGeneratedImageFromUrl.mockClear();
   });
 
   it("generates images and emits artifact_created events without leaking urls", async () => {
@@ -81,7 +119,7 @@ describe("generate_image tool", () => {
           { id: "seedream-1", url: "https://cdn.example/1.png", title: "Seedream image" },
         ];
         for (const image of images) {
-          input.onImage?.(image);
+          await input.onImage?.(image);
         }
         return { images };
       }
@@ -95,10 +133,20 @@ describe("generate_image tool", () => {
 
     expect(context.producedArtifacts).toHaveLength(1);
     expect(context.producedArtifacts[0]).toMatchObject({
+      contentRef:
+        "supabase://agent-assets/projects/project-1/runs/run-1/artifacts/seedream-1.png",
       id: "seedream-1",
       type: "image",
-      uri: "https://cdn.example/1.png",
+      uri: "/api/projects/project-1/artifacts/seedream-1/content",
     });
+    expect(storeGeneratedImageFromUrl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        artifactId: "seedream-1",
+        projectId: "project-1",
+        runNodeId: "run-1",
+        sourceUrl: "https://cdn.example/1.png",
+      })
+    );
     expect(context.pendingEvents).toEqual([
       {
         type: "artifact_created",
@@ -173,5 +221,34 @@ describe("generate_image tool", () => {
         summary: undefined,
       },
     ]);
+  });
+
+  it("signs storage-backed image references only when building Seedream input", async () => {
+    isSeedreamConfigured.mockReturnValue(true);
+    generateSeedreamImage.mockResolvedValue({ images: [] });
+    const context = buildContext({
+      upstreamContext: [
+        {
+          artifact: {
+            contentRef: "supabase://agent-assets/projects/project-1/uploads/ref.png",
+            id: "ref",
+            type: "image",
+            uri: "/api/projects/project-1/artifacts/ref/content",
+          },
+          contentRef: "supabase://agent-assets/projects/project-1/uploads/ref.png",
+          imageUrl: "/api/projects/project-1/artifacts/ref/content",
+          nodeId: "image-1",
+          type: "image",
+        },
+      ],
+    });
+
+    await invokeTool(context, { prompt: "参考图生成" });
+
+    const callArg = generateSeedreamImage.mock.calls[0][0];
+    expect(callArg.requests[0].body.image_urls).toEqual([
+      "https://signed.example/ref.png",
+    ]);
+    expect(JSON.stringify(context.pendingEvents)).not.toContain("signed.example");
   });
 });

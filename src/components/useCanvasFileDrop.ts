@@ -6,18 +6,26 @@ import type {
   SetStateAction,
 } from "react";
 
-import { createCanvasNodesFromFiles } from "@/lib/file-upload";
+import { uploadProjectFileAsset } from "@/lib/asset-upload";
+import {
+  createCanvasNodeFromUploadedFile,
+  prepareLocalCanvasUploads,
+} from "@/lib/file-upload";
 import type { AgentCanvasEdge, AgentCanvasNode } from "@/types/canvas";
 
 type UseCanvasFileDropOptions = {
   canUploadFiles: boolean;
   nodes: AgentCanvasNode[];
+  projectId: string | null;
+  setEdges: Dispatch<SetStateAction<AgentCanvasEdge[]>>;
   setNodes: Dispatch<SetStateAction<AgentCanvasNode[]>>;
 };
 
 export function useCanvasFileDrop({
   canUploadFiles,
   nodes,
+  projectId,
+  setEdges,
   setNodes,
 }: UseCanvasFileDropOptions) {
   const [uploadDragActive, setUploadDragActive] = useState(false);
@@ -52,6 +60,10 @@ export function useCanvasFileDrop({
 
   const clearUploadError = useCallback(() => {
     setUploadError(null);
+  }, []);
+
+  const showUploadError = useCallback((message: string) => {
+    setUploadError(message);
   }, []);
 
   const handleFileDragEnter = useCallback(
@@ -113,6 +125,10 @@ export function useCanvasFileDrop({
         setUploadError("当前画布不可上传文件");
         return;
       }
+      if (!projectId) {
+        setUploadError("项目尚未加载完成");
+        return;
+      }
 
       const files = Array.from(event.dataTransfer.files);
       if (!files.length) {
@@ -130,7 +146,7 @@ export function useCanvasFileDrop({
           x: event.clientX,
           y: event.clientY,
         });
-        const uploadedNodes = await createCanvasNodesFromFiles(
+        const preparedUploads = await prepareLocalCanvasUploads(
           files,
           position,
           nodes
@@ -138,14 +154,42 @@ export function useCanvasFileDrop({
 
         setNodes((current) => [
           ...clearSelectedNodes(current),
-          ...uploadedNodes.map((node) => ({ ...node, selected: true })),
+          ...preparedUploads.map((item) => ({ ...item.localNode, selected: true })),
         ]);
         setUploadError(null);
+
+        for (const item of preparedUploads) {
+          void uploadProjectFileAsset(projectId, item.upload)
+            .then((artifact) => {
+              const finalNode = createCanvasNodeFromUploadedFile(
+                item.upload,
+                artifact
+              );
+              setNodes((current) =>
+                replaceLocalUploadNode(current, item.localNode.id, finalNode)
+              );
+              setEdges((current) =>
+                replaceLocalUploadEdges(current, item.localNode.id, finalNode.id)
+              );
+            })
+            .catch((nextError: unknown) => {
+              const message = getClientError(nextError);
+              setNodes((current) =>
+                markLocalUploadNodeError(current, item.localNode.id, message)
+              );
+              setUploadError(message);
+            })
+            .finally(() => {
+              if (item.objectUrl) {
+                URL.revokeObjectURL(item.objectUrl);
+              }
+            });
+        }
       } catch (nextError) {
         setUploadError(getClientError(nextError));
       }
     },
-    [canUploadFiles, nodes, setNodes]
+    [canUploadFiles, nodes, projectId, setEdges, setNodes]
   );
 
   return {
@@ -157,6 +201,7 @@ export function useCanvasFileDrop({
     handleFileDrop,
     uploadDragActive,
     uploadError,
+    showUploadError,
   };
 }
 
@@ -168,6 +213,70 @@ function clearSelectedNodes(nodes: AgentCanvasNode[]) {
 
 function isFileDragEvent(event: DragEvent<HTMLElement>) {
   return Array.from(event.dataTransfer.types).includes("Files");
+}
+
+function replaceLocalUploadNode(
+  nodes: AgentCanvasNode[],
+  localNodeId: string,
+  finalNode: AgentCanvasNode
+) {
+  return nodes.map((node) => {
+    if (node.id !== localNodeId) {
+      return node;
+    }
+
+    return {
+      ...finalNode,
+      height: node.height ?? finalNode.height,
+      measured: node.measured ?? finalNode.measured,
+      position: node.position,
+      selected: node.selected,
+      width: node.width ?? finalNode.width,
+    };
+  });
+}
+
+function markLocalUploadNodeError(
+  nodes: AgentCanvasNode[],
+  localNodeId: string,
+  message: string
+) {
+  return nodes.map((node) => {
+    if (node.id !== localNodeId || !("upload" in node.data)) {
+      return node;
+    }
+
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        status: node.data.kind === "imageResult" ? "error" : undefined,
+        upload: {
+          ...node.data.upload,
+          error: message,
+          status: "error" as const,
+        },
+      },
+    } as AgentCanvasNode;
+  });
+}
+
+function replaceLocalUploadEdges(
+  edges: AgentCanvasEdge[],
+  localNodeId: string,
+  finalNodeId: string
+) {
+  return edges.map((edge) => {
+    if (edge.source !== localNodeId && edge.target !== localNodeId) {
+      return edge;
+    }
+
+    return {
+      ...edge,
+      source: edge.source === localNodeId ? finalNodeId : edge.source,
+      target: edge.target === localNodeId ? finalNodeId : edge.target,
+    };
+  });
 }
 
 function getClientError(error: unknown) {

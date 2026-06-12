@@ -1,6 +1,6 @@
 import { getResponseError } from "@/lib/api-client";
 import type { RunStepTraceEvent } from "@/lib/graph-projection";
-import type { AgentCanvasEdge, AgentCanvasNode } from "@/types/canvas";
+import type { AgentCanvasEdge, AgentCanvasNode, CanvasPatch } from "@/types/canvas";
 
 export type ProjectSummary = {
   id: string;
@@ -28,6 +28,7 @@ export type UpdateProjectInput = {
   title?: string;
   nodes?: AgentCanvasNode[];
   edges?: AgentCanvasEdge[];
+  canvasPatch?: CanvasPatch;
   selectedNodeId?: string | null;
   lastRunId?: string | null;
   expectedVersion?: number;
