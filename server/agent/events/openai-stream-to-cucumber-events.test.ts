@@ -63,6 +63,36 @@ describe("OpenAI Agents stream adapter", () => {
       })
     );
   });
+
+  it("formats object stream failures before emitting tool_failed", async () => {
+    const context = agentContext();
+    const stream = failingObjectStream();
+    const events: CucumberRunEvent[] = [];
+
+    await expect(async () => {
+      for await (const event of openAIStreamToCucumberEvents(stream, context)) {
+        events.push(event);
+      }
+    }).rejects.toEqual(
+      expect.objectContaining({
+        code: "PGRST205",
+      })
+    );
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "tool_failed",
+        toolName: "expand_image_prompt",
+        toolCallId: "call-skill",
+        message: expect.stringContaining("agent_skill_definitions"),
+      })
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        message: expect.stringContaining("Code: PGRST205"),
+      })
+    );
+  });
 });
 
 function fakeStream(events: unknown[], finalOutput: string) {
@@ -87,6 +117,32 @@ function failingStream() {
         item: { rawItem: { name: "generate_image", callId: "call-1", arguments: "{}" } },
       };
       throw new Error("Seedream failed");
+    },
+  } as never;
+}
+
+function failingObjectStream() {
+  return {
+    completed: Promise.resolve(),
+    async *[Symbol.asyncIterator]() {
+      yield {
+        type: "run_item_stream_event",
+        name: "tool_called",
+        item: {
+          rawItem: {
+            name: "expand_image_prompt",
+            callId: "call-skill",
+            arguments: '{"prompt":"小狗"}',
+          },
+        },
+      };
+      throw {
+        code: "PGRST205",
+        details: null,
+        hint: "Perhaps you meant the table 'public.agent_run_events'",
+        message:
+          "Could not find the table 'public.agent_skill_definitions' in the schema cache",
+      };
     },
   } as never;
 }

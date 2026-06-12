@@ -16,6 +16,7 @@ import {
   type AgentEventWriter,
 } from "./events/runtime-event-writer.ts";
 import { openAIStreamToCucumberEvents } from "./events/openai-stream-to-cucumber-events.ts";
+import { getAgentErrorMessage, isAbortError } from "./errors.ts";
 import {
   materializeAgentRunSnapshot,
   shouldMaterializeRunEvent,
@@ -273,7 +274,7 @@ export async function executeAgentRun({
     });
   } catch (error) {
     const aborted = input.signal?.aborted || isAbortError(error);
-    const message = aborted ? "Run stopped by user." : getErrorMessage(error);
+    const message = aborted ? "Run stopped by user." : getAgentErrorMessage(error);
     if (!aborted) {
       console.error("[agent-run]", error);
     }
@@ -369,12 +370,4 @@ function buildManagerRunPrompt(input: AgentRunInput) {
       ...imageContext,
     ].slice(0, 12))}`,
   ].join("\n\n");
-}
-
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function isAbortError(error: unknown) {
-  return error instanceof Error && error.name === "AbortError";
 }

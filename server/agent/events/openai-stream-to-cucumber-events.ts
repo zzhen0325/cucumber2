@@ -1,6 +1,7 @@
 import type { RunStreamEvent } from "@openai/agents";
 
 import type { CucumberAgentContext, CucumberRunEvent, PendingCucumberEvent } from "../context.ts";
+import { getAgentErrorMessage } from "../errors.ts";
 
 type StreamWithCompletion = AsyncIterable<RunStreamEvent> & {
   completed?: Promise<unknown>;
@@ -118,7 +119,7 @@ export async function* openAIStreamToCucumberEvents(
         finalOutput: stringifyFinalOutput(stream.finalOutput),
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = getAgentErrorMessage(error);
       for (const [toolCallId, tool] of activeTools) {
         push({
           type: "tool_failed",
