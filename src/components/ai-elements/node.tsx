@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { Handle, NodeResizer, Position } from "@xyflow/react";
+import { forwardRef } from "react";
 import type { ComponentProps } from "react";
 
 export type NodeProps = ComponentProps<typeof Card> & {
@@ -18,37 +19,50 @@ export type NodeProps = ComponentProps<typeof Card> & {
   };
   minHeight?: number;
   minWidth?: number;
+  onResize?: ComponentProps<typeof NodeResizer>["onResize"];
+  onResizeEnd?: ComponentProps<typeof NodeResizer>["onResizeEnd"];
   selected?: boolean;
 };
 
-export const Node = ({
-  handles,
-  className,
-  minHeight = 72,
-  minWidth = 160,
-  selected,
-  ...props
-}: NodeProps) => (
-  <Card
-    className={cn(
-      "node-container relative size-full gap-0 rounded-md p-0",
-      className
-    )}
-    {...props}
-  >
-    <NodeResizer
-      color="#29bf4e"
-      handleClassName="canvas-node-resizer-handle nodrag nopan"
-      isVisible={selected}
-      lineClassName="canvas-node-resizer-line"
-      minHeight={minHeight}
-      minWidth={minWidth}
-    />
-    {handles.target && <Handle position={Position.Top} type="target" />}
-    {handles.source && <Handle position={Position.Bottom} type="source" />}
-    {props.children}
-  </Card>
+export const Node = forwardRef<HTMLDivElement, NodeProps>(
+  (
+    {
+      handles,
+      className,
+      minHeight = 72,
+      minWidth = 160,
+      onResize,
+      onResizeEnd,
+      selected,
+      ...props
+    },
+    ref
+  ) => (
+    <Card
+      className={cn(
+        "node-container relative size-full gap-0 rounded-md p-0",
+        className
+      )}
+      ref={ref}
+      {...props}
+    >
+      <NodeResizer
+        color="#29bf4e"
+        handleClassName="canvas-node-resizer-handle nodrag nopan"
+        isVisible={selected}
+        lineClassName="canvas-node-resizer-line"
+        minHeight={minHeight}
+        minWidth={minWidth}
+        onResize={onResize}
+        onResizeEnd={onResizeEnd}
+      />
+      {handles.target && <Handle position={Position.Top} type="target" />}
+      {handles.source && <Handle position={Position.Bottom} type="source" />}
+      {props.children}
+    </Card>
+  )
 );
+Node.displayName = "Node";
 
 export type NodeHeaderProps = ComponentProps<typeof CardHeader>;
 

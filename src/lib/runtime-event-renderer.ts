@@ -23,11 +23,16 @@ export type AgentEventsFromMessagesOptions = {
   messageStartIndex?: number;
 };
 
+export type AgentTextFromMessagesOptions = {
+  messageStartIndex?: number;
+};
+
 export function projectRuntimeEventsToCanvas({
   events,
   existingSnapshot,
   projectId,
   runNodeId,
+  streamedAgentTextByRunId,
 }: {
   events: AgentEvent[];
   existingSnapshot?: {
@@ -36,6 +41,7 @@ export function projectRuntimeEventsToCanvas({
   };
   projectId?: string;
   runNodeId?: string;
+  streamedAgentTextByRunId?: Map<string, string>;
 }): CanvasProjectionState {
   const projection = projectRunTraceToCanvas({
     events,
@@ -43,6 +49,7 @@ export function projectRuntimeEventsToCanvas({
     existingEdges: existingSnapshot?.edges,
     projectId,
     runNodeId,
+    streamedAgentTextByRunId,
   });
 
   return {
@@ -78,6 +85,35 @@ export function runtimeEventsFromMessageParts(parts?: readonly unknown[]) {
       return [];
     }
     return isAgentEvent(part.data) ? [part.data] : [];
+  });
+}
+
+export function agentTextFromMessages(
+  messages: Array<{ role?: unknown; parts?: readonly unknown[] }>,
+  options: AgentTextFromMessagesOptions = {}
+) {
+  const textParts = getMessageWindow(messages, options.messageStartIndex).flatMap(
+    (message) => {
+      if (message.role !== "assistant") {
+        return [];
+      }
+      return agentTextFromMessageParts(message.parts);
+    }
+  );
+
+  return textParts.join("\n\n").trim();
+}
+
+function agentTextFromMessageParts(parts?: readonly unknown[]) {
+  if (!parts?.length) {
+    return [];
+  }
+
+  return parts.flatMap((part) => {
+    if (!isRecord(part) || part.type !== "text") {
+      return [];
+    }
+    return typeof part.text === "string" && part.text.trim() ? [part.text] : [];
   });
 }
 

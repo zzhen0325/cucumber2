@@ -1,33 +1,20 @@
-import type { Node as FlowNode, NodeProps } from "@xyflow/react";
+import type { Node as FlowNode, NodeProps, ResizeParams } from "@xyflow/react";
+import { useUpdateNodeInternals } from "@xyflow/react";
 import {
-  Bot,
   Check,
   ChevronDown,
   CircleAlert,
   ListTree,
   Sparkles,
-  UserRound,
   Wrench,
 } from "lucide-react";
-import type { CSSProperties, ReactNode } from "react";
-import { useState } from "react";
+import type { CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Node, NodeContent } from "@/components/ai-elements/node";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
-import {
-  Tool,
-  ToolContent,
-  ToolHeader,
-  ToolInput,
-  ToolOutput,
-} from "@/components/ai-elements/tool";
-import type {
-  CanvasToolPart,
-  RunNodeData,
-  RunStepTimelineItem,
-  RunSummaryItem,
-} from "@/types/canvas";
+import type { CanvasToolPart, RunNodeData } from "@/types/canvas";
 
 export function RunNodeView({
   id,
@@ -36,17 +23,22 @@ export function RunNodeView({
   width,
   height,
 }: NodeProps<FlowNode<RunNodeData, "runNode">>) {
-  const [expanded, setExpanded] = useState(true);
-  const toolParts = data.toolParts?.length
-    ? data.toolParts
-    : data.toolPart
-      ? [data.toolPart]
-      : [];
+  const [expanded, setExpanded] = useState(false);
+  const [manualSize, setManualSize] = useState<ResizeParams | null>(null);
+  const nodeRef = useRef<HTMLDivElement>(null);
+  const updateNodeInternals = useUpdateNodeInternals();
+  const toolParts = useMemo(
+    () =>
+      data.toolParts?.length
+        ? data.toolParts
+        : data.toolPart
+          ? [data.toolPart]
+          : [],
+    [data.toolPart, data.toolParts]
+  );
   const latestToolPart = toolParts.at(-1) ?? toolParts[0];
   const title = getRunTitle(data.status, latestToolPart?.state);
   const toggleLabel = expanded ? "收起输出" : "展开输出";
-  const summaryItems = data.summaryItems ?? [];
-  const stepTimeline = getStepTimeline(data.stepTimeline, toolParts);
   const hasToolDetail =
     data.status !== "queued" ||
     toolParts.some((part) => part.state !== "input-streaming");
@@ -62,10 +54,52 @@ export function RunNodeView({
   ]
     .filter(Boolean)
     .join(" ");
+  const contentSignature = useMemo(
+    () =>
+      JSON.stringify({
+        agentText,
+        expanded,
+        status: data.status,
+        toolParts: toolParts.map((part) => ({
+          errorText: part.errorText,
+          input: part.input,
+          output: part.output,
+          state: part.state,
+          toolCallId: part.toolCallId,
+          type: part.type,
+        })),
+      }),
+    [agentText, data.status, expanded, toolParts]
+  );
   const nodeStyle = getResizableNodeStyle(width, height, {
     expanded,
     hasRunOutput,
+    manualSize,
   });
+
+  useEffect(() => {
+    updateNodeInternals(id);
+  }, [contentSignature, id, updateNodeInternals]);
+
+  useEffect(() => {
+    const element = nodeRef.current;
+    if (!element) {
+      return;
+    }
+
+    let animationFrame = 0;
+    const resizeObserver = new ResizeObserver(() => {
+      cancelAnimationFrame(animationFrame);
+      animationFrame = requestAnimationFrame(() => updateNodeInternals(id));
+    });
+
+    resizeObserver.observe(element);
+
+    return () => {
+      cancelAnimationFrame(animationFrame);
+      resizeObserver.disconnect();
+    };
+  }, [id, updateNodeInternals]);
 
   return (
     <Node
@@ -73,6 +107,9 @@ export function RunNodeView({
       handles={{ source: true, target: true }}
       minHeight={36}
       minWidth={220}
+      onResize={(_, params) => setManualSize(params)}
+      onResizeEnd={(_, params) => setManualSize(params)}
+      ref={nodeRef}
       selected={selected}
       style={nodeStyle}
       data-resized={nodeStyle?.height ? "true" : undefined}
@@ -117,17 +154,13 @@ export function RunNodeView({
             <ChevronDown size={12} />
           </button>
         </div>
-        {hasRunOutput && expanded && (
+        {hasRunOutput && (
           <div
-            className="run-stream copyable-region nodrag nopan"
+            className="run-stream copyable-region nodrag nopan nowheel"
             aria-label="Agent run stream"
+            data-expanded={expanded}
           >
-            <RunStreamGroup icon={<UserRound size={11} />} title="用户请求">
-              <p className="run-user-prompt" title={data.prompt}>
-                {data.prompt}
-              </p>
-            </RunStreamGroup>
-            <RunStreamGroup icon={<Bot size={12} />} title="Agent 输出">
+            <div className="run-agent-text-region nodrag nopan nowheel">
               {agentText ? (
                 <MessageResponse className="agent-text-output">
                   {agentText}
@@ -137,26 +170,18 @@ export function RunNodeView({
                   等待模型输出...
                 </Shimmer>
               )}
-            </RunStreamGroup>
-            {(summaryItems.length > 0 || stepTimeline.length > 0) && (
-              <RunStreamGroup icon={<ListTree size={11} />} title="Agent 运行">
-                <PlanSummaryView items={summaryItems} />
-                <StepTimelineView steps={stepTimeline} />
-              </RunStreamGroup>
-            )}
+            </div>
             {hasToolDetail &&
               toolParts.length > 0 && (
-                <RunStreamGroup icon={<Wrench size={11} />} title="工具调用">
-                  <div className="tool-call-stack">
-                    {toolParts.map((part, index) => (
-                      <ToolPartView
-                        error={data.error}
-                        key={`${part.type}-${part.toolCallId ?? index}`}
-                        toolPart={part}
-                      />
-                    ))}
-                  </div>
-                </RunStreamGroup>
+                <div className="tool-call-stack" aria-label="工具调用">
+                  {toolParts.map((part, index) => (
+                    <ToolPartView
+                      error={data.error}
+                      key={`${part.type}-${part.toolCallId ?? index}`}
+                      toolPart={part}
+                    />
+                  ))}
+                </div>
               )}
           </div>
         )}
@@ -168,79 +193,24 @@ export function RunNodeView({
 function getResizableNodeStyle(
   width?: number,
   height?: number,
-  options: { expanded: boolean; hasRunOutput: boolean } = {
+  options: {
+    expanded: boolean;
+    hasRunOutput: boolean;
+    manualSize: ResizeParams | null;
+  } = {
     expanded: false,
     hasRunOutput: false,
+    manualSize: null,
   }
 ): CSSProperties | undefined {
-  if (!width && !height) {
+  if (!width && !height && !options.manualSize) {
     return undefined;
   }
 
-  const shouldReleaseCompactHeight =
-    options.expanded && options.hasRunOutput && height !== undefined && height <= 48;
-
   return {
-    height: shouldReleaseCompactHeight ? undefined : height,
-    width,
+    height: options.manualSize?.height,
+    width: options.manualSize?.width ?? width,
   };
-}
-
-function RunStreamGroup({
-  children,
-  icon,
-  title,
-}: {
-  children: ReactNode;
-  icon: ReactNode;
-  title: string;
-}) {
-  return (
-    <section className="run-stream-group">
-      <div className="run-stream-group-heading">
-        <span>{icon}</span>
-        <strong>{title}</strong>
-      </div>
-      <div className="run-stream-group-body">{children}</div>
-    </section>
-  );
-}
-
-export function PlanSummaryView({ items }: { items: RunSummaryItem[] }) {
-  if (!items.length) {
-    return null;
-  }
-
-  return (
-    <div className="run-summary-list" aria-label="Run summary">
-      {items.map((item) => (
-        <div className={`run-summary-item ${item.kind}`} key={item.kind}>
-          <span>{item.label}</span>
-          <strong title={item.detail}>{item.detail}</strong>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-export function StepTimelineView({ steps }: { steps: RunStepTimelineItem[] }) {
-  if (!steps.length) {
-    return null;
-  }
-
-  return (
-    <div className="run-step-timeline" aria-label="Run step timeline">
-      {steps.map((step) => (
-        <span
-          className={`run-step-chip ${step.status}`}
-          key={step.id}
-          title={step.errorText ?? step.label}
-        >
-          {step.label}
-        </span>
-      ))}
-    </div>
-  );
 }
 
 export function ToolPartView({
@@ -250,23 +220,53 @@ export function ToolPartView({
   error?: string;
   toolPart: CanvasToolPart;
 }) {
-  const [open, setOpen] = useState(
-    toolPart.state !== "output-available" || toolPart.type === "tool-generate_image"
-  );
+  const [open, setOpen] = useState(false);
   const toolName = getToolName(toolPart);
   const errorText =
     toolPart.state === "output-error"
       ? toolPart.errorText ?? error
       : toolPart.errorText;
+  const stateLabel = getToolStateLabel(toolPart.state);
 
   return (
-    <Tool className="nodrag nopan" open={open} onOpenChange={setOpen}>
-      <ToolHeader state={toolPart.state} title={toolName} type={toolPart.type} />
-      <ToolContent>
-        {toolPart.input !== undefined && <ToolInput input={toolPart.input} />}
-        <ToolOutput errorText={errorText} output={toolPart.output} />
-      </ToolContent>
-    </Tool>
+    <div
+      className={`tool-call-row ${toolPart.state === "output-error" ? "error" : ""}`}
+      data-state={open ? "open" : "closed"}
+    >
+      <button
+        aria-expanded={open}
+        className="tool-call-main nodrag nopan"
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpen((current) => !current);
+        }}
+        type="button"
+      >
+        <Wrench size={13} />
+        <strong>{toolName}</strong>
+        <span className={`tool-state ${toolPart.state}`}>{stateLabel}</span>
+        <ChevronDown className="tool-call-chevron" size={13} />
+      </button>
+      {errorText && !open && (
+        <span className="tool-call-error-snippet" title={errorText}>
+          {errorText}
+        </span>
+      )}
+      {open && (
+        <div className="tool-call-content nodrag nopan nowheel">
+          {toolPart.input !== undefined && (
+            <ToolJsonBlock label="参数" value={toolPart.input} />
+          )}
+          {(toolPart.output !== undefined || errorText) && (
+            <ToolJsonBlock
+              error={Boolean(errorText)}
+              label={errorText ? "错误" : "结果"}
+              value={errorText ?? toolPart.output}
+            />
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -278,28 +278,6 @@ function RunStatusIcon({ status }: { status: RunNodeData["status"] }) {
     return <CircleAlert size={14} />;
   }
   return <Sparkles size={14} />;
-}
-
-function getStepTimeline(
-  timeline: RunNodeData["stepTimeline"],
-  toolParts: CanvasToolPart[]
-) {
-  if (timeline?.length) {
-    return timeline;
-  }
-
-  return toolParts.map((part, index) => ({
-    id: `${part.type}-${index}`,
-    label: getToolName(part),
-    status:
-      part.state === "output-error"
-        ? ("error" as const)
-        : part.state === "output-available"
-          ? ("success" as const)
-          : ("running" as const),
-    toolName: getToolName(part),
-    errorText: part.errorText,
-  }));
 }
 
 function dispatchOpenTrace(runNodeId: string) {
@@ -334,4 +312,39 @@ function getToolName(toolPart: CanvasToolPart) {
   };
 
   return names[toolPart.type] ?? toolPart.type.replace(/^tool-/, "");
+}
+
+function getToolStateLabel(state: CanvasToolPart["state"]) {
+  const labels: Record<CanvasToolPart["state"], string> = {
+    "input-streaming": "准备中",
+    "input-available": "运行中",
+    "output-available": "完成",
+    "output-error": "失败",
+  };
+
+  return labels[state];
+}
+
+function ToolJsonBlock({
+  error = false,
+  label,
+  value,
+}: {
+  error?: boolean;
+  label: string;
+  value: unknown;
+}) {
+  return (
+    <div className={`tool-json-block ${error ? "error" : ""}`}>
+      <span>{label}</span>
+      <pre>{formatToolValue(value)}</pre>
+    </div>
+  );
+}
+
+function formatToolValue(value: unknown) {
+  if (typeof value === "string") {
+    return value;
+  }
+  return JSON.stringify(value, null, 2);
 }

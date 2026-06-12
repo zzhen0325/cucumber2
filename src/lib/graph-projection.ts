@@ -202,12 +202,14 @@ export function projectRunTraceToCanvas({
   existingEdges = [],
   projectId,
   runNodeId,
+  streamedAgentTextByRunId,
 }: {
   events: RunStepTraceEvent[];
   existingNodes?: AgentCanvasNode[];
   existingEdges?: AgentCanvasEdge[];
   projectId?: string;
   runNodeId?: string;
+  streamedAgentTextByRunId?: Map<string, string>;
 }) {
   const orderedEvents = [...events].sort((left, right) =>
     left.createdAt.localeCompare(right.createdAt)
@@ -248,9 +250,16 @@ export function projectRunTraceToCanvas({
       x: promptPosition.x,
       y: promptPosition.y + RUN_OFFSET_Y,
     };
-  const runStatus = getProjectedRunStatus(orderedEvents);
+  const streamedAgentText = readString(
+    streamedAgentTextByRunId?.get(targetRunNodeId)
+  );
+  const projectedRunStatus = getProjectedRunStatus(orderedEvents);
+  const runStatus =
+    streamedAgentText && projectedRunStatus === "queued"
+      ? "running"
+      : projectedRunStatus;
   const toolParts = buildToolParts(orderedEvents, prompt);
-  const agentText = buildAgentText(orderedEvents, runStatus);
+  const agentText = buildAgentText(orderedEvents, runStatus, streamedAgentText);
   const promptNode: AgentCanvasNode = getExistingOrProjectedNode(
     existingNodes,
     promptNodeId,
@@ -1025,13 +1034,18 @@ function getProjectedRunStatus(events: RunStepTraceEvent[]): AgentRunStatus {
 
 function buildAgentText(
   events: RunStepTraceEvent[],
-  status: AgentRunStatus
+  status: AgentRunStatus,
+  streamedAgentText?: string
 ): string | undefined {
   const finalOutput = readString(
     events.findLast((event) => event.type === "run.completed")?.payload.finalOutput
   );
   if (finalOutput) {
     return finalOutput;
+  }
+
+  if (streamedAgentText) {
+    return streamedAgentText;
   }
 
   if (status === "success") {

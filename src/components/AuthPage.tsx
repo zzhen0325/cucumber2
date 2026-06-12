@@ -2,7 +2,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useState } from "react";
 import type { FormEvent } from "react";
 
-import { cucumberLogoInverted } from "@/components/icons/cucumber-logo";
+import { CucumberLogoInverted } from "@/components/icons/cucumber-logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -93,7 +93,7 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
             custom={0}
             className="mb-4 flex items-center gap-4"
           >
-            <cucumberLogoInverted className="size-14" />
+            <CucumberLogoInverted className="size-14" />
             <h1 className="text-4xl font-bold tracking-tight">cucumber</h1>
           </motion.div>
 

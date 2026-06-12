@@ -80,6 +80,65 @@ describe("agent event graph projection", () => {
     });
   });
 
+  it("keeps streamed text when tool input arrives", () => {
+    const projection = projectRunTraceToCanvas({
+      runNodeId: "run-1",
+      streamedAgentTextByRunId: new Map([["run-1", "我会先理解需求，再调用工具。"]]),
+      events: [
+        event("run.created", "run", { prompt: "生成图片", promptNodeId: "prompt-1" }),
+        event("tool.input", "generate_image", {
+          toolCallId: "call-1",
+          toolName: "generate_image",
+          input: { prompt: "green cucumber" },
+        }),
+      ],
+    });
+    const run = projection.nodes.find((node) => node.id === "run-1");
+
+    expect(run?.data).toMatchObject({
+      kind: "run",
+      status: "running",
+      agentText: "我会先理解需求，再调用工具。",
+    });
+  });
+
+  it("replays persisted traces without streamed text", () => {
+    const projection = projectRunTraceToCanvas({
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", { prompt: "生成图片", promptNodeId: "prompt-1" }),
+        event("run.completed", "run", {
+          finalOutput: "历史最终输出",
+          artifactIds: [],
+        }),
+      ],
+    });
+    const run = projection.nodes.find((node) => node.id === "run-1");
+
+    expect(run?.data).toMatchObject({
+      kind: "run",
+      status: "success",
+      agentText: "历史最终输出",
+    });
+  });
+
+  it("uses streamed text without tool status placeholders while running", () => {
+    const projection = projectRunTraceToCanvas({
+      runNodeId: "run-1",
+      streamedAgentTextByRunId: new Map([["run-1", "实时模型文字"]]),
+      events: [
+        event("run.created", "run", { prompt: "分析", promptNodeId: "prompt-1" }),
+      ],
+    });
+    const run = projection.nodes.find((node) => node.id === "run-1");
+
+    expect(run?.data).toMatchObject({
+      kind: "run",
+      status: "running",
+      agentText: "实时模型文字",
+    });
+  });
+
   it("projects tool failures and run errors", () => {
     const projection = projectRunTraceToCanvas({
       runNodeId: "run-1",

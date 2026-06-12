@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 
-import { cucumberLogo } from "@/components/icons/cucumber-logo";
+import { CucumberLogo } from "@/components/icons/cucumber-logo";
 import { cn } from "@/lib/utils";
 
 export type WorkspaceView = "home" | "projects";
@@ -46,7 +46,7 @@ export function AppSidebar({ view, onViewChange, onLogout }: AppSidebarProps) {
             whileTap={{ scale: 0.9 }}
             transition={{ type: "spring", stiffness: 400, damping: 17 }}
           >
-            <cucumberLogo className="size-7 text-foreground" />
+            <CucumberLogo className="size-7 text-foreground" />
           </motion.div>
         </div>
 

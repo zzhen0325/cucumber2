@@ -4,7 +4,7 @@ import { useId, type SVGProps } from "react";
  * cucumber brand logo — 6-petal flower mark on a soft rounded badge.
  * Has its own colors; scales with width/height (e.g. Tailwind `size-*`).
  */
-export function cucumberLogo(props: SVGProps<SVGSVGElement>) {
+export function CucumberLogo(props: SVGProps<SVGSVGElement>) {
   const uid = useId().replace(/:/g, "");
   const id = (name: string) => `${name}_${uid}`;
   return (
@@ -182,6 +182,6 @@ export function cucumberLogo(props: SVGProps<SVGSVGElement>) {
  * Inverted variant kept for API compatibility. The brand mark already sits on a
  * light badge that reads well on dark backgrounds, so it renders the same logo.
  */
-export function cucumberLogoInverted(props: SVGProps<SVGSVGElement>) {
-  return <cucumberLogo {...props} />;
+export function CucumberLogoInverted(props: SVGProps<SVGSVGElement>) {
+  return <CucumberLogo {...props} />;
 }

@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
 import { useCallback, useRef, useState } from "react";
 
-import { cucumberLogo } from "@/components/icons/cucumber-logo";
+import { CucumberLogo } from "@/components/icons/cucumber-logo";
 import type { AppUser } from "@/lib/auth-storage";
 import type { ProjectSummary } from "@/lib/project-storage";
 import { formatDate } from "@/lib/utils";
@@ -71,7 +71,7 @@ export function HomePage({
           custom={0}
           className="mb-3 flex items-center gap-2 md:mb-4"
         >
-          <cucumberLogo className="size-7 text-foreground md:size-8" />
+          <CucumberLogo className="size-7 text-foreground md:size-8" />
           <span className="text-lg font-semibold text-foreground md:text-xl">
             cucumber
           </span>

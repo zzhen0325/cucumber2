@@ -87,6 +87,7 @@ import {
 import { collectUpstreamContext, createRunDraft, getRunReferenceNodeId } from "@/lib/graph";
 import type { RunStepTraceEvent } from "@/lib/graph-projection";
 import {
+  agentTextFromMessages,
   projectRuntimeEventsToCanvas,
   runtimeEventsFromMessageParts,
   runtimeEventsFromMessages,
@@ -247,6 +248,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const activeRunMessageStartIndex = useRef(0);
   const loadedProjectIdRef = useRef<string | null>(null);
   const streamedRuntimeEvents = useRef<StreamedRuntimeEvents>([]);
+  const streamedAgentTextByRunId = useRef(new Map<string, string>());
   const hasLoadedProject = useRef(false);
   const messagesRef = useRef<ReturnType<typeof useChat>["messages"]>([]);
   const nodesRef = useRef(nodes);
@@ -323,7 +325,8 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       }
 
       const nextEvents = events.filter((event) => event.runNodeId === runId);
-      if (!nextEvents.length) {
+      const streamedAgentText = streamedAgentTextByRunId.current.get(runId);
+      if (!nextEvents.length && !streamedAgentText) {
         return;
       }
       const previousEvents = options.replace
@@ -347,6 +350,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           nodes: nodesRef.current,
           edges: edgesRef.current,
         },
+        streamedAgentTextByRunId: streamedAgentTextByRunId.current,
       });
 
       const runWasStopped = stoppedRunIds.current.has(runId);
@@ -684,6 +688,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     activeRunId.current = null;
     activeRunMessageStartIndex.current = 0;
     streamedRuntimeEvents.current = [];
+    streamedAgentTextByRunId.current.clear();
 
     const loadStartedAt = performance.now();
 
@@ -990,6 +995,12 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       runNodeId: runId,
       messageStartIndex: activeRunMessageStartIndex.current,
     });
+    const streamedAgentText = agentTextFromMessages(messages, {
+      messageStartIndex: activeRunMessageStartIndex.current,
+    });
+    if (streamedAgentText) {
+      streamedAgentTextByRunId.current.set(runId, streamedAgentText);
+    }
     projectStreamedRuntimeEvents(runtimeEvents, { replace: true });
   }, [
     loadedProjectId,
@@ -1104,6 +1115,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       streamedRuntimeEvents.current = streamedRuntimeEvents.current.filter(
         (event) => event.runNodeId !== draft.runNode.id
       );
+      streamedAgentTextByRunId.current.delete(draft.runNode.id);
       setContextCount(draft.upstreamContext.length);
       const requestBody: AgentRunRequestBody = {
         projectId: loadedProjectId,
