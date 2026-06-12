@@ -1,0 +1,16 @@
+src/components/RunNodeView.tsx
+  h_49a1fcd5ff42d1 170
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "345ea8b64bcbde821d14ec56b323d757ca9a09f4",
+  "prompts": {},
+  "humans": {
+    "h_49a1fcd5ff42d1": {
+      "author": "zzhen0325 <26629213+zzhen0325@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
