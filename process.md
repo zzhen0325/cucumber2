@@ -1,6 +1,6 @@
 # Process
 
-本文记录 2026-06-11 Agent v2 正式切换后的变更。更早记录位于 `docs/archive/process-through-2026-06-10.md`。
+本文记录 2026-06-11 Agent v2 正式切换后的变更。
 
 ## 2026-06-11 Agent Runtime Cutover
 
@@ -75,3 +75,4 @@
 - 项目摘要统计：`src/lib/project-summary.test.ts`
 - 对象存储上传和引用签名：`src/lib/file-upload.test.ts`、`server/storage.test.ts`
 - 基础检查：`pnpm exec tsc -b --pretty false`、`pnpm build`、相关 ESLint、浏览器验收
+
