@@ -2,6 +2,8 @@ import {
   applyNodeChanges,
   Controls,
   MiniMap,
+  NodeToolbar,
+  Position,
   SelectionMode,
   useReactFlow,
   useEdgesState,
@@ -20,8 +22,10 @@ import {
   Check,
   Circle,
   CircleDot,
+  Copy,
   Database,
   Diamond,
+  Download,
   FileText,
   Frame,
   Workflow,
@@ -29,6 +33,7 @@ import {
   Hand,
   Image,
   Layers,
+  Maximize2,
   MousePointer2,
   Palette,
   Sparkles,
@@ -44,6 +49,7 @@ import {
   createContext,
   lazy,
   memo,
+  type PointerEvent as ReactPointerEvent,
   Suspense,
   useCallback,
   useContext,
@@ -69,6 +75,12 @@ import {
   PromptInputTextarea,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   getCanvasLayoutSignature,
   layoutAgentCanvasGraph,
@@ -2631,36 +2643,245 @@ function ImageResultNode({
 }: NodeProps<FlowNode<ImageResultNodeData, "imageResultNode">>) {
   const status = data.status ?? (data.image.url ? "ready" : "loading");
   const requestLabel = formatImageRequestLabel(data.request);
+  const [isPreviewOpen, setPreviewOpen] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "link" | "error">(
+    "idle"
+  );
+  const copyResetTimer = useRef<number | undefined>(undefined);
+  const isReady = status === "ready" && Boolean(data.image.url);
+
+  useEffect(() => {
+    return () => {
+      if (copyResetTimer.current) {
+        window.clearTimeout(copyResetTimer.current);
+      }
+    };
+  }, []);
+
+  const resetCopyStateSoon = useCallback((state: "copied" | "link" | "error") => {
+    setCopyState(state);
+    if (copyResetTimer.current) {
+      window.clearTimeout(copyResetTimer.current);
+    }
+    copyResetTimer.current = window.setTimeout(() => setCopyState("idle"), 1600);
+  }, []);
+
+  const handleDownload = useCallback(async () => {
+    if (!data.image.url) {
+      return;
+    }
+
+    await downloadImageAsset(data.image);
+  }, [data.image]);
+
+  const handleCopy = useCallback(async () => {
+    if (!data.image.url) {
+      return;
+    }
+
+    try {
+      const result = await copyImageAsset(data.image);
+      resetCopyStateSoon(result);
+    } catch {
+      resetCopyStateSoon("error");
+    }
+  }, [data.image, resetCopyStateSoon]);
 
   return (
-    <Node
-      className={
-        selected ? "canvas-node selected result-card" : "canvas-node result-card"
-      }
-      handles={{ source: true, target: true }}
-      minHeight={24}
-      minWidth={120}
-      selected={selected}
-      style={getResizableNodeStyle(width, height)}
-    >
-      <div className={`result-image-frame ${status}`}>
-        {data.image.url ? (
-          <img src={data.image.url} alt={data.image.title ?? "Generated result"} />
-        ) : (
-          <div className="result-placeholder" aria-label={data.image.title}>
-            <span>{status === "error" ? "生成失败" : "生成中"}</span>
-            {requestLabel && <small>{requestLabel}</small>}
-          </div>
-        )}
-      </div>
-      {selected && status === "ready" && <NodeFooterLike image={data.image} />}
-      {data.upload && (
-        <span className={`upload-state image-upload-state ${data.upload.status}`}>
-          {data.upload.status === "error" ? "上传失败" : "上传中"}
-        </span>
+    <>
+      {isReady && (
+        <NodeToolbar
+          align="end"
+          className="image-node-toolbar nodrag nopan nowheel"
+          isVisible={selected}
+          offset={12}
+          position={Position.Top}
+        >
+          <button
+            aria-label="放大查看图片"
+            onClick={(event) => {
+              stopNodeToolbarEvent(event);
+              setPreviewOpen(true);
+            }}
+            onMouseDown={stopNodeToolbarEvent}
+            onPointerDown={stopNodeToolbarEvent}
+            title="放大查看"
+            type="button"
+          >
+            <Maximize2 size={14} />
+          </button>
+          <button
+            aria-label="下载图片"
+            onClick={(event) => {
+              stopNodeToolbarEvent(event);
+              void handleDownload();
+            }}
+            onMouseDown={stopNodeToolbarEvent}
+            onPointerDown={stopNodeToolbarEvent}
+            title="下载"
+            type="button"
+          >
+            <Download size={14} />
+          </button>
+          <button
+            aria-label="复制图片"
+            onClick={(event) => {
+              stopNodeToolbarEvent(event);
+              void handleCopy();
+            }}
+            onMouseDown={stopNodeToolbarEvent}
+            onPointerDown={stopNodeToolbarEvent}
+            title={
+              copyState === "idle"
+                ? "复制"
+                : copyState === "copied"
+                  ? "已复制图片"
+                  : copyState === "link"
+                    ? "已复制链接"
+                    : "复制失败"
+            }
+            type="button"
+          >
+            {copyState === "idle" ? <Copy size={14} /> : <Check size={14} />}
+          </button>
+        </NodeToolbar>
       )}
-    </Node>
+
+      <Node
+        className={
+          selected ? "canvas-node selected result-card" : "canvas-node result-card"
+        }
+        handles={{ source: true, target: true }}
+        minHeight={24}
+        minWidth={120}
+        selected={selected}
+        style={getResizableNodeStyle(width, height)}
+      >
+        <div className={`result-image-frame ${status}`}>
+          {data.image.url ? (
+            <img src={data.image.url} alt={data.image.title ?? "Generated result"} />
+          ) : (
+            <div className="result-placeholder" aria-label={data.image.title}>
+              <span>{status === "error" ? "生成失败" : "生成中"}</span>
+              {requestLabel && <small>{requestLabel}</small>}
+            </div>
+          )}
+        </div>
+        {selected && isReady && <NodeFooterLike image={data.image} />}
+        {data.upload && (
+          <span className={`upload-state image-upload-state ${data.upload.status}`}>
+            {data.upload.status === "error" ? "上传失败" : "上传中"}
+          </span>
+        )}
+      </Node>
+
+      <Dialog onOpenChange={setPreviewOpen} open={isPreviewOpen}>
+        <DialogContent className="image-preview-dialog nodrag nopan nowheel">
+          <DialogTitle>{data.image.title ?? "Generated image"}</DialogTitle>
+          <DialogDescription>{requestLabel || "图片预览"}</DialogDescription>
+          <div className="image-preview-stage">
+            <img src={data.image.url} alt={data.image.title ?? "Generated result"} />
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
+}
+
+function stopNodeToolbarEvent(
+  event: ReactMouseEvent<HTMLElement> | ReactPointerEvent<HTMLElement>
+) {
+  event.stopPropagation();
+}
+
+async function downloadImageAsset(image: GeneratedImage) {
+  const filename = getImageDownloadName(image);
+
+  try {
+    const response = await fetch(image.url);
+    if (!response.ok) {
+      throw new Error(`Image download failed (${response.status}).`);
+    }
+
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    triggerImageDownload(objectUrl, filename);
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    return;
+  } catch {
+    triggerImageDownload(image.url, filename);
+  }
+}
+
+async function copyImageAsset(image: GeneratedImage): Promise<"copied" | "link"> {
+  const clipboard = navigator.clipboard;
+
+  if (clipboard?.write && typeof ClipboardItem !== "undefined") {
+    try {
+      const response = await fetch(image.url);
+      if (!response.ok) {
+        throw new Error(`Image copy failed (${response.status}).`);
+      }
+
+      const blob = await response.blob();
+      const mimeType = blob.type || "image/png";
+      if (mimeType.startsWith("image/")) {
+        await clipboard.write([new ClipboardItem({ [mimeType]: blob })]);
+        return "copied";
+      }
+    } catch {
+      // Fall back to a link below when image clipboard writes are unavailable.
+    }
+  }
+
+  await copyTextToClipboard(image.url);
+  return "link";
+}
+
+async function copyTextToClipboard(text: string) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.append(textarea);
+  textarea.select();
+
+  try {
+    const copied = document.execCommand("copy");
+    if (!copied) {
+      throw new Error("Text copy command failed.");
+    }
+  } finally {
+    textarea.remove();
+  }
+}
+
+function triggerImageDownload(url: string, filename: string) {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.rel = "noopener";
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
+function getImageDownloadName(image: GeneratedImage) {
+  const fallback = image.id || "generated-image";
+  const rawName = image.title || fallback;
+  const safeName =
+    rawName
+      .trim()
+      .replace(/\.[a-z0-9]{2,5}$/i, "")
+      .replace(/[^a-z0-9\u4e00-\u9fa5_-]+/gi, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || fallback;
+  const extension =
+    image.url.match(/\.(png|jpe?g|webp|gif)(?:[?#]|$)/i)?.[1]?.toLowerCase() ??
+    "png";
+
+  return `${safeName}.${extension === "jpeg" ? "jpg" : extension}`;
 }
 
 function hasLocalUploadState(node: AgentCanvasNode) {

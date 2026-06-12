@@ -167,7 +167,7 @@ export function RunNodeView({
                 </MessageResponse>
               ) : (
                 <Shimmer as="p" className="agent-text-output muted" duration={1.8}>
-                  等待模型输出...
+                  Thinking...
                 </Shimmer>
               )}
             </div>
