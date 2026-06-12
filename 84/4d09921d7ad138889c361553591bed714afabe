@@ -1,0 +1,16 @@
+server/agent/prompts/manager.instructions.ts
+  h_49a1fcd5ff42d1 18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "844d09921d7ad138889c361553591bed714afabe",
+  "prompts": {},
+  "humans": {
+    "h_49a1fcd5ff42d1": {
+      "author": "zzhen0325 <26629213+zzhen0325@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
