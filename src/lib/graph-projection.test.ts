@@ -155,6 +155,14 @@ describe("agent event graph projection", () => {
       prompt: "一张清爽的黄瓜饮品海报，16:9 横版构图，明亮自然光。",
       request: expect.objectContaining({ aspectRatio: "16:9" }),
     });
+    expect(image).toMatchObject({
+      width: 240,
+      height: 135,
+      style: {
+        width: 240,
+        height: 135,
+      },
+    });
   });
 
   it("keeps streamed text when tool input arrives", () => {

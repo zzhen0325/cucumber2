@@ -222,6 +222,35 @@ describe("generate_image tool", () => {
     ).toEqual(["小狗的图", "小狗的图", "小狗的图", "小狗的图"]);
   });
 
+  it("forwards normalized aspect ratio and count to Seedream requests", async () => {
+    isSeedreamConfigured.mockReturnValue(true);
+    generateSeedreamImage.mockResolvedValue({ images: [] });
+
+    const context = buildContext();
+    await invokeTool(context, {
+      prompt: "日本家居 banner KV，主体是女生打扫家里的插画",
+      resultCount: 4,
+      aspectRatio: "16:9",
+    });
+
+    const callArg = generateSeedreamImage.mock.calls[0][0];
+    expect(callArg.totalRequestedImageCount).toBe(4);
+    expect(callArg.requests).toHaveLength(4);
+    expect(
+      callArg.requests.map(
+        (request: { body: { prompt: string } }) => request.body.prompt
+      )
+    ).toEqual([
+      "日本家居 banner KV，主体是女生打扫家里的插画",
+      "日本家居 banner KV，主体是女生打扫家里的插画",
+      "日本家居 banner KV，主体是女生打扫家里的插画",
+      "日本家居 banner KV，主体是女生打扫家里的插画",
+    ]);
+    expect(
+      callArg.requests[0].body.width / callArg.requests[0].body.height
+    ).toBeCloseTo(16 / 9, 2);
+  });
+
   it("throws when seedream is not configured (no silent fallback)", async () => {
     isSeedreamConfigured.mockReturnValue(false);
     const context = buildContext();

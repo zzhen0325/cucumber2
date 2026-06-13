@@ -270,11 +270,12 @@ export async function generateSeedreamImage(
   const client = new SeedreamClient(config);
 
   // Fan out one task per request so every image is generated independently.
-  // Run them with a bounded concurrency and a stagger delay between submits to
-  // stay under the Seedream account's API concurrency limit (code 50430).
+  // Start requests in staggered windows, then let their polling run concurrently.
+  // This keeps submit bursts under the Seedream account's API concurrency limit
+  // (code 50430) without serializing the whole submit+poll lifecycle.
   // Each task builds its own image and invokes `onImage` the moment it lands so
   // callers can stream results instead of waiting for the whole batch.
-  const imagesPerRequest = await mapWithConcurrency(
+  const imagesPerRequest = await mapWithStaggeredStarts(
     requests,
     config.maxConcurrency,
     config.staggerMs,
@@ -424,43 +425,40 @@ function buildSeedreamGeneratedImage({
   };
 }
 
-// Map over items with a bounded number of in-flight tasks. Submits are spaced
-// out by at least `staggerMs` via a shared gate so we never fire two requests
-// at the same instant. Results preserve input order.
-async function mapWithConcurrency<T, R>(
+// Start tasks in staggered windows while preserving result order. `startsPerWindow`
+// controls how many requests may begin in the same window; it does not cap
+// in-flight polling, so later requests can start before earlier tasks finish.
+export async function mapWithStaggeredStarts<T, R>(
   items: readonly T[],
-  concurrency: number,
+  startsPerWindow: number,
   staggerMs: number,
   task: (item: T) => Promise<R>,
   signal?: AbortSignal
 ): Promise<R[]> {
   const results = new Array<R>(items.length);
-  const limit = Math.max(1, Math.min(concurrency, items.length || 1));
-  let nextIndex = 0;
-  // Earliest timestamp (ms) at which the next task is allowed to start.
-  let nextAllowedStart = 0;
+  const limit = Math.max(1, Math.min(startsPerWindow, items.length || 1));
+  let stopped = false;
 
-  const worker = async () => {
-    while (true) {
+  await Promise.all(
+    items.map(async (item, index) => {
       signal?.throwIfAborted();
-      const index = nextIndex++;
-      if (index >= items.length) {
+      const wait = Math.floor(index / limit) * staggerMs;
+      if (wait > 0) {
+        await delay(wait, undefined, { signal });
+      }
+      if (stopped) {
         return;
       }
-      if (staggerMs > 0) {
-        const now = Date.now();
-        const startAt = Math.max(now, nextAllowedStart);
-        nextAllowedStart = startAt + staggerMs;
-        const wait = startAt - now;
-        if (wait > 0) {
-          await delay(wait, undefined, { signal });
-        }
+      signal?.throwIfAborted();
+      try {
+        results[index] = await task(item);
+      } catch (error) {
+        stopped = true;
+        throw error;
       }
-      results[index] = await task(items[index]);
-    }
-  };
+    })
+  );
 
-  await Promise.all(Array.from({ length: limit }, () => worker()));
   return results;
 }
 

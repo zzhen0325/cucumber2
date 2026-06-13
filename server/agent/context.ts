@@ -9,6 +9,7 @@ import type {
 } from "../../src/types/canvas.ts";
 import type { CanvasOperation } from "../../src/types/runtime.ts";
 import type { AgentProject } from "../supabase.ts";
+import type { NormalizedAgentInput } from "./input-normalizer.ts";
 import type { ActivatedAgentSkill, AgentSkillCard } from "./skills/types.ts";
 
 export type CanvasSnapshot = {
@@ -29,6 +30,7 @@ export type AgentRunInput = {
   canvasId: string;
   runNodeId: string;
   message: string;
+  normalizedInput?: NormalizedAgentInput;
   promptNodeId: string | null;
   selectedNodeId: string | null;
   upstreamContext: UpstreamContextItem[];
@@ -125,6 +127,7 @@ export type CucumberAgentContext = {
   pushLiveEvent?: (event: PendingCucumberEvent) => void;
   skillCandidates: AgentSkillCard[];
   prompt: string;
+  normalizedInput?: NormalizedAgentInput;
   selectedNodeId: string | null;
   upstreamContext: UpstreamContextItem[];
 };
@@ -210,6 +213,7 @@ export function buildCucumberAgentContext(input: AgentRunInput): CucumberAgentCo
     producedArtifacts: [],
     projectId: input.projectId,
     prompt: input.message,
+    normalizedInput: input.normalizedInput,
     runNodeId: input.runNodeId,
     selectedNodeId: input.selectedNodeId,
     selectedNodeIds: input.selectedNodeIds,

@@ -15,8 +15,11 @@ export type SeedreamUpstreamContext = {
 };
 
 export type GenerateImageSeedreamRequestInput = {
+  aspectRatio?: string;
+  height?: number;
   prompt: string;
   requestedResultCount?: number;
+  width?: number;
   upstreamContext?: UpstreamContextItem[];
   onImage?: SeedreamGenerateInput["onImage"];
   signal?: AbortSignal;
@@ -24,9 +27,16 @@ export type GenerateImageSeedreamRequestInput = {
 
 type SeedreamRequestBuildInput = {
   prompts: string[];
+  geometry?: SeedreamGeometryInput;
   upstreamContext?: SeedreamUpstreamContext[];
   resultCount: number;
   promptBatchMode: SeedreamPromptBatchMode;
+};
+
+type SeedreamGeometryInput = {
+  aspectRatio?: string;
+  height?: number;
+  width?: number;
 };
 
 export function buildGenerateImageSeedreamInput(
@@ -48,6 +58,11 @@ export function buildGenerateImageSeedreamInput(
     requests: buildSeedreamRequestBodies(
       {
         prompts: [prompt],
+        geometry: {
+          aspectRatio: input.aspectRatio,
+          height: input.height,
+          width: input.width,
+        },
         resultCount,
         promptBatchMode: "single_prompt",
         upstreamContext: toSeedreamUpstreamContext(input.upstreamContext ?? []),
@@ -71,7 +86,11 @@ export function buildSeedreamRequestBodies(
   );
   return resolveSeedreamPromptRequests(input, config.maxOutputImages).map(
     (request) => {
-      const geometry = resolveSeedreamGeometry(request.prompt, config);
+      const geometry = resolveSeedreamGeometry(
+        request.prompt,
+        config,
+        input.geometry
+      );
       const body: Record<string, unknown> = {
         prompt: request.prompt,
         force_single:
@@ -210,7 +229,25 @@ function resolveSeedreamPromptRequests(
   }));
 }
 
-function resolveSeedreamGeometry(prompt: string, config: SeedreamConfig) {
+function resolveSeedreamGeometry(
+  prompt: string,
+  config: SeedreamConfig,
+  geometry?: SeedreamGeometryInput
+) {
+  if (geometry?.width !== undefined || geometry?.height !== undefined) {
+    if (geometry.width === undefined || geometry.height === undefined) {
+      throw new Error("Seedream explicit dimensions require both width and height.");
+    }
+    validateSeedreamDimensions(geometry.width, geometry.height);
+    return { width: geometry.width, height: geometry.height };
+  }
+
+  const requestedAspectRatio = parseAspectRatio(geometry?.aspectRatio);
+  if (requestedAspectRatio) {
+    const area = findExplicitOutputArea(prompt) ?? config.width * config.height;
+    return dimensionsFromAspectRatio(requestedAspectRatio, area);
+  }
+
   const explicitDimensions = findExplicitDimensions(prompt);
   if (explicitDimensions) {
     return explicitDimensions;
@@ -260,11 +297,7 @@ function findExplicitOutputArea(prompt: string) {
 function findExplicitAspectRatio(prompt: string) {
   const ratioMatch = prompt.match(/\b(\d{1,2})\s*[:：]\s*(\d{1,2})\b/);
   if (ratioMatch) {
-    const widthRatio = Number(ratioMatch[1]);
-    const heightRatio = Number(ratioMatch[2]);
-    if (widthRatio > 0 && heightRatio > 0) {
-      return widthRatio / heightRatio;
-    }
+    return parseAspectRatio(`${ratioMatch[1]}:${ratioMatch[2]}`);
   }
 
   if (/(横版|横图|宽屏|landscape|wide)/i.test(prompt)) {
@@ -278,6 +311,26 @@ function findExplicitAspectRatio(prompt: string) {
   }
 
   return null;
+}
+
+function parseAspectRatio(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+  const ratioMatch = value.match(/^\s*(\d{1,2})\s*[:：]\s*(\d{1,2})\s*$/);
+  if (!ratioMatch) {
+    throw new Error("Seedream aspectRatio must use the format width:height.");
+  }
+  const widthRatio = Number(ratioMatch[1]);
+  const heightRatio = Number(ratioMatch[2]);
+  if (widthRatio <= 0 || heightRatio <= 0) {
+    throw new Error("Seedream aspectRatio must be positive.");
+  }
+  const aspectRatio = widthRatio / heightRatio;
+  if (aspectRatio < 1 / 16 || aspectRatio > 16) {
+    throw new Error("Seedream aspectRatio must be within the supported range.");
+  }
+  return aspectRatio;
 }
 
 function dimensionsFromAspectRatio(aspectRatio: number, targetArea: number) {

@@ -15,8 +15,11 @@ import type { CucumberAgentContext } from "../../context.ts";
 import { buildGenerateImageSeedreamInput } from "./generate-image.request.ts";
 
 const generateImageInputSchema = z.object({
+  aspectRatio: z.string().min(1).optional(),
+  height: z.number().int().positive().optional(),
   prompt: z.string().min(1).optional(),
   resultCount: z.number().int().positive().optional(),
+  width: z.number().int().positive().optional(),
 });
 
 // Hand-written JSON schema (strict:false) to mirror the other Agent tools.
@@ -28,6 +31,23 @@ const generateImageJsonSchema = {
       type: "string",
       description:
         "The image description to render. Optional. Defaults to the run prompt when omitted. Reference images attached on the canvas are sent to the image service automatically and are NOT visible to you.",
+    },
+    aspectRatio: {
+      type: "string",
+      description:
+        "Optional output aspect ratio such as 16:9, 9:16, or 1:1. Prefer this when normalized input provides an aspect ratio.",
+    },
+    width: {
+      type: "integer",
+      minimum: 1,
+      description:
+        "Optional explicit output width in pixels. Use with height when normalized input provides exact dimensions.",
+    },
+    height: {
+      type: "integer",
+      minimum: 1,
+      description:
+        "Optional explicit output height in pixels. Use with width when normalized input provides exact dimensions.",
     },
     resultCount: {
       type: "integer",
@@ -118,6 +138,9 @@ export const generateImageTool = tool({
         {
           prompt,
           requestedResultCount: parsed.data.resultCount,
+          aspectRatio: parsed.data.aspectRatio,
+          width: parsed.data.width,
+          height: parsed.data.height,
           upstreamContext,
           onImage: emitArtifact,
           signal: details?.signal,

@@ -373,6 +373,10 @@ function createAlignedImageResultNodes(
       position,
       width: dimension.width,
       height: dimension.height,
+      style: {
+        width: dimension.width,
+        height: dimension.height,
+      },
       data: {
         kind: "imageResult",
         image: result.image,
@@ -395,7 +399,7 @@ function createAlignedImageResultNodes(
   return { resultNodes, resultEdges };
 }
 
-function getImageResultNodeDimensions({
+export function getImageResultNodeDimensions({
   image,
   request,
 }: {
@@ -747,7 +751,9 @@ function getStoredNodeDimension(
   node: AgentCanvasNode,
   dimension: "height" | "width"
 ) {
-  const value = node[dimension] ?? node.measured?.[dimension];
+  const styleValue =
+    node.style && typeof node.style === "object" ? node.style[dimension] : null;
+  const value = node[dimension] ?? styleValue ?? node.measured?.[dimension];
   return typeof value === "number" && Number.isFinite(value) && value > 0
     ? value
     : null;

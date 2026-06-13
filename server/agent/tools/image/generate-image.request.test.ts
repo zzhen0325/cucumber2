@@ -188,6 +188,29 @@ describe("generate image request normalization", () => {
     expect(request.body.size).toBeUndefined();
   });
 
+  it("uses structured aspect ratio geometry when provided by normalized input", () => {
+    const requests = buildSeedreamRequestBodies(
+      {
+        prompts: ["日本家居 banner KV，主体是女生打扫家里的插画"],
+        geometry: { aspectRatio: "16:9" },
+        resultCount: 4,
+        promptBatchMode: "single_prompt",
+      },
+      testSeedreamConfig
+    );
+
+    expect(requests).toHaveLength(4);
+    expect(requests.map((request) => request.body.prompt)).toEqual([
+      "日本家居 banner KV，主体是女生打扫家里的插画",
+      "日本家居 banner KV，主体是女生打扫家里的插画",
+      "日本家居 banner KV，主体是女生打扫家里的插画",
+      "日本家居 banner KV，主体是女生打扫家里的插画",
+    ]);
+    expect(
+      (requests[0].body.width as number) / (requests[0].body.height as number)
+    ).toBeCloseTo(16 / 9, 2);
+  });
+
   it("uses explicit pixel dimensions or size-only requests when present", () => {
     expect(
       buildSeedreamRequestBodies(

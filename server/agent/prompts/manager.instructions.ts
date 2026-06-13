@@ -27,10 +27,24 @@ const baseManagerInstructions = `你是 Cucumber Manager，是无限智能体画
 export function managerInstructions(context?: CucumberAgentContext) {
   return [
     baseManagerInstructions,
+    buildNormalizedInputInstructions(context),
     buildSkillInstructions(context),
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+function buildNormalizedInputInstructions(context?: CucumberAgentContext) {
+  if (!context?.normalizedInput) {
+    return "";
+  }
+
+  return [
+    "规格化输入：",
+    `normalized_input: ${JSON.stringify(context.normalizedInput)}`,
+    "- 路由和执行优先依据 normalized_input.intent；图片生成或图片放大必须转交给 Cucumber Image Agent。",
+    "- rawPrompt 只用于追溯，不得把未规格化的原始需求当作结构化执行参数。",
+  ].join("\n");
 }
 
 function buildSkillInstructions(context?: CucumberAgentContext) {

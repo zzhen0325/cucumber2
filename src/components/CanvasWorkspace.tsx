@@ -990,6 +990,151 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     []
   );
 
+  const startAgentRun = useCallback(
+    async ({
+      clearComposer = false,
+      promptText,
+      selectedNodeId,
+    }: {
+      clearComposer?: boolean;
+      promptText: string;
+      selectedNodeId: string | null;
+    }) => {
+      const value = promptText.trim();
+      if (!value || isBusy) {
+        return;
+      }
+      const projectId = loadedProjectIdRef.current;
+      if (!projectId) {
+        setStorageStatus("error");
+        setStorageError("项目尚未加载完成");
+        return;
+      }
+      if (hasLocalUploadNodes) {
+        showUploadError("请等待文件上传完成后再启动 Agent。");
+        return;
+      }
+      if (storageError) {
+        return;
+      }
+
+      const currentNodes = nodesRef.current;
+      const currentEdges = edgesRef.current;
+      const draft = createRunDraft(value, selectedNodeId, currentNodes, currentEdges);
+      activeRunId.current = draft.runNode.id;
+      activeRunMessageStartIndex.current = messagesRef.current.length;
+      streamedRuntimeEvents.current = streamedRuntimeEvents.current.filter(
+        (event) => event.runNodeId !== draft.runNode.id
+      );
+      streamedAgentTextByRunId.current.delete(draft.runNode.id);
+      setContextCount(draft.upstreamContext.length);
+      const requestBody: AgentRunRequestBody = {
+        projectId,
+        runNodeId: draft.runNode.id,
+        canvasContext: {
+          prompt: value,
+          promptNodeId: draft.promptNode.id,
+          selectedNodeId,
+        },
+      };
+      const nextNodes = [
+        ...applySelectedNodeIds(currentNodes, []),
+        draft.promptNode,
+        draft.runNode,
+      ];
+      const nextEdges = [...currentEdges, ...draft.edges];
+      nodesRef.current = nextNodes;
+      edgesRef.current = nextEdges;
+      setNodes(nextNodes);
+      setEdges(nextEdges);
+
+      const saved = await saveProjectSnapshot();
+      if (!saved) {
+        markRunError(draft.runNode.id, "项目快照保存失败，Agent 未启动。");
+        return;
+      }
+
+      if (clearComposer) {
+        setPrompt("");
+      }
+
+      await sendMessage(
+        { text: value },
+        {
+          body: requestBody,
+        }
+      );
+    },
+    [
+      hasLocalUploadNodes,
+      isBusy,
+      markRunError,
+      saveProjectSnapshot,
+      sendMessage,
+      setEdges,
+      setNodes,
+      showUploadError,
+      storageError,
+    ]
+  );
+
+  const handleRetryRun = useCallback(
+    (runNodeId: string) => {
+      if (isReplayModeRef.current) {
+        setStorageStatus("error");
+        setStorageError("Run 回放模式为只读，退出回放后再重试。");
+        return;
+      }
+      if (isBusy) {
+        setStorageStatus("error");
+        setStorageError("Agent 正在运行，请稍后重试。");
+        return;
+      }
+
+      const runNode = nodesRef.current.find(
+        (node) => node.id === runNodeId && node.data.kind === "run"
+      );
+      if (!runNode || runNode.data.kind !== "run") {
+        return;
+      }
+      if (runNode.data.status !== "error") {
+        return;
+      }
+
+      const retryPrompt = runNode.data.prompt.trim();
+      if (!retryPrompt) {
+        setStorageStatus("error");
+        setStorageError("原 Run 没有可重试的 prompt。");
+        return;
+      }
+
+      void startAgentRun({
+        promptText: retryPrompt,
+        selectedNodeId: getRetryAnchorNodeId(
+          runNodeId,
+          nodesRef.current,
+          edgesRef.current
+        ),
+      });
+    },
+    [isBusy, startAgentRun]
+  );
+
+  useEffect(() => {
+    const handleRetryRunEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{ runNodeId?: unknown }>).detail;
+      if (typeof detail?.runNodeId === "string") {
+        handleRetryRun(detail.runNodeId);
+      }
+    };
+
+    window.addEventListener("cucumber:retry-run", handleRetryRunEvent);
+
+    return () => {
+      window.removeEventListener("cucumber:retry-run", handleRetryRunEvent);
+    };
+  }, [handleRetryRun]);
+
   useEffect(() => {
     const flushPendingSave = () => {
       if (saveTimer.current) {
@@ -1339,82 +1484,13 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     ) => {
       event?.preventDefault();
       const value = (message.text || prompt).trim();
-      if (!value || isBusy) {
-        return;
-      }
-      if (!loadedProjectId) {
-        setStorageStatus("error");
-        setStorageError("项目尚未加载完成");
-        return;
-      }
-      if (hasLocalUploadNodes) {
-        showUploadError("请等待文件上传完成后再启动 Agent。");
-        return;
-      }
-      if (storageError) {
-        return;
-      }
-
-      const anchorId = referenceNodeId;
-      const draft = createRunDraft(value, anchorId, nodes, edges);
-      activeRunId.current = draft.runNode.id;
-      activeRunMessageStartIndex.current = messagesRef.current.length;
-      streamedRuntimeEvents.current = streamedRuntimeEvents.current.filter(
-        (event) => event.runNodeId !== draft.runNode.id
-      );
-      streamedAgentTextByRunId.current.delete(draft.runNode.id);
-      setContextCount(draft.upstreamContext.length);
-      const requestBody: AgentRunRequestBody = {
-        projectId: loadedProjectId,
-        runNodeId: draft.runNode.id,
-        canvasContext: {
-          prompt: value,
-          promptNodeId: draft.promptNode.id,
-          selectedNodeId: anchorId,
-        },
-      };
-      const nextNodes = [
-        ...applySelectedNodeIds(nodes, []),
-        draft.promptNode,
-        draft.runNode,
-      ];
-      const nextEdges = [...edges, ...draft.edges];
-      nodesRef.current = nextNodes;
-      edgesRef.current = nextEdges;
-      setNodes(nextNodes);
-      setEdges(nextEdges);
-
-      const saved = await saveProjectSnapshot();
-      if (!saved) {
-        markRunError(draft.runNode.id, "项目快照保存失败，Agent 未启动。");
-        return;
-      }
-
-      setPrompt("");
-
-      await sendMessage(
-        { text: value },
-        {
-          body: requestBody,
-        }
-      );
+      await startAgentRun({
+        clearComposer: true,
+        promptText: value,
+        selectedNodeId: referenceNodeId,
+      });
     },
-    [
-      edges,
-      hasLocalUploadNodes,
-      isBusy,
-      loadedProjectId,
-      markRunError,
-      nodes,
-      prompt,
-      referenceNodeId,
-      saveProjectSnapshot,
-      sendMessage,
-      setEdges,
-      setNodes,
-      showUploadError,
-      storageError,
-    ]
+    [prompt, referenceNodeId, startAgentRun]
   );
 
   const handleReplayTrace = useCallback(() => {
@@ -1853,6 +1929,23 @@ function getDescendantNodeIds(nodeId: string, edges: AgentCanvasEdge[]) {
   }
 
   return descendants;
+}
+
+function getRetryAnchorNodeId(
+  runNodeId: string,
+  nodes: AgentCanvasNode[],
+  edges: AgentCanvasEdge[]
+) {
+  const promptEdge = edges.find((edge) => edge.target === runNodeId);
+  const promptNodeId = promptEdge?.source;
+  const promptNode = nodes.find((node) => node.id === promptNodeId);
+  if (!promptNode || promptNode.data.kind !== "prompt") {
+    return null;
+  }
+
+  const upstreamEdge = edges.find((edge) => edge.target === promptNode.id);
+  const upstreamNode = nodes.find((node) => node.id === upstreamEdge?.source);
+  return getRunReferenceNodeId(upstreamNode);
 }
 
 function hasReadyRunOutput(nodes: AgentCanvasNode[], runId: string) {
@@ -2969,6 +3062,10 @@ function createPendingUpscaleImageNode(
       x: sourceNode.position.x,
       y: sourceNode.position.y + 310,
     },
+    style: {
+      width,
+      height,
+    },
     type: "imageResultNode",
     width,
     data: {
@@ -2997,7 +3094,9 @@ function getNodeDimension(
   node: AgentCanvasNode,
   dimension: "height" | "width"
 ) {
-  const value = node[dimension] ?? node.measured?.[dimension];
+  const styleValue =
+    node.style && typeof node.style === "object" ? node.style[dimension] : null;
+  const value = node[dimension] ?? styleValue ?? node.measured?.[dimension];
   return typeof value === "number" && Number.isFinite(value) && value > 0
     ? value
     : null;

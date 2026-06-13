@@ -1,6 +1,7 @@
 import {
   createImageResultNodes,
   createPendingImageResultNodes,
+  getImageResultNodeDimensions,
 } from "./graph";
 import type {
   AgentCanvasEdge,
@@ -681,10 +682,22 @@ function readExpectedImageRequest(
   const input = readRecord(generateInput.payload.input);
   const requestedCount = readNumber(input?.resultCount);
   const imagePrompt = readString(input?.prompt) ?? prompt;
+  const explicitWidth = readNumber(input?.width);
+  const explicitHeight = readNumber(input?.height);
+  const explicitAspectRatio = readString(input?.aspectRatio);
 
   return {
     count: Math.max(1, requestedCount ? Math.floor(requestedCount) : 1),
-    preview: readImageRequestPreview(imagePrompt),
+    preview:
+      explicitWidth && explicitHeight
+        ? {
+            width: explicitWidth,
+            height: explicitHeight,
+            aspectRatio: simplifyAspectRatio(explicitWidth, explicitHeight),
+          }
+        : explicitAspectRatio
+          ? { aspectRatio: explicitAspectRatio }
+          : readImageRequestPreview(imagePrompt),
   };
 }
 
@@ -794,11 +807,20 @@ function createArtifactCanvasNode({
     };
     const projected = createImageResultNodes(runNode, [image], existingNodes)
       .resultNodes[0];
+    const dimensions =
+      pendingImageDimensions(position, existingNodes, nodeId) ??
+      getImageResultNodeDimensions({ image, request });
 
     return getExistingOrProjectedNode(existingNodes, nodeId, {
       id: nodeId,
       type: "imageResultNode",
       position: existingPosition ?? position ?? projected?.position ?? basePosition,
+      width: dimensions.width,
+      height: dimensions.height,
+      style: {
+        width: dimensions.width,
+        height: dimensions.height,
+      },
       data: {
         kind: "imageResult",
         artifact,
@@ -858,6 +880,33 @@ function createArtifactCanvasNode({
                   }
               : { ...baseData, kind },
   } as AgentCanvasNode);
+}
+
+function pendingImageDimensions(
+  position: AgentCanvasNode["position"] | undefined,
+  existingNodes: AgentCanvasNode[],
+  nodeId: string
+) {
+  const node = existingNodes.find((candidate) => candidate.id === nodeId);
+  if (!node || node.data.kind !== "imageResult" || !position) {
+    return null;
+  }
+
+  const width = readNodeDimension(node, "width");
+  const height = readNodeDimension(node, "height");
+  return width && height ? { width, height } : null;
+}
+
+function readNodeDimension(
+  node: AgentCanvasNode,
+  dimension: "height" | "width"
+) {
+  const styleValue =
+    node.style && typeof node.style === "object" ? node.style[dimension] : null;
+  const value = node[dimension] ?? styleValue ?? node.measured?.[dimension];
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : null;
 }
 
 function getExistingOrProjectedNode(

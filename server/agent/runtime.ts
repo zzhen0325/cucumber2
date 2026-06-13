@@ -17,6 +17,7 @@ import {
 } from "./events/runtime-event-writer.ts";
 import { openAIStreamToCucumberEvents } from "./events/openai-stream-to-cucumber-events.ts";
 import { getAgentErrorMessage, isAbortError } from "./errors.ts";
+import { normalizeAgentInput } from "./input-normalizer.ts";
 import {
   materializeAgentRunSnapshot,
   shouldMaterializeRunEvent,
@@ -28,14 +29,18 @@ const runner = new Runner({ workflowName: "Cucumber Agent" });
 
 export class OpenAIAgentsRuntime implements AgentRuntime {
   async *run(input: AgentRunInput): AsyncIterable<CucumberRunEvent> {
-    const context = buildCucumberAgentContext(input);
-    context.skillCandidates = await retrieveRelevantAgentSkills(input);
+    const model = resolveAgentModel();
+    const normalizedInput =
+      input.normalizedInput ??
+      (await normalizeAgentInput(input, { model, signal: input.signal }));
+    const normalizedRunInput = { ...input, normalizedInput };
+    const context = buildCucumberAgentContext(normalizedRunInput);
+    context.skillCandidates = await retrieveRelevantAgentSkills(normalizedRunInput);
     yield { type: "skill_retrieved", candidates: context.skillCandidates };
 
-    const model = resolveAgentModel();
     const managerAgent = createManagerAgent({ model });
 
-    const stream = await runner.run(managerAgent, buildManagerRunPrompt(input), {
+    const stream = await runner.run(managerAgent, buildManagerRunPrompt(normalizedRunInput), {
       context,
       maxTurns: 8,
       signal: input.signal,
@@ -56,7 +61,7 @@ export async function executeAgentRun({
     runNodeId: input.runNodeId,
     writer: streamWriter,
   });
-  const agentInput = buildAgentRunInput(input);
+  let agentInput = buildAgentRunInput(input);
   const textStreamId = `agent-text-${crypto.randomUUID()}`;
   let textStarted = false;
   let finalOutput: string | undefined;
@@ -99,12 +104,21 @@ export async function executeAgentRun({
         runtime: "openai-agents-sdk",
       },
     });
+    const model = resolveAgentModel();
+    agentInput = {
+      ...agentInput,
+      normalizedInput: await normalizeAgentInput(agentInput, {
+        model,
+        signal: input.signal,
+      }),
+    };
     await writeRunEvent({
       projectId: input.projectId,
       runNodeId: input.runNodeId,
       stepId: "input",
       type: "input.normalized",
       payload: {
+        normalizedInput: agentInput.normalizedInput,
         prompt: agentInput.message,
         promptNodeId: agentInput.promptNodeId,
         selectedNodeId: agentInput.selectedNodeId,
@@ -427,6 +441,9 @@ function buildManagerRunPrompt(input: AgentRunInput) {
     }));
   return [
     `User request: ${input.message}`,
+    input.normalizedInput
+      ? `Normalized input: ${JSON.stringify(input.normalizedInput)}`
+      : "",
     `Project id: ${input.projectId}`,
     `Run node id: ${input.runNodeId}`,
     `Selected node ids: ${input.selectedNodeIds.join(", ") || "none"}`,
@@ -435,5 +452,5 @@ function buildManagerRunPrompt(input: AgentRunInput) {
       ...input.upstreamContext.filter((item) => item.type !== "image"),
       ...imageContext,
     ].slice(0, 12))}`,
-  ].join("\n\n");
+  ].filter(Boolean).join("\n\n");
 }

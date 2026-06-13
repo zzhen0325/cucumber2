@@ -886,6 +886,10 @@ function createUpscaleCanvasPatch({
       y: sourceNode.position.y + 310,
     },
     selected: true,
+    style: {
+      width,
+      height,
+    },
     type: "imageResultNode",
     width,
     data: {
@@ -919,7 +923,9 @@ function getNodeNumericDimension(
   node: AgentCanvasNode,
   dimension: "height" | "width"
 ) {
-  const value = node[dimension] ?? node.measured?.[dimension];
+  const styleValue =
+    node.style && typeof node.style === "object" ? node.style[dimension] : null;
+  const value = node[dimension] ?? styleValue ?? node.measured?.[dimension];
   return typeof value === "number" && Number.isFinite(value) && value > 0
     ? value
     : null;

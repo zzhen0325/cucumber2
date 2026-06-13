@@ -32,6 +32,12 @@
 - 新增 `server/agent/tools/image/generate-image.request.ts`，集中负责图片数量、尺寸/比例和 upstream 引用图归一化。
 - `generate_image` 工具只做 Agent tool 边界、artifact 事件和 Seedream provider 调用编排。
 - `seedream.ts` 收敛为 Seedream provider 执行层，保留配置读取、签名、提交/轮询、并发/重试、取消和 provider metadata。
+- 多张图片生成按 `SEEDREAM_STAGGER_MS` 分窗口启动请求，`SEEDREAM_MAX_CONCURRENCY` 表示每个窗口最多启动几个请求；后续轮询并发进行，不再等待上一张完整出图后才提交下一张。
+
+## 2026-06-13 Input Normalization
+
+- Agent Run 在 Manager 启动前通过 `server/agent/input-normalizer.ts` 生成结构化 `normalizedInput`，并写入 `input.normalized` Trace。
+- 图片生成请求会单独抽取 `contentPrompt`、`resultCount`、`aspectRatio` 或 `dimensions`；`generate_image` 接收这些结构化参数，prompt 文本推断仅作为旧调用兼容。
 
 ## 2026-06-12 Image Node Toolbar
 

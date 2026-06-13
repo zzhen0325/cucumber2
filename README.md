@@ -9,6 +9,7 @@ Infinite Canvas Agent Run MVP。前端使用 Vite、React、TypeScript、React F
 - API：`POST /api/agent-run`；停止运行使用同一路径的 `DELETE` 方法
 - 实现：`server/agent/`
 - 编排：每次运行创建独立 Manager/Image Agent；Manager 通过 Agents SDK handoff 委派给 Image Agent
+- 失败 Run 节点显示重试按钮；重试会保留原失败节点，并用原 prompt 与原上游锚点创建新的可见 Agent Run 分支
 - 图片工具：`expand_image_prompt` 只使用已激活的 image prompt-expansion skill，`generate_image` 调用 Seedream 生成图片，`upscale_image` 调用 Seedream 智能超清
 - Agent OS 技能流：服务端从持久化画布重建可信上下文，检索启用技能的 metadata，首轮只注入 skill cards；模型必须调用 `activate_skill` 才能读取完整 `SKILL.md`，脚本只能通过 `run_skill_script` 执行
 - 画布变更：Agent 只能提出 `CanvasOperation`，由 runtime policy 校验后投影到画布

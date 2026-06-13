@@ -5,6 +5,7 @@ import {
   ChevronDown,
   CircleAlert,
   ListTree,
+  RotateCcw,
   Sparkles,
   Wrench,
 } from "lucide-react";
@@ -125,6 +126,20 @@ export function RunNodeView({
             </Shimmer>
           ) : (
             <span className="run-title">{title}</span>
+          )}
+          {data.status === "error" && (
+            <button
+              aria-label="重试 Agent Run"
+              className="run-retry-button nodrag nopan"
+              onClick={(event) => {
+                event.stopPropagation();
+                dispatchRetryRun(id);
+              }}
+              title="重试"
+              type="button"
+            >
+              <RotateCcw size={12} />
+            </button>
           )}
           <button
             aria-label="查看 Run Trace"
@@ -283,6 +298,14 @@ function RunStatusIcon({ status }: { status: RunNodeData["status"] }) {
 function dispatchOpenTrace(runNodeId: string) {
   window.dispatchEvent(
     new CustomEvent("cucumber:open-run-trace", {
+      detail: { runNodeId },
+    })
+  );
+}
+
+function dispatchRetryRun(runNodeId: string) {
+  window.dispatchEvent(
+    new CustomEvent("cucumber:retry-run", {
       detail: { runNodeId },
     })
   );

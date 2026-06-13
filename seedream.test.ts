@@ -1,8 +1,11 @@
+import { setTimeout as wait } from "node:timers/promises";
+
 import { describe, expect, it } from "vitest";
 
 import {
   buildSeedreamUpscaleTaskBody,
   generateSeedreamImage,
+  mapWithStaggeredStarts,
   type SeedreamConfig,
   type SeedreamGenerateInput,
 } from "./seedream";
@@ -63,6 +66,49 @@ describe("seedream provider", () => {
         scale: -5,
       }).scale
     ).toBe(0);
+  });
+
+  it("starts image requests by stagger without waiting for prior polling", async () => {
+    const started: number[] = [];
+    const release: Array<() => void> = [];
+
+    const result = mapWithStaggeredStarts(
+      [1, 2, 3],
+      1,
+      20,
+      async (item) => {
+        started.push(item);
+        await new Promise<void>((resolve) => release.push(resolve));
+        return item * 10;
+      }
+    );
+
+    await wait(5);
+    expect(started).toEqual([1]);
+
+    await wait(25);
+    expect(started).toEqual([1, 2]);
+
+    await wait(25);
+    expect(started).toEqual([1, 2, 3]);
+
+    release.forEach((resolve) => resolve());
+    await expect(result).resolves.toEqual([10, 20, 30]);
+  });
+
+  it("does not start pending staggered requests after a prior request fails", async () => {
+    const started: number[] = [];
+    const result = mapWithStaggeredStarts([1, 2], 1, 20, async (item) => {
+      started.push(item);
+      if (item === 1) {
+        throw new Error("submit failed");
+      }
+      return item;
+    });
+
+    await expect(result).rejects.toThrow("submit failed");
+    await wait(30);
+    expect(started).toEqual([1]);
   });
 
   it("aborts before making a Seedream request", async () => {

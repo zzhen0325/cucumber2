@@ -33,6 +33,13 @@ export function createManagerAgent({
 
 function shouldEnableImageHandoff(context: CucumberAgentContext) {
   if (
+    context.normalizedInput?.intent === "image.generate" ||
+    context.normalizedInput?.intent === "image.upscale"
+  ) {
+    return true;
+  }
+
+  if (
     hasBuiltInImageIntent({
       message: context.prompt,
       upstreamContext: context.upstreamContext,
