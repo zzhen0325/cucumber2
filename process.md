@@ -44,6 +44,13 @@
 - Agent Run 提交支持 `selectedNodeIds`，多选的可引用节点会一起生成到 Prompt 节点的引用边。
 - 服务端继续从持久化项目快照重建 upstream context，并过滤 Run 节点；客户端提供的节点列表只作为待验证 id，不提供可信上下文。
 
+## 2026-06-13 Internal MCP Tools
+
+- `generate_image` 已迁为内部 MCP tool，由 `/internal/mcp` 通过 Streamable HTTP 暴露给当前 Agents SDK runtime。
+- 内部 MCP endpoint 只接受进程内随机 bearer token；暂不作为外部 API 使用。
+- MCP tool input 只包含模型可决定的图片参数；`userId`、`projectId`、`runNodeId`、upstream context 和 artifact URL 继续由服务端 run context registry 注入，不进入模型参数。
+- 图片 artifact、tool 事件和错误仍通过现有 Cucumber runtime 事件投影到画布。
+
 ## 2026-06-12 Image Node Toolbar
 
 - 图片结果节点选中后显示浮动 toolbar，当前提供放大查看、高清放大、下载和复制四个用户动作。

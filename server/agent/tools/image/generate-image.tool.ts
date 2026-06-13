@@ -22,8 +22,10 @@ const generateImageInputSchema = z.object({
   width: z.number().int().positive().optional(),
 });
 
+export type GenerateImageToolArgs = z.infer<typeof generateImageInputSchema>;
+
 // Hand-written JSON schema (strict:false) to mirror the other Agent tools.
-const generateImageJsonSchema = {
+export const generateImageJsonSchema = {
   type: "object",
   additionalProperties: false,
   properties: {
@@ -58,10 +60,12 @@ const generateImageJsonSchema = {
   },
 } as const;
 
+export const generateImageToolDescription =
+  "Generate image artifacts from a text prompt using the Seedream image service. Generated images are rendered onto the canvas automatically as image result nodes. This tool does not write the database directly; it produces in-memory artifacts that the Cucumber runtime emits. Reference images are forwarded to the service directly and never exposed to you, so do not try to read or fabricate image URLs.";
+
 export const generateImageTool = tool({
   name: "generate_image",
-  description:
-    "Generate image artifacts from a text prompt using the Seedream image service. Generated images are rendered onto the canvas automatically as image result nodes. This tool does not write the database directly; it produces in-memory artifacts that the Cucumber runtime emits. Reference images are forwarded to the service directly and never exposed to you, so do not try to read or fabricate image URLs.",
+  description: generateImageToolDescription,
   parameters: generateImageJsonSchema as never,
   strict: false,
   // Let real failures (misconfiguration, image-service errors) propagate so the
@@ -69,95 +73,109 @@ export const generateImageTool = tool({
   errorFunction: null,
   async execute(rawArgs, runContext, details) {
     const context = requireCucumberContext(runContext?.context);
-
-    const parsed = generateImageInputSchema.safeParse(rawArgs);
-    if (!parsed.success) {
-      return {
-        error: `invalid_image_input: ${parsed.error.issues
-          .map((issue) => `${issue.path.join(".")} ${issue.message}`)
-          .join("; ")}`,
-      };
-    }
-
-    // No silent fallback: surface a configuration error instead of faking output.
-    if (!isSeedreamConfigured()) {
-      throw new Error(
-        "Seedream image generation is not configured. Set SEEDREAM_ACCESS_KEY_ID and SEEDREAM_SECRET_ACCESS_KEY."
-      );
-    }
-
-    const prompt = parsed.data.prompt?.trim() || context.prompt?.trim();
-    if (!prompt) {
-      return { error: "empty_prompt: no image prompt was provided." };
-    }
-
-    const artifacts: ArtifactRef[] = [];
-    const emitArtifact = async (image: {
-      id: string;
-      url: string;
-      title?: string;
-      metadata?: Record<string, unknown>;
-    }) => {
-      const artifact = await storeGeneratedImageFromUrl({
-        artifactId: image.id,
-        metadata: {
-          ...image.metadata,
-          prompt,
-          sourcePrompt: context.prompt,
-        },
-        projectId: context.projectId,
-        runNodeId: context.runNodeId,
-        signal: details?.signal,
-        sourceUrl: image.url,
-        title: image.title,
-        userId: context.userId,
-      });
-      context.producedArtifacts.push(artifact);
-      artifacts.push(artifact);
-      // Stream each image to the client the moment it lands so the canvas
-      // renders results one-by-one. Falls back to `pendingEvents` (drained when
-      // the tool returns) if no live sink is wired up.
-      const event = {
-        type: "artifact_created" as const,
-        artifact,
-        toolName: "generate_image",
-      };
-      if (context.pushLiveEvent) {
-        context.pushLiveEvent(event);
-      } else {
-        context.pendingEvents.push(event);
-      }
-    };
-
-    const config = readSeedreamConfigFromEnv();
-    const upstreamContext = await resolveStorageBackedImageContext(
-      context.upstreamContext
-    );
-    await generateSeedreamImage(
-      buildGenerateImageSeedreamInput(
-        {
-          prompt,
-          requestedResultCount: parsed.data.resultCount,
-          aspectRatio: parsed.data.aspectRatio,
-          width: parsed.data.width,
-          height: parsed.data.height,
-          upstreamContext,
-          onImage: emitArtifact,
-          signal: details?.signal,
-        },
-        config
-      ),
-      config
-    );
-
-    return {
-      generated: artifacts.length,
-      artifactIds: artifacts.map((artifact) => artifact.id),
-      prompt,
-      note: "Images rendered to the canvas. Image URLs are intentionally omitted from your context.",
-    };
+    return executeGenerateImageTool({
+      args: rawArgs,
+      context,
+      signal: details?.signal,
+    });
   },
 });
+
+export async function executeGenerateImageTool({
+  args,
+  context,
+  signal,
+}: {
+  args: unknown;
+  context: CucumberAgentContext;
+  signal?: AbortSignal;
+}) {
+  const parsed = generateImageInputSchema.safeParse(args);
+  if (!parsed.success) {
+    return {
+      error: `invalid_image_input: ${parsed.error.issues
+        .map((issue) => `${issue.path.join(".")} ${issue.message}`)
+        .join("; ")}`,
+    };
+  }
+
+  // No silent fallback: surface a configuration error instead of faking output.
+  if (!isSeedreamConfigured()) {
+    throw new Error(
+      "Seedream image generation is not configured. Set SEEDREAM_ACCESS_KEY_ID and SEEDREAM_SECRET_ACCESS_KEY."
+    );
+  }
+
+  const prompt = parsed.data.prompt?.trim() || context.prompt?.trim();
+  if (!prompt) {
+    return { error: "empty_prompt: no image prompt was provided." };
+  }
+
+  const artifacts: ArtifactRef[] = [];
+  const emitArtifact = async (image: {
+    id: string;
+    url: string;
+    title?: string;
+    metadata?: Record<string, unknown>;
+  }) => {
+    const artifact = await storeGeneratedImageFromUrl({
+      artifactId: image.id,
+      metadata: {
+        ...image.metadata,
+        prompt,
+        sourcePrompt: context.prompt,
+      },
+      projectId: context.projectId,
+      runNodeId: context.runNodeId,
+      signal: signal ?? context.signal,
+      sourceUrl: image.url,
+      title: image.title,
+      userId: context.userId,
+    });
+    context.producedArtifacts.push(artifact);
+    artifacts.push(artifact);
+    // Stream each image to the client the moment it lands so the canvas renders
+    // results one-by-one. Falls back to `pendingEvents` if no live sink is wired.
+    const event = {
+      type: "artifact_created" as const,
+      artifact,
+      toolName: "generate_image",
+    };
+    if (context.pushLiveEvent) {
+      context.pushLiveEvent(event);
+    } else {
+      context.pendingEvents.push(event);
+    }
+  };
+
+  const config = readSeedreamConfigFromEnv();
+  const upstreamContext = await resolveStorageBackedImageContext(
+    context.upstreamContext
+  );
+  await generateSeedreamImage(
+    buildGenerateImageSeedreamInput(
+      {
+        prompt,
+        requestedResultCount: parsed.data.resultCount,
+        aspectRatio: parsed.data.aspectRatio,
+        width: parsed.data.width,
+        height: parsed.data.height,
+        upstreamContext,
+        onImage: emitArtifact,
+        signal: signal ?? context.signal,
+      },
+      config
+    ),
+    config
+  );
+
+  return {
+    generated: artifacts.length,
+    artifactIds: artifacts.map((artifact) => artifact.id),
+    prompt,
+    note: "Images rendered to the canvas. Image URLs are intentionally omitted from your context.",
+  };
+}
 
 function requireCucumberContext(context: unknown): CucumberAgentContext {
   if (!context || typeof context !== "object") {

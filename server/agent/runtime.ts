@@ -19,6 +19,13 @@ import { openAIStreamToCucumberEvents } from "./events/openai-stream-to-cucumber
 import { getAgentErrorMessage, isAbortError } from "./errors.ts";
 import { normalizeAgentInput } from "./input-normalizer.ts";
 import {
+  ensureCucumberInternalMcpConnected,
+} from "./mcp/internal-mcp-client.ts";
+import {
+  registerMcpRunContext,
+  unregisterMcpRunContext,
+} from "./mcp/context-registry.ts";
+import {
   materializeAgentRunSnapshot,
   shouldMaterializeRunEvent,
 } from "./materialize-run.ts";
@@ -35,18 +42,24 @@ export class OpenAIAgentsRuntime implements AgentRuntime {
       (await normalizeAgentInput(input, { model, signal: input.signal }));
     const normalizedRunInput = { ...input, normalizedInput };
     const context = buildCucumberAgentContext(normalizedRunInput);
-    context.skillCandidates = await retrieveRelevantAgentSkills(normalizedRunInput);
-    yield { type: "skill_retrieved", candidates: context.skillCandidates };
+    const mcpContextId = registerMcpRunContext(context);
+    try {
+      context.skillCandidates = await retrieveRelevantAgentSkills(normalizedRunInput);
+      yield { type: "skill_retrieved", candidates: context.skillCandidates };
 
-    const managerAgent = createManagerAgent({ model });
+      await ensureCucumberInternalMcpConnected();
+      const managerAgent = createManagerAgent({ model });
 
-    const stream = await runner.run(managerAgent, buildManagerRunPrompt(normalizedRunInput), {
-      context,
-      maxTurns: 8,
-      signal: input.signal,
-      stream: true,
-    });
-    yield* openAIStreamToCucumberEvents(stream, context);
+      const stream = await runner.run(managerAgent, buildManagerRunPrompt(normalizedRunInput), {
+        context,
+        maxTurns: 8,
+        signal: input.signal,
+        stream: true,
+      });
+      yield* openAIStreamToCucumberEvents(stream, context);
+    } finally {
+      unregisterMcpRunContext(mcpContextId);
+    }
   }
 }
 

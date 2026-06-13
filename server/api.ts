@@ -24,6 +24,7 @@ import type {
   ImageResultNodeData,
 } from "../src/types/canvas.ts";
 import { executeAgentRun } from "./agent/index.ts";
+import { handleInternalMcpRequest } from "./agent/mcp/internal-mcp-server.ts";
 import { getAgentModelConfiguration } from "./agent/model-config.ts";
 import { importAgentSkillZip } from "./agent/skills/skill-import.ts";
 import { parseAgentSkillMarkdown } from "./agent/skills/skill-parser.ts";
@@ -60,10 +61,10 @@ import {
   type AppUser,
 } from "./supabase.ts";
 import {
-  createSignedArtifactReadUrl,
   createSignedAssetUpload,
   completeSignedAssetUpload,
   MAX_AGENT_ASSET_BYTES,
+  readArtifactContent,
   resolveStorageBackedImageContext,
   storeAgentSkillPackage,
   storeGeneratedImageFromUrl,
@@ -179,6 +180,8 @@ const skillImportSchema = z.object({
 });
 
 app.use("*", cors());
+
+app.all("/internal/mcp", async (c) => handleInternalMcpRequest(c.req.raw));
 
 app.onError((error, c) => {
   console.error("[api]", error);
@@ -731,8 +734,13 @@ app.get("/api/projects/:projectId/artifacts/:artifactId/content", async (c) => {
     return notFound(c);
   }
 
-  const signedUrl = await createSignedArtifactReadUrl(artifact);
-  return c.redirect(signedUrl, 302);
+  const content = await readArtifactContent(artifact);
+  const headers = new Headers({
+    "Cache-Control": "private, max-age=300",
+    "Content-Length": String(content.sizeBytes),
+    "Content-Type": content.mimeType,
+  });
+  return new Response(content.bytes, { headers });
 });
 
 app.delete("/api/agent-run", async (c) => {

@@ -315,6 +315,36 @@ export async function createSignedArtifactReadUrl(
   return createSignedStorageReadUrl(artifact.bucketId, artifact.storagePath);
 }
 
+export async function readArtifactContent(
+  artifact: Pick<
+    AgentArtifactRecord,
+    "bucketId" | "mimeType" | "sizeBytes" | "storagePath"
+  >
+) {
+  if (!artifact.bucketId || !artifact.storagePath) {
+    throw new Error("Artifact is not backed by object storage.");
+  }
+
+  const { data, error } = await getSupabaseClient()
+    .storage
+    .from(artifact.bucketId)
+    .download(artifact.storagePath);
+
+  if (error) {
+    throw error;
+  }
+  if (!data) {
+    throw new Error("Artifact content was not found in object storage.");
+  }
+
+  const bytes = await data.arrayBuffer();
+  return {
+    bytes,
+    mimeType: artifact.mimeType ?? data.type ?? "application/octet-stream",
+    sizeBytes: artifact.sizeBytes ?? bytes.byteLength,
+  };
+}
+
 export async function resolveStorageBackedImageContext(
   items: UpstreamContextItem[]
 ): Promise<UpstreamContextItem[]> {

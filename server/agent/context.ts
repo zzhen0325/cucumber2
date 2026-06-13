@@ -125,6 +125,7 @@ export type CucumberAgentContext = {
   selectedNodeIds: string[];
   signal?: AbortSignal;
   knownNodeIds: string[];
+  mcpRunContextId?: string;
   activatedSkills: ActivatedAgentSkill[];
   producedArtifacts: ArtifactRef[];
   pendingEvents: PendingCucumberEvent[];

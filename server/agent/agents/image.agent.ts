@@ -3,7 +3,7 @@ import { Agent } from "@openai/agents";
 import type { CucumberAgentContext } from "../context.ts";
 import { activateSkillTool } from "../tools/skills/activate-skill.tool.ts";
 import { expandImagePromptTool } from "../tools/image/expand-image-prompt.tool.ts";
-import { generateImageTool } from "../tools/image/generate-image.tool.ts";
+import { getCucumberInternalMcpServer } from "../mcp/internal-mcp-client.ts";
 import { runSkillScriptTool } from "../tools/skills/run-skill-script.tool.ts";
 import { upscaleImageTool } from "../tools/image/upscale-image.tool.ts";
 import { imageInstructions } from "../prompts/image.instructions.ts";
@@ -22,11 +22,16 @@ export function createImageAgent({
       "Image specialist. Delegate here for any request that needs images generated, created, edited, or upscaled (with or without reference images on the canvas).",
     instructions: (runContext) => imageInstructions(runContext.context),
     ...(model ? { model } : {}),
+    mcpConfig: {
+      convertSchemasToStrict: false,
+      errorFunction: null,
+      includeServerInToolNames: false,
+    },
+    mcpServers: [getCucumberInternalMcpServer()],
     tools: [
       activateSkillTool,
       expandImagePromptTool,
       runSkillScriptTool,
-      generateImageTool,
       upscaleImageTool,
     ],
   });
