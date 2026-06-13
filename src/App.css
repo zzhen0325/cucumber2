@@ -574,6 +574,7 @@
   display: grid;
   height: 100%;
   min-height: 0;
+  overflow: hidden;
   place-items: center;
   padding: 0 27px;
 }
@@ -588,6 +589,21 @@
   text-align: center;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.prompt-card.expanded .prompt-content {
+  place-items: start stretch;
+  overflow: auto;
+  padding: 22px 27px;
+}
+
+.prompt-card.expanded p {
+  display: block;
+  overflow: visible;
+  text-align: left;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  -webkit-line-clamp: unset;
 }
 
 .sticky-note-card {
@@ -725,7 +741,7 @@
 .run-heading {
   display: grid;
   height: 36px;
-  grid-template-columns: 20px minmax(0, 1fr) 20px 20px;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
   align-items: center;
   gap: 4px;
   padding: 0 12px;
@@ -734,10 +750,43 @@
   line-height: 16px;
 }
 
+.run-heading-main {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
 .run-title {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.run-header-summary {
+  flex: 1 1 auto;
+  min-width: 34px;
+  overflow: hidden;
+  color: var(--run-text-muted);
+  font-size: 11px;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-header-summary::before {
+  content: "·";
+  margin-right: 6px;
+  color: rgba(41, 191, 78, 0.42);
+}
+
+.run-heading-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
 }
 
 .ai-shimmer {

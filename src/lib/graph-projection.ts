@@ -3,6 +3,7 @@ import {
   createPendingImageResultNodes,
   getImageResultNodeDimensions,
 } from "./graph";
+import { getPromptNodeDimensions } from "./canvas-node-dimensions";
 import type {
   AgentCanvasEdge,
   AgentCanvasNode,
@@ -263,13 +264,17 @@ export function projectRunTraceToCanvas({
   const toolParts = buildToolParts(orderedEvents, prompt);
   const agentText = buildAgentText(orderedEvents, runStatus, streamedAgentText);
   const directTextResult = readDirectTextResult(orderedEvents);
+  const promptDimensions = getPromptNodeDimensions(prompt);
   const promptNode: AgentCanvasNode = getExistingOrProjectedNode(
     existingNodes,
     promptNodeId,
     {
+      height: promptDimensions.height,
       id: promptNodeId,
       type: "promptNode",
       position: promptPosition,
+      style: promptDimensions,
+      width: promptDimensions.width,
       data: {
         kind: "prompt",
         prompt,
@@ -342,16 +347,20 @@ export function projectRunTraceToCanvas({
 
   if (directTextResult) {
     const resultPromptNodeId = `prompt-result-${targetRunNodeId}`;
+    const resultPromptDimensions = getPromptNodeDimensions(directTextResult.text);
     const resultPromptNode = getExistingOrProjectedNode(
       existingNodes,
       resultPromptNodeId,
       {
+        height: resultPromptDimensions.height,
         id: resultPromptNodeId,
         type: "promptNode",
         position: getExistingPosition(existingNodes, resultPromptNodeId) ?? {
           x: runNode.position.x,
           y: runNode.position.y + DIRECT_TEXT_RESULT_OFFSET_Y,
         },
+        style: resultPromptDimensions,
+        width: resultPromptDimensions.width,
         data: {
           kind: "prompt",
           prompt: directTextResult.text,

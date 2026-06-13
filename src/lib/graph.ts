@@ -11,9 +11,14 @@ import type {
   UpstreamContextItem,
   UpstreamContextType,
 } from "../types/canvas";
+import {
+  DEFAULT_CANVAS_NODE_WIDTH,
+  DEFAULT_PROMPT_NODE_HEIGHT,
+  getPromptNodeDimensions,
+} from "./canvas-node-dimensions";
 
-const NODE_WIDTH = 240;
-const PROMPT_NODE_HEIGHT = 84;
+const NODE_WIDTH = DEFAULT_CANVAS_NODE_WIDTH;
+const PROMPT_NODE_HEIGHT = DEFAULT_PROMPT_NODE_HEIGHT;
 const COMPACT_RUN_NODE_HEIGHT = 36;
 const RUN_NODE_HEIGHT = 300;
 const RESULT_NODE_HEIGHT = 240;
@@ -204,11 +209,15 @@ export function createRunDraft(
   const promptId = id("prompt");
   const runId = id("run");
   const createdAt = new Date().toISOString();
+  const promptDimensions = getPromptNodeDimensions(prompt);
 
   const promptNode: AgentCanvasNode = {
+    height: promptDimensions.height,
     id: promptId,
     type: "promptNode",
     position: { x: baseX, y: baseY },
+    style: promptDimensions,
+    width: promptDimensions.width,
     data: {
       kind: "prompt",
       prompt,

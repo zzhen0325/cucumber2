@@ -1,9 +1,12 @@
 import dagre from "@dagrejs/dagre";
 
+import {
+  DEFAULT_CANVAS_NODE_WIDTH,
+  getPromptNodeDimensions,
+} from "./canvas-node-dimensions";
 import type { AgentCanvasEdge, AgentCanvasNode } from "@/types/canvas";
 
-const NODE_WIDTH = 240;
-const PROMPT_NODE_HEIGHT = 84;
+const NODE_WIDTH = DEFAULT_CANVAS_NODE_WIDTH;
 const COMPACT_RUN_NODE_HEIGHT = 36;
 const RUN_NODE_HEIGHT = 300;
 const RESULT_NODE_HEIGHT = 240;
@@ -117,7 +120,7 @@ function getNodeHeight(node: AgentCanvasNode) {
   }
 
   if (node.data.kind === "prompt") {
-    return PROMPT_NODE_HEIGHT;
+    return getPromptNodeDimensions(node.data.prompt).height;
   }
   if (node.data.kind === "imageResult") {
     return RESULT_NODE_HEIGHT;

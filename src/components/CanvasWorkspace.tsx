@@ -2525,11 +2525,19 @@ function PromptNode({
   width,
   height,
 }: NodeProps<FlowNode<PromptNodeData, "promptNode">>) {
+  const isExpanded = typeof height === "number" && height > 96;
+  const nodeClassName = [
+    "canvas-node",
+    "prompt-card",
+    selected ? "selected" : "",
+    isExpanded ? "expanded" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <Node
-      className={
-        selected ? "canvas-node selected prompt-card" : "canvas-node prompt-card"
-      }
+      className={nodeClassName}
       handles={{ source: true, target: true }}
       minHeight={64}
       minWidth={180}

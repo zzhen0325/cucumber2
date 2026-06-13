@@ -39,6 +39,7 @@ export function RunNodeView({
   );
   const latestToolPart = toolParts.at(-1) ?? toolParts[0];
   const title = getRunTitle(data.status, latestToolPart?.state);
+  const headerSummary = getRunHeaderSummary(data.status, toolParts);
   const toggleLabel = expanded ? "收起输出" : "展开输出";
   const hasToolDetail =
     data.status !== "queued" ||
@@ -120,60 +121,69 @@ export function RunNodeView({
           <span className={`run-status-dot ${data.status}`}>
             <RunStatusIcon status={data.status} />
           </span>
-          {isActiveRun ? (
-            <Shimmer as="span" className="run-title" duration={1.8}>
-              {title}
-            </Shimmer>
-          ) : (
-            <span className="run-title">{title}</span>
-          )}
-          {data.status === "error" && (
+          <span className="run-heading-main">
+            {isActiveRun ? (
+              <Shimmer as="span" className="run-title" duration={1.8}>
+                {title}
+              </Shimmer>
+            ) : (
+              <span className="run-title">{title}</span>
+            )}
+            {headerSummary && (
+              <span className="run-header-summary" title={headerSummary.fullLabel}>
+                {headerSummary.visibleLabel}
+              </span>
+            )}
+          </span>
+          <span className="run-heading-actions">
+            {data.status === "error" && (
+              <button
+                aria-label="重试 Agent Run"
+                className="run-retry-button nodrag nopan"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  dispatchRetryRun(id);
+                }}
+                title="重试"
+                type="button"
+              >
+                <RotateCcw size={12} />
+              </button>
+            )}
             <button
-              aria-label="重试 Agent Run"
-              className="run-retry-button nodrag nopan"
+              aria-label="查看 Run Trace"
+              className="run-trace-button nodrag nopan"
               onClick={(event) => {
                 event.stopPropagation();
-                dispatchRetryRun(id);
+                dispatchOpenTrace(id);
               }}
-              title="重试"
+              title="查看 Trace"
               type="button"
             >
-              <RotateCcw size={12} />
+              <ListTree size={12} />
             </button>
-          )}
-          <button
-            aria-label="查看 Run Trace"
-            className="run-trace-button nodrag nopan"
-            onClick={(event) => {
-              event.stopPropagation();
-              dispatchOpenTrace(id);
-            }}
-            title="查看 Trace"
-            type="button"
-          >
-            <ListTree size={12} />
-          </button>
-          <button
-            aria-expanded={expanded}
-            aria-label={toggleLabel}
-            className="run-toggle nodrag nopan"
-            data-expanded={expanded}
-            disabled={!hasRunOutput}
-            onClick={(event) => {
-              event.stopPropagation();
-              setExpanded((current) => !current);
-            }}
-            title={toggleLabel}
-            type="button"
-          >
-            <ChevronDown size={12} />
-          </button>
+            <button
+              aria-expanded={expanded}
+              aria-label={toggleLabel}
+              className="run-toggle nodrag nopan"
+              data-expanded={expanded}
+              disabled={!hasRunOutput}
+              onClick={(event) => {
+                event.stopPropagation();
+                setExpanded((current) => !current);
+              }}
+              title={toggleLabel}
+              type="button"
+            >
+              <ChevronDown size={12} />
+            </button>
+          </span>
         </div>
-        {hasRunOutput && (
+        {hasRunOutput && expanded && (
           <div
             className="run-stream copyable-region nodrag nopan nowheel"
             aria-label="Agent run stream"
-            data-expanded={expanded}
+            data-expanded="true"
           >
             <div className="run-agent-text-region nodrag nopan nowheel">
               {agentText ? (
@@ -339,6 +349,58 @@ function getToolName(toolPart: CanvasToolPart) {
   };
 
   return names[toolPart.type] ?? toolPart.type.replace(/^tool-/, "");
+}
+
+function getRunHeaderSummary(
+  status: RunNodeData["status"],
+  toolParts: CanvasToolPart[]
+) {
+  if (status === "success") {
+    return null;
+  }
+
+  const currentToolPart =
+    toolParts.findLast(
+      (part) => part.state === "input-streaming" || part.state === "input-available"
+    ) ??
+    (status === "error"
+      ? toolParts.findLast((part) => part.state === "output-error")
+      : undefined) ??
+    toolParts.at(-1);
+
+  if (!currentToolPart) {
+    return null;
+  }
+
+  const label = getToolHeaderLabel(currentToolPart);
+
+  return {
+    fullLabel: label,
+    visibleLabel: label,
+  };
+}
+
+function getToolHeaderLabel(toolPart: CanvasToolPart) {
+  if (toolPart.type === "tool-activate_skill") {
+    const skillName = readToolString(toolPart.output, "skillName")
+      ?? readToolString(toolPart.input, "skillName");
+    return skillName ? `激活技能：${skillName}` : getToolName(toolPart);
+  }
+
+  if (toolPart.type === "tool-run_skill_script") {
+    return readToolString(toolPart.input, "scriptName") ?? getToolName(toolPart);
+  }
+
+  return getToolName(toolPart);
+}
+
+function readToolString(value: unknown, key: string) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const nested = (value as Record<string, unknown>)[key];
+  return typeof nested === "string" && nested.trim() ? nested : null;
 }
 
 function getToolStateLabel(state: CanvasToolPart["state"]) {
