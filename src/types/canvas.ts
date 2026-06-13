@@ -251,6 +251,7 @@ export type RunDraft = {
   omittedContext: UpstreamContextItem[];
   contextTrace?: {
     selectedNodeId: string | null;
+    selectedNodeIds: string[];
     budget?: number;
     omittedContextReason?: string;
     omittedNodeIds: string[];

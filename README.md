@@ -15,7 +15,7 @@ Infinite Canvas Agent Run MVP。前端使用 Vite、React、TypeScript、React F
 - 画布变更：Agent 只能提出 `CanvasOperation`，由 runtime policy 校验后投影到画布
 - 流协议：AI SDK UI `createUIMessageStream` + `data-runtime-event`
 
-客户端只提交 `projectId`、`runNodeId`、prompt、`promptNodeId` 和 `selectedNodeId`。提交前会强制保存项目快照；服务端从持久化 `nodes/edges` 重建 upstream context，不信任客户端上传的节点、artifact 或 URL。
+客户端只提交 `projectId`、`runNodeId`、prompt、`promptNodeId`、主 `selectedNodeId` 和 `selectedNodeIds`。提交前会强制保存项目快照；服务端从持久化 `nodes/edges` 重建 upstream context，不信任客户端上传的节点、artifact 或 URL。多选引用会过滤掉 Run 节点，只让可引用画布节点进入上下文。
 
 模型按服务端环境固定优先级选择：Ark、DeepSeek、OpenAI。前端没有模型选择器，也没有 runtime feature flag。
 

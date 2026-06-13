@@ -61,6 +61,7 @@ export type { GeneratedHtmlPage };
 
 export type ContextCollectionTrace = {
   selectedNodeId: string | null;
+  selectedNodeIds: string[];
   budget?: number;
   omittedContextReason?: string;
   omittedNodeIds: string[];
@@ -89,8 +90,24 @@ export function getRunReferenceNodeId(node?: AgentCanvasNode) {
   return node.id;
 }
 
+export function getRunReferenceNodeIds(nodes: AgentCanvasNode[]) {
+  const seen = new Set<string>();
+  const referenceNodeIds: string[] = [];
+
+  for (const node of nodes) {
+    const nodeId = getRunReferenceNodeId(node);
+    if (!nodeId || seen.has(nodeId)) {
+      continue;
+    }
+    seen.add(nodeId);
+    referenceNodeIds.push(nodeId);
+  }
+
+  return referenceNodeIds;
+}
+
 export function collectUpstreamContext(
-  selectedNodeId: string | null,
+  selectedNodeId: string | string[] | null,
   nodes: AgentCanvasNode[],
   edges: AgentCanvasEdge[],
   options: { budget?: number } = {}
@@ -104,22 +121,25 @@ export function collectUpstreamContext(
 }
 
 export function collectUpstreamContextWithTrace(
-  selectedNodeId: string | null,
+  selectedNodeId: string | string[] | null,
   nodes: AgentCanvasNode[],
   edges: AgentCanvasEdge[],
   options: { budget?: number } = {}
 ): UpstreamContextCollection {
-  if (!selectedNodeId) {
+  const selectedNodeIds = normalizeContextNodeIds(selectedNodeId);
+  if (!selectedNodeIds.length) {
     return {
       items: [],
       omittedItems: [],
       trace: {
         selectedNodeId: null,
+        selectedNodeIds: [],
         budget: options.budget,
         omittedNodeIds: [],
       },
     };
   }
+  const selectedNodeIdSet = new Set(selectedNodeIds);
 
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const incomingByTarget = new Map<string, string[]>();
@@ -149,22 +169,25 @@ export function collectUpstreamContextWithTrace(
     }
   };
 
-  visit(selectedNodeId);
+  for (const nodeId of selectedNodeIds) {
+    visit(nodeId);
+  }
 
   const collected = ordered.flatMap((node) =>
-    contextItemsFromNode(node, node.id === selectedNodeId)
+    contextItemsFromNode(node, selectedNodeIdSet.has(node.id))
   );
   const { selected, omitted } = selectContextWithinBudget(
     collected,
     options.budget,
-    selectedNodeId
+    selectedNodeIdSet
   );
 
   return {
     items: selected,
     omittedItems: omitted,
     trace: {
-      selectedNodeId,
+      selectedNodeId: selectedNodeIds[0] ?? null,
+      selectedNodeIds,
       budget: options.budget,
       omittedContextReason: omitted.length ? "context_budget_exceeded" : undefined,
       omittedNodeIds: omitted.map((item) => item.nodeId),
@@ -174,28 +197,37 @@ export function collectUpstreamContextWithTrace(
 
 export function createRunDraft(
   prompt: string,
-  selectedNodeId: string | null,
+  selectedNodeId: string | string[] | null,
   nodes: AgentCanvasNode[],
   edges: AgentCanvasEdge[]
 ): RunDraft {
-  const selectedNode = nodes.find((node) => node.id === selectedNodeId);
-  const referenceNodeId = getRunReferenceNodeId(selectedNode);
-  const referenceNode = referenceNodeId ? selectedNode : undefined;
-  const siblings = referenceNodeId
-    ? edges.filter((edge) => edge.source === referenceNodeId).length
+  const selectedNodeIds = normalizeContextNodeIds(selectedNodeId);
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const selectedNodes = selectedNodeIds.flatMap((nodeId) => {
+    const node = nodesById.get(nodeId);
+    return node ? [node] : [];
+  });
+  const referenceNodeIds = getRunReferenceNodeIds(selectedNodes);
+  const referenceNodes = referenceNodeIds.flatMap((nodeId) => {
+    const node = nodesById.get(nodeId);
+    return node ? [node] : [];
+  });
+  const primaryReferenceNode = referenceNodes[0];
+  const siblings = primaryReferenceNode
+    ? edges.filter((edge) => edge.source === primaryReferenceNode.id).length
     : nodes.filter((node) => node.data.kind === "prompt").length;
 
   const contextCollection = collectUpstreamContextWithTrace(
-    referenceNodeId,
+    referenceNodeIds,
     nodes,
     edges
   );
   const upstreamContext = contextCollection.items;
-  const preferredBaseX = referenceNode
-    ? referenceNode.position.x + siblings * FOLLOW_UP_GAP_X
+  const preferredBaseX = primaryReferenceNode
+    ? primaryReferenceNode.position.x + siblings * FOLLOW_UP_GAP_X
     : ROOT_START_X + siblings * ROOT_CHAIN_GAP;
-  const baseY = referenceNode
-    ? referenceNode.position.y + FOLLOW_UP_GAP_Y
+  const baseY = primaryReferenceNode
+    ? primaryReferenceNode.position.y + FOLLOW_UP_GAP_Y
     : ROOT_START_Y;
   const baseX = resolveNonOverlappingX(
     {
@@ -241,6 +273,12 @@ export function createRunDraft(
   };
 
   const draftEdges: AgentCanvasEdge[] = [
+    ...referenceNodeIds.map((referenceNodeId) => ({
+      id: id("edge"),
+      source: referenceNodeId,
+      target: promptId,
+      type: "temporary",
+    })),
     {
       id: id("edge"),
       source: promptId,
@@ -249,15 +287,6 @@ export function createRunDraft(
       data: { active: true },
     },
   ];
-
-  if (referenceNodeId) {
-    draftEdges.unshift({
-      id: id("edge"),
-      source: referenceNodeId,
-      target: promptId,
-      type: "temporary",
-    });
-  }
 
   return {
     promptNode,
@@ -937,7 +966,7 @@ function getShapeLabel(shape: AgentCanvasNode["data"] extends infer Data
 function selectContextWithinBudget(
   items: UpstreamContextItem[],
   budget: number | undefined,
-  selectedNodeId: string | null
+  selectedNodeIds: Set<string>
 ) {
   if (!Number.isFinite(budget)) {
     return { selected: items, omitted: [] };
@@ -950,7 +979,7 @@ function selectContextWithinBudget(
   while (getContextTokenEstimate(selected) > maxBudget) {
     const dropCandidate = selected
       .map((item, index) => ({ item, index }))
-      .filter(({ item }) => item.nodeId !== selectedNodeId)
+      .filter(({ item }) => !selectedNodeIds.has(item.nodeId))
       .sort(
         (left, right) =>
           (left.item.priority ?? 0) - (right.item.priority ?? 0) ||
@@ -969,6 +998,23 @@ function selectContextWithinBudget(
   }
 
   return { selected, omitted };
+}
+
+function normalizeContextNodeIds(nodeIds: string | string[] | null) {
+  const selectedNodeIds = Array.isArray(nodeIds)
+    ? nodeIds
+    : nodeIds
+      ? [nodeIds]
+      : [];
+  const seen = new Set<string>();
+
+  return selectedNodeIds.filter((nodeId) => {
+    if (!nodeId || seen.has(nodeId)) {
+      return false;
+    }
+    seen.add(nodeId);
+    return true;
+  });
 }
 
 function getContextTokenEstimate(items: UpstreamContextItem[]) {

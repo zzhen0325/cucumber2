@@ -97,7 +97,12 @@ import {
   hasNodeContentChanged,
   toPersistableNodes,
 } from "@/lib/canvas-persistence";
-import { collectUpstreamContext, createRunDraft, getRunReferenceNodeId } from "@/lib/graph";
+import {
+  collectUpstreamContext,
+  createRunDraft,
+  getRunReferenceNodeId,
+  getRunReferenceNodeIds,
+} from "@/lib/graph";
 import {
   diffCanvasPatch,
   hasCanvasPatchChanges,
@@ -182,6 +187,7 @@ type AgentRunRequestBody = {
     prompt: string;
     promptNodeId: string;
     selectedNodeId: string | null;
+    selectedNodeIds: string[];
   };
 };
 
@@ -639,21 +645,24 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     messagesRef.current = messages;
   }, [messages]);
 
-  const selectedNode = useMemo(() => {
-    if (selectedNodeIds.length !== 1) {
-      return undefined;
-    }
-
-    return nodes.find((node) => node.id === selectedNodeIds[0]);
+  const selectedNodes = useMemo(() => {
+    const selectedNodeIdSet = new Set(selectedNodeIds);
+    return nodes.filter((node) => selectedNodeIdSet.has(node.id));
   }, [nodes, selectedNodeIds]);
-  const referenceNodeId = getRunReferenceNodeId(selectedNode);
-  const referenceNode = referenceNodeId ? selectedNode : undefined;
+  const referenceNodeIds = useMemo(
+    () => getRunReferenceNodeIds(selectedNodes),
+    [selectedNodes]
+  );
+  const referenceNodeId = referenceNodeIds[0] ?? null;
+  const referenceNode = referenceNodeId
+    ? nodes.find((node) => node.id === referenceNodeId)
+    : undefined;
   const referenceContextCount = useMemo(
     () =>
-      referenceNodeId
-        ? collectUpstreamContext(referenceNodeId, nodes, edges).length
+      referenceNodeIds.length
+        ? collectUpstreamContext(referenceNodeIds, nodes, edges).length
         : 0,
-    [edges, nodes, referenceNodeId]
+    [edges, nodes, referenceNodeIds]
   );
   const hasLocalUploadNodes = useMemo(
     () => nodes.some(hasLocalUploadState),
@@ -995,10 +1004,12 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       clearComposer = false,
       promptText,
       selectedNodeId,
+      selectedNodeIds = selectedNodeId ? [selectedNodeId] : [],
     }: {
       clearComposer?: boolean;
       promptText: string;
       selectedNodeId: string | null;
+      selectedNodeIds?: string[];
     }) => {
       const value = promptText.trim();
       if (!value || isBusy) {
@@ -1020,7 +1031,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
       const currentNodes = nodesRef.current;
       const currentEdges = edgesRef.current;
-      const draft = createRunDraft(value, selectedNodeId, currentNodes, currentEdges);
+      const draft = createRunDraft(value, selectedNodeIds, currentNodes, currentEdges);
       activeRunId.current = draft.runNode.id;
       activeRunMessageStartIndex.current = messagesRef.current.length;
       streamedRuntimeEvents.current = streamedRuntimeEvents.current.filter(
@@ -1035,6 +1046,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           prompt: value,
           promptNodeId: draft.promptNode.id,
           selectedNodeId,
+          selectedNodeIds,
         },
       };
       const nextNodes = [
@@ -1488,9 +1500,10 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         clearComposer: true,
         promptText: value,
         selectedNodeId: referenceNodeId,
+        selectedNodeIds: referenceNodeIds,
       });
     },
-    [prompt, referenceNodeId, startAgentRun]
+    [prompt, referenceNodeId, referenceNodeIds, startAgentRun]
   );
 
   const handleReplayTrace = useCallback(() => {
@@ -1715,6 +1728,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         prompt={prompt}
         referenceContextCount={referenceContextCount}
         referenceNode={referenceNode}
+        referenceNodeCount={referenceNodeIds.length}
         replayActive={isReplayMode}
         selectionCount={selectedNodeIds.length}
         setPrompt={setPrompt}
@@ -2398,6 +2412,7 @@ function Composer({
   prompt,
   referenceContextCount,
   referenceNode,
+  referenceNodeCount,
   replayActive,
   selectionCount,
   setPrompt,
@@ -2410,6 +2425,7 @@ function Composer({
   prompt: string;
   referenceContextCount: number;
   referenceNode?: AgentCanvasNode;
+  referenceNodeCount: number;
   replayActive: boolean;
   selectionCount: number;
   setPrompt: (value: string) => void;
@@ -2421,19 +2437,24 @@ function Composer({
 }) {
   const hasReference = Boolean(referenceNode);
   const hasMultiSelection = selectionCount > 1;
+  const hasMultipleReferences = referenceNodeCount > 1;
   const footerContextLabel = hasReference
-    ? `${referenceContextCount} upstream items`
+    ? hasMultipleReferences
+      ? `${referenceNodeCount} 个引用节点 · ${referenceContextCount} upstream items`
+      : `${referenceContextCount} upstream items`
     : hasMultiSelection
-      ? "多选不会进入上下文"
+      ? "选中的 Run 节点不会引用"
       : `${contextCount} upstream items`;
 
   return (
     <div className="composer-wrap">
       <div className="context-pill" data-active={hasReference || hasMultiSelection}>
         {hasReference
-          ? `引用节点: ${getReferenceNodeLabel(referenceNode)}`
+          ? hasMultipleReferences
+            ? `引用节点: ${referenceNodeCount} 个`
+            : `引用节点: ${getReferenceNodeLabel(referenceNode)}`
           : hasMultiSelection
-            ? `已选中 ${selectionCount} 个节点，仅单个节点会作为引用`
+            ? `已选中 ${selectionCount} 个节点，无可引用节点`
           : "未引用节点"}
       </div>
       <PromptInput
@@ -2459,7 +2480,13 @@ function Composer({
         </PromptInputBody>
         <PromptInputFooter className="composer-footer">
           <ComposerFooterStatus
-            label={hasReference ? "继续基于引用节点生成分支" : footerContextLabel}
+            label={
+              hasReference
+                ? hasMultipleReferences
+                  ? `继续基于 ${referenceNodeCount} 个引用节点生成分支`
+                  : "继续基于引用节点生成分支"
+                : footerContextLabel
+            }
           />
           <PromptInputSubmit
             disabled={busy ? false : !prompt.trim() || !canSubmit}

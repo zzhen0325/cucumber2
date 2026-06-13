@@ -66,6 +66,34 @@ describe("agent context", () => {
 
     expect(buildCucumberAgentContext(input).knownNodeIds).not.toContain("foreign-node");
   });
+
+  it("rebuilds upstream context from multiple selected project nodes", () => {
+    const input = buildAgentRunInput({
+      userId: "user-1",
+      projectId: "project-1",
+      runNodeId: "run-2",
+      canvasContext: {
+        prompt: "结合多个节点继续生成",
+        promptNodeId: "prompt-2",
+        selectedNodeId: "image-1",
+        selectedNodeIds: ["image-1", "note-1", "run-1"],
+      },
+      projectSnapshot: snapshot(),
+    });
+
+    expect(input.selectedNodeId).toBe("image-1");
+    expect(input.selectedNodeIds).toEqual(["image-1", "note-1", "prompt-1"]);
+    expect(input.upstreamContext.map((item) => item.nodeId)).toEqual([
+      "prompt-1",
+      "image-1",
+      "note-1",
+    ]);
+    expect(input.upstreamContext.at(-1)).toMatchObject({
+      nodeId: "note-1",
+      type: "doc",
+      summary: "保留绿色背景",
+    });
+  });
 });
 
 function snapshot() {
@@ -80,6 +108,12 @@ function snapshot() {
         contextLabel: "Root",
         createdAt: "2026-06-11T00:00:00.000Z",
       },
+    },
+    {
+      id: "run-1",
+      type: "runNode",
+      position: { x: 0, y: 124 },
+      data: { kind: "run", prompt: "初始需求", status: "success" },
     },
     {
       id: "image-1",
@@ -102,6 +136,17 @@ function snapshot() {
           type: "image",
           uri: "/api/projects/project-1/artifacts/artifact-1/content",
         },
+      },
+    },
+    {
+      id: "note-1",
+      type: "stickyNoteNode",
+      position: { x: 260, y: 0 },
+      data: {
+        kind: "stickyNote",
+        text: "保留绿色背景",
+        color: "green",
+        createdAt: "2026-06-11T00:00:00.000Z",
       },
     },
     {

@@ -1,6 +1,9 @@
 import type { UIMessage, UIMessageStreamWriter } from "ai";
 
-import { collectUpstreamContext } from "../../src/lib/graph.ts";
+import {
+  collectUpstreamContext,
+  getRunReferenceNodeIds,
+} from "../../src/lib/graph.ts";
 import type {
   AgentCanvasEdge,
   AgentCanvasNode,
@@ -21,6 +24,7 @@ export type AgentRunRequestContext = {
   prompt: string;
   promptNodeId?: string | null;
   selectedNodeId?: string | null;
+  selectedNodeIds?: string[];
 };
 
 export type AgentRunInput = {
@@ -166,16 +170,30 @@ export function buildAgentRunInput({
     assertProjectNode(nodeIds, promptNodeId, "Prompt node");
   }
 
-  const selectedNodeId = canvasContext.selectedNodeId ?? null;
-  if (selectedNodeId) {
-    assertProjectNode(nodeIds, selectedNodeId, "Selected node");
+  const requestedSelectedNodeIds = normalizeRequestedSelectedNodeIds(
+    canvasContext.selectedNodeIds,
+    canvasContext.selectedNodeId ?? null
+  );
+  for (const nodeId of requestedSelectedNodeIds) {
+    assertProjectNode(nodeIds, nodeId, "Selected node");
   }
+  const nodesById = new Map(projectSnapshot.nodes.map((node) => [node.id, node]));
+  const requestedSelectedNodes = requestedSelectedNodeIds.flatMap((nodeId) => {
+    const node = nodesById.get(nodeId);
+    return node ? [node] : [];
+  });
+  const referenceNodeIds = getRunReferenceNodeIds(requestedSelectedNodes);
+  const selectedNodeId = referenceNodeIds[0] ?? null;
 
   const upstreamContext = collectUpstreamContext(
-    selectedNodeId,
+    referenceNodeIds,
     projectSnapshot.nodes,
     projectSnapshot.edges
   );
+  const contextNodeIds = uniqueNodeIds([
+    ...referenceNodeIds,
+    ...upstreamContext.map((item) => item.nodeId),
+  ]);
 
   return {
     canvasId: projectId,
@@ -188,9 +206,7 @@ export function buildAgentRunInput({
     projectId,
     runNodeId,
     selectedNodeId,
-    selectedNodeIds: [selectedNodeId, ...upstreamContext.map((item) => item.nodeId)].filter(
-      (id): id is string => Boolean(id)
-    ),
+    selectedNodeIds: contextNodeIds,
     signal,
     upstreamContext,
     userId,
@@ -223,6 +239,28 @@ export function buildCucumberAgentContext(input: AgentRunInput): CucumberAgentCo
     userId: input.userId,
     workspaceId: input.workspaceId,
   };
+}
+
+function normalizeRequestedSelectedNodeIds(
+  selectedNodeIds: string[] | undefined,
+  fallbackSelectedNodeId: string | null
+) {
+  if (selectedNodeIds?.length) {
+    return uniqueNodeIds(selectedNodeIds);
+  }
+
+  return fallbackSelectedNodeId ? [fallbackSelectedNodeId] : [];
+}
+
+function uniqueNodeIds(nodeIds: string[]) {
+  const seen = new Set<string>();
+  return nodeIds.filter((nodeId) => {
+    if (!nodeId || seen.has(nodeId)) {
+      return false;
+    }
+    seen.add(nodeId);
+    return true;
+  });
 }
 
 function assertProjectNode(nodeIds: Set<string>, nodeId: string, label: string) {

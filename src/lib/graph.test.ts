@@ -76,6 +76,33 @@ describe("agent canvas graph", () => {
     ]);
   });
 
+  it("creates a follow-up branch from multiple selected references", () => {
+    const nodes = [
+      promptNode("prompt-1", "初始需求"),
+      imageNode("image-1"),
+      stickyNoteNode("note-1", "保留绿色背景"),
+      runNode("run-1"),
+    ];
+    const edges = [edge("prompt-1", "image-1")];
+    const draft = createRunDraft(
+      "结合参考继续生成",
+      ["image-1", "note-1", "run-1"],
+      nodes,
+      edges
+    );
+
+    expect(draft.edges).toEqual([
+      expect.objectContaining({ source: "image-1", target: draft.promptNode.id }),
+      expect.objectContaining({ source: "note-1", target: draft.promptNode.id }),
+      expect.objectContaining({ source: draft.promptNode.id, target: draft.runNode.id }),
+    ]);
+    expect(draft.upstreamContext.map((item) => item.nodeId)).toEqual([
+      "prompt-1",
+      "image-1",
+      "note-1",
+    ]);
+  });
+
   it("reports context omitted by a budget", () => {
     const nodes = [
       promptNode("prompt-1", "很长的初始需求".repeat(20)),
@@ -130,6 +157,20 @@ function imageNode(id: string): AgentCanvasNode {
       status: "ready",
       image: { id, url },
       artifact: { id: `artifact-${id}`, type: "image", uri: url },
+    },
+  };
+}
+
+function stickyNoteNode(id: string, text: string): AgentCanvasNode {
+  return {
+    id,
+    type: "stickyNoteNode",
+    position: { x: 260, y: 0 },
+    data: {
+      kind: "stickyNote",
+      text,
+      color: "green",
+      createdAt: "2026-06-11T00:00:00.000Z",
     },
   };
 }

@@ -84,6 +84,7 @@ const canvasContextSchema = z.object({
   prompt: z.string().trim().min(1),
   promptNodeId: z.string().nullable().optional(),
   selectedNodeId: z.string().nullable().optional(),
+  selectedNodeIds: z.array(z.string()).optional(),
 });
 
 const projectCreateSchema = z.object({
