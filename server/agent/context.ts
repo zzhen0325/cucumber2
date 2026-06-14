@@ -13,7 +13,7 @@ import type {
 import type { CanvasOperation } from "../../src/types/runtime.ts";
 import type { AgentProject } from "../supabase.ts";
 import type { NormalizedAgentInput } from "./input-normalizer.ts";
-import type { AgentSkillCard } from "./skills/types.ts";
+import type { ActivatedAgentSkill, AgentSkillCard } from "./skills/types.ts";
 
 export type CanvasSnapshot = {
   nodes: AgentCanvasNode[];
@@ -70,6 +70,35 @@ export type CucumberRunEvent =
       toolName?: string;
     }
   | { type: "skill_retrieved"; candidates: AgentSkillCard[] }
+  | {
+      type: "skill_activated";
+      skill: Pick<
+        ActivatedAgentSkill,
+        "agentScope" | "id" | "name" | "purpose" | "scripts" | "tags"
+      >;
+    }
+  | {
+      type: "skill_script_started";
+      input?: unknown;
+      scriptName: string;
+      skillId: string;
+      skillName: string;
+    }
+  | {
+      type: "skill_script_completed";
+      output: unknown;
+      scriptName: string;
+      skillId: string;
+      skillName: string;
+    }
+  | {
+      type: "skill_script_failed";
+      input?: unknown;
+      message: string;
+      scriptName: string;
+      skillId: string;
+      skillName: string;
+    }
   | { type: "run_completed"; finalOutput?: string; artifactIds: string[] }
   | { type: "error"; message: string };
 
@@ -97,6 +126,7 @@ export type CucumberAgentContext = {
   signal?: AbortSignal;
   knownNodeIds: string[];
   mcpRunContextId?: string;
+  activatedSkills: ActivatedAgentSkill[];
   producedArtifacts: ArtifactRef[];
   pendingEvents: PendingCucumberEvent[];
   pushLiveEvent?: (event: PendingCucumberEvent) => void;
@@ -195,6 +225,7 @@ export function buildCucumberAgentContext(input: AgentRunInput): CucumberAgentCo
     canvasId: input.canvasId,
     canvasSnapshot: input.canvasSnapshot,
     knownNodeIds: [...knownNodeIds],
+    activatedSkills: [],
     pendingEvents: [],
     producedArtifacts: [],
     projectId: input.projectId,
