@@ -270,9 +270,8 @@ export async function generateSeedreamImage(
   const client = new SeedreamClient(config);
 
   // Fan out one task per request so every image is generated independently.
-  // Start requests in staggered windows, then let their polling run concurrently.
-  // This keeps submit bursts under the Seedream account's API concurrency limit
-  // (code 50430) without serializing the whole submit+poll lifecycle.
+  // Keep the full submit+poll lifecycle inside the configured concurrency limit:
+  // Seedream's 50430/429 limit is account task concurrency, not just submit QPS.
   // Each task builds its own image and invokes `onImage` the moment it lands so
   // callers can stream results instead of waiting for the whole batch.
   const imagesPerRequest = await mapWithStaggeredStarts(
@@ -425,9 +424,11 @@ function buildSeedreamGeneratedImage({
   };
 }
 
-// Start tasks in staggered windows while preserving result order. `startsPerWindow`
-// controls how many requests may begin in the same window; it does not cap
-// in-flight polling, so later requests can start before earlier tasks finish.
+// Run tasks with bounded lifecycle concurrency while preserving result order.
+// `startsPerWindow` is kept as the public parameter name, but now caps the full
+// submit+poll task count. Seedream counts submitted tasks while they are still
+// polling, so stagger-only scheduling can still exceed the provider concurrency
+// limit even with a large delay.
 export async function mapWithStaggeredStarts<T, R>(
   items: readonly T[],
   startsPerWindow: number,
@@ -437,27 +438,61 @@ export async function mapWithStaggeredStarts<T, R>(
 ): Promise<R[]> {
   const results = new Array<R>(items.length);
   const limit = Math.max(1, Math.min(startsPerWindow, items.length || 1));
+  let nextIndex = 0;
+  let lastStartAt = 0;
+  let startGate = Promise.resolve();
   let stopped = false;
 
-  await Promise.all(
-    items.map(async (item, index) => {
-      signal?.throwIfAborted();
-      const wait = Math.floor(index / limit) * staggerMs;
-      if (wait > 0) {
-        await delay(wait, undefined, { signal });
+  async function waitForStartSlot() {
+    const previousGate = startGate;
+    let releaseGate!: () => void;
+    startGate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+
+    await previousGate;
+    try {
+      if (staggerMs <= 0 || lastStartAt === 0) {
+        lastStartAt = Date.now();
+        return;
       }
+
+      const elapsed = Date.now() - lastStartAt;
+      const waitMs = Math.max(0, staggerMs - elapsed);
+      if (waitMs > 0) {
+        await delay(waitMs, undefined, { signal });
+      }
+      lastStartAt = Date.now();
+    } finally {
+      releaseGate();
+    }
+  }
+
+  async function worker() {
+    while (!stopped) {
+      signal?.throwIfAborted();
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) {
+        return;
+      }
+
+      await waitForStartSlot();
       if (stopped) {
         return;
       }
       signal?.throwIfAborted();
+      const item = items[index];
       try {
         results[index] = await task(item);
       } catch (error) {
         stopped = true;
         throw error;
       }
-    })
-  );
+    }
+  }
+
+  await Promise.all(Array.from({ length: limit }, () => worker()));
 
   return results;
 }

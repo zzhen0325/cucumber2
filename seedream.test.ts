@@ -68,14 +68,39 @@ describe("seedream provider", () => {
     ).toBe(0);
   });
 
-  it("starts image requests by stagger without waiting for prior polling", async () => {
+  it("waits for prior polling when concurrency is one", async () => {
+    const started: number[] = [];
+    const result = mapWithStaggeredStarts(
+      [1, 2, 3],
+      1,
+      20,
+      async (item) => {
+        started.push(item);
+        await wait(30);
+        return item * 10;
+      }
+    );
+
+    await wait(5);
+    expect(started).toEqual([1]);
+
+    await wait(15);
+    expect(started).toEqual([1]);
+
+    await wait(25);
+    expect(started).toEqual([1, 2]);
+
+    await expect(result).resolves.toEqual([10, 20, 30]);
+  });
+
+  it("allows only the configured number of in-flight Seedream tasks", async () => {
     const started: number[] = [];
     const release: Array<() => void> = [];
 
     const result = mapWithStaggeredStarts(
       [1, 2, 3],
-      1,
-      20,
+      2,
+      0,
       async (item) => {
         started.push(item);
         await new Promise<void>((resolve) => release.push(resolve));
@@ -84,12 +109,10 @@ describe("seedream provider", () => {
     );
 
     await wait(5);
-    expect(started).toEqual([1]);
-
-    await wait(25);
     expect(started).toEqual([1, 2]);
 
-    await wait(25);
+    release.shift()?.();
+    await wait(5);
     expect(started).toEqual([1, 2, 3]);
 
     release.forEach((resolve) => resolve());

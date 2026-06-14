@@ -119,6 +119,7 @@ Agent 相关改动优先运行对应 Vitest 文件和 TypeScript。画布 UI 改
 ## Documents
 
 - `AGENTS.md`：当前实现约束
+- `agent-os-roadmap.md`：通用 Agent OS 画布产品路线图
 - `process.md`：2026-06-11 起的 v2 变更记录
 - `design.md`：UI 设计语言
 - `docs/archive/agent-v1/`：Agent v1 历史文档，不再是实现依据
