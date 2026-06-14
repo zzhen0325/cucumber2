@@ -118,6 +118,40 @@ describe("agent context", () => {
     });
   });
 
+  it("applies the default context budget and reports omitted nodes", () => {
+    const projectSnapshot = snapshot();
+    if (projectSnapshot.nodes[0].data.kind !== "prompt") {
+      throw new Error("Expected prompt node");
+    }
+    projectSnapshot.nodes[0] = {
+      ...projectSnapshot.nodes[0],
+      data: {
+        ...projectSnapshot.nodes[0].data,
+        prompt: "很长的上游需求".repeat(6000),
+      },
+    };
+
+    const input = buildAgentRunInput({
+      userId: "user-1",
+      projectId: "project-1",
+      runNodeId: "run-2",
+      canvasContext: {
+        prompt: "基于参考图继续生成",
+        promptNodeId: "prompt-2",
+        selectedNodeId: "image-1",
+      },
+      projectSnapshot,
+    });
+
+    expect(input.upstreamContext.map((item) => item.nodeId)).toEqual(["image-1"]);
+    expect(input.contextSummary?.omittedNodes).toEqual([
+      expect.objectContaining({
+        id: "prompt-1",
+        reason: "context_budget_exceeded",
+      }),
+    ]);
+  });
+
   it("throws a typed context validation error for untrusted selected nodes", () => {
     expect(() =>
       buildAgentRunInput({

@@ -80,6 +80,7 @@ async function completeProjectUpload(
         kind: upload.kind,
         mimeType: getFileMimeType(upload.file),
         path: signed.path,
+        preview: upload.preview,
         sizeBytes: upload.file.size,
         summary: upload.summary,
         title: upload.title,

@@ -15,6 +15,7 @@ export type UploadedFilePreviewKind =
   | "file";
 
 export type UploadedFileForStorage = {
+  content?: string;
   dimensions?: { width: number; height: number } | null;
   file: File;
   kind: UploadedFilePreviewKind;
@@ -263,6 +264,7 @@ export async function prepareUploadedFile(
   const summary = getUploadSummary(file, kind, preview);
 
   return {
+    content: kind === "markdown" ? text : undefined,
     dimensions,
     file,
     kind,
@@ -303,8 +305,9 @@ export function createCanvasNodeFromUploadedFile(
   }
 
   if (upload.kind === "markdown") {
-    const content = upload.preview.trim()
-      ? trimText(upload.preview, MARKDOWN_CONTENT_LIMIT)
+    const markdown = upload.content ?? upload.preview;
+    const content = markdown.trim()
+      ? trimText(markdown, MARKDOWN_CONTENT_LIMIT)
       : `${upload.title}\n\n${upload.summary}`;
 
     return {
@@ -397,6 +400,7 @@ export function createLocalCanvasNodeFromUploadedFile(
     metadata: {
       ...upload.metadata,
       localOnly: true,
+      preview: upload.preview,
       summary: upload.summary,
     },
     title: upload.title,
@@ -420,8 +424,10 @@ export function createLocalCanvasNodeFromUploadedFile(
 
 function getBaseUploadMetadata(file: File, uploadedAt: string) {
   return {
+    byteSize: file.size,
     fileName: file.name,
     mimeType: file.type || "application/octet-stream",
+    previewKind: classifyUploadedFile(file),
     size: file.size,
     source: "local_upload",
     uploadedAt,

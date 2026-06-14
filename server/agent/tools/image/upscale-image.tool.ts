@@ -81,6 +81,7 @@ export const upscaleImageTool = tool({
         projectId: context.projectId,
         runNodeId: context.runNodeId,
         signal: details?.signal,
+        sourceToolName: "upscale_image",
         sourceNodeId: source.nodeId,
         sourceUrl: image.url,
         title: image.title,

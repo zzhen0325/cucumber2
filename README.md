@@ -15,6 +15,7 @@ Infinite Canvas Agent Run MVP。前端使用 Vite、React、TypeScript、React F
 - 画布变更：Agent 只能提出 `CanvasOperation`，由 runtime policy 校验后投影到画布
 - Trace：`run.created` / `input.normalized` 记录服务端重建的 selected nodes、reference nodes、upstream path 和 omitted nodes；Trace 面板用用户可读摘要展示 input、skill、tool error 和 canvas policy rejection
 - 物化：artifact、canvas operation 和终态事件会幂等写回项目快照；同一 artifact id 只保留一个结果节点
+- Typed artifacts：图片、Markdown、code、document、webpage、dataset、decision、memory 和 tool result 都使用稳定 `ArtifactRef`；没有工具 artifact 的最终文本回复会由 runtime 物化为 Markdown artifact 节点
 - 错误：Run 节点只保留短错误来源，完整诊断保留在 Trace 事件中；上下文校验失败也会写入 `run.failed`
 - 流协议：AI SDK UI `createUIMessageStream` + `data-runtime-event`
 
@@ -73,6 +74,7 @@ pnpm dev
 - 生成图片路径：`projects/{projectId}/runs/{runNodeId}/artifacts/{artifactId}.{ext}`
 - 技能包路径：`skills/{skillName}/{sha256}.zip`
 - 画布只保存 `/api/projects/:projectId/artifacts/:artifactId/content` 和 `supabase://agent-assets/...` 稳定引用；实际读取由服务端校验权限后签发短期 URL。
+- Artifact metadata 公共字段包括 `mimeType`、`byteSize`、`digest`、`sourceRunNodeId`、`sourceToolName`、`createdBy` 和 `previewKind`；文本类节点默认给 Agent 上下文摘要和 content ref，不把全文塞进 prompt。
 - 画布保存使用 `canvasPatch` 增量写入 `nodes/edges` JSON；打开项目仍读取完整快照。
 
 `supabase/migrations/20260611000000_agent_v2_cutover.sql` 会删除 Agent v1 Trace、Skill 和旧 runtime 表，只保留 `run.created.payload.runtime = 'openai-agents-sdk'` 的 Trace，并保留所有项目画布 nodes/edges。该迁移不可逆。

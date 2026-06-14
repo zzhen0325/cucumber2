@@ -38,6 +38,7 @@ const FOLLOW_UP_GAP_Y = 310;
 const RUN_OFFSET_Y = 124;
 const RESULT_OFFSET_FROM_PROMPT_Y = 200;
 const EXPANDED_RESULT_OFFSET_FROM_PROMPT_Y = 480;
+export const DEFAULT_UPSTREAM_CONTEXT_BUDGET = 4_000;
 
 const id = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -220,7 +221,8 @@ export function createRunDraft(
   const contextCollection = collectUpstreamContextWithTrace(
     referenceNodeIds,
     nodes,
-    edges
+    edges,
+    { budget: DEFAULT_UPSTREAM_CONTEXT_BUDGET }
   );
   const upstreamContext = contextCollection.items;
   const preferredBaseX = primaryReferenceNode

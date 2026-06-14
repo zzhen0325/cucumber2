@@ -1,6 +1,7 @@
 import type { UIMessage, UIMessageStreamWriter } from "ai";
 
 import {
+  DEFAULT_UPSTREAM_CONTEXT_BUDGET,
   collectUpstreamContextWithTrace,
   getRunReferenceNodeIds,
 } from "../../src/lib/graph.ts";
@@ -222,7 +223,8 @@ export function buildAgentRunInput({
   const contextCollection = collectUpstreamContextWithTrace(
     referenceNodeIds,
     projectSnapshot.nodes,
-    projectSnapshot.edges
+    projectSnapshot.edges,
+    { budget: DEFAULT_UPSTREAM_CONTEXT_BUDGET }
   );
   const upstreamContext = contextCollection.items;
   const contextNodeIds = uniqueNodeIds([

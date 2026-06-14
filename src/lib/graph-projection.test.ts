@@ -351,6 +351,59 @@ describe("agent event graph projection", () => {
     });
   });
 
+  it("projects markdown artifacts as typed content nodes", () => {
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", {
+          prompt: "总结画布",
+          promptNodeId: "prompt-1",
+        }),
+        event("artifact.created", "final_output", {
+          artifact: {
+            contentRef:
+              "supabase://agent-assets/projects/project-1/runs/run-1/artifacts/text-1.md",
+            id: "text-1",
+            metadata: {
+              byteSize: 42,
+              digest: "sha256:abc",
+              format: "markdown",
+              mimeType: "text/markdown",
+              preview: "# 总结\n\n这是一个 markdown 结果。",
+              previewKind: "markdown",
+              sourceRunNodeId: "run-1",
+              sourceToolName: "final_output",
+            },
+            title: "Agent reply",
+            type: "doc",
+          },
+        }),
+        event("run.completed", "run", {
+          finalOutput: "# 总结\n\n这是一个 markdown 结果。",
+          artifactIds: ["text-1"],
+        }),
+      ],
+    });
+
+    const markdown = projection.nodes.find((node) => node.data.kind === "markdown");
+    expect(markdown).toMatchObject({
+      id: "markdown-text-1",
+      type: "markdownNode",
+      data: {
+        kind: "markdown",
+        content: "# 总结\n\n这是一个 markdown 结果。",
+        artifact: {
+          id: "text-1",
+          metadata: expect.objectContaining({
+            digest: "sha256:abc",
+            sourceToolName: "final_output",
+          }),
+        },
+      },
+    });
+  });
+
   it("does not leave pending image placeholders for aborted runs", () => {
     const projection = projectRunTraceToCanvas({
       runNodeId: "run-1",

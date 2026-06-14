@@ -13,12 +13,34 @@ export type ArtifactType =
   | "tool_result"
   | "memory";
 
+export type ArtifactPreviewKind =
+  | "image"
+  | "markdown"
+  | "code"
+  | "document"
+  | "webpage"
+  | "dataset"
+  | "file"
+  | "decision"
+  | "memory"
+  | "toolResult";
+
+export type ArtifactMetadata = Record<string, unknown> & {
+  byteSize?: number;
+  createdBy?: string;
+  digest?: string;
+  mimeType?: string;
+  previewKind?: ArtifactPreviewKind;
+  sourceRunNodeId?: string;
+  sourceToolName?: string;
+};
+
 export type ArtifactRef = {
   id: string;
   type: ArtifactType;
   uri?: string;
   title?: string;
-  metadata?: Record<string, unknown>;
+  metadata?: ArtifactMetadata;
   contentRef?: string;
 };
 

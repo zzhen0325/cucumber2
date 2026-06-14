@@ -1,6 +1,7 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type {
+  ArtifactPreviewKind,
   ArtifactRef,
   ArtifactType,
   UpstreamContextItem,
@@ -41,6 +42,7 @@ type CompleteSignedAssetUploadInput = {
   fileName: string;
   kind: UploadAssetKind;
   mimeType: string;
+  preview?: string;
   sizeBytes: number;
   title?: string;
   width?: number;
@@ -56,8 +58,19 @@ type StoreGeneratedImageInput = {
   title?: string;
   sourceUrl: string;
   sourceNodeId?: string | null;
+  sourceToolName?: string;
   metadata?: Record<string, unknown>;
   signal?: AbortSignal;
+};
+
+type StoreTextArtifactInput = {
+  content: string;
+  projectId: string;
+  runNodeId: string;
+  sourceToolName: string;
+  title: string;
+  type?: Extract<ArtifactType, "doc" | "code" | "webpage" | "decision" | "memory" | "tool_result">;
+  userId: string;
 };
 
 type StoreAgentSkillPackageInput = {
@@ -128,17 +141,26 @@ export async function completeSignedAssetUpload(
   assertAllowedAssetSize(input.sizeBytes);
 
   const objectInfo = await getStoredObjectInfo(input.bucket, input.path);
+  const objectBytes = await readStoredObjectBytes(input.bucket, input.path);
   const artifactId = `upload-${input.uploadId}`;
   const artifactType = getArtifactTypeForUploadKind(input.kind);
   const mimeType = input.mimeType || objectInfo.mimeType || "application/octet-stream";
-  const sizeBytes = objectInfo.sizeBytes ?? input.sizeBytes;
+  const sizeBytes = objectInfo.sizeBytes ?? objectBytes.byteLength ?? input.sizeBytes;
+  const previewKind = getPreviewKindForUploadKind(input.kind);
   const metadata = compactRecord({
+    byteSize: sizeBytes,
+    createdBy: input.userId,
+    digest: createSha256Digest(objectBytes),
     fileName: input.fileName,
     format: getUploadFormat(input.kind),
     height: input.height,
     mimeType,
     origin: "user_upload",
+    preview: input.preview,
+    previewKind,
+    projectId: input.projectId,
     size: sizeBytes,
+    sourceToolName: "upload",
     storageBucket: input.bucket,
     storagePath: input.path,
     summary: input.summary,
@@ -210,9 +232,18 @@ export async function storeGeneratedImageFromUrl(
 
   const metadata = compactRecord({
     ...input.metadata,
+    byteSize: bytes.byteLength,
+    createdBy: input.userId,
+    digest: createSha256Digest(bytes),
     mimeType,
     origin: "seedream_generated",
+    previewKind: "image",
+    projectId: input.projectId,
     size: bytes.byteLength,
+    sourceRunNodeId: input.runNodeId,
+    sourceToolName:
+      input.sourceToolName ??
+      (input.metadata?.operation === "upscale" ? "upscale_image" : "generate_image"),
     storageBucket: AGENT_ASSETS_BUCKET,
     storagePath: path,
   });
@@ -232,6 +263,76 @@ export async function storeGeneratedImageFromUrl(
     title: input.title,
     type: "image",
     uri: getArtifactContentUrl(input.projectId, input.artifactId),
+    userId: input.userId,
+  });
+
+  if (!record) {
+    throw new Error("Project not found.");
+  }
+
+  return toArtifactRef(record);
+}
+
+export async function storeTextArtifactContent(
+  input: StoreTextArtifactInput
+): Promise<ArtifactRef> {
+  const bytes = new TextEncoder().encode(input.content);
+  assertAllowedAssetSize(bytes.byteLength);
+
+  const artifactId = `text-${input.runNodeId}-${randomUUID()}`;
+  const artifactType = input.type ?? "doc";
+  const mimeType = getMimeTypeForTextArtifact(artifactType);
+  const extension = getExtensionForTextArtifact(artifactType);
+  const path = `projects/${input.projectId}/runs/${sanitizePathSegment(
+    input.runNodeId
+  )}/artifacts/${sanitizePathSegment(artifactId)}.${extension}`;
+
+  const { error } = await getSupabaseClient()
+    .storage
+    .from(AGENT_ASSETS_BUCKET)
+    .upload(path, bytes, {
+      cacheControl: "31536000",
+      contentType: mimeType,
+      upsert: false,
+    });
+
+  if (error) {
+    throw error;
+  }
+
+  const metadata = compactRecord({
+    byteSize: bytes.byteLength,
+    createdBy: input.userId,
+    digest: createSha256Digest(bytes),
+    format: extension === "md" ? "markdown" : extension,
+    mimeType,
+    origin: "runtime_materialized",
+    preview: summarizeTextPreview(input.content, 4_000),
+    previewKind: getPreviewKindForArtifactType(artifactType),
+    projectId: input.projectId,
+    size: bytes.byteLength,
+    sourceRunNodeId: input.runNodeId,
+    sourceToolName: input.sourceToolName,
+    storageBucket: AGENT_ASSETS_BUCKET,
+    storagePath: path,
+    summary: summarizeTextPreview(input.content, 240),
+  });
+
+  const record = await registerAgentArtifact({
+    bucketId: AGENT_ASSETS_BUCKET,
+    contentRef: getStorageContentRef(AGENT_ASSETS_BUCKET, path),
+    createdBy: input.userId,
+    id: artifactId,
+    metadata,
+    mimeType,
+    origin: "seedream_generated",
+    projectId: input.projectId,
+    runNodeId: input.runNodeId,
+    sizeBytes: bytes.byteLength,
+    storagePath: path,
+    title: input.title,
+    type: artifactType,
+    uri: null,
     userId: input.userId,
   });
 
@@ -400,11 +501,35 @@ async function getStoredObjectInfo(bucket: string, path: string) {
   };
 }
 
+async function readStoredObjectBytes(bucket: string, path: string) {
+  const { data, error } = await getSupabaseClient()
+    .storage
+    .from(bucket)
+    .download(path);
+
+  if (error) {
+    throw error;
+  }
+  if (!data) {
+    throw new Error("Artifact content was not found in object storage.");
+  }
+
+  return new Uint8Array(await data.arrayBuffer());
+}
+
 function toArtifactRef(record: AgentArtifactRecord): ArtifactRef {
   return {
     contentRef: record.contentRef ?? undefined,
     id: record.id,
-    metadata: record.metadata,
+    metadata: compactRecord({
+      ...record.metadata,
+      byteSize: record.metadata.byteSize ?? record.sizeBytes,
+      createdAt: record.createdAt,
+      createdBy: record.metadata.createdBy ?? record.createdBy,
+      mimeType: record.metadata.mimeType ?? record.mimeType,
+      previewKind: record.metadata.previewKind ?? getPreviewKindForArtifactType(record.type),
+      sourceRunNodeId: record.metadata.sourceRunNodeId ?? record.runNodeId,
+    }),
     title: record.title ?? undefined,
     type: record.type,
     uri: record.uri ?? undefined,
@@ -464,6 +589,27 @@ function getUploadFormat(kind: UploadAssetKind) {
   return undefined;
 }
 
+function getPreviewKindForUploadKind(kind: UploadAssetKind): ArtifactPreviewKind {
+  if (kind === "markdown") {
+    return "markdown";
+  }
+  return kind;
+}
+
+function getPreviewKindForArtifactType(type: ArtifactType): ArtifactPreviewKind {
+  if (type === "doc") {
+    return "document";
+  }
+  if (type === "tool_result") {
+    return "toolResult";
+  }
+  return type;
+}
+
+function createSha256Digest(bytes: Uint8Array) {
+  return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+}
+
 function sanitizeFileName(fileName: string) {
   const normalized = fileName.trim() || "asset";
   const safe = normalized
@@ -498,6 +644,34 @@ function getExtensionForMimeType(mimeType: string) {
   };
 
   return extensions[mimeType] ?? "png";
+}
+
+function getMimeTypeForTextArtifact(type: ArtifactType) {
+  if (type === "code" || type === "tool_result") {
+    return "application/json";
+  }
+  if (type === "webpage") {
+    return "text/html";
+  }
+  return "text/markdown";
+}
+
+function getExtensionForTextArtifact(type: ArtifactType) {
+  if (type === "code" || type === "tool_result") {
+    return "json";
+  }
+  if (type === "webpage") {
+    return "html";
+  }
+  return "md";
+}
+
+function summarizeTextPreview(content: string, limit: number) {
+  const normalized = content.replace(/\s+/g, " ").trim();
+  if (normalized.length <= limit) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(0, limit - 1))}…`;
 }
 
 function compactRecord(record: Record<string, unknown>) {

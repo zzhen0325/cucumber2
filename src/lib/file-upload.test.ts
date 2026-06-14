@@ -63,6 +63,11 @@ describe("file upload canvas nodes", () => {
     expect(JSON.stringify(node)).not.toContain("local-upload://");
     expect(node.data.artifact?.type).toBe("image");
     expect(node.data.image.metadata).toMatchObject({ width: 1600, height: 900 });
+    expect(node.data.artifact?.metadata).toMatchObject({
+      byteSize: 24,
+      mimeType: "image/png",
+      previewKind: "image",
+    });
   });
 
   it("creates markdown preview nodes with file content", async () => {
@@ -88,6 +93,30 @@ describe("file upload canvas nodes", () => {
 
     expect(node.data.content).toContain("上传预览");
     expect(node.data.artifact.metadata?.format).toBe("markdown");
+  });
+
+  it("uses full markdown text for canvas content instead of the storage preview", async () => {
+    const longMarkdown = [
+      "# Agent Skill",
+      "",
+      ...Array.from({ length: 120 }, (_, index) => `- step ${index}: keep this line`),
+      "",
+      "final line should remain visible",
+    ].join("\n");
+    const [node] = await createCanvasNodesFromFiles(
+      [new File([longMarkdown], "SKILL.md", { type: "text/markdown" })],
+      { x: 0, y: 0 },
+      [],
+      { resolveUploadedFile: resolveTestUpload }
+    );
+
+    if (node.data.kind !== "markdown") {
+      throw new Error("Expected markdown node");
+    }
+
+    expect(longMarkdown.length).toBeGreaterThan(900);
+    expect(node.data.content).toContain("final line should remain visible");
+    expect(node.data.content).not.toContain("...内容已截断");
   });
 
   it("creates code and dataset artifact-backed preview nodes", async () => {

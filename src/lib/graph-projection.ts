@@ -1072,7 +1072,8 @@ function readMarkdownArtifactContent(artifact: ArtifactRef) {
   return (
     readString(artifact.metadata?.markdown) ??
     readString(artifact.metadata?.content) ??
-    readString(artifact.metadata?.text)
+    readString(artifact.metadata?.text) ??
+    readString(artifact.metadata?.preview)
   );
 }
 

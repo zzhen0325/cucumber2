@@ -133,6 +133,7 @@ export async function executeGenerateImageTool({
       projectId: context.projectId,
       runNodeId: context.runNodeId,
       signal: signal ?? context.signal,
+      sourceToolName: "generate_image",
       sourceUrl: image.url,
       title: image.title,
       userId: context.userId,

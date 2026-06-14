@@ -16,6 +16,7 @@ import {
 } from "@xyflow/react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
+import type { BundledLanguage } from "shiki";
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -61,6 +62,14 @@ import {
 import type { CSSProperties, FormEvent, MouseEvent as ReactMouseEvent } from "react";
 
 import { Canvas } from "@/components/ai-elements/canvas";
+import {
+  CodeBlock,
+  CodeBlockActions,
+  CodeBlockCopyButton,
+  CodeBlockFilename,
+  CodeBlockHeader,
+  CodeBlockTitle,
+} from "@/components/ai-elements/code-block";
 import { Edge } from "@/components/ai-elements/edge";
 import { FileUploadOverlay } from "@/components/FileUploadOverlay";
 import { Node, NodeContent } from "@/components/ai-elements/node";
@@ -118,6 +127,7 @@ import {
 import type {
   AgentCanvasEdge,
   AgentCanvasNode,
+  CodeNodeData,
   GeneratedImage,
   ImageResultNodeData,
   MarkdownNodeData,
@@ -130,7 +140,7 @@ import type {
 
 const nodeTypes = {
   artifactNode: memo(ArtifactLikeNode),
-  codeNode: memo(ArtifactLikeNode),
+  codeNode: memo(CodeNode),
   decisionNode: memo(ArtifactLikeNode),
   documentNode: memo(ArtifactLikeNode),
   memoryNode: memo(ArtifactLikeNode),
@@ -2674,42 +2684,348 @@ type ArtifactLikeNodeProps = NodeProps<FlowNode<ArtifactLikeNodeData, string>>;
 function ArtifactLikeNode({ data, selected, width, height }: ArtifactLikeNodeProps) {
   const label = getArtifactNodeLabel(data);
   const summary = getArtifactNodeSummary(data);
+  const metaLine = getArtifactMetaLine(data);
+  const contentUrl = getArtifactContentUrl(data.artifact);
+  const canPreview = Boolean(getInlineArtifactPreview(data) || contentUrl);
+  const [isPreviewOpen, setPreviewOpen] = useState(false);
 
   return (
-    <Node
-      className={
-        selected
-          ? `canvas-node selected artifact-card ${data.kind}`
-          : `canvas-node artifact-card ${data.kind}`
-      }
-      handles={{ source: true, target: true }}
-      minHeight={96}
-      minWidth={180}
-      selected={selected}
-      style={getResizableNodeStyle(width, height)}
-    >
-      <NodeContent className="artifact-content">
-        <div className="artifact-heading">
-          <span className="artifact-icon">
-            <ArtifactNodeIcon kind={data.kind} />
-          </span>
-          <span className="copyable-text nodrag nopan">{label}</span>
+    <>
+      {selected && (
+        <NodeToolbar
+          align="end"
+          className="artifact-node-toolbar nodrag nopan nowheel"
+          isVisible={selected}
+          offset={10}
+          position={Position.Top}
+        >
+          <button
+            aria-label="预览产物"
+            disabled={!canPreview}
+            onClick={(event) => {
+              stopNodeToolbarEvent(event);
+              setPreviewOpen(true);
+            }}
+            onMouseDown={stopNodeToolbarEvent}
+            onPointerDown={stopNodeToolbarEvent}
+            title="预览"
+            type="button"
+          >
+            <Maximize2 size={14} />
+          </button>
+          <button
+            aria-label="打开产物"
+            disabled={!contentUrl}
+            onClick={(event) => {
+              stopNodeToolbarEvent(event);
+              if (contentUrl) {
+                window.open(contentUrl, "_blank", "noreferrer");
+              }
+            }}
+            onMouseDown={stopNodeToolbarEvent}
+            onPointerDown={stopNodeToolbarEvent}
+            title="打开"
+            type="button"
+          >
+            <ArrowUpRight size={14} />
+          </button>
+          <button
+            aria-label="下载产物"
+            disabled={!contentUrl}
+            onClick={(event) => {
+              stopNodeToolbarEvent(event);
+              if (contentUrl) {
+                downloadArtifactAsset(contentUrl, data);
+              }
+            }}
+            onMouseDown={stopNodeToolbarEvent}
+            onPointerDown={stopNodeToolbarEvent}
+            title="下载"
+            type="button"
+          >
+            <Download size={14} />
+          </button>
+        </NodeToolbar>
+      )}
+
+      <Node
+        className={
+          selected
+            ? `canvas-node selected artifact-card ${data.kind}`
+            : `canvas-node artifact-card ${data.kind}`
+        }
+        handles={{ source: true, target: true }}
+        minHeight={96}
+        minWidth={180}
+        selected={selected}
+        style={getResizableNodeStyle(width, height)}
+      >
+        <NodeContent className="artifact-content">
+          <div className="artifact-heading">
+            <span className="artifact-icon">
+              <ArtifactNodeIcon kind={data.kind} />
+            </span>
+            <span className="copyable-text nodrag nopan">{label}</span>
+          </div>
+          <strong className="copyable-text nodrag nopan" title={data.title}>
+            {data.title}
+          </strong>
+          {summary && (
+            <p className="copyable-text nodrag nopan" title={summary}>
+              {summary}
+            </p>
+          )}
+          {metaLine && (
+            <small className="artifact-meta copyable-text nodrag nopan">
+              {metaLine}
+            </small>
+          )}
+          {data.upload && (
+            <span className={`upload-state ${data.upload.status}`}>
+              {data.upload.status === "error" ? "上传失败" : "上传中"}
+            </span>
+          )}
+        </NodeContent>
+      </Node>
+
+      <ArtifactPreviewDialog
+        contentUrl={contentUrl}
+        data={data}
+        open={isPreviewOpen}
+        onOpenChange={setPreviewOpen}
+      />
+    </>
+  );
+}
+
+function ArtifactPreviewDialog({
+  contentUrl,
+  data,
+  open,
+  onOpenChange,
+}: {
+  contentUrl?: string;
+  data: ArtifactLikeNodeProps["data"];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const inlinePreview = getInlineArtifactPreview(data);
+  const shouldFetchText = Boolean(
+    open &&
+      contentUrl &&
+      isTextualArtifact(data) &&
+      (data.kind === "code" || !inlinePreview)
+  );
+  const loadedPreview = useTextArtifactContent(contentUrl, shouldFetchText);
+  const loadState =
+    loadedPreview?.status === "error"
+      ? "error"
+      : inlinePreview || loadedPreview?.text
+        ? "ready"
+        : !contentUrl
+          ? "idle"
+          : !isTextualArtifact(data)
+            ? "binary"
+            : shouldFetchText
+              ? "loading"
+              : "idle";
+  const previewText =
+    (loadedPreview && loadedPreview.url === contentUrl ? loadedPreview.text : null) ??
+    inlinePreview;
+  const metaLine = getArtifactMetaLine(data);
+  const codeLanguage = data.kind === "code" ? getCodeBlockLanguage(data) : null;
+
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent className="artifact-preview-dialog nodrag nopan nowheel">
+        <DialogTitle>{data.title}</DialogTitle>
+        <DialogDescription>{metaLine || getArtifactNodeLabel(data)}</DialogDescription>
+        <div className="artifact-preview-body">
+          {loadState === "loading" && <span>读取预览...</span>}
+          {loadState === "error" && <span>无法读取预览</span>}
+          {loadState === "binary" && <span>此产物可下载或打开查看</span>}
+          {previewText && data.kind === "code" && codeLanguage && (
+            <CodeBlock
+              className="artifact-preview-code"
+              code={previewText}
+              language={codeLanguage}
+              showLineNumbers
+            >
+              <CodeBlockHeader>
+                <CodeBlockTitle>
+                  <CodeBlockFilename>{data.title}</CodeBlockFilename>
+                </CodeBlockTitle>
+                <CodeBlockActions>
+                  <CodeBlockCopyButton aria-label="复制代码" title="复制代码" />
+                </CodeBlockActions>
+              </CodeBlockHeader>
+            </CodeBlock>
+          )}
+          {previewText && data.kind !== "code" && (
+            <pre className="artifact-preview-text">{previewText}</pre>
+          )}
+          {!previewText && loadState === "idle" && <span>暂无预览</span>}
         </div>
-        <strong className="copyable-text nodrag nopan" title={data.title}>
-          {data.title}
-        </strong>
-        {summary && (
-          <p className="copyable-text nodrag nopan" title={summary}>
-            {summary}
-          </p>
+        {contentUrl && (
+          <div className="artifact-preview-actions">
+            <a href={contentUrl} rel="noreferrer" target="_blank">
+              打开
+            </a>
+            <button
+              type="button"
+              onClick={() => downloadArtifactAsset(contentUrl, data)}
+            >
+              下载
+            </button>
+          </div>
         )}
-        {data.upload && (
-          <span className={`upload-state ${data.upload.status}`}>
-            {data.upload.status === "error" ? "上传失败" : "上传中"}
-          </span>
-        )}
-      </NodeContent>
-    </Node>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CodeNode({
+  data,
+  selected,
+  width,
+  height,
+}: NodeProps<FlowNode<CodeNodeData, "codeNode">>) {
+  const contentUrl = getArtifactContentUrl(data.artifact);
+  const inlinePreview = getInlineArtifactPreview(data);
+  const [isPreviewOpen, setPreviewOpen] = useState(false);
+  const loadedPreview = useTextArtifactContent(
+    contentUrl,
+    Boolean(contentUrl && isTextualArtifact(data))
+  );
+  const metaLine = getArtifactMetaLine(data);
+  const codeText =
+    (loadedPreview && loadedPreview.url === contentUrl ? loadedPreview.text : null) ??
+    inlinePreview ??
+    "";
+  const displayCode =
+    codeText ||
+    (loadedPreview?.status === "error" ? "无法读取代码预览" : "读取代码...");
+  const language = getCodeBlockLanguage(data);
+  const canPreview = Boolean(codeText || contentUrl);
+
+  return (
+    <>
+      {selected && (
+        <NodeToolbar
+          align="end"
+          className="artifact-node-toolbar nodrag nopan nowheel"
+          isVisible={selected}
+          offset={10}
+          position={Position.Top}
+        >
+          <button
+            aria-label="预览代码"
+            disabled={!canPreview}
+            onClick={(event) => {
+              stopNodeToolbarEvent(event);
+              setPreviewOpen(true);
+            }}
+            onMouseDown={stopNodeToolbarEvent}
+            onPointerDown={stopNodeToolbarEvent}
+            title="预览"
+            type="button"
+          >
+            <Maximize2 size={14} />
+          </button>
+          <button
+            aria-label="打开代码文件"
+            disabled={!contentUrl}
+            onClick={(event) => {
+              stopNodeToolbarEvent(event);
+              if (contentUrl) {
+                window.open(contentUrl, "_blank", "noreferrer");
+              }
+            }}
+            onMouseDown={stopNodeToolbarEvent}
+            onPointerDown={stopNodeToolbarEvent}
+            title="打开"
+            type="button"
+          >
+            <ArrowUpRight size={14} />
+          </button>
+          <button
+            aria-label="下载代码文件"
+            disabled={!contentUrl}
+            onClick={(event) => {
+              stopNodeToolbarEvent(event);
+              if (contentUrl) {
+                downloadArtifactAsset(contentUrl, data);
+              }
+            }}
+            onMouseDown={stopNodeToolbarEvent}
+            onPointerDown={stopNodeToolbarEvent}
+            title="下载"
+            type="button"
+          >
+            <Download size={14} />
+          </button>
+        </NodeToolbar>
+      )}
+
+      <Node
+        className={
+          selected ? "canvas-node selected code-card" : "canvas-node code-card"
+        }
+        handles={{ source: true, target: true }}
+        minHeight={160}
+        minWidth={260}
+        selected={selected}
+        style={getResizableNodeStyle(width, height)}
+      >
+        <NodeContent className="code-content">
+          <div className="code-heading">
+            <span className="artifact-icon">
+              <Type size={14} />
+            </span>
+            <div>
+              <span>Code</span>
+              <strong className="copyable-text nodrag nopan" title={data.title}>
+                {data.title}
+              </strong>
+            </div>
+          </div>
+          <div className="code-node-editor nodrag nopan nowheel">
+            <CodeBlock
+              className="code-node-block"
+              code={displayCode}
+              language={language}
+              showLineNumbers
+            >
+              <CodeBlockHeader className="code-node-block-header">
+                <CodeBlockTitle>
+                  <CodeBlockFilename>{language}</CodeBlockFilename>
+                </CodeBlockTitle>
+                <CodeBlockActions>
+                  <CodeBlockCopyButton aria-label="复制代码" title="复制代码" />
+                </CodeBlockActions>
+              </CodeBlockHeader>
+            </CodeBlock>
+          </div>
+          {metaLine && (
+            <small className="artifact-meta copyable-text nodrag nopan">
+              {metaLine}
+            </small>
+          )}
+          {data.upload && (
+            <span className={`upload-state ${data.upload.status}`}>
+              {data.upload.status === "error" ? "上传失败" : "上传中"}
+            </span>
+          )}
+        </NodeContent>
+      </Node>
+
+      <ArtifactPreviewDialog
+        contentUrl={contentUrl}
+        data={data}
+        open={isPreviewOpen}
+        onOpenChange={setPreviewOpen}
+      />
+    </>
   );
 }
 
@@ -2839,6 +3155,338 @@ function getArtifactNodeSummary(data: ArtifactLikeNodeProps["data"]) {
   return data.summary ?? data.artifact.contentRef ?? data.artifact.uri;
 }
 
+function getArtifactMetaLine(data: ArtifactLikeNodeProps["data"]) {
+  const parts = [
+    readMetadataString(data.artifact.metadata?.sourceToolName) ??
+      (data.runId ? "Run" : undefined),
+    formatArtifactDate(data.createdAt ?? readMetadataString(data.artifact.metadata?.createdAt)),
+    formatArtifactBytes(readMetadataNumber(data.artifact.metadata?.byteSize)),
+  ].filter(Boolean);
+
+  return parts.join(" · ");
+}
+
+function getInlineArtifactPreview(data: ArtifactLikeNodeProps["data"]) {
+  if (data.kind === "markdown") {
+    return data.content;
+  }
+  if (data.kind === "decision") {
+    return data.decision;
+  }
+  if (data.kind === "memory") {
+    return data.memory;
+  }
+  if (data.kind === "toolResult") {
+    return (
+      stringifyPreviewValue(data.artifact.metadata?.output) ??
+      stringifyPreviewValue(data.artifact.metadata?.result) ??
+      data.summary
+    );
+  }
+
+  return (
+    readMetadataString(data.artifact.metadata?.preview) ??
+    readMetadataString(data.artifact.metadata?.text) ??
+    readMetadataString(data.artifact.metadata?.content) ??
+    data.summary
+  );
+}
+
+function getArtifactContentUrl(artifact: ArtifactLikeNodeProps["data"]["artifact"]) {
+  if (artifact.uri?.startsWith("/api/") || artifact.uri?.startsWith("http")) {
+    return artifact.uri;
+  }
+
+  const projectId =
+    readMetadataString(artifact.metadata?.projectId) ??
+    readProjectIdFromStoragePath(readMetadataString(artifact.metadata?.storagePath)) ??
+    readProjectIdFromContentRef(artifact.contentRef);
+  if (!projectId) {
+    return undefined;
+  }
+
+  return `/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(
+    artifact.id
+  )}/content`;
+}
+
+type TextArtifactContentState = {
+  status: "ready" | "error";
+  text: string | null;
+  url: string;
+};
+
+function useTextArtifactContent(
+  contentUrl: string | undefined,
+  enabled: boolean,
+  maxLength = 24_000
+) {
+  const [loadedPreview, setLoadedPreview] =
+    useState<TextArtifactContentState | null>(null);
+
+  useEffect(() => {
+    if (!enabled || !contentUrl) {
+      return;
+    }
+
+    let ignore = false;
+    fetch(contentUrl, { credentials: "include" })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const contentType = response.headers.get("Content-Type") ?? "";
+        if (!isTextContentType(contentType)) {
+          if (!ignore) {
+            setLoadedPreview({ status: "ready", text: null, url: contentUrl });
+          }
+          return;
+        }
+        const text = await response.text();
+        if (!ignore) {
+          setLoadedPreview({
+            status: "ready",
+            text: text.slice(0, maxLength),
+            url: contentUrl,
+          });
+        }
+      })
+      .catch(() => {
+        if (!ignore) {
+          setLoadedPreview({ status: "error", text: null, url: contentUrl });
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [contentUrl, enabled, maxLength]);
+
+  return loadedPreview;
+}
+
+const CODE_LANGUAGE_ALIASES: Record<string, BundledLanguage> = {
+  bash: "bash" as BundledLanguage,
+  c: "c" as BundledLanguage,
+  cc: "cpp" as BundledLanguage,
+  cpp: "cpp" as BundledLanguage,
+  cs: "csharp" as BundledLanguage,
+  css: "css" as BundledLanguage,
+  go: "go" as BundledLanguage,
+  htm: "html" as BundledLanguage,
+  html: "html" as BundledLanguage,
+  java: "java" as BundledLanguage,
+  js: "javascript" as BundledLanguage,
+  json: "json" as BundledLanguage,
+  jsonl: "json" as BundledLanguage,
+  jsx: "jsx" as BundledLanguage,
+  kt: "kotlin" as BundledLanguage,
+  lua: "lua" as BundledLanguage,
+  md: "markdown" as BundledLanguage,
+  mdx: "mdx" as BundledLanguage,
+  ndjson: "json" as BundledLanguage,
+  php: "php" as BundledLanguage,
+  py: "python" as BundledLanguage,
+  rb: "ruby" as BundledLanguage,
+  rs: "rust" as BundledLanguage,
+  scss: "scss" as BundledLanguage,
+  sh: "shellscript" as BundledLanguage,
+  sql: "sql" as BundledLanguage,
+  swift: "swift" as BundledLanguage,
+  toml: "toml" as BundledLanguage,
+  ts: "typescript" as BundledLanguage,
+  tsx: "tsx" as BundledLanguage,
+  vue: "vue" as BundledLanguage,
+  xml: "xml" as BundledLanguage,
+  yaml: "yaml" as BundledLanguage,
+  yml: "yaml" as BundledLanguage,
+  zsh: "zsh" as BundledLanguage,
+};
+
+const CODE_MIME_LANGUAGE_ALIASES: Record<string, BundledLanguage> = {
+  "application/json": "json" as BundledLanguage,
+  "application/typescript": "typescript" as BundledLanguage,
+  "application/x-javascript": "javascript" as BundledLanguage,
+  "application/x-sh": "shellscript" as BundledLanguage,
+  "application/xml": "xml" as BundledLanguage,
+  "text/css": "css" as BundledLanguage,
+  "text/html": "html" as BundledLanguage,
+  "text/javascript": "javascript" as BundledLanguage,
+  "text/markdown": "markdown" as BundledLanguage,
+  "text/x-markdown": "markdown" as BundledLanguage,
+  "text/x-python": "python" as BundledLanguage,
+  "text/xml": "xml" as BundledLanguage,
+};
+
+function getCodeBlockLanguage(data: CodeNodeData): BundledLanguage {
+  const mimeType = readMetadataString(data.artifact.metadata?.mimeType)?.toLowerCase();
+  const candidates = [
+    data.language,
+    readMetadataString(data.artifact.metadata?.language),
+    getFileExtensionFromName(readMetadataString(data.artifact.metadata?.fileName)),
+    getFileExtensionFromName(data.title),
+  ];
+
+  for (const candidate of candidates) {
+    const language = normalizeCodeLanguage(candidate);
+    if (language) {
+      return language;
+    }
+  }
+
+  if (mimeType) {
+    if (CODE_MIME_LANGUAGE_ALIASES[mimeType]) {
+      return CODE_MIME_LANGUAGE_ALIASES[mimeType];
+    }
+    if (mimeType.endsWith("+json")) {
+      return "json" as BundledLanguage;
+    }
+    if (mimeType.includes("javascript")) {
+      return "javascript" as BundledLanguage;
+    }
+  }
+
+  return "text" as BundledLanguage;
+}
+
+function normalizeCodeLanguage(value: string | undefined) {
+  if (!value) {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase().replace(/^\./, "");
+  return CODE_LANGUAGE_ALIASES[normalized] ?? (normalized as BundledLanguage);
+}
+
+function getFileExtensionFromName(value: string | undefined) {
+  const match = value?.trim().match(/\.([a-z0-9]+)$/i);
+  return match?.[1];
+}
+
+function readProjectIdFromStoragePath(value: string | undefined) {
+  return value?.match(/^projects\/([^/]+)\//)?.[1];
+}
+
+function readProjectIdFromContentRef(value: string | undefined) {
+  return value?.match(/^supabase:\/\/[^/]+\/projects\/([^/]+)\//)?.[1];
+}
+
+function isTextualArtifact(data: ArtifactLikeNodeProps["data"]) {
+  const mimeType = readMetadataString(data.artifact.metadata?.mimeType)?.toLowerCase();
+  return (
+    data.kind === "code" ||
+    data.kind === "markdown" ||
+    data.kind === "toolResult" ||
+    data.kind === "webpage" ||
+    mimeType?.startsWith("text/") ||
+    mimeType?.includes("json") ||
+    mimeType?.includes("javascript") ||
+    mimeType?.includes("xml") ||
+    mimeType?.includes("yaml")
+  );
+}
+
+function isTextContentType(contentType: string) {
+  const normalized = contentType.toLowerCase();
+  return (
+    normalized.startsWith("text/") ||
+    normalized.includes("json") ||
+    normalized.includes("javascript") ||
+    normalized.includes("xml") ||
+    normalized.includes("yaml")
+  );
+}
+
+function formatArtifactDate(value: string | undefined) {
+  if (!value) {
+    return undefined;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return undefined;
+  }
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatArtifactBytes(value: number | undefined) {
+  if (!Number.isFinite(value) || !value) {
+    return undefined;
+  }
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function readMetadataString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function readMetadataNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function stringifyPreviewValue(value: unknown) {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function downloadArtifactAsset(
+  url: string,
+  data: ArtifactLikeNodeProps["data"]
+) {
+  triggerImageDownload(url, getArtifactDownloadName(data));
+}
+
+function getArtifactDownloadName(data: ArtifactLikeNodeProps["data"]) {
+  const extension = getArtifactDownloadExtension(data);
+  const safeName =
+    data.title
+      .trim()
+      .replace(/\.[a-z0-9]{2,8}$/i, "")
+      .replace(/[^a-z0-9\u4e00-\u9fa5_-]+/gi, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || data.artifact.id;
+
+  return `${safeName}.${extension}`;
+}
+
+function getArtifactDownloadExtension(data: ArtifactLikeNodeProps["data"]) {
+  const mimeType = readMetadataString(data.artifact.metadata?.mimeType)?.toLowerCase();
+  if (data.kind === "code") {
+    return readMetadataString(data.artifact.metadata?.language) ?? "txt";
+  }
+  if (data.kind === "markdown") {
+    return "md";
+  }
+  if (data.kind === "webpage" || mimeType === "text/html") {
+    return "html";
+  }
+  if (mimeType?.includes("json")) {
+    return "json";
+  }
+  if (mimeType === "application/pdf") {
+    return "pdf";
+  }
+  return "txt";
+}
+
 function MarkdownNode({
   id,
   data,
@@ -2847,6 +3495,50 @@ function MarkdownNode({
   height,
 }: NodeProps<FlowNode<MarkdownNodeData, "markdownNode">>) {
   const { readOnly, onChange } = useContext(MarkdownNodeEditingContext);
+  const contentUrl = getArtifactContentUrl(data.artifact);
+  const [loadedContent, setLoadedContent] = useState<{
+    text: string;
+    url: string;
+  } | null>(null);
+  const shouldLoadFullContent = shouldLoadFullMarkdownContent(data, contentUrl);
+
+  useEffect(() => {
+    if (!shouldLoadFullContent || !contentUrl) {
+      return;
+    }
+
+    let ignore = false;
+    fetch(contentUrl, { credentials: "include" })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const contentType = response.headers.get("Content-Type") ?? "";
+        if (contentType && !isTextContentType(contentType)) {
+          return;
+        }
+        const text = await response.text();
+        if (!ignore && text.trim()) {
+          setLoadedContent({ text, url: contentUrl });
+        }
+      })
+      .catch((error: unknown) => {
+        console.error("[markdown-node] failed to load artifact content", error);
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [contentUrl, shouldLoadFullContent]);
+
+  const loadedText =
+    shouldLoadFullContent && loadedContent && loadedContent.url === contentUrl
+      ? loadedContent.text
+      : null;
+  const editorData =
+    loadedText && loadedText !== data.content
+      ? { ...data, content: loadedText }
+      : data;
 
   return (
     <Node
@@ -2876,11 +3568,12 @@ function MarkdownNode({
         <div className="blocknote-body nodrag nopan nowheel">
           <Suspense
             fallback={
-              <pre className="markdown-plain-preview">{data.content}</pre>
+              <pre className="markdown-plain-preview">{editorData.content}</pre>
             }
           >
             <BlockNoteMarkdownEditor
-              data={data}
+              key={`${data.artifact.id}:${loadedText ? "loaded" : "inline"}`}
+              data={editorData}
               nodeId={id}
               readOnly={readOnly}
               onChange={onChange}
@@ -2889,6 +3582,17 @@ function MarkdownNode({
         </div>
       </NodeContent>
     </Node>
+  );
+}
+
+function shouldLoadFullMarkdownContent(
+  data: MarkdownNodeData,
+  contentUrl: string | undefined
+) {
+  return Boolean(
+    contentUrl &&
+      !data.blockNoteBlocks &&
+      data.content.trimEnd().endsWith("...内容已截断")
   );
 }
 

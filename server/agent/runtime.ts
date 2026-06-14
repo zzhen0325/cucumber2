@@ -32,6 +32,7 @@ import {
 } from "./materialize-run.ts";
 import { resolveAgentModel } from "./model-config.ts";
 import { retrieveRelevantAgentSkills } from "./skills/skill-retrieval.ts";
+import { storeTextArtifactContent } from "../storage.ts";
 
 const runner = new Runner({ workflowName: "Cucumber Agent" });
 
@@ -357,6 +358,28 @@ export async function executeAgentRun({
     }
 
     closeTextStream();
+    if (finalOutput?.trim() && artifactIds.length === 0) {
+      const artifact = await storeTextArtifactContent({
+        content: finalOutput,
+        projectId: input.projectId,
+        runNodeId: input.runNodeId,
+        sourceToolName: "final_output",
+        title: "Agent reply",
+        userId: input.userId,
+      });
+      artifactIds = [artifact.id];
+      await writeRunEvent({
+        projectId: input.projectId,
+        runNodeId: input.runNodeId,
+        stepId: "final_output",
+        type: "artifact.created",
+        payload: {
+          artifact,
+          runtime: "openai-agents-sdk",
+          toolName: "final_output",
+        },
+      });
+    }
     await eventWriter.flush();
     await writeRunEvent({
       projectId: input.projectId,
