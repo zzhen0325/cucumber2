@@ -30,7 +30,7 @@ import {
   materializeAgentRunSnapshot,
   shouldMaterializeRunEvent,
 } from "./materialize-run.ts";
-import { resolveAgentModel } from "./model-config.ts";
+import { getAgentModelConfiguration, resolveAgentModel } from "./model-config.ts";
 import { retrieveRelevantAgentSkills } from "./skills/skill-retrieval.ts";
 import { prepareSdkSkillSource } from "./skills/sdk-skill-source.ts";
 
@@ -54,6 +54,9 @@ export class OpenAIAgentsRuntime implements AgentRuntime {
       await ensureCucumberInternalMcpConnected();
       const managerAgent = createManagerAgent({
         model,
+        sandboxCapabilities: {
+          includeCompaction: getAgentModelConfiguration().provider === "openai",
+        },
         skillCapability: sdkSkillSource?.capability,
       });
 

@@ -1,18 +1,24 @@
 import { Agent, type RunContext } from "@openai/agents";
-import { Capabilities, SandboxAgent, type Capability } from "@openai/agents/sandbox";
+import { SandboxAgent, type Capability } from "@openai/agents/sandbox";
 
 import type { CucumberAgentContext } from "../context.ts";
 import { getCucumberInternalMcpServer } from "../mcp/internal-mcp-client.ts";
 import { upscaleImageTool } from "../tools/image/upscale-image.tool.ts";
 import { imageInstructions } from "../prompts/image.instructions.ts";
+import {
+  createCucumberSandboxCapabilities,
+  type CucumberSandboxCapabilityOptions,
+} from "./sandbox-capabilities.ts";
 
 // NOTE: like the manager agent, the model is intentionally NOT set here. It is
 // resolved lazily at run time (see runtime.ts) because the model provider
 // depends on environment variables loaded *after* this module is imported.
 export function createImageAgent({
+  sandboxCapabilities,
   skillCapability,
   model,
 }: {
+  sandboxCapabilities?: CucumberSandboxCapabilityOptions;
   skillCapability?: Capability;
   model?: Agent<CucumberAgentContext>["model"];
 } = {}) {
@@ -37,7 +43,7 @@ export function createImageAgent({
   if (skillCapability) {
     return new SandboxAgent<CucumberAgentContext>({
       ...commonConfig,
-      capabilities: [...Capabilities.default(), skillCapability],
+      capabilities: createCucumberSandboxCapabilities(skillCapability, sandboxCapabilities),
     });
   }
 

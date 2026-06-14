@@ -57,6 +57,25 @@ export type SeedreamConfig = {
   scale?: number;
 };
 
+export class SeedreamConcurrencyLimitError extends Error {
+  readonly code = "seedream_concurrency_limit";
+  readonly requestId?: string;
+
+  constructor({
+    requestId,
+    retries,
+  }: {
+    requestId?: string;
+    retries: number;
+  }) {
+    super(
+      `Seedream 当前达到 API 并发上限，已重试 ${retries} 次仍未获得可用额度。请稍后重试。`
+    );
+    this.name = "SeedreamConcurrencyLimitError";
+    this.requestId = requestId;
+  }
+}
+
 type SignedPostResult = {
   status: number;
   body: Record<string, unknown>;
@@ -256,7 +275,7 @@ class SeedreamClient {
         continue;
       }
 
-      assertSeedreamOk("submit", submit);
+      assertSeedreamOk("submit", submit, { retries: attempt });
       return submit;
     }
   }
@@ -675,9 +694,19 @@ function readCustomCaFromEnv() {
   return cachedCa;
 }
 
-function assertSeedreamOk(step: string, result: SignedPostResult) {
+function assertSeedreamOk(
+  step: string,
+  result: SignedPostResult,
+  options: { retries?: number } = {}
+) {
   const code = result.body.code;
   if (result.status !== 200 || code !== 10000) {
+    if (step === "submit" && isSeedreamConcurrencyLimit(result)) {
+      throw new SeedreamConcurrencyLimitError({
+        requestId: getRequestId(result.body),
+        retries: options.retries ?? 0,
+      });
+    }
     const message =
       typeof result.body.message === "string"
         ? result.body.message
