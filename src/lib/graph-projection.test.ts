@@ -85,6 +85,47 @@ describe("agent event graph projection", () => {
     });
   });
 
+  it("projects run plans and current steps from trace events", () => {
+    const projection = projectRunTraceToCanvas({
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", { prompt: "生成图片", promptNodeId: "prompt-1" }),
+        event("input.normalized", "input", {
+          normalizedInput: { intent: "image.generate", rawPrompt: "生成图片" },
+        }),
+        event("run.plan.created", "plan", {
+          items: [
+            { id: "prepare", label: "整理需求和上下文" },
+            { id: "route", label: "选择合适的 Agent / 工具" },
+            { id: "execute", label: "生成图片产物" },
+            { id: "materialize", label: "写入画布结果" },
+          ],
+        }),
+        event("tool.input", "generate_image", {
+          toolCallId: "call-1",
+          toolName: "generate_image",
+          input: { prompt: "生成图片" },
+        }),
+      ],
+    });
+    const run = projection.nodes.find((node) => node.id === "run-1");
+
+    expect(run?.data).toMatchObject({
+      kind: "run",
+      currentStep: {
+        id: "generate_image",
+        label: "generate_image",
+        status: "running",
+      },
+      plan: [
+        { id: "prepare", status: "success" },
+        { id: "route", status: "success" },
+        { id: "execute", status: "running" },
+        { id: "materialize", status: "queued" },
+      ],
+    });
+  });
+
   it("keeps prompt expansion and image generation as separate visible tools", () => {
     const projection = projectRunTraceToCanvas({
       projectId: "project-1",
@@ -314,6 +355,27 @@ describe("agent event graph projection", () => {
       status: "error",
       error: "Seedream 调用失败。",
       toolParts: [expect.objectContaining({ state: "output-error" })],
+    });
+  });
+
+  it("summarizes trace persistence failures separately from model failures", () => {
+    const projection = projectRunTraceToCanvas({
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", { prompt: "分析", promptNodeId: "prompt-1" }),
+        event("run.failed", "run", {
+          errorCode: "agent_trace_persistence_failed",
+          errorSource: "trace_storage",
+          errorText:
+            'new row for relation "agent_run_events" violates check constraint "agent_run_events_type_check"',
+        }),
+      ],
+    });
+
+    expect(projection.nodes.find((node) => node.id === "run-1")?.data).toMatchObject({
+      kind: "run",
+      status: "error",
+      error: "Trace 存储失败。",
     });
   });
 

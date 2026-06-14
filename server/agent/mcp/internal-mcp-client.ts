@@ -12,7 +12,7 @@ export function getCucumberInternalMcpServer() {
       cacheToolsList: true,
       errorFunction: null,
       name: "cucumber-internal-tools",
-      timeout: 120_000,
+      timeout: 360_000,
       requestInit: {
         headers: {
           accept: "application/json, text/event-stream",

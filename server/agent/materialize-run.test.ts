@@ -77,6 +77,47 @@ describe("agent run materializer", () => {
     expect(next.nodes.some((node) => node.id === "manual-note")).toBe(true);
   });
 
+  it("writes in-progress run plan state into the snapshot", () => {
+    const next = materializeSnapshot(
+      projectSnapshot(),
+      [
+        event("run.created", {
+          prompt: "生成一张图",
+          promptNodeId: "prompt-1",
+          selectedNodeId: null,
+        }),
+        event("input.normalized", {
+          normalizedInput: { intent: "image.generate", rawPrompt: "生成一张图" },
+        }),
+        event("run.plan.created", {
+          items: [
+            { id: "prepare", label: "整理需求和上下文" },
+            { id: "route", label: "选择合适的 Agent / 工具" },
+            { id: "execute", label: "生成图片产物" },
+            { id: "materialize", label: "写入画布结果" },
+          ],
+        }),
+      ],
+      "run-1"
+    );
+
+    expect(next.nodes.find((node) => node.id === "run-1")?.data).toMatchObject({
+      kind: "run",
+      status: "running",
+      currentStep: {
+        id: "route",
+        label: "选择合适的 Agent / 工具",
+        status: "running",
+      },
+      plan: [
+        { id: "prepare", status: "success" },
+        { id: "route", status: "running" },
+        { id: "execute", status: "queued" },
+        { id: "materialize", status: "queued" },
+      ],
+    });
+  });
+
   it("removes duplicate result nodes for the same run artifact id", () => {
     const project = projectSnapshot();
     project.nodes.push(

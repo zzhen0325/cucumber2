@@ -92,6 +92,13 @@ const authInputSchema = z.object({
 const canvasContextSchema = z.object({
   prompt: z.string().trim().min(1),
   promptNodeId: z.string().nullable().optional(),
+  retryFrom: z
+    .object({
+      failedRunNodeId: z.string().trim().min(1).max(260),
+      stepId: z.string().trim().min(1).max(260).optional(),
+    })
+    .nullable()
+    .optional(),
   selectedNodeId: z.string().nullable().optional(),
   selectedNodeIds: z.array(z.string()).optional(),
 });
@@ -840,7 +847,7 @@ app.post("/api/agent-run", async (c) => {
 
   const body = await c.req.json();
   const messages = (body.messages ?? []) as UIMessage[];
-  const canvasContext = canvasContextSchema.parse(body.canvasContext ?? {});
+  const parsedCanvasContext = canvasContextSchema.parse(body.canvasContext ?? {});
   const projectId = z.string().uuid().parse(body.projectId);
   const runNodeId = z.string().min(1).parse(body.runNodeId);
   const project = await getProjectForUser(projectId, user.id);
@@ -848,6 +855,15 @@ app.post("/api/agent-run", async (c) => {
   if (!project) {
     return notFound(c);
   }
+  const retryFrom = await resolveRetryContext({
+    project,
+    retryFrom: parsedCanvasContext.retryFrom,
+    userId: user.id,
+  });
+  const canvasContext = {
+    ...parsedCanvasContext,
+    retryFrom,
+  };
 
   const updatedProject = await updateProjectForUser({
     projectId,
@@ -861,8 +877,6 @@ app.post("/api/agent-run", async (c) => {
   const activeRunKey = getActiveAgentRunKey(user.id, projectId, runNodeId);
   const controller = new AbortController();
   activeAgentRuns.set(activeRunKey, controller);
-  const abortFromRequest = () => controller.abort(c.req.raw.signal.reason);
-  c.req.raw.signal.addEventListener("abort", abortFromRequest, { once: true });
 
   const stream = createUIMessageStream({
     originalMessages: messages,
@@ -878,7 +892,6 @@ app.post("/api/agent-run", async (c) => {
           writer,
         });
       } finally {
-        c.req.raw.signal.removeEventListener("abort", abortFromRequest);
         if (activeAgentRuns.get(activeRunKey) === controller) {
           activeAgentRuns.delete(activeRunKey);
         }
@@ -889,6 +902,71 @@ app.post("/api/agent-run", async (c) => {
 
   return createUIMessageStreamResponse({ stream });
 });
+
+async function resolveRetryContext({
+  project,
+  retryFrom,
+  userId,
+}: {
+  project: NonNullable<Awaited<ReturnType<typeof getProjectForUser>>>;
+  retryFrom?: { failedRunNodeId: string; stepId?: string } | null;
+  userId: string;
+}) {
+  if (!retryFrom) {
+    return null;
+  }
+
+  const failedRun = project.nodes.find(
+    (node) => node.id === retryFrom.failedRunNodeId && node.data.kind === "run"
+  );
+  if (!failedRun || failedRun.data.kind !== "run") {
+    return null;
+  }
+
+  const events = await listAgentEventsForUser({
+    projectId: project.id,
+    runNodeId: retryFrom.failedRunNodeId,
+    userId,
+  });
+  const failedEvent = events
+    ?.filter(
+      (event) =>
+        event.type === "tool.error" ||
+        event.type === "skill.script.failed" ||
+        event.type === "run.failed"
+    )
+    .findLast((event) => !retryFrom.stepId || event.stepId === retryFrom.stepId);
+  if (!failedEvent) {
+    return {
+      failedRunNodeId: retryFrom.failedRunNodeId,
+      stepId: retryFrom.stepId ?? "run",
+      label: "失败步骤",
+      errorText: failedRun.data.error,
+    };
+  }
+
+  const toolName =
+    typeof failedEvent.payload.toolName === "string"
+      ? failedEvent.payload.toolName
+      : undefined;
+  const scriptName =
+    typeof failedEvent.payload.scriptName === "string"
+      ? failedEvent.payload.scriptName
+      : undefined;
+  const errorText =
+    failedEvent.errorText ??
+    (typeof failedEvent.payload.errorText === "string"
+      ? failedEvent.payload.errorText
+      : failedRun.data.error);
+
+  return {
+    failedRunNodeId: retryFrom.failedRunNodeId,
+    stepId: failedEvent.stepId,
+    label: toolName ?? scriptName ?? "失败步骤",
+    toolName,
+    errorText,
+  };
+}
 
 function getActiveAgentRunKey(
   userId: string,

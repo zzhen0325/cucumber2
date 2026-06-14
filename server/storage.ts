@@ -11,6 +11,10 @@ import {
   registerAgentArtifact,
   type AgentArtifactRecord,
 } from "./supabase.ts";
+import {
+  indexArtifactForKnowledge,
+  readKnowledgeTextFromBytes,
+} from "./agent/knowledge/knowledge-index.ts";
 
 export const AGENT_ASSETS_BUCKET = "agent-assets";
 export const AGENT_SKILL_PACKAGES_BUCKET = "agent-skill-packages";
@@ -194,6 +198,15 @@ export async function completeSignedAssetUpload(
     throw new Error("Project not found.");
   }
 
+  await indexArtifactForKnowledge({
+    artifact: record,
+    contentText: readKnowledgeTextFromBytes({
+      bytes: objectBytes,
+      mimeType,
+      path: input.path,
+    }),
+  });
+
   return toArtifactRef(record);
 }
 
@@ -271,6 +284,8 @@ export async function storeGeneratedImageFromUrl(
     throw new Error("Project not found.");
   }
 
+  await indexArtifactForKnowledge({ artifact: record });
+
   return toArtifactRef(record);
 }
 
@@ -341,6 +356,11 @@ export async function storeTextArtifactContent(
   if (!record) {
     throw new Error("Project not found.");
   }
+
+  await indexArtifactForKnowledge({
+    artifact: record,
+    contentText: input.content,
+  });
 
   return toArtifactRef(record);
 }

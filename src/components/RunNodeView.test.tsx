@@ -81,6 +81,52 @@ describe("RunNodeView", () => {
       "aria-expanded"
     )).toBe("false");
   });
+
+  it("shows a compact plan and current step", () => {
+    renderRunNode({
+      currentStep: {
+        id: "generate_image",
+        label: "生成图片产物",
+        status: "running",
+      },
+      plan: [
+        { id: "prepare", label: "整理需求和上下文", status: "success" },
+        { id: "execute", label: "生成图片产物", status: "running" },
+      ],
+      status: "running",
+    });
+
+    expect(screen.getAllByTitle("生成图片产物").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("任务计划")).toBeTruthy();
+    expect(screen.getByText("整理需求和上下文")).toBeTruthy();
+  });
+
+  it("dispatches retry events for failed tool steps", () => {
+    const listener = vi.fn();
+    window.addEventListener("cucumber:retry-run", listener);
+
+    renderRunNode({
+      status: "error",
+      toolParts: [
+        {
+          errorText: "Seedream missing",
+          state: "output-error",
+          type: "tool-generate_image",
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "展开输出" }));
+    fireEvent.click(screen.getByRole("button", { name: "从生成图片重试" }));
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect((listener.mock.calls[0][0] as CustomEvent).detail).toEqual({
+      retryFrom: { stepId: "generate_image" },
+      runNodeId: "run-1",
+    });
+
+    window.removeEventListener("cucumber:retry-run", listener);
+  });
 });
 
 function renderRunNode(data: Partial<RunNodeData>) {

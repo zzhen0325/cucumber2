@@ -2,6 +2,14 @@
 
 本文记录 2026-06-11 Agent v2 正式切换后的变更。
 
+## 2026-06-14 Knowledge Artifacts
+
+- 新增 `agent_knowledge_chunks` 作为 artifact 派生 knowledge index，不新增平行 Trace；字段包括 chunk id、project id、source artifact id、source node id、text excerpt、text excerpt digest、keyword index、可选 embedding、metadata、createdAt 和 updatedAt。
+- 用户上传文档、网页、图片、数据集，以及 runtime 生成的文本、网页、图片 artifact 后会自动重建对应 knowledge chunks；同一 artifact 重建时先删除旧 chunks，避免重复索引。
+- 当前索引实现采用 keyword index，不引入 embedding provider 或 pgvector 依赖；文本型 md/html/txt/csv/json 等会索引正文片段，图片和二进制文件索引标题、summary、prompt 和 metadata 摘要。
+- 新增 `search_knowledge` Agent tool，scope 为 `read.artifact` 和 `read.knowledge`；Manager、Document/Web/Research/Image Agent 都可按项目可见 source node/artifact 检索 chunks。
+- Agent instructions 更新为：用户要求参考、基于、总结、比较或复用已导入资料时先检索 knowledge；不得声称读取了 `search_knowledge` 未返回的全文。
+
 ## 2026-06-14 P3 Specialist Agents
 
 - 新增 specialist agent registry，集中声明 specialist name、enabled intents、required tools、produced artifact types 和 handoff policy；Manager 通过 registry 生成 Agents SDK handoff，specialist model 仍由 runtime 统一注入。

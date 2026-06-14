@@ -90,6 +90,20 @@ export type AgentArtifactRecord = {
   createdAt: string;
 };
 
+export type AgentKnowledgeChunkRecord = {
+  id: string;
+  projectId: string;
+  sourceArtifactId: string;
+  sourceNodeId: string | null;
+  textExcerpt: string;
+  textExcerptDigest: string;
+  keywordIndex: string[];
+  embedding: Record<string, unknown> | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type AgentSkillDefinitionSummary = {
   id: string;
   name: string;
@@ -241,6 +255,20 @@ type AgentArtifactRow = {
   created_at: string;
 };
 
+type AgentKnowledgeChunkRow = {
+  id: string;
+  project_id: string;
+  source_artifact_id: string;
+  source_node_id: string | null;
+  text_excerpt: string;
+  text_excerpt_digest: string;
+  keyword_index: string[] | null;
+  embedding: Record<string, unknown> | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
 type AgentSkillDefinitionRow = {
   id: string;
   name: string;
@@ -286,6 +314,18 @@ export type RegisterAgentArtifactInput = {
   sizeBytes?: number | null;
   origin: AgentArtifactOrigin;
   createdBy?: string | null;
+};
+
+export type UpsertAgentKnowledgeChunkInput = {
+  id: string;
+  projectId: string;
+  sourceArtifactId: string;
+  sourceNodeId?: string | null;
+  textExcerpt: string;
+  textExcerptDigest: string;
+  keywordIndex: string[];
+  embedding?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown>;
 };
 
 let cachedClient: SupabaseClient | null = null;
@@ -854,6 +894,84 @@ export async function getAgentArtifactForUser({
   return mapAgentArtifactRow(data);
 }
 
+export async function replaceAgentKnowledgeChunksForArtifact({
+  chunks,
+  projectId,
+  sourceArtifactId,
+}: {
+  chunks: UpsertAgentKnowledgeChunkInput[];
+  projectId: string;
+  sourceArtifactId: string;
+}) {
+  const client = getSupabaseClient();
+  const { error: deleteError } = await client
+    .from("agent_knowledge_chunks")
+    .delete()
+    .eq("project_id", projectId)
+    .eq("source_artifact_id", sourceArtifactId);
+
+  if (deleteError) {
+    throw deleteError;
+  }
+
+  if (!chunks.length) {
+    return [];
+  }
+
+  const { data, error } = await client
+    .from("agent_knowledge_chunks")
+    .upsert(
+      chunks.map((chunk) => ({
+        id: chunk.id,
+        project_id: chunk.projectId,
+        source_artifact_id: chunk.sourceArtifactId,
+        source_node_id: chunk.sourceNodeId ?? null,
+        text_excerpt: chunk.textExcerpt,
+        text_excerpt_digest: chunk.textExcerptDigest,
+        keyword_index: chunk.keywordIndex,
+        embedding: chunk.embedding ?? null,
+        metadata: chunk.metadata ?? {},
+        updated_at: new Date().toISOString(),
+      })),
+      { onConflict: "id" }
+    )
+    .select()
+    .returns<AgentKnowledgeChunkRow[]>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data.map(mapAgentKnowledgeChunkRow);
+}
+
+export async function listAgentKnowledgeChunksForProject({
+  projectId,
+  userId,
+}: {
+  projectId: string;
+  userId: string;
+}) {
+  const existing = await getProjectRow(projectId);
+  if (!canAccessProject(userId, mapProjectAccess(existing))) {
+    return null;
+  }
+
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("agent_knowledge_chunks")
+    .select("*")
+    .eq("project_id", projectId)
+    .order("updated_at", { ascending: false })
+    .returns<AgentKnowledgeChunkRow[]>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data.map(mapAgentKnowledgeChunkRow);
+}
+
 async function getProjectRow(projectId: string) {
   const client = getSupabaseClient();
   const { data, error } = await client
@@ -1029,6 +1147,24 @@ function mapAgentArtifactRow(row: AgentArtifactRow): AgentArtifactRecord {
     origin: row.origin ?? "user_upload",
     createdBy: row.created_by,
     createdAt: row.created_at,
+  };
+}
+
+function mapAgentKnowledgeChunkRow(
+  row: AgentKnowledgeChunkRow
+): AgentKnowledgeChunkRecord {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    sourceArtifactId: row.source_artifact_id,
+    sourceNodeId: row.source_node_id,
+    textExcerpt: row.text_excerpt,
+    textExcerptDigest: row.text_excerpt_digest,
+    keywordIndex: row.keyword_index ?? [],
+    embedding: row.embedding,
+    metadata: row.metadata ?? {},
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 

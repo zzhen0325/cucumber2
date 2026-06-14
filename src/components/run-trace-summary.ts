@@ -23,6 +23,7 @@ export function summarizeRunTrace(events: RunStepTraceEvent[]) {
       (event) =>
         event.type === "tool.error" ||
         event.type === "skill.script.failed" ||
+        event.type === "run.step.failed" ||
         event.type === "run.failed" ||
         event.type === "canvas.operation.rejected"
     ),
@@ -57,7 +58,10 @@ export function summarizeRunTrace(events: RunStepTraceEvent[]) {
       (event) =>
         event.type === "tool.input" ||
         event.type === "tool.output" ||
-        event.type === "tool.error"
+        event.type === "tool.error" ||
+        event.type === "run.step.started" ||
+        event.type === "run.step.completed" ||
+        event.type === "run.step.failed"
     ),
   };
 }
@@ -75,6 +79,10 @@ export function getEventLabel(event: RunStepTraceEvent) {
     "run.completed": "Run completed",
     "run.created": "Run created",
     "run.failed": "Run failed",
+    "run.plan.created": "Run plan created",
+    "run.step.completed": "Run step completed",
+    "run.step.failed": "Run step failed",
+    "run.step.started": "Run step started",
     "skill.activated": "Skill activated",
     "skill.retrieved": "Skills retrieved",
     "skill.script.completed": "Skill script completed",
@@ -156,6 +164,15 @@ export function summarizeTraceEvent(event: RunStepTraceEvent) {
     return error ? `${sourceLabel}: ${truncate(error, 150)}` : sourceLabel;
   }
 
+  if (event.type === "run.plan.created") {
+    const items = readArray(event.payload.items);
+    return items.length ? `${items.length} 个步骤` : "计划已生成";
+  }
+
+  if (event.type.startsWith("run.step.")) {
+    return readString(event.payload.label) ?? event.stepId;
+  }
+
   if (event.type === "tool.input" || event.type === "tool.output") {
     return readString(event.payload.toolName) ?? summarizeUnknown(event.payload);
   }
@@ -177,6 +194,9 @@ function buildTraceSteps(events: RunStepTraceEvent[]) {
       event.type !== "tool.input" &&
       event.type !== "tool.output" &&
       event.type !== "tool.error" &&
+      event.type !== "run.step.started" &&
+      event.type !== "run.step.completed" &&
+      event.type !== "run.step.failed" &&
       event.type !== "skill.script.started" &&
       event.type !== "skill.script.completed" &&
       event.type !== "skill.script.failed"
@@ -184,7 +204,9 @@ function buildTraceSteps(events: RunStepTraceEvent[]) {
       continue;
     }
     const toolName =
-      event.type.startsWith("skill.script.")
+      event.type.startsWith("run.step.")
+        ? readString(event.payload.label) ?? event.stepId
+        : event.type.startsWith("skill.script.")
         ? readString(event.payload.scriptName) ?? event.stepId
         : readString(event.payload.toolName) ?? event.stepId;
     steps.set(event.stepId, {
@@ -192,8 +214,11 @@ function buildTraceSteps(events: RunStepTraceEvent[]) {
       label: toolName,
       status:
         event.type === "tool.error" || event.type === "skill.script.failed"
+          || event.type === "run.step.failed"
           ? "error"
-          : event.type === "tool.output" || event.type === "skill.script.completed"
+          : event.type === "tool.output" ||
+              event.type === "skill.script.completed" ||
+              event.type === "run.step.completed"
             ? "success"
             : "running",
       toolName,

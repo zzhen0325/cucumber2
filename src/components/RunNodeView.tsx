@@ -41,12 +41,13 @@ export function RunNodeView({
   );
   const latestToolPart = toolParts.at(-1) ?? toolParts[0];
   const title = getRunTitle(data.status, latestToolPart?.state);
-  const headerSummary = getRunHeaderSummary(data.status, toolParts);
+  const headerSummary = getRunHeaderSummary(data.status, toolParts, data.currentStep);
   const hasToolDetail =
     data.status !== "queued" ||
     toolParts.some((part) => part.state !== "input-streaming");
   const agentText = data.agentText?.trim() ?? "";
-  const hasRunOutput = isActiveRun || Boolean(agentText) || hasToolDetail;
+  const hasPlan = Boolean(data.plan?.length);
+  const hasRunOutput = isActiveRun || Boolean(agentText) || hasToolDetail || hasPlan;
   const toggleLabel = expanded ? "收起输出" : "展开输出";
   const nodeClassName = [
     "canvas-node",
@@ -63,6 +64,8 @@ export function RunNodeView({
         agentText,
         expanded,
         status: data.status,
+        currentStep: data.currentStep,
+        plan: data.plan,
         toolParts: toolParts.map((part) => ({
           errorText: part.errorText,
           input: part.input,
@@ -72,7 +75,7 @@ export function RunNodeView({
           type: part.type,
         })),
       }),
-    [agentText, data.status, expanded, toolParts]
+    [agentText, data.currentStep, data.plan, data.status, expanded, toolParts]
   );
   const nodeStyle = getResizableNodeStyle(width, height, {
     expanded,
@@ -212,6 +215,7 @@ export function RunNodeView({
                 </Shimmer>
               )}
             </div>
+            {hasPlan && <RunPlanView plan={data.plan ?? []} />}
             {hasToolDetail &&
               toolParts.length > 0 && (
                 <div className="tool-call-stack" aria-label="工具调用">
@@ -219,6 +223,7 @@ export function RunNodeView({
                     <ToolPartView
                       error={data.error}
                       key={`${part.type}-${part.toolCallId ?? index}`}
+                      runNodeId={id}
                       toolPart={part}
                     />
                   ))}
@@ -256,9 +261,11 @@ function getResizableNodeStyle(
 
 export function ToolPartView({
   error,
+  runNodeId,
   toolPart,
 }: {
   error?: string;
+  runNodeId?: string;
   toolPart: CanvasToolPart;
 }) {
   const [open, setOpen] = useState(false);
@@ -289,8 +296,26 @@ export function ToolPartView({
         <ChevronDown className="tool-call-chevron" size={13} />
       </button>
       {errorText && !open && (
-        <span className="tool-call-error-snippet" title={errorText}>
-          {errorText}
+        <span className="tool-call-error-line">
+          <span className="tool-call-error-snippet" title={errorText}>
+            {errorText}
+          </span>
+          {runNodeId && (
+            <button
+              aria-label={`从${toolName}重试`}
+              className="tool-call-retry nodrag nopan"
+              onClick={(event) => {
+                event.stopPropagation();
+                dispatchRetryRun(runNodeId, {
+                  stepId: getToolStepId(toolPart),
+                });
+              }}
+              title="从这里重试"
+              type="button"
+            >
+              <RotateCcw size={11} />
+            </button>
+          )}
         </span>
       )}
       {open && (
@@ -307,6 +332,21 @@ export function ToolPartView({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function RunPlanView({ plan }: { plan: NonNullable<RunNodeData["plan"]> }) {
+  return (
+    <div className="run-plan-list" aria-label="任务计划">
+      {plan.slice(0, 4).map((item) => (
+        <div className={`run-plan-item ${item.status}`} key={item.id}>
+          <span className={`run-plan-dot ${item.status}`}>
+            <RunStatusIcon status={item.status} />
+          </span>
+          <strong title={item.label}>{item.label}</strong>
+        </div>
+      ))}
     </div>
   );
 }
@@ -329,10 +369,13 @@ function dispatchOpenTrace(runNodeId: string) {
   );
 }
 
-function dispatchRetryRun(runNodeId: string) {
+function dispatchRetryRun(
+  runNodeId: string,
+  retryFrom?: { stepId?: string }
+) {
   window.dispatchEvent(
     new CustomEvent("cucumber:retry-run", {
-      detail: { runNodeId },
+      detail: { runNodeId, retryFrom },
     })
   );
 }
@@ -369,12 +412,24 @@ function getToolName(toolPart: CanvasToolPart) {
   return names[toolPart.type] ?? toolPart.type.replace(/^tool-/, "");
 }
 
+function getToolStepId(toolPart: CanvasToolPart) {
+  return toolPart.type.replace(/^tool-/, "");
+}
+
 function getRunHeaderSummary(
   status: RunNodeData["status"],
-  toolParts: CanvasToolPart[]
+  toolParts: CanvasToolPart[],
+  currentStep?: RunNodeData["currentStep"]
 ) {
   if (status === "success") {
     return null;
+  }
+
+  if (currentStep?.label) {
+    return {
+      fullLabel: currentStep.label,
+      visibleLabel: currentStep.label,
+    };
   }
 
   const currentToolPart =

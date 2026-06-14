@@ -657,7 +657,7 @@ function signedHttpsPost(
         headers,
         ca: readCustomCaFromEnv(),
         signal,
-        timeout: 120_000,
+        timeout: 360_000,
       },
       (res) => {
         let text = "";

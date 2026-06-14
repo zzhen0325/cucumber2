@@ -2,6 +2,7 @@ import { Agent } from "@openai/agents";
 
 import type { CucumberAgentContext } from "../context.ts";
 import { researchInstructions } from "../prompts/research.instructions.ts";
+import { searchKnowledgeTool } from "../tools/knowledge/search-knowledge.tool.ts";
 import { collectResearchSourcesTool } from "../tools/research/collect-research-sources.tool.ts";
 import { createResearchArtifactTool } from "../tools/research/create-research-artifact.tool.ts";
 
@@ -18,6 +19,6 @@ export function createResearchAgent({
       "Research specialist. Delegate here for source-based research, comparison, synthesis, and answers that cite explicit public URLs or trusted canvas sources. Does not perform general web search yet.",
     instructions: (runContext) => researchInstructions(runContext.context),
     ...(model ? { model } : {}),
-    tools: [collectResearchSourcesTool, createResearchArtifactTool],
+    tools: [searchKnowledgeTool, collectResearchSourcesTool, createResearchArtifactTool],
   });
 }

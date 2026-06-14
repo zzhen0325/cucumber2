@@ -1,6 +1,7 @@
 export const toolScopeValues = [
   "read.canvas",
   "read.artifact",
+  "read.knowledge",
   "read.skill",
   "write.artifact",
   "propose.canvas",
@@ -100,6 +101,28 @@ export const toolRegistry = {
     producedArtifactTypes: [],
     canCallExternalNetwork: false,
     inputSchema: objectSchema,
+    outputSchema: objectSchema,
+  },
+  search_knowledge: {
+    id: "search_knowledge",
+    name: "search_knowledge",
+    traceLabel: "Search knowledge",
+    requiredScopes: ["read.artifact", "read.knowledge"],
+    producedArtifactTypes: [],
+    canCallExternalNetwork: false,
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        limit: { type: "integer" },
+        query: { type: "string" },
+        sourceNodeIds: {
+          type: "array",
+          items: { type: "string" },
+        },
+      },
+      required: ["query"],
+    },
     outputSchema: objectSchema,
   },
   create_text_artifact: {

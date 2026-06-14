@@ -13,6 +13,7 @@ import type {
   CanvasToolPart,
   GeneratedImage,
   ImageRequestPreview,
+  RunPlanItem,
   RunStepTimelineItem,
   RunSummaryItem,
 } from "../types/canvas";
@@ -262,6 +263,9 @@ export function projectRunTraceToCanvas({
       ? "running"
       : projectedRunStatus;
   const toolParts = buildToolParts(orderedEvents, prompt);
+  const plan = buildRunPlanItems(orderedEvents, runStatus);
+  const stepTimeline = buildStepTimeline(orderedEvents);
+  const currentStep = getCurrentRunStep(orderedEvents, runStatus, stepTimeline, plan);
   const agentText = buildAgentText(orderedEvents, runStatus, streamedAgentText);
   const directTextResult = readDirectTextResult(orderedEvents);
   const runWasAborted = isAbortedRun(orderedEvents);
@@ -296,9 +300,11 @@ export function projectRunTraceToCanvas({
         prompt,
         status: runStatus,
         agentText,
+        currentStep,
+        plan,
         toolPart: toolParts.at(-1),
         toolParts,
-        stepTimeline: buildStepTimeline(orderedEvents),
+        stepTimeline,
         summaryItems: buildRunSummaryItems(orderedEvents),
         traceAvailable: true,
         error: readRunError(orderedEvents),
@@ -562,6 +568,7 @@ function buildToolParts(
         ...previous,
         type: `tool-${toolName}`,
         state: "input-available",
+        toolCallId,
         input: event.payload.input ?? previous?.input,
       });
     }
@@ -571,6 +578,7 @@ function buildToolParts(
         ...previous,
         type: `tool-${toolName}`,
         state: "output-available",
+        toolCallId,
         input: previous?.input,
         output: event.payload.output,
       });
@@ -582,6 +590,7 @@ function buildToolParts(
         ...previous,
         type: `tool-${toolName}`,
         state: "output-error",
+        toolCallId,
         input: previous?.input,
         output: previous?.output,
         errorText: summarizeRunError(rawErrorText, {
@@ -622,7 +631,7 @@ function buildStepTimeline(events: RunStepTraceEvent[]): RunStepTimelineItem[] {
         id: event.stepId,
         label: previous?.label ?? event.stepId,
         status: event.type === "tool.output" ? "success" : "running",
-        startedAt: previous?.startedAt,
+        startedAt: previous?.startedAt ?? event.createdAt,
         completedAt: event.type === "tool.output" ? event.createdAt : undefined,
         toolName: readString(event.payload.toolName) ?? previous?.toolName,
       });
@@ -634,9 +643,36 @@ function buildStepTimeline(events: RunStepTraceEvent[]): RunStepTimelineItem[] {
         id: event.stepId,
         label: previous?.label ?? event.stepId,
         status: "error",
-        startedAt: previous?.startedAt,
+        startedAt: previous?.startedAt ?? event.createdAt,
         completedAt: event.createdAt,
         toolName: readString(event.payload.toolName) ?? previous?.toolName,
+        errorText: event.errorText ?? readString(event.payload.errorText),
+      });
+    }
+
+    if (
+      event.type === "skill.script.started" ||
+      event.type === "skill.script.completed" ||
+      event.type === "skill.script.failed"
+    ) {
+      const previous = timeline.get(event.stepId);
+      const scriptName = readString(event.payload.scriptName) ?? event.stepId;
+      timeline.set(event.stepId, {
+        id: event.stepId,
+        label: scriptName,
+        status:
+          event.type === "skill.script.failed"
+            ? "error"
+            : event.type === "skill.script.completed"
+              ? "success"
+              : "running",
+        startedAt: previous?.startedAt ?? event.createdAt,
+        completedAt:
+          event.type === "skill.script.completed" ||
+          event.type === "skill.script.failed"
+            ? event.createdAt
+            : undefined,
+        toolName: scriptName,
         errorText: event.errorText ?? readString(event.payload.errorText),
       });
     }
@@ -652,6 +688,169 @@ function buildStepTimeline(events: RunStepTraceEvent[]): RunStepTimelineItem[] {
     }
     return step;
   });
+}
+
+function buildRunPlanItems(
+  events: RunStepTraceEvent[],
+  runStatus: AgentRunStatus
+): RunPlanItem[] {
+  const planEvent = events.findLast((event) => event.type === "run.plan.created");
+  const rawItems = readArray(planEvent?.payload.items).flatMap((item) => {
+    const record = readRecord(item);
+    const id = readString(record?.id);
+    const label = readString(record?.label);
+    return id && label ? [{ id, label }] : [];
+  });
+  const items = rawItems.length
+    ? rawItems
+    : [
+        { id: "prepare", label: "整理需求和上下文" },
+        { id: "route", label: "选择合适的 Agent / 工具" },
+        { id: "execute", label: "执行任务" },
+        { id: "materialize", label: "写入画布结果" },
+      ];
+  const failure = events.findLast(
+    (event) =>
+      event.type === "tool.error" ||
+      event.type === "skill.script.failed" ||
+      event.type === "run.failed"
+  );
+  const hasInput = events.some((event) => event.type === "input.normalized");
+  const hasRoute = events.some(
+    (event) =>
+      event.type === "agent.active" ||
+      event.type === "handoff.requested" ||
+      event.type === "handoff.completed" ||
+      event.type === "skill.retrieved"
+  );
+  const hasExecution = events.some(
+    (event) =>
+      event.type === "tool.input" ||
+      event.type === "tool.output" ||
+      event.type === "tool.error" ||
+      event.type === "skill.script.started" ||
+      event.type === "skill.script.completed" ||
+      event.type === "skill.script.failed" ||
+      event.type === "artifact.created" ||
+      event.type === "canvas.operation.applied"
+  );
+  const hasMaterialized = events.some(
+    (event) =>
+      event.type === "artifact.created" ||
+      event.type === "canvas.operation.applied" ||
+      event.type === "run.completed"
+  );
+
+  return items.map((item) => ({
+    ...item,
+    status: getPlanItemStatus(item.id, {
+      failure,
+      hasExecution,
+      hasInput,
+      hasMaterialized,
+      hasRoute,
+      runStatus,
+    }),
+  }));
+}
+
+function getPlanItemStatus(
+  itemId: string,
+  state: {
+    failure: RunStepTraceEvent | undefined;
+    hasExecution: boolean;
+    hasInput: boolean;
+    hasMaterialized: boolean;
+    hasRoute: boolean;
+    runStatus: AgentRunStatus;
+  }
+): AgentRunStatus {
+  if (state.runStatus === "success") {
+    return "success";
+  }
+
+  if (state.runStatus === "error") {
+    if (itemId === "materialize" && state.hasMaterialized) {
+      return "success";
+    }
+    if (itemId === "execute" || itemId === "materialize") {
+      return itemId === "execute" ? "error" : "queued";
+    }
+  }
+
+  if (itemId === "prepare") {
+    return state.hasInput ? "success" : "running";
+  }
+  if (itemId === "route") {
+    if (!state.hasInput) {
+      return "queued";
+    }
+    return state.hasRoute || state.hasExecution ? "success" : "running";
+  }
+  if (itemId === "execute") {
+    if (!state.hasRoute && !state.hasExecution) {
+      return "queued";
+    }
+    return state.hasMaterialized ? "success" : "running";
+  }
+  if (itemId === "materialize") {
+    if (!state.hasMaterialized) {
+      return "queued";
+    }
+    return state.failure ? "running" : "success";
+  }
+
+  return "queued";
+}
+
+function getCurrentRunStep(
+  events: RunStepTraceEvent[],
+  runStatus: AgentRunStatus,
+  timeline: RunStepTimelineItem[],
+  plan: RunPlanItem[]
+): RunStepTimelineItem | undefined {
+  const failedStep = timeline.findLast((step) => step.status === "error");
+  if (failedStep) {
+    return failedStep;
+  }
+  if (runStatus === "error") {
+    return {
+      id: "run",
+      label: readRunError(events) ?? "运行失败",
+      status: "error",
+      completedAt: events.findLast((event) => event.type === "run.failed")?.createdAt,
+    };
+  }
+  if (runStatus === "success") {
+    return {
+      id: "run",
+      label: "完成",
+      status: "success",
+      completedAt: events.findLast((event) => event.type === "run.completed")?.createdAt,
+    };
+  }
+
+  const runningStep = timeline.findLast((step) => step.status === "running");
+  if (runningStep) {
+    return runningStep;
+  }
+  const runningPlan = plan.find((item) => item.status === "running");
+  if (runningPlan) {
+    return {
+      id: runningPlan.id,
+      label: runningPlan.label,
+      status: "running",
+    };
+  }
+
+  const queuedPlan = plan.find((item) => item.status === "queued");
+  return queuedPlan
+    ? {
+        id: queuedPlan.id,
+        label: queuedPlan.label,
+        status: "queued",
+      }
+    : undefined;
 }
 
 function buildRunSummaryItems(events: RunStepTraceEvent[]): RunSummaryItem[] {
@@ -1296,6 +1495,12 @@ function summarizeRunError(
   if (errorSource === "canvas_policy") {
     return "画布操作被拒绝。";
   }
+  if (
+    errorSource === "trace_storage" ||
+    errorCode === "agent_trace_persistence_failed"
+  ) {
+    return "Trace 存储失败。";
+  }
   if (errorSource === "skill_script" || errorCode === "skill_script_failed") {
     return "技能脚本失败。";
   }
@@ -1418,6 +1623,10 @@ function readRecord(value: unknown) {
   return value && typeof value === "object"
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function readArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
 function humanizeRuntimeLabel(value: string | undefined) {

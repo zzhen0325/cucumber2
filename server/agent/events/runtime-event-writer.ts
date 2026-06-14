@@ -62,7 +62,7 @@ export function createAgentEventWriter({
         createdAt: input.createdAt ?? new Date().toISOString(),
       };
 
-      writer.write({
+      safeWrite(writer, {
         type: "data-runtime-event",
         id: getAgentEventStreamId(event),
         data: event,
@@ -87,7 +87,7 @@ export function createAgentEventWriter({
         getToolTraceMetadata(input.toolName),
         redacted.metadata
       );
-      writer.write({
+      safeWrite(writer, {
         type: "tool-input-available",
         toolCallId: input.toolCallId,
         toolName: input.toolName,
@@ -120,7 +120,7 @@ export function createAgentEventWriter({
         getToolTraceMetadata(input.toolName),
         redacted.metadata
       );
-      writer.write({
+      safeWrite(writer, {
         type: "tool-output-available",
         toolCallId: input.toolCallId,
         output: redacted.value,
@@ -151,7 +151,8 @@ export function createAgentEventWriter({
         getToolTraceMetadata(input.toolName),
         redactedInput.metadata
       );
-      writer.write(
+      safeWrite(
+        writer,
         input.inputWritten
           ? {
               type: "tool-output-error",
@@ -164,7 +165,7 @@ export function createAgentEventWriter({
               toolName: input.toolName,
               input: redactedInput.value,
               errorText: input.errorText,
-            }
+          }
       );
       return this.writeEvent({
         projectId,
@@ -194,4 +195,16 @@ function mergeMetadata(
 
 function getAgentEventStreamId(event: AgentEvent) {
   return event.id ?? `${event.runNodeId}-${event.stepId}-${event.type}-${event.createdAt}`;
+}
+
+function safeWrite(
+  writer: UIMessageStreamWriter<UIMessage>,
+  part: Parameters<UIMessageStreamWriter<UIMessage>["write"]>[0]
+) {
+  try {
+    writer.write(part);
+  } catch {
+    // A browser may leave the project while the run continues in-process.
+    // Persistence remains the source of truth for later hydration.
+  }
 }

@@ -23,6 +23,10 @@ export type CanvasOperation =
 export const agentEventTypes = [
   "run.created",
   "input.normalized",
+  "run.plan.created",
+  "run.step.started",
+  "run.step.completed",
+  "run.step.failed",
   "skill.retrieved",
   "skill.activated",
   "skill.script.started",

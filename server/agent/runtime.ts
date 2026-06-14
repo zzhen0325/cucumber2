@@ -148,15 +148,27 @@ export async function executeAgentRun({
         runtime: "openai-agents-sdk",
       }),
     });
+    const runPlan = buildRunPlan(agentInput);
+    await writeRunEvent({
+      projectId: input.projectId,
+      runNodeId: input.runNodeId,
+      stepId: "plan",
+      type: "run.plan.created",
+      payload: {
+        items: runPlan,
+        retryFrom: agentInput.retryFrom ?? null,
+        runtime: "openai-agents-sdk",
+      },
+    });
 
     for await (const event of agentRuntime.run(agentInput)) {
       if (event.type === "text_delta") {
         if (!textStarted) {
           textStarted = true;
-          streamWriter.write({ type: "start-step" });
-          streamWriter.write({ type: "text-start", id: textStreamId });
+          writeStreamPart({ type: "start-step" });
+          writeStreamPart({ type: "text-start", id: textStreamId });
         }
-        streamWriter.write({ type: "text-delta", id: textStreamId, delta: event.text });
+        writeStreamPart({ type: "text-delta", id: textStreamId, delta: event.text });
         continue;
       }
 
@@ -458,9 +470,17 @@ export async function executeAgentRun({
     if (!textStarted) {
       return;
     }
-    streamWriter.write({ type: "text-end", id: textStreamId });
-    streamWriter.write({ type: "finish-step" });
+    writeStreamPart({ type: "text-end", id: textStreamId });
+    writeStreamPart({ type: "finish-step" });
     textStarted = false;
+  }
+
+  function writeStreamPart(part: Parameters<typeof streamWriter.write>[0]) {
+    try {
+      streamWriter.write(part);
+    } catch {
+      // The run can continue after the user leaves; persisted events hydrate UI.
+    }
   }
 }
 
@@ -486,6 +506,13 @@ function classifyRunFailure({
     return {
       errorCode: "context_validation_failed",
       errorSource: "context",
+    };
+  }
+
+  if (isAgentEventPersistenceError(error, message)) {
+    return {
+      errorCode: "agent_trace_persistence_failed",
+      errorSource: "trace_storage",
     };
   }
 
@@ -521,6 +548,36 @@ function classifyRunFailure({
     errorCode: "agent_run_failed",
     errorSource: "model",
   };
+}
+
+function isAgentEventPersistenceError(error: unknown, message: string) {
+  const combined = [
+    message,
+    readErrorString(error, "code"),
+    readErrorString(error, "details"),
+    readErrorString(error, "hint"),
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return (
+    combined.includes("agent_run_events") ||
+    combined.includes("agent_run_events_type_check")
+  );
+}
+
+function readErrorString(error: unknown, key: string) {
+  if (!error || typeof error !== "object" || !(key in error)) {
+    return null;
+  }
+  const value = (error as Record<string, unknown>)[key];
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  if (typeof value === "number") {
+    return String(value);
+  }
+  return null;
 }
 
 function buildRedactedPayload(payload: Record<string, unknown>) {
@@ -583,5 +640,64 @@ function buildManagerRunPrompt(input: AgentRunInput) {
       ...input.upstreamContext.filter((item) => item.type !== "image"),
       ...imageContext,
     ].slice(0, 12))}`,
+    input.retryFrom
+      ? [
+          "Retry context:",
+          JSON.stringify({
+            failedRunNodeId: input.retryFrom.failedRunNodeId,
+            stepId: input.retryFrom.stepId,
+            label: input.retryFrom.label,
+            toolName: input.retryFrom.toolName,
+            errorText: input.retryFrom.errorText,
+          }),
+          "Resume from the failed step when possible. Preserve already completed upstream work and do not repeat completed tool work unless it is required to recover.",
+        ].join("\n")
+      : "",
   ].filter(Boolean).join("\n\n");
+}
+
+function buildRunPlan(input: AgentRunInput) {
+  const intent = input.normalizedInput?.intent ?? "text.answer";
+  const retryPrefix = input.retryFrom ? "重试：" : "";
+  const taskLabel = getTaskExecutionLabel(intent);
+
+  return [
+    {
+      id: "prepare",
+      label: input.retryFrom
+        ? `定位失败步骤：${input.retryFrom.label ?? input.retryFrom.stepId}`
+        : "整理需求和上下文",
+    },
+    {
+      id: "route",
+      label: `${retryPrefix}选择合适的 Agent / 工具`,
+    },
+    {
+      id: "execute",
+      label: `${retryPrefix}${taskLabel}`,
+    },
+    {
+      id: "materialize",
+      label: "写入画布结果",
+    },
+  ];
+}
+
+function getTaskExecutionLabel(intent: string) {
+  const labels: Record<string, string> = {
+    "canvas.operation": "更新画布",
+    "code.create": "处理代码请求",
+    "data.analyze": "分析数据请求",
+    "document.create": "生成文档产物",
+    "document.edit": "改写文档产物",
+    "image.generate": "生成图片产物",
+    "image.upscale": "高清放大图片",
+    "research.answer": "整理调研来源",
+    "text.answer": "生成文字回复",
+    "web.fetch": "抓取网页内容",
+    "workflow.plan": "拆解任务计划",
+    unsupported: "确认能力边界",
+  };
+
+  return labels[intent] ?? "执行任务";
 }

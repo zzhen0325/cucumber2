@@ -134,6 +134,12 @@ export type RunSummaryItem = {
   detail?: string;
 };
 
+export type RunPlanItem = {
+  id: string;
+  label: string;
+  status: AgentRunStatus;
+};
+
 export type PromptNodeData = {
   kind: "prompt";
   prompt: string;
@@ -149,6 +155,8 @@ export type RunNodeData = {
   toolParts?: CanvasToolPart[];
   toolPart?: CanvasToolPart;
   error?: string;
+  plan?: RunPlanItem[];
+  currentStep?: RunStepTimelineItem;
   stepTimeline?: RunStepTimelineItem[];
   decision?: string;
   summaryItems?: RunSummaryItem[];

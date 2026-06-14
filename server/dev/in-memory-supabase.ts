@@ -63,6 +63,13 @@ function withDefaults(table: string, value: Row): Row {
     if (row.origin == null) row.origin = "user_upload";
     if (row.created_by === undefined) row.created_by = null;
   }
+  if (table === "agent_knowledge_chunks") {
+    if (row.source_node_id === undefined) row.source_node_id = null;
+    if (row.keyword_index == null) row.keyword_index = [];
+    if (row.embedding === undefined) row.embedding = null;
+    if (row.metadata == null) row.metadata = {};
+    if (row.updated_at == null) row.updated_at = nowIso();
+  }
   if (table === "agent_skill_definitions") {
     if (row.agent_scope === undefined) row.agent_scope = "general";
     if (row.purpose === undefined) row.purpose = "general";
@@ -268,6 +275,9 @@ class InMemoryQuery implements PromiseLike<{ data: unknown; error: null; count?:
         if (this.name === "agent_skill_definitions") {
           r.updated_at = nowIso();
         }
+        if (this.name === "agent_knowledge_chunks") {
+          r.updated_at = nowIso();
+        }
       }
       return this.wantRows ? this.finalizeRows(target) : { data: null, error: null };
     }
@@ -279,6 +289,9 @@ class InMemoryQuery implements PromiseLike<{ data: unknown; error: null; count?:
         const existing = v.id != null ? rows.find((r) => r.id === v.id) : undefined;
         if (existing) {
           Object.assign(existing, v);
+          if (this.name === "agent_knowledge_chunks") {
+            existing.updated_at = nowIso();
+          }
           touched.push(existing);
         } else {
           const row = withDefaults(this.name, v);

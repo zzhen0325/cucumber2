@@ -196,6 +196,10 @@ type AgentRunRequestBody = {
   canvasContext: {
     prompt: string;
     promptNodeId: string;
+    retryFrom?: {
+      failedRunNodeId: string;
+      stepId?: string;
+    } | null;
     selectedNodeId: string | null;
     selectedNodeIds: string[];
   };
@@ -1013,11 +1017,13 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     async ({
       clearComposer = false,
       promptText,
+      retryFrom,
       selectedNodeId,
       selectedNodeIds = selectedNodeId ? [selectedNodeId] : [],
     }: {
       clearComposer?: boolean;
       promptText: string;
+      retryFrom?: AgentRunRequestBody["canvasContext"]["retryFrom"];
       selectedNodeId: string | null;
       selectedNodeIds?: string[];
     }) => {
@@ -1055,6 +1061,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         canvasContext: {
           prompt: value,
           promptNodeId: draft.promptNode.id,
+          retryFrom,
           selectedNodeId,
           selectedNodeIds,
         },
@@ -1101,7 +1108,10 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   );
 
   const handleRetryRun = useCallback(
-    (runNodeId: string) => {
+    (
+      runNodeId: string,
+      retryFrom?: { stepId?: string }
+    ) => {
       if (isReplayModeRef.current) {
         setStorageStatus("error");
         setStorageError("Run 回放模式为只读，退出回放后再重试。");
@@ -1132,6 +1142,10 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
       void startAgentRun({
         promptText: retryPrompt,
+        retryFrom: {
+          failedRunNodeId: runNodeId,
+          stepId: retryFrom?.stepId ?? getLatestFailedStepId(runNode),
+        },
         selectedNodeId: getRetryAnchorNodeId(
           runNodeId,
           nodesRef.current,
@@ -1144,9 +1158,17 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
   useEffect(() => {
     const handleRetryRunEvent = (event: Event) => {
-      const detail = (event as CustomEvent<{ runNodeId?: unknown }>).detail;
+      const detail = (event as CustomEvent<{
+        retryFrom?: { stepId?: unknown };
+        runNodeId?: unknown;
+      }>).detail;
       if (typeof detail?.runNodeId === "string") {
-        handleRetryRun(detail.runNodeId);
+        handleRetryRun(
+          detail.runNodeId,
+          typeof detail.retryFrom?.stepId === "string"
+            ? { stepId: detail.retryFrom.stepId }
+            : undefined
+        );
       }
     };
 
@@ -1970,6 +1992,17 @@ function getRetryAnchorNodeId(
   const upstreamEdge = edges.find((edge) => edge.target === promptNode.id);
   const upstreamNode = nodes.find((node) => node.id === upstreamEdge?.source);
   return getRunReferenceNodeId(upstreamNode);
+}
+
+function getLatestFailedStepId(runNode: AgentCanvasNode) {
+  if (runNode.data.kind !== "run") {
+    return undefined;
+  }
+
+  const failedStep = runNode.data.stepTimeline?.findLast(
+    (step) => step.status === "error"
+  );
+  return failedStep?.id;
 }
 
 function hasReadyRunOutput(nodes: AgentCanvasNode[], runId: string) {

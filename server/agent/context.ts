@@ -24,6 +24,7 @@ export type CanvasSnapshot = {
 export type AgentRunRequestContext = {
   prompt: string;
   promptNodeId?: string | null;
+  retryFrom?: AgentRetryContext | null;
   selectedNodeId?: string | null;
   selectedNodeIds?: string[];
 };
@@ -37,6 +38,7 @@ export type AgentRunInput = {
   message: string;
   normalizedInput?: NormalizedAgentInput;
   promptNodeId: string | null;
+  retryFrom?: AgentRetryContext | null;
   selectedNodeId: string | null;
   upstreamContext: UpstreamContextItem[];
   contextSummary?: AgentRunContextSummary;
@@ -65,6 +67,14 @@ export type AgentRunContextSummary = {
     summary?: string;
   }>;
   omittedNodes: AgentRunOmittedContextNode[];
+};
+
+export type AgentRetryContext = {
+  failedRunNodeId: string;
+  stepId: string;
+  label?: string;
+  toolName?: string;
+  errorText?: string;
 };
 
 export type CucumberRunEvent =
@@ -157,6 +167,7 @@ export type CucumberAgentContext = {
   skillCandidates: AgentSkillCard[];
   prompt: string;
   normalizedInput?: NormalizedAgentInput;
+  retryFrom?: AgentRetryContext | null;
   selectedNodeId: string | null;
   upstreamContext: UpstreamContextItem[];
   contextSummary?: AgentRunContextSummary;
@@ -272,6 +283,7 @@ export function buildAgentRunInput({
     message: canvasContext.prompt,
     promptNodeId,
     projectId,
+    retryFrom: normalizeRetryContext(canvasContext.retryFrom),
     runNodeId,
     selectedNodeId,
     selectedNodeIds: contextNodeIds,
@@ -299,6 +311,7 @@ export function buildCucumberAgentContext(input: AgentRunInput): CucumberAgentCo
     projectId: input.projectId,
     prompt: input.message,
     normalizedInput: input.normalizedInput,
+    retryFrom: input.retryFrom ?? null,
     runNodeId: input.runNodeId,
     selectedNodeId: input.selectedNodeId,
     selectedNodeIds: input.selectedNodeIds,
@@ -354,6 +367,26 @@ function normalizeRequestedSelectedNodeIds(
   }
 
   return fallbackSelectedNodeId ? [fallbackSelectedNodeId] : [];
+}
+
+function normalizeRetryContext(
+  retryFrom: AgentRetryContext | null | undefined
+): AgentRetryContext | null {
+  if (!retryFrom?.failedRunNodeId || !retryFrom.stepId) {
+    return null;
+  }
+
+  return {
+    failedRunNodeId: retryFrom.failedRunNodeId,
+    stepId: retryFrom.stepId,
+    label: normalizeOptionalText(retryFrom.label),
+    toolName: normalizeOptionalText(retryFrom.toolName),
+    errorText: normalizeOptionalText(retryFrom.errorText),
+  };
+}
+
+function normalizeOptionalText(value: string | undefined) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function uniqueNodeIds(nodeIds: string[]) {

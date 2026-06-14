@@ -1057,6 +1057,52 @@
   color: #cc2e33;
 }
 
+.run-plan-list {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.run-plan-item {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  color: var(--run-text-muted);
+  font-size: 10px;
+  line-height: 13px;
+}
+
+.run-plan-item strong {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-plan-item.running,
+.run-plan-item.success {
+  color: var(--run-text);
+}
+
+.run-plan-item.error {
+  color: #cc2e33;
+}
+
+.run-plan-dot {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  color: inherit;
+}
+
+.run-plan-dot svg {
+  width: 11px;
+  height: 11px;
+}
+
 .tool-call-row {
   display: grid;
   gap: 6px;
@@ -1094,6 +1140,13 @@
   color: var(--run-text-muted);
 }
 
+.tool-call-error-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 6px;
+}
+
 .tool-call-error-snippet {
   display: -webkit-box;
   overflow: hidden;
@@ -1103,6 +1156,22 @@
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.tool-call-retry {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.68);
+  color: #cc2e33;
+  cursor: pointer;
+}
+
+.tool-call-retry:hover {
+  background: rgba(255, 255, 255, 0.92);
 }
 
 .tool-call-row strong {

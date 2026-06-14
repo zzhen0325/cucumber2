@@ -9,10 +9,26 @@ import {
 } from "../supabase.ts";
 
 const materializedEventTypes = new Set<AgentEventType>([
+  "agent.active",
   "artifact.created",
   "canvas.operation.applied",
+  "handoff.completed",
+  "handoff.requested",
+  "input.normalized",
   "run.completed",
   "run.failed",
+  "run.plan.created",
+  "run.step.completed",
+  "run.step.failed",
+  "run.step.started",
+  "skill.activated",
+  "skill.retrieved",
+  "skill.script.completed",
+  "skill.script.failed",
+  "skill.script.started",
+  "tool.error",
+  "tool.input",
+  "tool.output",
 ]);
 
 export function shouldMaterializeRunEvent(type: AgentEventType) {
