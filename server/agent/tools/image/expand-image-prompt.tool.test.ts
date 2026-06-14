@@ -115,6 +115,7 @@ function skill() {
     score: 10,
     scripts: [],
     skillMd: "---\nname: imagegen-prompt-expander\n---\nBody",
+    sourceManifest: {},
     tags: [],
     triggers: { canvasKinds: [], keywords: [] },
   };

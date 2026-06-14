@@ -26,15 +26,19 @@ export type SkillScriptOutput = z.infer<typeof scriptOutputSchema> & {
 };
 
 export async function runSkillScript({
+  args,
   input,
   scriptName,
   skill,
   signal,
+  stdin,
 }: {
+  args?: string[];
   input: unknown;
   scriptName: string;
   skill: ActivatedAgentSkill;
   signal?: AbortSignal;
+  stdin?: string;
 }): Promise<SkillScriptOutput> {
   await assertSandboxAvailable();
   const script = skill.scripts.find((candidate) => candidate.name === scriptName);
@@ -62,10 +66,12 @@ export async function runSkillScript({
       tempDir,
     });
     const result = await runScriptProcess({
+      args: args ?? [],
       input,
       runtime: script.runtime,
       scriptPath: entryPath,
       signal,
+      stdin,
       tempDir,
     });
     return parseScriptOutput(result.stdout, result.stderr);
@@ -114,23 +120,41 @@ async function extractSkillPackage({
 }
 
 async function runScriptProcess({
+  args,
   input,
   runtime,
   scriptPath,
   signal,
+  stdin,
   tempDir,
 }: {
+  args: string[];
   input: unknown;
-  runtime: "node" | "python";
+  runtime: "bash" | "node" | "python";
   scriptPath: string;
   signal?: AbortSignal;
+  stdin?: string;
   tempDir: string;
 }) {
-  const runtimeBinary = runtime === "node" ? process.execPath : "/usr/bin/python3";
+  const runtimeBinary =
+    runtime === "node"
+      ? process.execPath
+      : runtime === "python"
+        ? "/usr/bin/python3"
+        : "/bin/bash";
   const profile = buildSandboxProfile(tempDir);
   const child = spawn(
     SANDBOX_EXEC_PATH,
-    ["-p", profile, "/usr/bin/env", "-i", "PATH=/usr/bin:/bin", runtimeBinary, scriptPath],
+    [
+      "-p",
+      profile,
+      "/usr/bin/env",
+      "-i",
+      "PATH=/usr/bin:/bin",
+      runtimeBinary,
+      scriptPath,
+      ...args,
+    ],
     {
       cwd: tempDir,
       env: {},
@@ -160,7 +184,7 @@ async function runScriptProcess({
     }
   });
 
-  child.stdin.end(JSON.stringify(input ?? {}));
+  child.stdin.end(stdin ?? JSON.stringify(input ?? {}));
 
   const exitCode = await new Promise<number | null>((resolve, reject) => {
     child.once("error", reject);
@@ -187,18 +211,24 @@ function parseScriptOutput(stdout: string, stderr: string): SkillScriptOutput {
   try {
     parsed = JSON.parse(stdout);
   } catch {
-    throw new Error(
-      `Skill script must print one JSON object to stdout. Stderr: ${stderr.trim() || "none"}`
-    );
+    const summary = stdout.trim() || stderr.trim() || "Script completed.";
+    return {
+      data: { stderr, stdout },
+      status: "ok",
+      summary: summary.slice(0, 4000),
+    };
   }
 
   const result = scriptOutputSchema.safeParse(parsed);
   if (!result.success) {
-    throw new Error(
-      `Skill script output is invalid: ${result.error.issues
-        .map((issue) => `${issue.path.join(".")} ${issue.message}`)
-        .join("; ")}`
-    );
+    return {
+      data: { parsed, stderr, stdout },
+      status: "ok",
+      summary:
+        typeof parsed === "string"
+          ? parsed.slice(0, 4000)
+          : "Script completed with JSON output.",
+    };
   }
 
   return {

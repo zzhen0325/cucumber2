@@ -10,9 +10,12 @@ Infinite Canvas Agent Run MVP。前端使用 Vite、React、TypeScript、React F
 - 实现：`server/agent/`
 - 编排：每次运行创建独立 Manager/Image Agent；Manager 通过 Agents SDK handoff 委派给 Image Agent
 - 失败 Run 节点显示重试按钮；重试会保留原失败节点，并用原 prompt 与原上游锚点创建新的可见 Agent Run 分支
-- 图片工具：`expand_image_prompt` 只使用已激活的 image prompt-expansion skill，`generate_image` 调用 Seedream 生成图片，`upscale_image` 调用 Seedream 智能超清
-- Agent OS 技能流：服务端从持久化画布重建可信上下文，检索启用技能的 metadata，首轮只注入 skill cards；模型必须调用 `activate_skill` 才能读取完整 `SKILL.md`，脚本只能通过 `run_skill_script` 执行
+- 图片工具：`render_visual_style_prompt` 使用已激活 visual style-library 技能的 `style.json` 生成结构化图片提示词；默认 `visual-prompt-cookbook` 只是内置实例；`expand_image_prompt` 只作为普通扩写后备；`generate_image` 调用 Seedream 生成图片，`upscale_image` 调用 Seedream 智能超清
+- Agent OS 技能流：兼容 Agent Skills 目录格式；服务端从持久化画布重建可信上下文，检索启用技能的 metadata，首轮只注入 skill cards；模型必须调用 `activate_skill` 才能读取完整 `SKILL.md`，包内资源通过 `read_skill_resource` 按需读取，脚本只能通过 `run_skill_script` 执行
 - 画布变更：Agent 只能提出 `CanvasOperation`，由 runtime policy 校验后投影到画布
+- Trace：`run.created` / `input.normalized` 记录服务端重建的 selected nodes、reference nodes、upstream path 和 omitted nodes；Trace 面板用用户可读摘要展示 input、skill、tool error 和 canvas policy rejection
+- 物化：artifact、canvas operation 和终态事件会幂等写回项目快照；同一 artifact id 只保留一个结果节点
+- 错误：Run 节点只保留短错误来源，完整诊断保留在 Trace 事件中；上下文校验失败也会写入 `run.failed`
 - 流协议：AI SDK UI `createUIMessageStream` + `data-runtime-event`
 
 客户端只提交 `projectId`、`runNodeId`、prompt、`promptNodeId`、主 `selectedNodeId` 和 `selectedNodeIds`。提交前会强制保存项目快照；服务端从持久化 `nodes/edges` 重建 upstream context，不信任客户端上传的节点、artifact 或 URL。多选引用会过滤掉 Run 节点，只让可引用画布节点进入上下文。
@@ -65,7 +68,7 @@ pnpm dev
 对象存储：
 
 - bucket：`agent-assets`，private，单文件上限 50MB
-- bucket：`agent-skill-packages`，private，单包上限 5MB，仅存储导入的技能 zip 包
+- bucket：`agent-skill-packages`，private，单包上限 100MB，存储导入的完整技能 zip 包
 - 用户上传路径：`projects/{projectId}/uploads/{uploadId}/{fileName}`
 - 生成图片路径：`projects/{projectId}/runs/{runNodeId}/artifacts/{artifactId}.{ext}`
 - 技能包路径：`skills/{skillName}/{sha256}.zip`
@@ -95,15 +98,19 @@ pnpm dev
 
 ## Agent Skill Contract
 
-`SKILL.md` 必须包含 YAML frontmatter：
+`SKILL.md` 遵循 Agent Skills 标准，必须包含 YAML frontmatter：
 
 - 必填：`name`、`description`
-- 可选：`agent_scope`、`purpose`、`tags`、`triggers.keywords`、`triggers.canvas_kinds`、`bindings.tools`、`bindings.agents`
-- 可选脚本：`scripts[]`，每项声明 `name`、`path`、`runtime: node|python`、`description`、JSON input/output 期望
+- 标准可选字段：`license`、`compatibility`、`metadata`、`allowed-tools` 会保留在 frontmatter 中
+- Cucumber 可选扩展：`agent_scope`、`purpose`、`tags`、`triggers.keywords`、`triggers.canvas_kinds`、`bindings.tools`、`bindings.agents`
+- Cucumber 可选脚本 manifest：`scripts[]` 可声明 `name`、`path`、`runtime: bash|node|python`、`description`、JSON input/output 期望；标准 skill 即使没有该 manifest，也会从 `scripts/` 自动发现可执行脚本
+- 可选资源：zip 包根下除 `SKILL.md` 外的安全相对路径都会作为技能资源保存；文本资源由 Agent 通过 `read_skill_resource` 按需读取，图片等二进制资源只暴露路径和 metadata，不直接塞进模型上下文
 
-zip 导入只接受一个 `SKILL.md` 和声明过的 `scripts/**/*.mjs|*.js|*.py`，拒绝路径穿越、未声明脚本、重复脚本名、超 5MB 包和不支持文件。脚本从 `agent-skill-packages` 下载，校验 SHA-256 后在临时目录中通过 `sandbox-exec` 执行，JSON stdin/stdout，15 秒超时，空 secret 环境；没有 sandbox 支持时直接失败并写入 Trace。
+zip 导入接受一个可见 `SKILL.md` 和同一包根下的标准 Agent Skills 文件结构，包括 `scripts/`、`references/`、`assets/`、`agents/openai.yaml`、`LICENSE*` 以及其他资源文件；拒绝路径穿越、多个 `SKILL.md`、超 100MB 包和缺失的已声明脚本。脚本从 `agent-skill-packages` 下载，校验 SHA-256 后在临时目录中通过 `sandbox-exec` 执行，支持 bash/node/python、args/stdin、普通 stdout 包装和原 Cucumber JSON 输出，15 秒超时，空 secret 环境；没有 sandbox 支持时直接失败并写入 Trace。
 
 Trace 新增 `skill.retrieved`、`skill.activated`、`skill.script.started`、`skill.script.completed`、`skill.script.failed`。Run Trace 面板显示 Skills 区；Run 节点摘要只显示技能名称，不展示 package path。
+
+内置 `visual-prompt-cookbook` 基于 `server/agent/skills/builtin/visual-prompt-cookbook` 中的 68 个 `style.json` 和 136 张预览图。Image Agent 在新图片请求中优先激活它并调用通用 `render_visual_style_prompt`，再把返回 prompt 传给 `generate_image`；用户上传的 skill 只要绑定同一工具并提供 `references/styles/<slug>/style.json` 或 `styles/<slug>/style.json`，也可走同一机制。旧 `imagegen-prompt-expander` 保留为非默认普通扩写技能。
 
 ## Validation
 

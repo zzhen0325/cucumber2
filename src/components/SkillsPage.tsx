@@ -300,7 +300,7 @@ export function SkillsPage({ className }: SkillsPageProps) {
             size="sm"
             disabled={importing}
             onClick={() => fileInputRef.current?.click()}
-            title="导入 zip"
+            title="导入 Agent Skills zip，最高 100MB，支持 SKILL.md、scripts、references、assets 和其他资源"
           >
             {importing ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
             导入

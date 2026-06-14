@@ -4,7 +4,9 @@ import type { CucumberAgentContext } from "../context.ts";
 import { activateSkillTool } from "../tools/skills/activate-skill.tool.ts";
 import { expandImagePromptTool } from "../tools/image/expand-image-prompt.tool.ts";
 import { getCucumberInternalMcpServer } from "../mcp/internal-mcp-client.ts";
+import { readSkillResourceTool } from "../tools/skills/read-skill-resource.tool.ts";
 import { runSkillScriptTool } from "../tools/skills/run-skill-script.tool.ts";
+import { renderVisualStylePromptTool } from "../tools/image/render-visual-style-prompt.tool.ts";
 import { upscaleImageTool } from "../tools/image/upscale-image.tool.ts";
 import { imageInstructions } from "../prompts/image.instructions.ts";
 
@@ -31,6 +33,8 @@ export function createImageAgent({
     tools: [
       activateSkillTool,
       expandImagePromptTool,
+      readSkillResourceTool,
+      renderVisualStylePromptTool,
       runSkillScriptTool,
       upscaleImageTool,
     ],

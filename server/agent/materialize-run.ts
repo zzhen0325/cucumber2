@@ -97,10 +97,61 @@ export function materializeSnapshot(
     runNodeId,
   });
 
-  return mergeCanvasUpserts(
+  return removeDuplicateRunArtifactNodes(mergeCanvasUpserts(
     { nodes: project.nodes, edges: project.edges },
     { nodes: projection.nodes, edges: projection.edges }
-  );
+  ), runNodeId);
+}
+
+function removeDuplicateRunArtifactNodes(
+  snapshot: Pick<AgentProject, "edges" | "nodes">,
+  runNodeId: string
+) {
+  const seenArtifactIds = new Set<string>();
+  const removedNodeIds = new Set<string>();
+  const nodes = snapshot.nodes.filter((node) => {
+    const artifactId = getNodeArtifactIdForRun(node, runNodeId);
+    if (!artifactId) {
+      return true;
+    }
+    if (seenArtifactIds.has(artifactId)) {
+      removedNodeIds.add(node.id);
+      return false;
+    }
+    seenArtifactIds.add(artifactId);
+    return true;
+  });
+
+  if (!removedNodeIds.size) {
+    return snapshot;
+  }
+
+  return {
+    nodes,
+    edges: snapshot.edges.filter(
+      (edge) => !removedNodeIds.has(edge.source) && !removedNodeIds.has(edge.target)
+    ),
+  };
+}
+
+function getNodeArtifactIdForRun(
+  node: AgentProject["nodes"][number],
+  runNodeId: string
+) {
+  if (node.data.kind === "imageResult" && node.data.runId === runNodeId) {
+    return node.data.artifact?.id ?? node.data.image.artifact?.id ?? node.data.image.id;
+  }
+
+  if (
+    "artifact" in node.data &&
+    node.data.artifact &&
+    "runId" in node.data &&
+    node.data.runId === runNodeId
+  ) {
+    return node.data.artifact.id;
+  }
+
+  return null;
 }
 
 async function requireProject(projectId: string, userId: string) {

@@ -14,7 +14,7 @@ import {
 export const AGENT_ASSETS_BUCKET = "agent-assets";
 export const AGENT_SKILL_PACKAGES_BUCKET = "agent-skill-packages";
 export const MAX_AGENT_ASSET_BYTES = 50 * 1024 * 1024;
-export const MAX_AGENT_SKILL_PACKAGE_BYTES = 5 * 1024 * 1024;
+export const MAX_AGENT_SKILL_PACKAGE_BYTES = 100 * 1024 * 1024;
 export const SIGNED_ASSET_READ_TTL_SECONDS = 10 * 60;
 
 export type UploadAssetKind =
@@ -436,7 +436,7 @@ function assertAllowedSkillPackageSize(sizeBytes: number) {
     throw new Error("Skill package size is invalid.");
   }
   if (sizeBytes > MAX_AGENT_SKILL_PACKAGE_BYTES) {
-    throw new Error("Skill package exceeds the 5MB package limit.");
+    throw new Error("Skill package exceeds the 100MB package limit.");
   }
 }
 

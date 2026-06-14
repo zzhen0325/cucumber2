@@ -53,6 +53,50 @@ describe("skill retrieval", () => {
     expect(JSON.stringify(candidates[0])).not.toContain("Skill body");
   });
 
+  it("prefers the visual prompt cookbook over the generic expander for image intent", async () => {
+    mocks.listAgentSkillDefinitions.mockResolvedValue([
+      skill({
+        agentScope: "image",
+        bindings: {
+          agents: ["Cucumber Image Agent"],
+          tools: ["expand_image_prompt", "generate_image"],
+        },
+        description: "Expand short image prompts.",
+        name: "imagegen-prompt-expander",
+        purpose: "prompt_expansion",
+        triggers: {
+          canvasKinds: ["imageResult"],
+          keywords: ["生成图片", "海报"],
+        },
+      }),
+      skill({
+        agentScope: "image",
+        bindings: {
+          agents: ["Cucumber Image Agent"],
+          tools: ["render_visual_style_prompt", "generate_image"],
+        },
+        description: "Reusable style.json systems for visual prompts.",
+        isDefault: true,
+        name: "visual-prompt-cookbook",
+        purpose: "prompt_expansion",
+        tags: ["style-json"],
+        triggers: {
+          canvasKinds: ["imageResult"],
+          keywords: ["生成图片", "海报", "poster"],
+        },
+      }),
+    ]);
+
+    const candidates = await retrieveRelevantAgentSkills(
+      input({ message: "生成一张黄瓜海报" })
+    );
+
+    expect(candidates[0]).toMatchObject({
+      name: "visual-prompt-cookbook",
+      reasons: expect.arrayContaining(["visual-style-cookbook"]),
+    });
+  });
+
   it("keeps unrelated image skills below matching general skills", async () => {
     mocks.listAgentSkillDefinitions.mockResolvedValue([
       skill({

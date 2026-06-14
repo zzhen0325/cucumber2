@@ -123,13 +123,15 @@ function toToolResult(skill: ActivatedAgentSkill, status: "activated" | "already
     instructions: skill.body,
     purpose: skill.purpose,
     scriptCount: skill.scripts.length,
-    scripts: skill.scripts.map(({ description, input, name, output, runtime }) => ({
+    scripts: skill.scripts.map(({ description, input, name, output, path, runtime }) => ({
       description,
       input,
       name,
       output,
+      path,
       runtime,
     })),
+    resources: skill.sourceManifest.resources ?? null,
     skillId: skill.id,
     skillName: skill.name,
     status,

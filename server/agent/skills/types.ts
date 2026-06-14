@@ -20,6 +20,7 @@ export type AgentSkillCard = {
   triggers: AgentSkillTriggers;
   bindings: AgentSkillBindings;
   scripts: AgentSkillScriptSummary[];
+  sourceManifest: Record<string, unknown>;
   isDefault: boolean;
   score: number;
   reasons: string[];

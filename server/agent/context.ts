@@ -1,7 +1,7 @@
 import type { UIMessage, UIMessageStreamWriter } from "ai";
 
 import {
-  collectUpstreamContext,
+  collectUpstreamContextWithTrace,
   getRunReferenceNodeIds,
 } from "../../src/lib/graph.ts";
 import type {
@@ -38,9 +38,32 @@ export type AgentRunInput = {
   promptNodeId: string | null;
   selectedNodeId: string | null;
   upstreamContext: UpstreamContextItem[];
+  contextSummary?: AgentRunContextSummary;
   canvasSnapshot: CanvasSnapshot;
   selectedNodeIds: string[];
   signal?: AbortSignal;
+};
+
+export type AgentRunContextNodeSummary = {
+  id: string;
+  kind: AgentCanvasNode["data"]["kind"];
+  label?: string;
+};
+
+export type AgentRunOmittedContextNode = AgentRunContextNodeSummary & {
+  reason: string;
+};
+
+export type AgentRunContextSummary = {
+  selectedNodes: AgentRunContextNodeSummary[];
+  referenceNodes: AgentRunContextNodeSummary[];
+  upstreamPath: Array<{
+    nodeId: string;
+    type: UpstreamContextItem["type"];
+    title?: string;
+    summary?: string;
+  }>;
+  omittedNodes: AgentRunOmittedContextNode[];
 };
 
 export type CucumberRunEvent =
@@ -135,6 +158,7 @@ export type CucumberAgentContext = {
   normalizedInput?: NormalizedAgentInput;
   selectedNodeId: string | null;
   upstreamContext: UpstreamContextItem[];
+  contextSummary?: AgentRunContextSummary;
 };
 
 export type ExecuteAgentRunInput = {
@@ -151,6 +175,13 @@ export interface AgentRuntime {
   run(input: AgentRunInput): AsyncIterable<CucumberRunEvent>;
 }
 
+export class AgentContextValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AgentContextValidationError";
+  }
+}
+
 export function buildAgentRunInput({
   canvasContext,
   projectId,
@@ -160,7 +191,9 @@ export function buildAgentRunInput({
   userId,
 }: Omit<ExecuteAgentRunInput, "writer">): AgentRunInput {
   if (projectSnapshot.id !== projectId) {
-    throw new Error("Project snapshot does not match the requested project.");
+    throw new AgentContextValidationError(
+      "Project snapshot does not match the requested project."
+    );
   }
 
   const nodeIds = new Set(projectSnapshot.nodes.map((node) => node.id));
@@ -186,15 +219,47 @@ export function buildAgentRunInput({
   const referenceNodeIds = getRunReferenceNodeIds(requestedSelectedNodes);
   const selectedNodeId = referenceNodeIds[0] ?? null;
 
-  const upstreamContext = collectUpstreamContext(
+  const contextCollection = collectUpstreamContextWithTrace(
     referenceNodeIds,
     projectSnapshot.nodes,
     projectSnapshot.edges
   );
+  const upstreamContext = contextCollection.items;
   const contextNodeIds = uniqueNodeIds([
     ...referenceNodeIds,
     ...upstreamContext.map((item) => item.nodeId),
   ]);
+  const nonReferenceSelectedNodes = requestedSelectedNodes.filter(
+    (node) => !referenceNodeIds.includes(node.id)
+  );
+  const contextSummary: AgentRunContextSummary = {
+    selectedNodes: requestedSelectedNodes.map(summarizeNodeForContext),
+    referenceNodes: referenceNodeIds.flatMap((nodeId) => {
+      const node = nodesById.get(nodeId);
+      return node ? [summarizeNodeForContext(node)] : [];
+    }),
+    upstreamPath: upstreamContext.map((item) => ({
+      nodeId: item.nodeId,
+      type: item.type,
+      title: item.title,
+      summary: item.summary,
+    })),
+    omittedNodes: [
+      ...nonReferenceSelectedNodes.map((node) => ({
+        ...summarizeNodeForContext(node),
+        reason: "not_referenceable",
+      })),
+      ...contextCollection.omittedItems.map((item) => {
+        const node = nodesById.get(item.nodeId);
+        return {
+          ...(node
+            ? summarizeNodeForContext(node)
+            : { id: item.nodeId, kind: "artifact" as const }),
+          reason: item.omittedReason ?? "omitted",
+        };
+      }),
+    ],
+  };
 
   return {
     canvasId: projectId,
@@ -210,6 +275,7 @@ export function buildAgentRunInput({
     selectedNodeIds: contextNodeIds,
     signal,
     upstreamContext,
+    contextSummary,
     userId,
   };
 }
@@ -236,10 +302,45 @@ export function buildCucumberAgentContext(input: AgentRunInput): CucumberAgentCo
     selectedNodeIds: input.selectedNodeIds,
     signal: input.signal,
     skillCandidates: [],
+    contextSummary: input.contextSummary,
     upstreamContext: input.upstreamContext,
     userId: input.userId,
     workspaceId: input.workspaceId,
   };
+}
+
+function summarizeNodeForContext(node: AgentCanvasNode): AgentRunContextNodeSummary {
+  return {
+    id: node.id,
+    kind: node.data.kind,
+    label: getNodeContextLabel(node),
+  };
+}
+
+function getNodeContextLabel(node: AgentCanvasNode) {
+  const data = node.data;
+  if (data.kind === "prompt") {
+    return data.prompt;
+  }
+  if (data.kind === "run") {
+    return data.prompt;
+  }
+  if (data.kind === "imageResult") {
+    return data.image.title ?? data.prompt;
+  }
+  if (data.kind === "stickyNote") {
+    return data.text;
+  }
+  if (data.kind === "shape") {
+    return data.label;
+  }
+  if ("title" in data && typeof data.title === "string") {
+    return data.title;
+  }
+  if ("summary" in data && typeof data.summary === "string") {
+    return data.summary;
+  }
+  return undefined;
 }
 
 function normalizeRequestedSelectedNodeIds(
@@ -266,6 +367,8 @@ function uniqueNodeIds(nodeIds: string[]) {
 
 function assertProjectNode(nodeIds: Set<string>, nodeId: string, label: string) {
   if (!nodeIds.has(nodeId)) {
-    throw new Error(`${label} ${nodeId} is not part of the persisted project snapshot.`);
+    throw new AgentContextValidationError(
+      `${label} ${nodeId} is not part of the persisted project snapshot.`
+    );
   }
 }

@@ -4,6 +4,7 @@ import type { CucumberAgentContext } from "../context.ts";
 import { hasBuiltInImageIntent } from "../skills/skill-retrieval.ts";
 import { proposeCanvasOperationsTool } from "../tools/canvas/propose-canvas-operations.tool.ts";
 import { activateSkillTool } from "../tools/skills/activate-skill.tool.ts";
+import { readSkillResourceTool } from "../tools/skills/read-skill-resource.tool.ts";
 import { runSkillScriptTool } from "../tools/skills/run-skill-script.tool.ts";
 import { managerInstructions } from "../prompts/manager.instructions.ts";
 import { createImageAgent } from "./image.agent.ts";
@@ -22,7 +23,12 @@ export function createManagerAgent({
     name: "Cucumber Manager",
     instructions: (runContext) => managerInstructions(runContext.context),
     ...(model ? { model } : {}),
-    tools: [activateSkillTool, runSkillScriptTool, proposeCanvasOperationsTool],
+    tools: [
+      activateSkillTool,
+      readSkillResourceTool,
+      runSkillScriptTool,
+      proposeCanvasOperationsTool,
+    ],
     handoffs: [
       handoff(imageAgent, {
         isEnabled: ({ runContext }) => shouldEnableImageHandoff(runContext.context),

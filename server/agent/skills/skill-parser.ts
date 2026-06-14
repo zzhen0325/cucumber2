@@ -14,7 +14,7 @@ export type AgentSkillBindings = {
   agents: string[];
 };
 
-export type AgentSkillScriptRuntime = "node" | "python";
+export type AgentSkillScriptRuntime = "bash" | "node" | "python";
 
 export type AgentSkillScriptManifest = {
   name: string;
@@ -155,7 +155,7 @@ function parseScripts(value: unknown): AgentSkillScriptManifest[] {
     return [];
   }
   if (!Array.isArray(value)) {
-    throw new Error("SKILL.md scripts must be a YAML array.");
+    return [];
   }
 
   const seenNames = new Set<string>();
@@ -188,8 +188,8 @@ function parseScripts(value: unknown): AgentSkillScriptManifest[] {
       throw new Error(`Duplicate script name ${name}.`);
     }
     seenNames.add(name);
-    if (runtime !== "node" && runtime !== "python") {
-      throw new Error(`Script ${name} runtime must be node or python.`);
+    if (!isSupportedScriptRuntime(runtime)) {
+      throw new Error(`Script ${name} runtime must be bash, node, or python.`);
     }
     validateScriptExtension(scriptPath, runtime);
     if (description.length > 1024) {
@@ -205,6 +205,12 @@ function parseScripts(value: unknown): AgentSkillScriptManifest[] {
       runtime,
     };
   });
+}
+
+export function isSupportedScriptRuntime(
+  runtime: string
+): runtime is AgentSkillScriptRuntime {
+  return runtime === "bash" || runtime === "node" || runtime === "python";
 }
 
 export function normalizeScriptPath(rawPath: string) {
@@ -228,6 +234,9 @@ function validateScriptExtension(path: string, runtime: string) {
   }
   if (runtime === "python" && !/\.py$/.test(path)) {
     throw new Error("Python skill scripts must use .py.");
+  }
+  if (runtime === "bash" && !/\.(?:bash|sh)$/.test(path)) {
+    throw new Error("Bash skill scripts must use .bash or .sh.");
   }
 }
 

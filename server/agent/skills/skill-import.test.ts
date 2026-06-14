@@ -97,7 +97,109 @@ Run scripts.
     });
   });
 
-  it("rejects traversal, unsupported files, and undeclared scripts", async () => {
+  it("imports standard Agent Skills packages with extra files and discovered scripts", async () => {
+    const skillMd = `---
+name: standard-skill
+description: Standard Agent Skill package with references, assets, and scripts.
+license: Apache-2.0
+compatibility: Requires bash and python.
+metadata:
+  version: "1.0"
+allowed-tools: Bash(*) Read
+---
+
+# Standard Skill
+
+Read references/guide.md. Run scripts/check.sh or scripts/report.py when needed.
+`;
+
+    const imported = await importAgentSkillZip(
+      await zipBytes({
+        "standard-skill/SKILL.md": skillMd,
+        "standard-skill/README.md": "extra docs are allowed by the open format",
+        "standard-skill/references/guide.md": "# Guide",
+        "standard-skill/assets/template.txt": "template",
+        "standard-skill/scripts/check.sh": "#!/usr/bin/env bash\necho ok",
+        "standard-skill/scripts/report.py": "print('ok')",
+      }),
+      "standard-skill.zip"
+    );
+
+    expect(imported.scripts).toEqual([
+      expect.objectContaining({
+        name: "check",
+        path: "scripts/check.sh",
+        runtime: "bash",
+      }),
+      expect.objectContaining({
+        name: "report",
+        path: "scripts/report.py",
+        runtime: "python",
+      }),
+    ]);
+    expect(imported.sourceManifest.resources).toMatchObject({
+      additionalFiles: 1,
+      assetFiles: 1,
+      referenceFiles: 1,
+      resourceFiles: 5,
+      scriptFiles: 2,
+    });
+  });
+
+  it("imports visual style library resources without requiring scripts", async () => {
+    const skillMd = `---
+name: custom-style-cookbook
+description: Custom reusable style.json systems for generated image prompts.
+agent_scope: image
+purpose: prompt_expansion
+tags:
+  - style-json
+bindings:
+  tools:
+    - render_visual_style_prompt
+    - generate_image
+  agents:
+    - Cucumber Image Agent
+---
+
+# Custom Style Cookbook
+
+Use bundled style.json systems.
+`;
+    const imported = await importAgentSkillZip(
+      await zipBytes({
+        "custom-style-cookbook/SKILL.md": skillMd,
+        "custom-style-cookbook/references/catalog.md":
+          "| Style | Slug | Summary |\n| --- | --- | --- |\n| Clean Test Style | `clean-test-style` | Clean test visuals. |\n",
+        "custom-style-cookbook/references/styles/clean-test-style/style.json":
+          JSON.stringify({
+            style_name: "Clean Test Style",
+            style_slug: "clean-test-style",
+            style_summary: "Clean test visuals.",
+            environment_variables: { SUBJECT: "subject", ASPECT_RATIO: "ratio" },
+            prompt_template: "Create {ASPECT_RATIO} image of {SUBJECT}.",
+            negative_prompt: "watermark",
+          }),
+        "custom-style-cookbook/references/styles/clean-test-style/preview-16x9.jpg":
+          "fake image bytes",
+        "custom-style-cookbook/references/styles/clean-test-style/preview-9x16.jpg":
+          "fake image bytes",
+      }),
+      "custom-style-cookbook.zip"
+    );
+
+    expect(imported.name).toBe("custom-style-cookbook");
+    expect(imported.scripts).toEqual([]);
+    expect(imported.sourceManifest.resources).toMatchObject({
+      previewImages: 2,
+      referenceFiles: 4,
+      resourceFiles: 4,
+      styleJsonFiles: 1,
+      stylePreviewImages: 2,
+    });
+  });
+
+  it("rejects traversal and missing declared scripts without rejecting standard extras", async () => {
     await expect(
       importAgentSkillZip(
         await zipBytes({
@@ -112,21 +214,34 @@ Run scripts.
       importAgentSkillZip(
         await zipBytes({
           "script-skill/SKILL.md": promptExpanderSkillMd,
-          "script-skill/README.md": "no",
+          "script-skill/README.md": "standard extras are ok",
+          "script-skill/custom/data.bin": "opaque asset",
         }),
-        "unsupported.zip"
+        "extras.zip"
       )
-    ).rejects.toThrow(/scripts/);
+    ).resolves.toMatchObject({ name: "imagegen-prompt-expander" });
 
     await expect(
       importAgentSkillZip(
         await zipBytes({
-          "script-skill/SKILL.md": promptExpanderSkillMd,
-          "script-skill/scripts/run.mjs": "console.log('{}')",
+          "script-skill/SKILL.md": `---
+name: script-skill
+description: Declares a missing script.
+scripts:
+  - name: missing
+    path: scripts/missing.mjs
+    runtime: node
+    description: Missing script.
+---
+
+# Script Skill
+
+Run scripts.
+`,
         }),
-        "undeclared.zip"
+        "missing-declared.zip"
       )
-    ).rejects.toThrow(/declared/);
+    ).rejects.toThrow(/missing/);
   });
 });
 

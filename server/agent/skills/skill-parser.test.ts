@@ -113,4 +113,55 @@ Body
 `)
     ).toThrow(/Duplicate script/);
   });
+
+  it("accepts standard frontmatter fields and ignores non-manifest scripts metadata", () => {
+    const parsed = parseAgentSkillMarkdown(`---
+name: standard-skill
+description: Standard Agent Skill fields.
+license: Apache-2.0
+compatibility: Requires bash.
+allowed-tools: Bash(git:*) Read
+metadata:
+  version: "1.0"
+scripts: scripts are documented in the body
+---
+
+# Standard Skill
+
+Run scripts/check.sh when needed.
+`);
+
+    expect(parsed.scripts).toEqual([]);
+    expect(parsed.frontmatter).toMatchObject({
+      "allowed-tools": "Bash(git:*) Read",
+      compatibility: "Requires bash.",
+      license: "Apache-2.0",
+      metadata: { version: "1.0" },
+    });
+  });
+
+  it("parses bash script manifests for Cucumber-managed skills", () => {
+    const parsed = parseAgentSkillMarkdown(`---
+name: bash-skill
+description: Run bash scripts.
+scripts:
+  - name: check
+    path: scripts/check.sh
+    runtime: bash
+    description: Check the project.
+---
+
+# Bash Skill
+
+Run the script.
+`);
+
+    expect(parsed.scripts).toEqual([
+      expect.objectContaining({
+        name: "check",
+        path: "scripts/check.sh",
+        runtime: "bash",
+      }),
+    ]);
+  });
 });

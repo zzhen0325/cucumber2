@@ -17,7 +17,7 @@ export type AgentSkillBindings = {
 export type AgentSkillScriptManifest = {
   name: string;
   path?: string;
-  runtime: "node" | "python";
+  runtime: "bash" | "node" | "python";
   description: string;
   input?: unknown;
   output?: unknown;

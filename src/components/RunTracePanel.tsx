@@ -6,6 +6,7 @@ import {
   getEventLabel,
   shortId,
   summarizeRunTrace,
+  summarizeTraceEvent,
   summarizeUnknown,
 } from "./run-trace-summary";
 
@@ -76,8 +77,17 @@ export function RunTracePanel({
           <TraceSection title="Run">
             <TraceKeyValue label="Status" value={summary.runStatus} />
             <TraceKeyValue label="Prompt" value={summary.prompt} />
+            <TraceKeyValue label="Input" value={summary.normalizedInputSummary} />
             <TraceKeyValue label="Final" value={summary.finalOutput} />
             <TraceKeyValue label="Events" value={String(events.length)} />
+          </TraceSection>
+
+          <TraceSection title="Context">
+            <ContextSummaryView context={summary.context} />
+          </TraceSection>
+
+          <TraceSection title="Input">
+            <EventList events={summary.inputEvents} />
           </TraceSection>
 
           <TraceSection title="Agents & Handoffs">
@@ -190,13 +200,84 @@ function EventList({ events }: { events: RunStepTraceEvent[] }) {
 }
 
 function TraceEventRow({ event }: { event: RunStepTraceEvent }) {
+  const summary = summarizeTraceEvent(event);
   return (
     <div className="trace-event-row">
       <div>
         <strong>{getEventLabel(event)}</strong>
         <span>{event.stepId}</span>
       </div>
-      <small title={summarizeUnknown(event.payload)}>{summarizeUnknown(event.payload)}</small>
+      <small title={summarizeUnknown(event.payload)}>{summary}</small>
     </div>
   );
+}
+
+function ContextSummaryView({
+  context,
+}: {
+  context: ReturnType<typeof summarizeRunTrace>["context"];
+}) {
+  return (
+    <div className="trace-event-list">
+      <ContextRow
+        label="Selected"
+        value={
+          context.selectedNodes.length
+            ? context.selectedNodes.map(formatContextNode).join(" -> ")
+            : "无"
+        }
+      />
+      <ContextRow
+        label="References"
+        value={
+          context.referenceNodes.length
+            ? context.referenceNodes.map(formatContextNode).join(" -> ")
+            : "无"
+        }
+      />
+      <ContextRow
+        label="Upstream path"
+        value={
+          context.upstreamPath.length
+            ? context.upstreamPath
+                .map((item) =>
+                  [item.type, item.title ?? item.summary ?? shortId(item.nodeId)]
+                    .filter(Boolean)
+                    .join(": ")
+                )
+                .join(" -> ")
+            : "无"
+        }
+      />
+      <ContextRow
+        label="Omitted"
+        value={
+          context.omittedNodes.length
+            ? context.omittedNodes
+                .map((node) => `${formatContextNode(node)} · ${node.reason}`)
+                .join(" -> ")
+            : "无"
+        }
+      />
+    </div>
+  );
+}
+
+function ContextRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="trace-event-row">
+      <div>
+        <strong>{label}</strong>
+      </div>
+      <small title={value}>{value}</small>
+    </div>
+  );
+}
+
+function formatContextNode(node: { id: string; kind: string; label?: string }) {
+  return `${node.kind}: ${node.label ? truncateLabel(node.label) : shortId(node.id)}`;
+}
+
+function truncateLabel(value: string) {
+  return value.length > 48 ? `${value.slice(0, 45)}...` : value;
 }

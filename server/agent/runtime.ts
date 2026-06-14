@@ -4,6 +4,7 @@ import type { AgentEvent } from "../../src/types/runtime.ts";
 import type { CanvasOperation } from "../../src/types/runtime.ts";
 import { createManagerAgent } from "./agents/manager.agent.ts";
 import {
+  AgentContextValidationError,
   buildAgentRunInput,
   buildCucumberAgentContext,
   type AgentRunInput,
@@ -74,7 +75,7 @@ export async function executeAgentRun({
     runNodeId: input.runNodeId,
     writer: streamWriter,
   });
-  let agentInput = buildAgentRunInput(input);
+  let agentInput: AgentRunInput | null = null;
   const textStreamId = `agent-text-${crypto.randomUUID()}`;
   let textStarted = false;
   let finalOutput: string | undefined;
@@ -104,6 +105,7 @@ export async function executeAgentRun({
   };
 
   try {
+    agentInput = buildAgentRunInput(input);
     await writeRunEvent({
       projectId: input.projectId,
       runNodeId: input.runNodeId,
@@ -114,6 +116,7 @@ export async function executeAgentRun({
         promptNodeId: agentInput.promptNodeId,
         selectedNodeId: agentInput.selectedNodeId,
         selectedNodeIds: agentInput.selectedNodeIds,
+        contextSummary: agentInput.contextSummary,
         upstreamContext: agentInput.upstreamContext,
         runtime: "openai-agents-sdk",
       },
@@ -137,6 +140,7 @@ export async function executeAgentRun({
         promptNodeId: agentInput.promptNodeId,
         selectedNodeId: agentInput.selectedNodeId,
         selectedNodeIds: agentInput.selectedNodeIds,
+        contextSummary: agentInput.contextSummary,
         upstreamContext: agentInput.upstreamContext,
         runtime: "openai-agents-sdk",
       },
@@ -370,6 +374,12 @@ export async function executeAgentRun({
   } catch (error) {
     const aborted = input.signal?.aborted || isAbortError(error);
     const message = aborted ? "Run stopped by user." : getAgentErrorMessage(error);
+    const failure = classifyRunFailure({
+      aborted,
+      error,
+      events: runEvents,
+      message,
+    });
     if (!aborted) {
       console.error("[agent-run]", error);
     }
@@ -380,8 +390,14 @@ export async function executeAgentRun({
       stepId: "run",
       type: "run.failed",
       payload: {
-        errorCode: aborted ? "agent_run_aborted" : "agent_run_failed",
+        errorCode: failure.errorCode,
+        errorSource: failure.errorSource,
         errorText: message,
+        prompt: agentInput?.message ?? input.canvasContext.prompt,
+        promptNodeId: agentInput?.promptNodeId ?? input.canvasContext.promptNodeId ?? null,
+        selectedNodeId: agentInput?.selectedNodeId ?? input.canvasContext.selectedNodeId ?? null,
+        selectedNodeIds: agentInput?.selectedNodeIds ?? input.canvasContext.selectedNodeIds ?? [],
+        contextSummary: agentInput?.contextSummary,
         runtime: "openai-agents-sdk",
         status: "failed",
       },
@@ -413,6 +429,65 @@ export async function executeAgentRun({
     streamWriter.write({ type: "finish-step" });
     textStarted = false;
   }
+}
+
+function classifyRunFailure({
+  aborted,
+  error,
+  events,
+  message,
+}: {
+  aborted: boolean;
+  error: unknown;
+  events: AgentEvent[];
+  message: string;
+}) {
+  if (aborted) {
+    return {
+      errorCode: "agent_run_aborted",
+      errorSource: "user",
+    };
+  }
+
+  if (error instanceof AgentContextValidationError) {
+    return {
+      errorCode: "context_validation_failed",
+      errorSource: "context",
+    };
+  }
+
+  const skillScriptFailed = events.findLast(
+    (event) => event.type === "skill.script.failed"
+  );
+  if (skillScriptFailed) {
+    return {
+      errorCode: "skill_script_failed",
+      errorSource: "skill_script",
+    };
+  }
+
+  const toolError = events.findLast((event) => event.type === "tool.error");
+  const toolName = typeof toolError?.payload.toolName === "string"
+    ? toolError.payload.toolName
+    : "";
+  if (/seedream/i.test(message) || /generate_image|upscale_image/.test(toolName)) {
+    return {
+      errorCode: "seedream_failed",
+      errorSource: "seedream",
+    };
+  }
+
+  if (toolError) {
+    return {
+      errorCode: "tool_failed",
+      errorSource: "tool",
+    };
+  }
+
+  return {
+    errorCode: "agent_run_failed",
+    errorSource: "model",
+  };
 }
 
 async function writeCanvasOperationEvents({

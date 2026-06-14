@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { buildAgentRunInput, buildCucumberAgentContext } from "./context";
+import {
+  AgentContextValidationError,
+  buildAgentRunInput,
+  buildCucumberAgentContext,
+} from "./context";
 import type { AgentCanvasNode } from "../../src/types/canvas";
 
 describe("agent context", () => {
@@ -93,6 +97,41 @@ describe("agent context", () => {
       type: "doc",
       summary: "保留绿色背景",
     });
+    expect(input.contextSummary).toMatchObject({
+      selectedNodes: [
+        { id: "image-1", kind: "imageResult" },
+        { id: "note-1", kind: "stickyNote" },
+        { id: "run-1", kind: "run" },
+      ],
+      referenceNodes: [
+        { id: "image-1", kind: "imageResult" },
+        { id: "note-1", kind: "stickyNote" },
+      ],
+      upstreamPath: [
+        { nodeId: "prompt-1", type: "prompt" },
+        { nodeId: "image-1", type: "image" },
+        { nodeId: "note-1", type: "doc" },
+      ],
+      omittedNodes: [
+        { id: "run-1", kind: "run", reason: "not_referenceable" },
+      ],
+    });
+  });
+
+  it("throws a typed context validation error for untrusted selected nodes", () => {
+    expect(() =>
+      buildAgentRunInput({
+        userId: "user-1",
+        projectId: "project-1",
+        runNodeId: "run-2",
+        canvasContext: {
+          prompt: "越权请求",
+          promptNodeId: "prompt-2",
+          selectedNodeId: "foreign-image",
+        },
+        projectSnapshot: snapshot(),
+      })
+    ).toThrow(AgentContextValidationError);
   });
 });
 

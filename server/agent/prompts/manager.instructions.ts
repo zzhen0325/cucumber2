@@ -60,11 +60,12 @@ function buildSkillInstructions(context?: CucumberAgentContext) {
     purpose: skill.purpose,
     tags: skill.tags,
     bindings: skill.bindings,
-    scripts: skill.scripts.map(({ description, name, runtime }) => ({
-      description,
-      name,
-      runtime,
-    })),
+      scripts: skill.scripts.map(({ description, name, path, runtime }) => ({
+        description,
+        name,
+        path,
+        runtime,
+      })),
     score: skill.score,
     reasons: skill.reasons,
   }));
@@ -72,11 +73,13 @@ function buildSkillInstructions(context?: CucumberAgentContext) {
     id: skill.id,
     name: skill.name,
     instructions: skill.body,
-    scripts: skill.scripts.map(({ description, input, name, output, runtime }) => ({
+    resources: skill.sourceManifest.resources ?? null,
+    scripts: skill.scripts.map(({ description, input, name, output, path, runtime }) => ({
       description,
       input,
       name,
       output,
+      path,
       runtime,
     })),
   }));
@@ -86,8 +89,10 @@ function buildSkillInstructions(context?: CucumberAgentContext) {
     "- 本轮只可使用下面 skill cards 中列出的候选技能。",
     "- 使用任何技能前必须先调用 activate_skill；不要凭候选摘要直接执行技能细节。",
     "- activate_skill 返回完整 SKILL.md instructions 后，后续回答和工具调用必须严格遵循已激活技能。",
+    "- 如果已激活技能的 instructions 提到 references/、styles/、assets/、scripts/ 或其他随包资源，先用 read_skill_resource 列出资源，再读取当前任务需要的文本资源；不要凭文件名猜测资源内容。",
     "- 每轮最多激活 3 个技能；没有相关技能时直接按当前能力边界回答。",
-    "- 技能脚本只能通过 run_skill_script 调用；脚本返回的 canvasOperations 仍由 runtime policy 校验。",
+    "- 技能脚本只能通过 run_skill_script 调用；标准 Agent Skills 脚本可能没有 Cucumber 专用 JSON 输出，必要时先用 args=['--help'] 查看用法；脚本返回的 canvasOperations 仍由 runtime policy 校验。",
+    "- read_skill_resource 只能读取已激活技能包里的只读资源；二进制图片等资产只会作为资源路径/元数据返回。",
     "- 不要向用户暴露 package bucket/path 或引用图 URL。",
     `skill_cards: ${JSON.stringify(cards)}`,
     activated.length ? `activated_skills: ${JSON.stringify(activated)}` : "",

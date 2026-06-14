@@ -72,9 +72,100 @@ describe("agent run materializer", () => {
     ).toMatchObject({
       kind: "run",
       status: "error",
-      error: "Seedream image generation is not configured.",
+      error: "Seedream 调用失败。",
     });
     expect(next.nodes.some((node) => node.id === "manual-note")).toBe(true);
+  });
+
+  it("removes duplicate result nodes for the same run artifact id", () => {
+    const project = projectSnapshot();
+    project.nodes.push(
+      {
+        id: "image-pending-run-1-1",
+        type: "imageResultNode",
+        position: { x: 0, y: 200 },
+        data: {
+          kind: "imageResult",
+          image: {
+            id: "image-1",
+            url: "/api/projects/project-1/artifacts/image-1/content",
+          },
+          artifact: {
+            id: "image-1",
+            type: "image",
+            uri: "/api/projects/project-1/artifacts/image-1/content",
+          },
+          prompt: "生成一张图",
+          runId: "run-1",
+          status: "ready",
+        },
+      },
+      {
+        id: "artifact-image-1",
+        type: "imageResultNode",
+        position: { x: 260, y: 200 },
+        data: {
+          kind: "imageResult",
+          image: {
+            id: "image-1",
+            url: "/api/projects/project-1/artifacts/image-1/content",
+          },
+          artifact: {
+            id: "image-1",
+            type: "image",
+            uri: "/api/projects/project-1/artifacts/image-1/content",
+          },
+          prompt: "生成一张图",
+          runId: "run-1",
+          status: "ready",
+        },
+      }
+    );
+    project.edges.push(
+      {
+        id: "edge-run-1-image-pending-run-1-1",
+        source: "run-1",
+        target: "image-pending-run-1-1",
+        type: "animated",
+      },
+      {
+        id: "edge-run-1-artifact-image-1",
+        source: "run-1",
+        target: "artifact-image-1",
+        type: "animated",
+      }
+    );
+
+    const next = materializeSnapshot(
+      project,
+      [
+        event("run.created", {
+          prompt: "生成一张图",
+          promptNodeId: "prompt-1",
+          selectedNodeId: null,
+        }),
+        event("tool.input", {
+          toolCallId: "tool-1",
+          toolName: "generate_image",
+          input: { prompt: "生成一张图", resultCount: 1 },
+        }),
+        event("artifact.created", {
+          artifact: {
+            id: "image-1",
+            type: "image",
+            uri: "/api/projects/project-1/artifacts/image-1/content",
+          },
+          toolName: "generate_image",
+        }),
+      ],
+      "run-1"
+    );
+
+    const resultNodes = next.nodes.filter(
+      (node) => node.data.kind === "imageResult" && node.data.image.id === "image-1"
+    );
+    expect(resultNodes).toHaveLength(1);
+    expect(next.edges.some((edge) => edge.target === "artifact-image-1")).toBe(false);
   });
 
   it("materializes simple replies as a result prompt node", () => {

@@ -312,8 +312,73 @@ describe("agent event graph projection", () => {
     expect(run?.data).toMatchObject({
       kind: "run",
       status: "error",
-      error: "Seedream missing",
+      error: "Seedream 调用失败。",
       toolParts: [expect.objectContaining({ state: "output-error" })],
+    });
+  });
+
+  it("does not project duplicate image nodes for the same artifact id", () => {
+    const artifact = {
+      id: "artifact-dup",
+      type: "image",
+      uri: "/api/projects/project-1/artifacts/artifact-dup/content",
+    };
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", {
+          prompt: "生成图片",
+          promptNodeId: "prompt-1",
+        }),
+        event("tool.input", "generate_image", {
+          toolCallId: "call-1",
+          toolName: "generate_image",
+          input: { prompt: "生成图片", resultCount: 1 },
+        }),
+        event("artifact.created", "generate_image", { artifact }),
+        event("artifact.created", "generate_image", { artifact }),
+      ],
+    });
+
+    const imageNodes = projection.nodes.filter(
+      (node) => node.data.kind === "imageResult"
+    );
+    expect(imageNodes).toHaveLength(1);
+    expect(imageNodes[0].data).toMatchObject({
+      kind: "imageResult",
+      image: { id: "artifact-dup" },
+    });
+  });
+
+  it("does not leave pending image placeholders for aborted runs", () => {
+    const projection = projectRunTraceToCanvas({
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", {
+          prompt: "生成图片",
+          promptNodeId: "prompt-1",
+        }),
+        event("tool.input", "generate_image", {
+          toolCallId: "call-1",
+          toolName: "generate_image",
+          input: { prompt: "生成图片", resultCount: 1 },
+        }),
+        event("run.failed", "run", {
+          errorCode: "agent_run_aborted",
+          errorSource: "user",
+          errorText: "Run stopped by user.",
+        }),
+      ],
+    });
+
+    expect(
+      projection.nodes.some((node) => node.data.kind === "imageResult")
+    ).toBe(false);
+    expect(projection.nodes.find((node) => node.id === "run-1")?.data).toMatchObject({
+      kind: "run",
+      status: "error",
+      error: "运行已停止。",
     });
   });
 

@@ -340,6 +340,8 @@ function getRunTitle(
 function getToolName(toolPart: CanvasToolPart) {
   const names: Record<string, string> = {
     "tool-expand_image_prompt": "扩写提示词",
+    "tool-read_skill_resource": "读取技能资源",
+    "tool-render_visual_style_prompt": "风格提示词",
     "tool-generate_image": "生成图片",
     "tool-activate_skill": "激活技能",
     "tool-propose_canvas_operations": "更新画布",

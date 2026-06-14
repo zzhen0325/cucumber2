@@ -264,6 +264,7 @@ export function projectRunTraceToCanvas({
   const toolParts = buildToolParts(orderedEvents, prompt);
   const agentText = buildAgentText(orderedEvents, runStatus, streamedAgentText);
   const directTextResult = readDirectTextResult(orderedEvents);
+  const runWasAborted = isAbortedRun(orderedEvents);
   const promptDimensions = getPromptNodeDimensions(prompt);
   const promptNode: AgentCanvasNode = getExistingOrProjectedNode(
     existingNodes,
@@ -305,7 +306,7 @@ export function projectRunTraceToCanvas({
     }
   );
   const expectedImageRequest = readExpectedImageRequest(orderedEvents, prompt);
-  const pendingImageProjection = expectedImageRequest
+  const pendingImageProjection = expectedImageRequest && !runWasAborted
     ? createPendingImageResultNodes(
         runNode,
         expectedImageRequest.count,
@@ -320,6 +321,7 @@ export function projectRunTraceToCanvas({
   const projectedNodes = [promptNode, runNode];
   const projectedEdges: AgentCanvasEdge[] = [];
   const rejectedPatches: RejectedGraphPatch[] = [];
+  const processedArtifactIds = new Set<string>();
 
   if (selectedNodeId) {
     projectedEdges.push(
@@ -386,10 +388,23 @@ export function projectRunTraceToCanvas({
       if (!artifact) {
         continue;
       }
+      if (processedArtifactIds.has(artifact.id)) {
+        continue;
+      }
+      processedArtifactIds.add(artifact.id);
 
+      const existingArtifactNodeId = findArtifactNodeId(existingNodes, artifact.id);
       const pendingImageNode =
         artifact.type === "image" ? pendingImageNodes.shift() : undefined;
+      if (
+        existingArtifactNodeId &&
+        pendingImageNode &&
+        pendingImageNode.id !== existingArtifactNodeId
+      ) {
+        removeProjectedNode(projectedNodes, projectedEdges, pendingImageNode.id);
+      }
       const artifactNodeId =
+        existingArtifactNodeId ??
         pendingImageNode?.id ??
         readString(event.payload.canvasNodeId) ?? getArtifactNodeId(artifact);
       const artifactNode = createArtifactCanvasNode({
@@ -397,7 +412,7 @@ export function projectRunTraceToCanvas({
         existingNodes,
         index: projectedNodes.length,
         nodeId: artifactNodeId,
-        position: pendingImageNode?.position,
+        position: existingArtifactNodeId ? undefined : pendingImageNode?.position,
         request:
           pendingImageNode?.data.kind === "imageResult"
             ? pendingImageNode.data.request
@@ -462,6 +477,37 @@ function rejectPatch(
     state,
     rejected: { patch, reason },
   };
+}
+
+function removeProjectedNode(
+  nodes: AgentCanvasNode[],
+  edges: AgentCanvasEdge[],
+  nodeId: string
+) {
+  const nodeIndex = nodes.findIndex((node) => node.id === nodeId);
+  if (nodeIndex >= 0) {
+    nodes.splice(nodeIndex, 1);
+  }
+
+  for (let index = edges.length - 1; index >= 0; index -= 1) {
+    if (edges[index].source === nodeId || edges[index].target === nodeId) {
+      edges.splice(index, 1);
+    }
+  }
+}
+
+function findArtifactNodeId(nodes: AgentCanvasNode[], artifactId: string) {
+  return nodes.find((node) => getNodeArtifactId(node) === artifactId)?.id;
+}
+
+function getNodeArtifactId(node: AgentCanvasNode) {
+  if (node.data.kind === "imageResult") {
+    return node.data.artifact?.id ?? node.data.image.artifact?.id ?? node.data.image.id;
+  }
+  if ("artifact" in node.data) {
+    return node.data.artifact.id;
+  }
+  return null;
 }
 
 function isValidNode(node: AgentCanvasNode) {
@@ -531,13 +577,19 @@ function buildToolParts(
     }
 
     if (event.type === "tool.error") {
+      const rawErrorText = event.errorText ?? readString(event.payload.errorText);
       toolParts.set(toolCallId, {
         ...previous,
         type: `tool-${toolName}`,
         state: "output-error",
         input: previous?.input,
         output: previous?.output,
-        errorText: event.errorText ?? readString(event.payload.errorText),
+        errorText: summarizeRunError(rawErrorText, {
+          errorSource: /generate_image|upscale_image/.test(toolName)
+            ? "seedream"
+            : "tool",
+          toolName,
+        }),
       });
     }
   }
@@ -549,7 +601,10 @@ function buildToolParts(
       type: "tool-runtime",
       state: "output-error",
       input: { prompt },
-      errorText,
+      errorText: summarizeRunError(errorText, {
+        errorCode: readString(failure?.payload.errorCode),
+        errorSource: readString(failure?.payload.errorSource),
+      }),
     });
   }
 
@@ -1198,10 +1253,66 @@ function readDirectTextResult(events: RunStepTraceEvent[]) {
 
 function readRunError(events: RunStepTraceEvent[]) {
   const failed = events.find((event) => event.type === "run.failed");
-  return (
+  const detail =
     readString(failed?.payload.errorText) ??
-    readString(events.find((event) => event.type === "tool.error")?.errorText)
+    readString(events.find((event) => event.type === "tool.error")?.errorText);
+  const errorCode = readString(failed?.payload.errorCode);
+  const errorSource = readString(failed?.payload.errorSource);
+  const toolName = readString(
+    events.findLast((event) => event.type === "tool.error")?.payload.toolName
   );
+
+  return summarizeRunError(detail, { errorCode, errorSource, toolName });
+}
+
+function isAbortedRun(events: RunStepTraceEvent[]) {
+  const failed = events.findLast((event) => event.type === "run.failed");
+  return readString(failed?.payload.errorCode) === "agent_run_aborted";
+}
+
+function summarizeRunError(
+  detail: string | undefined,
+  {
+    errorCode,
+    errorSource,
+    toolName,
+  }: {
+    errorCode?: string;
+    errorSource?: string;
+    toolName?: string;
+  } = {}
+) {
+  if (!detail && !errorCode && !errorSource) {
+    return undefined;
+  }
+
+  if (errorCode === "agent_run_aborted" || errorSource === "user") {
+    return "运行已停止。";
+  }
+  if (errorCode === "context_validation_failed" || errorSource === "context") {
+    return "上下文校验失败。";
+  }
+  if (errorSource === "canvas_policy") {
+    return "画布操作被拒绝。";
+  }
+  if (errorSource === "skill_script" || errorCode === "skill_script_failed") {
+    return "技能脚本失败。";
+  }
+  if (errorSource === "seedream" || /seedream/i.test(detail ?? "")) {
+    return "Seedream 调用失败。";
+  }
+  if (errorSource === "tool" || toolName) {
+    return toolName ? `${humanizeRuntimeLabel(toolName) ?? "工具"} 调用失败。` : "工具调用失败。";
+  }
+  if (errorSource === "model") {
+    return "模型调用失败。";
+  }
+
+  return truncateRunError(detail ?? "运行失败。");
+}
+
+function truncateRunError(text: string) {
+  return text.length > 72 ? `${text.slice(0, 69)}...` : text;
 }
 
 function readToolName(value: unknown) {

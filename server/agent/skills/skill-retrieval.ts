@@ -103,6 +103,16 @@ function scoreSkill(
     reasons.push("image-intent");
   }
 
+  if (
+    query.hasImageIntent &&
+    (skill.name === "visual-prompt-cookbook" ||
+      skill.bindings.tools.includes("render_visual_style_prompt") ||
+      skill.tags.includes("style-json"))
+  ) {
+    score += 18;
+    reasons.push("visual-style-cookbook");
+  }
+
   const searchable = [
     skill.name,
     skill.description,
@@ -128,11 +138,12 @@ function scoreSkill(
     ...skill,
     reasons,
     score,
-    scripts: skill.scripts.map(({ description, input, name, output, runtime }) => ({
+    scripts: skill.scripts.map(({ description, input, name, output, path, runtime }) => ({
       description,
       input,
       name,
       output,
+      path,
       runtime,
     })),
   };

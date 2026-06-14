@@ -7,15 +7,24 @@ import { validateCanvasOperations } from "../../policy/canvas-operation-policy.t
 import { runSkillScript } from "../../skills/skill-script-runner.ts";
 
 const runSkillScriptInputSchema = z.object({
+  args: z.array(z.string().max(500)).max(50).optional(),
   input: z.unknown().optional(),
   scriptName: z.string().min(1),
   skillId: z.string().min(1),
+  stdin: z.string().max(100_000).optional(),
 });
 
 const runSkillScriptJsonSchema = {
   type: "object",
   additionalProperties: false,
   properties: {
+    args: {
+      type: "array",
+      items: { type: "string" },
+      maxItems: 50,
+      description:
+        "Optional command-line arguments for standard Agent Skills scripts, for example ['--help'].",
+    },
     input: {
       type: "object",
       additionalProperties: true,
@@ -30,6 +39,11 @@ const runSkillScriptJsonSchema = {
       type: "string",
       description: "Activated skill id that owns the script.",
     },
+    stdin: {
+      type: "string",
+      description:
+        "Optional raw stdin. If omitted, the tool sends JSON.stringify(input ?? {}) to stdin.",
+    },
   },
   required: ["skillId", "scriptName"],
 } as const;
@@ -37,7 +51,7 @@ const runSkillScriptJsonSchema = {
 export const runSkillScriptTool = tool({
   name: "run_skill_script",
   description:
-    "Run a script exposed by an activated skill with JSON stdin/stdout. Scripts cannot write the database or canvas directly; returned canvasOperations still go through runtime policy.",
+    "Run a script exposed by an activated skill in a sandbox. Supports discovered Agent Skills scripts with optional args/stdin. JSON skill output is parsed; ordinary stdout is wrapped as data. Scripts cannot write the database or canvas directly; returned canvasOperations still go through runtime policy.",
   parameters: runSkillScriptJsonSchema as never,
   strict: false,
   errorFunction: null,
@@ -83,10 +97,12 @@ export const runSkillScriptTool = tool({
 
     try {
       const output = await runSkillScript({
+        args: parsed.data.args,
         input: parsed.data.input,
         scriptName: script.name,
         signal: details?.signal,
         skill,
+        stdin: parsed.data.stdin,
       });
       const canvasResult = applyReturnedCanvasOperations(
         context,
