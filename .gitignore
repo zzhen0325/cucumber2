@@ -12,7 +12,6 @@ dist
 dist-ssr
 *.local
 supabase/.temp/
-.cucumber-runtime/
 
 # Editor directories and files
 .vscode/*

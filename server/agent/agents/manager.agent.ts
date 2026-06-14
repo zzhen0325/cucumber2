@@ -1,29 +1,23 @@
 import { Agent, handoff, type RunContext } from "@openai/agents";
-import { SandboxAgent, type Capability } from "@openai/agents/sandbox";
+import { Capabilities, SandboxAgent, type Capability } from "@openai/agents/sandbox";
 
 import type { CucumberAgentContext } from "../context.ts";
 import { hasBuiltInImageIntent } from "../skills/skill-retrieval.ts";
 import { proposeCanvasOperationsTool } from "../tools/canvas/propose-canvas-operations.tool.ts";
 import { managerInstructions } from "../prompts/manager.instructions.ts";
 import { createImageAgent } from "./image.agent.ts";
-import {
-  createCucumberSandboxCapabilities,
-  type CucumberSandboxCapabilityOptions,
-} from "./sandbox-capabilities.ts";
 
 // NOTE: the model is intentionally NOT set here. It is resolved lazily at run
 // time (see runtime.ts) because the model provider depends on environment
 // variables that are loaded *after* this module is imported.
 export function createManagerAgent({
-  sandboxCapabilities,
   skillCapability,
   model,
 }: {
-  sandboxCapabilities?: CucumberSandboxCapabilityOptions;
   skillCapability?: Capability;
   model?: Agent<CucumberAgentContext>["model"];
 } = {}) {
-  const imageAgent = createImageAgent({ model, sandboxCapabilities, skillCapability });
+  const imageAgent = createImageAgent({ model, skillCapability });
   const commonConfig = {
     handoffs: [
       handoff(imageAgent, {
@@ -40,7 +34,7 @@ export function createManagerAgent({
   if (skillCapability) {
     return new SandboxAgent<CucumberAgentContext>({
       ...commonConfig,
-      capabilities: createCucumberSandboxCapabilities(skillCapability, sandboxCapabilities),
+      capabilities: [...Capabilities.default(), skillCapability],
     });
   }
 

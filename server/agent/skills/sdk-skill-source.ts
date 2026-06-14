@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { localDirLazySkillSource, skills, type SkillIndexEntry, type Skills } from "@openai/agents/sandbox/local";
 import JSZip from "jszip";
@@ -7,8 +8,6 @@ import JSZip from "jszip";
 import { getAgentSkillDefinition } from "../../supabase.ts";
 import { downloadAgentSkillPackage } from "../../storage.ts";
 import type { AgentSkillCard } from "./types.ts";
-
-const SDK_SKILL_RUNTIME_DIR = ".cucumber-runtime/sdk-skills";
 
 export type SdkSkillSource = {
   capability: Skills;
@@ -24,9 +23,7 @@ export async function prepareSdkSkillSource(
     return null;
   }
 
-  const runtimeDir = path.resolve(process.cwd(), SDK_SKILL_RUNTIME_DIR);
-  await mkdir(runtimeDir, { recursive: true });
-  const rootDir = await mkdtemp(path.join(runtimeDir, "run-"));
+  const rootDir = await mkdtemp(path.join(tmpdir(), "cucumber-sdk-skills-"));
   try {
     const index: SkillIndexEntry[] = [];
     for (const candidate of candidates) {
@@ -51,10 +48,7 @@ export async function prepareSdkSkillSource(
     return {
       capability: skills({
         index,
-        lazyFrom: localDirLazySkillSource({
-          baseDir: process.cwd(),
-          src: path.relative(process.cwd(), rootDir),
-        }),
+        lazyFrom: localDirLazySkillSource(rootDir),
         skillsPath: ".agents",
       }),
       cleanup: () => rm(rootDir, { force: true, recursive: true }),

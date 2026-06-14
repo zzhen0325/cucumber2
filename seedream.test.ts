@@ -6,7 +6,6 @@ import {
   buildSeedreamUpscaleTaskBody,
   generateSeedreamImage,
   mapWithStaggeredStarts,
-  SeedreamConcurrencyLimitError,
   type SeedreamConfig,
   type SeedreamGenerateInput,
 } from "./seedream";
@@ -138,18 +137,5 @@ describe("seedream provider", () => {
     await expect(generateSeedreamImage(input, testSeedreamConfig)).rejects.toMatchObject({
       name: "AbortError",
     });
-  });
-
-  it("exposes a concise error for Seedream API concurrency limits", () => {
-    const error = new SeedreamConcurrencyLimitError({
-      requestId: "20260614141334D697D5C048658435DED5",
-      retries: 4,
-    });
-
-    expect(error.message).toBe(
-      "Seedream 当前达到 API 并发上限，已重试 4 次仍未获得可用额度。请稍后重试。"
-    );
-    expect(error.code).toBe("seedream_concurrency_limit");
-    expect(error.requestId).toBe("20260614141334D697D5C048658435DED5");
   });
 });

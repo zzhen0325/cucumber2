@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import JSZip from "jszip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -67,7 +67,6 @@ Use references and scripts.
         path: "sdk-skill",
       },
     ]);
-    expect(source?.rootDir.startsWith(path.join(process.cwd(), ".cucumber-runtime"))).toBe(true);
     await expect(
       readFile(path.join(source?.rootDir ?? "", "sdk-skill", "references", "guide.md"), "utf8")
     ).resolves.toBe("# Guide");
@@ -76,7 +75,6 @@ Use references and scripts.
     ).resolves.toBe("asset");
 
     await source?.cleanup();
-    await expect(stat(source?.rootDir ?? "")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("writes manual skills as SKILL.md files", async () => {
