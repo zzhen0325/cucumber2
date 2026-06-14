@@ -94,7 +94,6 @@ function buildContext(
     canvasSnapshot: { nodes: [], edges: [] },
     selectedNodeIds: [],
     knownNodeIds: [],
-    activatedSkills: [],
     producedArtifacts: [],
     pendingEvents: [],
     prompt: "生成一张黄瓜海报",

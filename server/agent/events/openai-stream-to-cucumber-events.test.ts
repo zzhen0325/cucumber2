@@ -164,7 +164,6 @@ function agentContext(): CucumberAgentContext {
     canvasSnapshot: { nodes: [], edges: [] },
     selectedNodeIds: [],
     knownNodeIds: ["run-1"],
-    activatedSkills: [],
     producedArtifacts: [],
     pendingEvents: [],
     prompt: "生成图片",

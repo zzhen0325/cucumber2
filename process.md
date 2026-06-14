@@ -78,14 +78,14 @@
 
 - 新增 `agent_skill_definitions` 作为当前 OpenAI Agents SDK runtime 的全局技能表；不恢复 Agent v1 Skill API、审批或执行器。
 - 技能表升级为 Agent OS metadata：`agent_scope`/`purpose` 不再只限 image/prompt_expansion，并新增 tags、triggers、bindings、scripts、package bucket/path/hash/size。
-- `agent-skill-packages` 成为技能 zip 包私有 bucket，单包 5MB；zip 导入只接受一个 `SKILL.md` 和声明过的 `scripts/**/*.mjs|*.js|*.py`，拒绝路径穿越、未声明脚本、重复脚本名和不支持文件。
+- `agent-skill-packages` 成为技能 zip 包私有 bucket，单包 5MB；zip 导入只接受一个 `SKILL.md`、声明过的 `scripts/**/*.mjs|*.js|*.py`、`references/**` 和 `assets/**`，拒绝路径穿越、未声明脚本、重复脚本名和根目录杂文件。
 - 新增 `/api/agent-skills` CRUD 和 `/api/agent-skills/import`，所有接口要求登录；列表不返回完整 `skillMd`，详情返回完整内容用于编辑。
 - 管理工作台“技能”页展示 scope、purpose、tags、bindings、scripts、package hash、启用和默认状态。
-- Agent Run 开始后服务端从可信画布快照检索最多 6 个启用技能，只把 skill cards 注入 Manager；完整 `SKILL.md` 只能通过 `activate_skill` 加载，每轮最多激活 3 个技能。
-- 新增 `run_skill_script`，仅已激活且含脚本的技能可用；脚本包下载后校验 SHA-256，通过 `sandbox-exec`、空 secret 环境、JSON stdin/stdout、15 秒超时执行。没有 sandbox 支持时失败，不做不安全 fallback。
-- Image Agent 的 `expand_image_prompt` 改为只使用已激活的 image/prompt_expansion 技能；短、关键词式或视觉细节不足的新图片请求会先激活扩写技能，再把 `expandedPrompt` 传给 `generate_image`。
+- Agent Run 开始后服务端从可信画布快照检索最多 6 个启用技能，把候选技能转换为 OpenAI Agents SDK `SandboxAgent` skills capability；完整 `SKILL.md`、`scripts/`、`references/` 和 `assets/` 只能通过 SDK `load_skill` 按需物化到 sandbox workspace。
+- 移除运行时对自定义 `activate_skill`、`run_skill_script` 和 `expand_image_prompt` 工具的依赖；技能脚本由 SDK sandbox filesystem/shell tools 按 `SKILL.md` 指令运行，画布变更仍必须通过 `propose_canvas_operations` 和 runtime policy。
+- Image Agent 对短、关键词式或视觉细节不足的新图片请求，会先按 SDK Skills 规则加载 prompt expansion skill，把技能产出的完整视觉描述传给 `generate_image`。
 - `generate_image` 的工具输出和 artifact metadata 保留实际 Seedream prompt，同时保留原始 run prompt，供 Trace 和图片结果节点追溯。
-- Trace 新增 `skill.retrieved`、`skill.activated`、`skill.script.started`、`skill.script.completed`、`skill.script.failed`；Run Trace 面板新增 Skills 区，Run 节点摘要显示已激活技能名称但不暴露 package path。
+- Trace 继续写入 `skill.retrieved`；SDK `load_skill`、filesystem 和 shell 调用作为普通 tool Trace 展示。Run 节点摘要显示本轮候选技能名称但不暴露 package path。
 
 ## Verification
 

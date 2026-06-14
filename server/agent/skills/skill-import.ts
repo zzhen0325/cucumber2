@@ -48,12 +48,13 @@ export async function importAgentSkillZip(
   const parsed = parseAgentSkillMarkdown(markdown);
   const rootPrefix = getRootPrefix(skillEntry.name);
   const declaredScripts = new Map(parsed.scripts.map((script) => [script.path, script]));
+  const packageFiles = visibleFiles.map((entry) => entry.name);
 
   validateVisibleFiles({
     declaredScripts,
     rootPrefix,
     skillPath: skillEntry.name,
-    visibleFiles: visibleFiles.map((entry) => entry.name),
+    visibleFiles: packageFiles,
   });
 
   const packageBytes = toUint8Array(bytes);
@@ -69,6 +70,11 @@ export async function importAgentSkillZip(
       fileName,
       packageSha256,
       packageSizeBytes: packageBytes.byteLength,
+      packageFiles: summarizePackageFiles({
+        rootPrefix,
+        skillPath: skillEntry.name,
+        visibleFiles: packageFiles,
+      }),
       scripts: summarizeScripts(parsed.scripts),
       skillPath: skillEntry.name,
       source: "zip",
@@ -100,6 +106,16 @@ function validateVisibleFiles({
     }
 
     const relativePath = file.slice(rootPrefix.length);
+    if (isReferenceOrAssetPath(relativePath)) {
+      continue;
+    }
+
+    if (!relativePath.startsWith("scripts/")) {
+      throw new Error(
+        `Skill package file ${relativePath} must be under scripts/, references/, or assets/.`
+      );
+    }
+
     const normalizedScriptPath = normalizeScriptPath(relativePath);
     if (!declaredScripts.has(normalizedScriptPath)) {
       throw new Error(`Skill script ${relativePath} is not declared in SKILL.md.`);
@@ -113,6 +129,10 @@ function validateVisibleFiles({
       throw new Error(`Declared script ${script.path} is missing from the zip.`);
     }
   }
+}
+
+function isReferenceOrAssetPath(relativePath: string) {
+  return relativePath.startsWith("references/") || relativePath.startsWith("assets/");
 }
 
 function assertPackageSize(sizeBytes: number) {
@@ -152,6 +172,22 @@ function summarizeScripts(scripts: AgentSkillScriptManifest[]) {
     output,
     runtime,
   }));
+}
+
+function summarizePackageFiles({
+  rootPrefix,
+  skillPath,
+  visibleFiles,
+}: {
+  rootPrefix: string;
+  skillPath: string;
+  visibleFiles: string[];
+}) {
+  return visibleFiles
+    .map((file) => normalizeZipPath(file))
+    .filter((file) => file !== normalizeZipPath(skillPath))
+    .map((file) => file.slice(rootPrefix.length))
+    .sort();
 }
 
 function isIgnoredZipPath(rawPath: string) {

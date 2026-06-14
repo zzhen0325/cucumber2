@@ -97,6 +97,25 @@ Run scripts.
     });
   });
 
+  it("imports SDK skill references and assets without script declarations", async () => {
+    const imported = await importAgentSkillZip(
+      await zipBytes({
+        "sdk-skill/SKILL.md": promptExpanderSkillMd.replace(
+          "imagegen-prompt-expander",
+          "sdk-skill"
+        ),
+        "sdk-skill/assets/template.txt": "asset",
+        "sdk-skill/references/guide.md": "# Guide",
+      }),
+      "sdk-skill.zip"
+    );
+
+    expect(imported.sourceManifest.packageFiles).toEqual([
+      "assets/template.txt",
+      "references/guide.md",
+    ]);
+  });
+
   it("rejects traversal, unsupported files, and undeclared scripts", async () => {
     await expect(
       importAgentSkillZip(
@@ -116,7 +135,7 @@ Run scripts.
         }),
         "unsupported.zip"
       )
-    ).rejects.toThrow(/scripts/);
+    ).rejects.toThrow(/scripts.*references.*assets/);
 
     await expect(
       importAgentSkillZip(

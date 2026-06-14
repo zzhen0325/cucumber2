@@ -10,8 +10,8 @@ Infinite Canvas Agent Run MVP。前端使用 Vite、React、TypeScript、React F
 - 实现：`server/agent/`
 - 编排：每次运行创建独立 Manager/Image Agent；Manager 通过 Agents SDK handoff 委派给 Image Agent
 - 失败 Run 节点显示重试按钮；重试会保留原失败节点，并用原 prompt 与原上游锚点创建新的可见 Agent Run 分支
-- 图片工具：`expand_image_prompt` 只使用已激活的 image prompt-expansion skill，`generate_image` 调用 Seedream 生成图片，`upscale_image` 调用 Seedream 智能超清
-- Agent OS 技能流：服务端从持久化画布重建可信上下文，检索启用技能的 metadata，首轮只注入 skill cards；模型必须调用 `activate_skill` 才能读取完整 `SKILL.md`，脚本只能通过 `run_skill_script` 执行
+- 图片工具：`generate_image` 调用 Seedream 生成图片，`upscale_image` 调用 Seedream 智能超清；短图片 prompt 的扩写由 SDK 原生 Skill 指令完成
+- Agent OS 技能流：服务端从持久化画布重建可信上下文，检索启用技能 metadata，并把候选技能作为 OpenAI Agents SDK `SandboxAgent` skills capability 注入；完整 `SKILL.md`、`scripts/`、`references/` 和 `assets/` 通过 SDK `load_skill` 按需物化到 sandbox workspace
 - 画布变更：Agent 只能提出 `CanvasOperation`，由 runtime policy 校验后投影到画布
 - 流协议：AI SDK UI `createUIMessageStream` + `data-runtime-event`
 
@@ -101,9 +101,9 @@ pnpm dev
 - 可选：`agent_scope`、`purpose`、`tags`、`triggers.keywords`、`triggers.canvas_kinds`、`bindings.tools`、`bindings.agents`
 - 可选脚本：`scripts[]`，每项声明 `name`、`path`、`runtime: node|python`、`description`、JSON input/output 期望
 
-zip 导入只接受一个 `SKILL.md` 和声明过的 `scripts/**/*.mjs|*.js|*.py`，拒绝路径穿越、未声明脚本、重复脚本名、超 5MB 包和不支持文件。脚本从 `agent-skill-packages` 下载，校验 SHA-256 后在临时目录中通过 `sandbox-exec` 执行，JSON stdin/stdout，15 秒超时，空 secret 环境；没有 sandbox 支持时直接失败并写入 Trace。
+zip 导入只接受一个 `SKILL.md`、声明过的 `scripts/**/*.mjs|*.js|*.py`，以及 SDK Skill 标准资源目录 `references/**`、`assets/**`；拒绝路径穿越、未声明脚本、重复脚本名、超 5MB 包和根目录杂文件。运行时会从 `agent-skill-packages` 下载技能包，校验 SHA-256 后展开为 SDK lazy skill source；脚本不再通过项目自定义 runner 执行，而是由 SDK sandbox filesystem/shell tools 按 `SKILL.md` 指令运行。脚本或 skill 仍不能直接写画布，画布变更必须调用 `propose_canvas_operations` 并通过 runtime policy。
 
-Trace 新增 `skill.retrieved`、`skill.activated`、`skill.script.started`、`skill.script.completed`、`skill.script.failed`。Run Trace 面板显示 Skills 区；Run 节点摘要只显示技能名称，不展示 package path。
+Trace 写入 `skill.retrieved` 记录本轮注入 SDK skills capability 的候选技能；SDK `load_skill`、filesystem 和 shell 调用作为普通 tool Trace 展示。Run 节点摘要只显示技能名称，不展示 package path。
 
 ## Validation
 

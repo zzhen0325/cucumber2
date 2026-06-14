@@ -1,10 +1,9 @@
-import { Agent, handoff } from "@openai/agents";
+import { Agent, handoff, type RunContext } from "@openai/agents";
+import { Capabilities, SandboxAgent, type Capability } from "@openai/agents/sandbox";
 
 import type { CucumberAgentContext } from "../context.ts";
 import { hasBuiltInImageIntent } from "../skills/skill-retrieval.ts";
 import { proposeCanvasOperationsTool } from "../tools/canvas/propose-canvas-operations.tool.ts";
-import { activateSkillTool } from "../tools/skills/activate-skill.tool.ts";
-import { runSkillScriptTool } from "../tools/skills/run-skill-script.tool.ts";
 import { managerInstructions } from "../prompts/manager.instructions.ts";
 import { createImageAgent } from "./image.agent.ts";
 
@@ -12,22 +11,35 @@ import { createImageAgent } from "./image.agent.ts";
 // time (see runtime.ts) because the model provider depends on environment
 // variables that are loaded *after* this module is imported.
 export function createManagerAgent({
+  skillCapability,
   model,
 }: {
+  skillCapability?: Capability;
   model?: Agent<CucumberAgentContext>["model"];
 } = {}) {
-  const imageAgent = createImageAgent({ model });
-
-  return new Agent<CucumberAgentContext>({
-    name: "Cucumber Manager",
-    instructions: (runContext) => managerInstructions(runContext.context),
-    ...(model ? { model } : {}),
-    tools: [activateSkillTool, runSkillScriptTool, proposeCanvasOperationsTool],
+  const imageAgent = createImageAgent({ model, skillCapability });
+  const commonConfig = {
     handoffs: [
       handoff(imageAgent, {
         isEnabled: ({ runContext }) => shouldEnableImageHandoff(runContext.context),
       }),
     ],
+    instructions: (runContext: RunContext<CucumberAgentContext>) =>
+      managerInstructions(runContext.context),
+    ...(model ? { model } : {}),
+    name: "Cucumber Manager",
+    tools: [proposeCanvasOperationsTool],
+  };
+
+  if (skillCapability) {
+    return new SandboxAgent<CucumberAgentContext>({
+      ...commonConfig,
+      capabilities: [...Capabilities.default(), skillCapability],
+    });
+  }
+
+  return new Agent<CucumberAgentContext>({
+    ...commonConfig,
   });
 }
 
@@ -48,7 +60,7 @@ function shouldEnableImageHandoff(context: CucumberAgentContext) {
     return true;
   }
 
-  return [...context.skillCandidates, ...context.activatedSkills].some(
+  return context.skillCandidates.some(
     (skill) =>
       skill.agentScope === "image" ||
       skill.bindings.agents.some((agent) => /image/i.test(agent)) ||
