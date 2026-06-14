@@ -140,7 +140,11 @@ describe("render_visual_style_prompt tool", () => {
 function skill() {
   return {
     agentScope: "image",
-    bindings: { agents: [], tools: ["render_visual_style_prompt"] },
+    bindings: {
+      agents: [],
+      scopes: ["read.skill" as const, "tool.image.prompt" as const],
+      tools: ["render_visual_style_prompt"],
+    },
     body: "Use Visual Prompt Cookbook.",
     description: "Reusable visual prompt cookbook.",
     enabled: true,

@@ -19,6 +19,8 @@ triggers:
 bindings:
   tools:
     - expand_image_prompt
+  scopes:
+    - read.skill
   agents:
     - Cucumber Image Agent
 scripts:
@@ -57,7 +59,39 @@ Return one expanded prompt.
         license: "internal",
         name: "imagegen-prompt-expander",
       },
+      bindings: {
+        scopes: ["read.skill", "tool.image.prompt"],
+        tools: ["expand_image_prompt"],
+      },
     });
+  });
+
+  it("rejects unknown tool bindings and scopes", () => {
+    expect(() =>
+      parseAgentSkillMarkdown(`---
+name: unknown-tool-skill
+description: Bad tool binding.
+bindings:
+  tools:
+    - missing_tool
+---
+
+Body
+`)
+    ).toThrow(/Unknown tool binding/);
+
+    expect(() =>
+      parseAgentSkillMarkdown(`---
+name: unknown-scope-skill
+description: Bad scope binding.
+bindings:
+  scopes:
+    - root.everything
+---
+
+Body
+`)
+    ).toThrow(/Unknown tool scope/);
   });
 
   it("rejects non-standard skill names", () => {

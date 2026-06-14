@@ -608,7 +608,7 @@ export async function createAgentSkillDefinition(
     .insert({
       agent_scope: agentScope,
       body: input.body,
-      bindings: input.bindings ?? { agents: [], tools: [] },
+      bindings: input.bindings ?? { agents: [], scopes: [], tools: [] },
       created_by: input.createdBy ?? null,
       description: input.description,
       enabled,
@@ -1038,7 +1038,7 @@ function mapAgentSkillDefinitionSummaryRow(
   return {
     id: row.id,
     agentScope: row.agent_scope,
-    bindings: row.bindings ?? { agents: [], tools: [] },
+    bindings: normalizeSkillBindings(row.bindings),
     createdAt: row.created_at,
     createdBy: row.created_by,
     description: row.description,
@@ -1055,6 +1055,16 @@ function mapAgentSkillDefinitionSummaryRow(
     tags: row.tags ?? [],
     triggers: row.triggers ?? { canvasKinds: [], keywords: [] },
     updatedAt: row.updated_at,
+  };
+}
+
+function normalizeSkillBindings(
+  bindings: AgentSkillDefinitionRow["bindings"]
+): AgentSkillBindings {
+  return {
+    agents: bindings?.agents ?? [],
+    scopes: bindings?.scopes ?? [],
+    tools: bindings?.tools ?? [],
   };
 }
 

@@ -23,6 +23,7 @@ describe("skill retrieval", () => {
         agentScope: "image",
         bindings: {
           agents: ["Cucumber Image Agent"],
+          scopes: ["tool.image.prompt", "tool.image.generate"],
           tools: ["expand_image_prompt", "generate_image"],
         },
         description: "Expand short image prompts.",
@@ -59,6 +60,7 @@ describe("skill retrieval", () => {
         agentScope: "image",
         bindings: {
           agents: ["Cucumber Image Agent"],
+          scopes: ["tool.image.prompt", "tool.image.generate"],
           tools: ["expand_image_prompt", "generate_image"],
         },
         description: "Expand short image prompts.",
@@ -73,6 +75,7 @@ describe("skill retrieval", () => {
         agentScope: "image",
         bindings: {
           agents: ["Cucumber Image Agent"],
+          scopes: ["read.skill", "tool.image.prompt", "tool.image.generate"],
           tools: ["render_visual_style_prompt", "generate_image"],
         },
         description: "Reusable style.json systems for visual prompts.",
@@ -163,7 +166,7 @@ function skill(overrides: Record<string, unknown>) {
     purpose: "general",
     tags: [],
     triggers: { canvasKinds: [], keywords: [] },
-    bindings: { agents: [], tools: [] },
+    bindings: { agents: [], scopes: [], tools: [] },
     scripts: [],
     packageBucket: null,
     packagePath: null,

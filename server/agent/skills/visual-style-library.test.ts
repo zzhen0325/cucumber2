@@ -60,7 +60,11 @@ async function visualStyleZip() {
 function skill(overrides: Partial<ActivatedAgentSkill> = {}): ActivatedAgentSkill {
   return {
     agentScope: "image",
-    bindings: { agents: [], tools: ["render_visual_style_prompt"] },
+    bindings: {
+      agents: [],
+      scopes: ["read.skill" as const, "tool.image.prompt" as const],
+      tools: ["render_visual_style_prompt"],
+    },
     body: "Use visual styles.",
     description: "Custom style cookbook.",
     frontmatter: {},

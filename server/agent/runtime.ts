@@ -33,6 +33,8 @@ import {
 import { resolveAgentModel } from "./model-config.ts";
 import { retrieveRelevantAgentSkills } from "./skills/skill-retrieval.ts";
 import { storeTextArtifactContent } from "../storage.ts";
+import { redactTraceValue } from "./trace-redaction.ts";
+import { getToolTraceMetadata } from "./tool-registry.ts";
 
 const runner = new Runner({ workflowName: "Cucumber Agent" });
 
@@ -112,7 +114,7 @@ export async function executeAgentRun({
       runNodeId: input.runNodeId,
       stepId: "run",
       type: "run.created",
-      payload: {
+      payload: buildRedactedPayload({
         prompt: agentInput.message,
         promptNodeId: agentInput.promptNodeId,
         selectedNodeId: agentInput.selectedNodeId,
@@ -120,7 +122,7 @@ export async function executeAgentRun({
         contextSummary: agentInput.contextSummary,
         upstreamContext: agentInput.upstreamContext,
         runtime: "openai-agents-sdk",
-      },
+      }),
     });
     const model = resolveAgentModel();
     agentInput = {
@@ -135,7 +137,7 @@ export async function executeAgentRun({
       runNodeId: input.runNodeId,
       stepId: "input",
       type: "input.normalized",
-      payload: {
+      payload: buildRedactedPayload({
         normalizedInput: agentInput.normalizedInput,
         prompt: agentInput.message,
         promptNodeId: agentInput.promptNodeId,
@@ -144,7 +146,7 @@ export async function executeAgentRun({
         contextSummary: agentInput.contextSummary,
         upstreamContext: agentInput.upstreamContext,
         runtime: "openai-agents-sdk",
-      },
+      }),
     });
 
     for await (const event of agentRuntime.run(agentInput)) {
@@ -214,6 +216,10 @@ export async function executeAgentRun({
         event.type === "skill_script_completed" ||
         event.type === "skill_script_failed"
       ) {
+        const inputRedaction =
+          "input" in event ? redactTraceValue(event.input) : undefined;
+        const outputRedaction =
+          "output" in event ? redactTraceValue(event.output) : undefined;
         await writeRunEvent({
           projectId: input.projectId,
           runNodeId: input.runNodeId,
@@ -225,8 +231,13 @@ export async function executeAgentRun({
                 ? "skill.script.completed"
                 : "skill.script.failed",
           payload: {
-            input: "input" in event ? event.input : undefined,
-            output: "output" in event ? event.output : undefined,
+            input: inputRedaction?.value,
+            output: outputRedaction?.value,
+            metadata: getToolTraceMetadata("run_skill_script"),
+            redaction: {
+              input: inputRedaction?.summary,
+              output: outputRedaction?.summary,
+            },
             runtime: "openai-agents-sdk",
             scriptName: event.scriptName,
             skillId: event.skillId,
@@ -411,7 +422,7 @@ export async function executeAgentRun({
       runNodeId: input.runNodeId,
       stepId: "run",
       type: "run.failed",
-      payload: {
+      payload: buildRedactedPayload({
         errorCode: failure.errorCode,
         errorSource: failure.errorSource,
         errorText: message,
@@ -422,7 +433,7 @@ export async function executeAgentRun({
         contextSummary: agentInput?.contextSummary,
         runtime: "openai-agents-sdk",
         status: "failed",
-      },
+      }),
       errorText: message,
     });
     runEvents.push(failedEvent);
@@ -509,6 +520,14 @@ function classifyRunFailure({
   return {
     errorCode: "agent_run_failed",
     errorSource: "model",
+  };
+}
+
+function buildRedactedPayload(payload: Record<string, unknown>) {
+  const redacted = redactTraceValue(payload);
+  return {
+    ...(redacted.value as Record<string, unknown>),
+    redaction: redacted.summary,
   };
 }
 

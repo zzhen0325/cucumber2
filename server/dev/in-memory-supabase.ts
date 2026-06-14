@@ -68,7 +68,7 @@ function withDefaults(table: string, value: Row): Row {
     if (row.purpose === undefined) row.purpose = "general";
     if (row.tags == null) row.tags = [];
     if (row.triggers == null) row.triggers = { canvasKinds: [], keywords: [] };
-    if (row.bindings == null) row.bindings = { agents: [], tools: [] };
+    if (row.bindings == null) row.bindings = { agents: [], scopes: [], tools: [] };
     if (row.scripts == null) row.scripts = [];
     if (row.package_bucket === undefined) row.package_bucket = null;
     if (row.package_path === undefined) row.package_path = null;

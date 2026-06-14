@@ -2,6 +2,8 @@ import type { UIMessage, UIMessageStreamWriter } from "ai";
 
 import type { AgentEvent } from "../../../src/types/runtime.ts";
 import { recordAgentEvent } from "../../supabase.ts";
+import { redactToolTraceValue } from "../trace-redaction.ts";
+import { getToolTraceMetadata } from "../tool-registry.ts";
 
 export type AgentEventWriter = {
   flush: () => Promise<void>;
@@ -75,12 +77,22 @@ export function createAgentEventWriter({
     },
 
     async writeToolInput(input) {
+      const redacted = redactToolTraceValue({
+        direction: "input",
+        toolName: input.toolName,
+        value: input.toolInput,
+      });
+      const metadata = mergeMetadata(
+        input.metadata,
+        getToolTraceMetadata(input.toolName),
+        redacted.metadata
+      );
       writer.write({
         type: "tool-input-available",
         toolCallId: input.toolCallId,
         toolName: input.toolName,
-        input: input.toolInput,
-        toolMetadata: input.metadata,
+        input: redacted.value,
+        toolMetadata: metadata,
       });
       return this.writeEvent({
         projectId,
@@ -90,17 +102,28 @@ export function createAgentEventWriter({
         payload: {
           toolCallId: input.toolCallId,
           toolName: input.toolName,
-          input: input.toolInput,
-          metadata: input.metadata,
+          input: redacted.value,
+          metadata,
+          redaction: redacted.summary,
         },
       });
     },
 
     async writeToolOutput(input) {
+      const redacted = redactToolTraceValue({
+        direction: "output",
+        toolName: input.toolName,
+        value: input.output,
+      });
+      const metadata = mergeMetadata(
+        input.metadata,
+        getToolTraceMetadata(input.toolName),
+        redacted.metadata
+      );
       writer.write({
         type: "tool-output-available",
         toolCallId: input.toolCallId,
-        output: input.output,
+        output: redacted.value,
       });
       return this.writeEvent({
         projectId,
@@ -110,13 +133,24 @@ export function createAgentEventWriter({
         payload: {
           toolCallId: input.toolCallId,
           toolName: input.toolName,
-          output: input.output,
-          metadata: input.metadata,
+          output: redacted.value,
+          metadata,
+          redaction: redacted.summary,
         },
       });
     },
 
     async writeToolError(input) {
+      const redactedInput = redactToolTraceValue({
+        direction: "input",
+        toolName: input.toolName,
+        value: input.input,
+      });
+      const metadata = mergeMetadata(
+        input.metadata,
+        getToolTraceMetadata(input.toolName),
+        redactedInput.metadata
+      );
       writer.write(
         input.inputWritten
           ? {
@@ -128,7 +162,7 @@ export function createAgentEventWriter({
               type: "tool-input-error",
               toolCallId: input.toolCallId,
               toolName: input.toolName,
-              input: input.input,
+              input: redactedInput.value,
               errorText: input.errorText,
             }
       );
@@ -140,15 +174,22 @@ export function createAgentEventWriter({
         payload: {
           toolCallId: input.toolCallId,
           toolName: input.toolName,
-          input: input.input,
+          input: redactedInput.value,
           errorText: input.errorText,
           errorCode: input.errorCode,
-          metadata: input.metadata,
+          metadata,
+          redaction: redactedInput.summary,
         },
         errorText: input.errorText,
       });
     },
   };
+}
+
+function mergeMetadata(
+  ...items: Array<Record<string, string> | undefined>
+): Record<string, string> {
+  return Object.assign({}, ...items.filter(Boolean));
 }
 
 function getAgentEventStreamId(event: AgentEvent) {

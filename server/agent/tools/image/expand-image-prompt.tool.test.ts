@@ -98,7 +98,11 @@ describe("expand_image_prompt tool", () => {
 function skill() {
   return {
     agentScope: "image",
-    bindings: { agents: [], tools: ["expand_image_prompt"] },
+    bindings: {
+      agents: [],
+      scopes: ["tool.image.prompt" as const],
+      tools: ["expand_image_prompt"],
+    },
     frontmatter: {},
     id: "skill-1",
     name: "imagegen-prompt-expander",

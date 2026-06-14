@@ -101,7 +101,7 @@ async function packageBytes() {
 function skill(overrides: Partial<ActivatedAgentSkill> = {}): ActivatedAgentSkill {
   return {
     agentScope: "general",
-    bindings: { agents: [], tools: [] },
+    bindings: { agents: [], scopes: [], tools: [] },
     body: "Use references/guide.md before answering.",
     description: "Full skill with resources and scripts.",
     frontmatter: {},

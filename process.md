@@ -110,6 +110,13 @@
 - `generate_image` 的工具输出和 artifact metadata 保留实际 Seedream prompt，同时保留原始 run prompt，供 Trace 和图片结果节点追溯。
 - Trace 新增 `skill.retrieved`、`skill.activated`、`skill.script.started`、`skill.script.completed`、`skill.script.failed`；Run Trace 面板新增 Skills 区，Run 节点摘要显示已激活技能名称但不暴露 package path。
 
+## 2026-06-14 Tool Registry, Scopes, Trace Redaction
+
+- 新增服务端 Tool Registry，统一声明当前 runtime 工具的 tool id/name、JSON input/output schema、required scopes、produced artifact types、Trace label 和外部网络能力。
+- `SKILL.md` 的 `bindings.tools` 导入/创建时必须匹配 Tool Registry；`bindings.scopes` 支持显式声明，未声明时从工具绑定自动推导并随 skill card/Trace 暴露。
+- 新迁移 `20260614190000_agent_tool_registry_scopes.sql` 为既有技能补写 `bindings.scopes`，不改变现有工具绑定。
+- 工具与 skill script Trace 写入统一走 redaction，secret/token/key/cookie/credential 和 URL-bearing 字段不落入默认 Trace payload；Trace metadata 记录 redaction 状态和 registry 派生的工具 scope/label 信息。
+
 ## Verification
 
 - Context 越权和服务端重建：`server/agent/context.test.ts`

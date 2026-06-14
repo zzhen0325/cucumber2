@@ -106,7 +106,8 @@ pnpm dev
 
 - 必填：`name`、`description`
 - 标准可选字段：`license`、`compatibility`、`metadata`、`allowed-tools` 会保留在 frontmatter 中
-- Cucumber 可选扩展：`agent_scope`、`purpose`、`tags`、`triggers.keywords`、`triggers.canvas_kinds`、`bindings.tools`、`bindings.agents`
+- Cucumber 可选扩展：`agent_scope`、`purpose`、`tags`、`triggers.keywords`、`triggers.canvas_kinds`、`bindings.tools`、`bindings.agents`、`bindings.scopes`
+- `bindings.tools` 必须匹配服务端 Tool Registry；`bindings.scopes` 可显式声明权限范围，未声明时会从绑定工具自动推导，例如 `read.skill`、`run.script`、`propose.canvas`、`tool.image.generate`、`tool.image.upscale`
 - Cucumber 可选脚本 manifest：`scripts[]` 可声明 `name`、`path`、`runtime: bash|node|python`、`description`、JSON input/output 期望；标准 skill 即使没有该 manifest，也会从 `scripts/` 自动发现可执行脚本
 - 可选资源：zip 包根下除 `SKILL.md` 外的安全相对路径都会作为技能资源保存；文本资源由 Agent 通过 `read_skill_resource` 按需读取，图片等二进制资源只暴露路径和 metadata，不直接塞进模型上下文；技能管理页可浏览 references、scripts、assets 等包内资源，图片资源走受保护内容接口预览
 
@@ -114,7 +115,7 @@ zip 导入接受一个可见 `SKILL.md` 和同一包根下的标准 Agent Skills
 
 技能源文件下载通过 `/api/agent-skills/:skillId/package`：zip 导入技能返回校验后的原始包；内置或手动技能会动态打包 `SKILL.md` 和可见资源。
 
-Trace 新增 `skill.retrieved`、`skill.activated`、`skill.script.started`、`skill.script.completed`、`skill.script.failed`。Run Trace 面板显示 Skills 区；Run 节点摘要只显示技能名称，不展示 package path。
+Trace 新增 `skill.retrieved`、`skill.activated`、`skill.script.started`、`skill.script.completed`、`skill.script.failed`。Run Trace 面板显示 Skills 区；Run 节点摘要只显示技能名称，不展示 package path。工具和脚本 Trace 写入前会统一 redaction：secret/token/key/cookie/credential 等字段和 URL-bearing 字段会被替换，payload 同时记录 redaction metadata；工具 Trace metadata 来自 Tool Registry，包括 label、required scopes、artifact types 和是否可能访问外部网络。
 
 内置 `visual-prompt-cookbook` 基于 `server/agent/skills/builtin/visual-prompt-cookbook` 中的 68 个 `style.json` 和 136 张预览图。Image Agent 在新图片请求中优先激活绑定 `render_visual_style_prompt` 的 style-library 技能，再把返回 prompt 传给 `generate_image`；用户上传的 skill 只要绑定同一工具并提供 `references/styles/<slug>/style.json` 或 `styles/<slug>/style.json`，也可走同一机制。旧 `imagegen-prompt-expander` 保留为普通扩写技能。
 

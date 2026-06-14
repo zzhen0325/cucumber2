@@ -1,5 +1,12 @@
 import { parse as parseYaml } from "yaml";
 
+import {
+  getRequiredScopesForToolBindings,
+  validateToolBindingIds,
+  validateToolScopes,
+  type ToolScope,
+} from "../tool-registry.ts";
+
 export type AgentSkillScope = string;
 export type AgentSkillPurpose = string;
 export type AgentSkillSourceType = "manual" | "seed" | "zip";
@@ -12,6 +19,7 @@ export type AgentSkillTriggers = {
 export type AgentSkillBindings = {
   tools: string[];
   agents: string[];
+  scopes: ToolScope[];
 };
 
 export type AgentSkillScriptRuntime = "bash" | "node" | "python";
@@ -138,15 +146,24 @@ function parseTriggers(value: unknown): AgentSkillTriggers {
 
 function parseBindings(value: unknown): AgentSkillBindings {
   if (value === undefined || value === null) {
-    return { agents: [], tools: [] };
+    return { agents: [], scopes: [], tools: [] };
   }
   if (!isRecord(value)) {
     throw new Error("SKILL.md bindings must be a YAML object.");
   }
 
+  const tools = readStringArray(value.tools, "bindings.tools");
+  const declaredScopes = readStringArray(value.scopes, "bindings.scopes");
+  validateToolBindingIds(tools);
+  validateToolScopes(declaredScopes);
+
   return {
     agents: readStringArray(value.agents, "bindings.agents"),
-    tools: readStringArray(value.tools, "bindings.tools"),
+    scopes: uniqueSortedScopes([
+      ...declaredScopes,
+      ...getRequiredScopesForToolBindings(tools),
+    ]),
+    tools,
   };
 }
 
@@ -271,6 +288,12 @@ function readStringArray(value: unknown, label: string) {
     }
   }
   return result;
+}
+
+function uniqueSortedScopes(scopes: string[]) {
+  const unique = [...new Set(scopes)];
+  validateToolScopes(unique);
+  return unique.sort() as ToolScope[];
 }
 
 function validateFrontmatterToken(value: string, label: string) {
