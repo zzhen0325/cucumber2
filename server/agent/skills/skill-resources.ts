@@ -7,7 +7,7 @@ import { downloadAgentSkillPackage } from "../../storage.ts";
 import type { ActivatedAgentSkill } from "./types.ts";
 
 const MAX_RESOURCE_TEXT_CHARS = 80_000;
-const MAX_LISTED_RESOURCES = 500;
+const MAX_LISTED_RESOURCES = 2_000;
 const readableTextExtensions = new Set([
   ".bash",
   ".cjs",
@@ -43,8 +43,23 @@ export type SkillResourceContent = SkillResourceSummary & {
   truncated?: boolean;
 };
 
+export type SkillResourceBytes = SkillResourceSummary & {
+  bytes: Uint8Array;
+  mimeType: string;
+  sizeBytes: number;
+};
+
+export type AgentSkillResourceSource = Pick<
+  ActivatedAgentSkill,
+  | "name"
+  | "packageBucket"
+  | "packagePath"
+  | "packageSha256"
+  | "sourceManifest"
+>;
+
 export async function listActivatedSkillResources(
-  skill: ActivatedAgentSkill
+  skill: AgentSkillResourceSource
 ): Promise<SkillResourceSummary[]> {
   if (skill.packageBucket && skill.packagePath && skill.packageSha256) {
     const zip = await loadSkillZip(skill);
@@ -64,7 +79,7 @@ export async function readActivatedSkillResource({
   skill,
 }: {
   resourcePath: string;
-  skill: ActivatedAgentSkill;
+  skill: AgentSkillResourceSource;
 }): Promise<SkillResourceContent> {
   const normalizedPath = normalizeResourcePath(resourcePath);
   if (!isAllowedResourcePath(normalizedPath)) {
@@ -94,7 +109,35 @@ export async function readActivatedSkillResource({
   return readDirectoryResource({ assetRoot, resourcePath: normalizedPath });
 }
 
-async function loadSkillZip(skill: ActivatedAgentSkill) {
+export async function readActivatedSkillResourceBytes({
+  resourcePath,
+  skill,
+}: {
+  resourcePath: string;
+  skill: AgentSkillResourceSource;
+}): Promise<SkillResourceBytes> {
+  const normalizedPath = normalizeResourcePath(resourcePath);
+  if (!isAllowedResourcePath(normalizedPath)) {
+    throw new Error("Resource path is unsafe or reserved.");
+  }
+
+  if (skill.packageBucket && skill.packagePath && skill.packageSha256) {
+    const zip = await loadSkillZip(skill);
+    return readZipResourceBytes({
+      resourcePath: normalizedPath,
+      rootPrefix: getRootPrefixFromSkill(skill),
+      zip,
+    });
+  }
+
+  const assetRoot = readAssetRoot(skill);
+  if (!assetRoot) {
+    throw new Error(`Skill ${skill.name} does not have uploaded or built-in resources.`);
+  }
+  return readDirectoryResourceBytes({ assetRoot, resourcePath: normalizedPath });
+}
+
+async function loadSkillZip(skill: AgentSkillResourceSource) {
   const packageBytes = await downloadAgentSkillPackage({
     bucket: skill.packageBucket ?? "",
     path: skill.packagePath ?? "",
@@ -172,6 +215,29 @@ async function readZipResource({
   return toResourceContent(resourcePath, content);
 }
 
+async function readZipResourceBytes({
+  resourcePath,
+  rootPrefix,
+  zip,
+}: {
+  resourcePath: string;
+  rootPrefix: string;
+  zip: JSZip;
+}) {
+  const entry = Object.values(zip.files).find((candidate) => {
+    if (candidate.dir) {
+      return false;
+    }
+    const candidatePath = toResourcePath(normalizeZipPath(candidate.name), rootPrefix);
+    return candidatePath === resourcePath;
+  });
+  if (!entry) {
+    throw new Error(`Skill resource not found: ${resourcePath}`);
+  }
+  const bytes = await entry.async("uint8array");
+  return toResourceBytes(resourcePath, bytes);
+}
+
 async function readDirectoryResource({
   assetRoot,
   resourcePath,
@@ -188,6 +254,26 @@ async function readDirectoryResource({
   const info = await stat(filePath);
   return {
     ...toResourceContent(resourcePath, content),
+    sizeBytes: info.size,
+  };
+}
+
+async function readDirectoryResourceBytes({
+  assetRoot,
+  resourcePath,
+}: {
+  assetRoot: string;
+  resourcePath: string;
+}) {
+  const filePath = path.join(assetRoot, resourcePath);
+  const relative = path.relative(assetRoot, filePath);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("Resource path escapes the skill asset root.");
+  }
+  const bytes = await readFile(filePath);
+  const info = await stat(filePath);
+  return {
+    ...toResourceBytes(resourcePath, new Uint8Array(bytes)),
     sizeBytes: info.size,
   };
 }
@@ -223,7 +309,21 @@ function toResourceContent(
   };
 }
 
-function getRootPrefixFromSkill(skill: ActivatedAgentSkill) {
+function toResourceBytes(
+  resourcePath: string,
+  bytes: Uint8Array
+): SkillResourceBytes {
+  return {
+    bytes,
+    mimeType: getResourceMimeType(resourcePath),
+    path: resourcePath,
+    readable: isReadableTextResource(resourcePath),
+    sizeBytes: bytes.byteLength,
+    type: classifyResource(resourcePath),
+  };
+}
+
+function getRootPrefixFromSkill(skill: AgentSkillResourceSource) {
   const skillPath = skill.sourceManifest.skillPath;
   if (typeof skillPath !== "string" || !skillPath.trim()) {
     return "";
@@ -261,6 +361,46 @@ function isReadableTextResource(resourcePath: string) {
   return readableTextExtensions.has(path.posix.extname(resourcePath).toLowerCase());
 }
 
+function getResourceMimeType(resourcePath: string) {
+  const extension = path.posix.extname(resourcePath).toLowerCase();
+  switch (extension) {
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".csv":
+      return "text/csv; charset=utf-8";
+    case ".gif":
+      return "image/gif";
+    case ".html":
+      return "text/html; charset=utf-8";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".js":
+    case ".mjs":
+    case ".cjs":
+      return "text/javascript; charset=utf-8";
+    case ".json":
+      return "application/json; charset=utf-8";
+    case ".md":
+      return "text/markdown; charset=utf-8";
+    case ".png":
+      return "image/png";
+    case ".svg":
+      return "image/svg+xml; charset=utf-8";
+    case ".txt":
+      return "text/plain; charset=utf-8";
+    case ".webp":
+      return "image/webp";
+    case ".yaml":
+    case ".yml":
+      return "application/yaml; charset=utf-8";
+    default:
+      return isReadableTextResource(resourcePath)
+        ? "text/plain; charset=utf-8"
+        : "application/octet-stream";
+  }
+}
+
 function classifyResource(resourcePath: string): SkillResourceSummary["type"] {
   if (resourcePath.startsWith("references/")) {
     return "reference";
@@ -280,7 +420,7 @@ function classifyResource(resourcePath: string): SkillResourceSummary["type"] {
   return "unknown";
 }
 
-function readAssetRoot(skill: ActivatedAgentSkill) {
+function readAssetRoot(skill: AgentSkillResourceSource) {
   const raw = skill.sourceManifest.assetRoot;
   return typeof raw === "string" && raw.trim() ? path.resolve(raw.trim()) : null;
 }

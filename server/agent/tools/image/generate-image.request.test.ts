@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import type { SeedreamConfig } from "../../../../seedream.ts";
 import {
+  SEEDREAM_PROMPT_MAX_LENGTH,
   buildSeedreamRequestBodies,
+  buildGenerateImageSeedreamInput,
   inferImageResultCount,
   inferImageResultCountFromPrompts,
 } from "./generate-image.request.ts";
@@ -208,6 +210,22 @@ describe("generate image request normalization", () => {
     ]);
     expect(
       (requests[0].body.width as number) / (requests[0].body.height as number)
+    ).toBeCloseTo(16 / 9, 2);
+  });
+
+  it("keeps Seedream prompt bodies within the provider limit", () => {
+    const prompt = `${"手绘家居清洁海报，".repeat(120)}16:9`;
+    const request = buildGenerateImageSeedreamInput(
+      { prompt },
+      testSeedreamConfig
+    ).requests[0];
+
+    expect((request.body.prompt as string).length).toBeLessThanOrEqual(
+      SEEDREAM_PROMPT_MAX_LENGTH
+    );
+    expect(request.body.prompt).toContain("手绘家居清洁海报");
+    expect(
+      (request.body.width as number) / (request.body.height as number)
     ).toBeCloseTo(16 / 9, 2);
   });
 

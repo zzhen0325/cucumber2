@@ -105,7 +105,6 @@ function skill() {
     description: "Expand compact prompts.",
     body: "Expand one image prompt.",
     enabled: true,
-    isDefault: true,
     packageBucket: null,
     packagePath: null,
     packageSha256: null,

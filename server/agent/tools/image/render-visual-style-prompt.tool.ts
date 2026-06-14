@@ -79,8 +79,11 @@ export const renderVisualStylePromptTool = tool({
 
     const library = await loadVisualStyleLibrary(skill);
     const requestedSlug = normalizeSlug(parsed.data.styleSlug);
-    const selectedSlug =
-      requestedSlug || chooseStyleSlug(library.catalog, parsed.data.prompt);
+    const selectedSlug = resolveStyleSlug(
+      library.catalog,
+      parsed.data.prompt,
+      requestedSlug
+    );
     const selectedStyle = await library.loadStyle(selectedSlug);
     const values = buildStyleValues({
       aspectRatio: parsed.data.aspectRatio,
@@ -88,10 +91,12 @@ export const renderVisualStylePromptTool = tool({
       style: selectedStyle,
       values: parsed.data.values ?? {},
     });
-    const finalPrompt = renderTemplate(selectedStyle.prompt_template ?? "", values);
+    const finalPrompt = renderTemplate(
+      removeAvoidanceTemplateSections(selectedStyle.prompt_template ?? ""),
+      values
+    );
 
     return {
-      negativePrompt: selectedStyle.negative_prompt ?? "",
       prompt: finalPrompt,
       selectedStyle: {
         name: selectedStyle.style_name ?? values.STYLE_NAME,
@@ -119,6 +124,22 @@ function chooseStyleSlug(catalog: StyleCatalogItem[], prompt: string) {
   return scored[0]?.item.slug ?? "playful-mascot-doodle-snapshot-style";
 }
 
+function resolveStyleSlug(
+  catalog: StyleCatalogItem[],
+  prompt: string,
+  requestedSlug: string
+) {
+  if (
+    requestedSlug &&
+    catalog.some((item) => normalizeSlug(item.slug) === requestedSlug)
+  ) {
+    return requestedSlug;
+  }
+
+  const searchPrompt = requestedSlug ? `${prompt} ${requestedSlug}` : prompt;
+  return chooseStyleSlug(catalog, searchPrompt);
+}
+
 function scoreStyle(item: StyleCatalogItem, normalizedPrompt: string) {
   let score = 0;
   if (normalizedPrompt.includes(item.slug)) {
@@ -132,10 +153,18 @@ function scoreStyle(item: StyleCatalogItem, normalizedPrompt: string) {
 
   const boosts: Array<[RegExp, RegExp, number]> = [
     [/(旅行|旅游|城市|街头|地铁|vlog|travel|city|tokyo|transit)/i, /(travel|triptych|tokyo|city|transit|diary)/i, 80],
+    [
+      /((照片|摄影|写真|实拍|photograph|photography|photo|realistic).*(涂鸦|手绘|doodle|marker))|((涂鸦|手绘|doodle|marker).*(照片|摄影|写真|实拍|photograph|photography|photo|realistic))/i,
+      /(photo|photograph|snapshot|realistic).*(doodle|illustration|overlay|collage|marker)|(doodle|illustration|overlay|collage|marker).*(photo|photograph|snapshot|realistic)/i,
+      260,
+    ],
     [/(涂鸦|贴纸|手绘|可爱|doodle|sticker|mascot)/i, /(doodle|sticker|mascot|marker|scribble)/i, 80],
     [/(拼贴|杂志|剪贴|zine|collage|ransom)/i, /(zine|collage|cutout|ransom)/i, 80],
     [/(字体|标题|字效|typography|type|headline)/i, /(type|typographic|poster|shockwave|kinetic)/i, 80],
-    [/(产品|广告|饮料|食物|发布|product|ad|launch|food|beverage)/i, /(product|ad|launch|food|beverage|hud|furniture)/i, 80],
+    [/(公益|公告|提醒|社区|高温|老人|孩子|psa|public.service)/i, /(psa|public-service)/i, 260],
+    [/(茶饮|饮品|饮料|气泡|果汁|咖啡|奶茶|beverage|drink)/i, /(beverage|splash)/i, 260],
+    [/(家具|家居|椅子|沙发|桌|目录|电商首图|furniture|chair|catalog)/i, /furniture/i, 260],
+    [/(产品|广告|饮料|食物|发布|product|ad|launch|food|beverage)/i, /(product|advertisement|launch|food|beverage|hud|furniture)/i, 80],
     [/(时装|高级|奢华|editorial|fashion|luxury)/i, /(editorial|fashion|luxury|nameplate|architectural)/i, 80],
   ];
   for (const [promptPattern, stylePattern, boost] of boosts) {
@@ -161,6 +190,9 @@ function buildStyleValues({
   const environmentVariables = style.environment_variables ?? {};
   const result: Record<string, string> = {};
   for (const key of Object.keys(environmentVariables)) {
+    if (key === "SOURCE_CONTENT_TO_AVOID" || key === "NEGATIVE_PROMPT") {
+      continue;
+    }
     const explicit = values[key];
     result[key] = explicit?.trim() || deriveVariableValue(key, prompt, aspectRatio);
   }
@@ -170,9 +202,6 @@ function buildStyleValues({
   result.STYLE_FIDELITY_ANCHORS =
     values.STYLE_FIDELITY_ANCHORS?.trim() ||
     (style.style_fidelity_anchors ?? []).join("; ");
-  result.SOURCE_CONTENT_TO_AVOID =
-    values.SOURCE_CONTENT_TO_AVOID?.trim() ||
-    (style.source_content_to_avoid ?? []).join("; ");
   result.STYLE_NAME = style.style_name ?? "";
   return result;
 }
@@ -218,6 +247,24 @@ function renderTemplate(template: string, values: Record<string, string>) {
   return template.replace(/\{([A-Z0-9_]+)\}/g, (_match, key: string) => {
     return values[key] ?? "";
   });
+}
+
+function removeAvoidanceTemplateSections(template: string) {
+  return template
+    .replace(
+      /\s*(?:Avoid this source content|Source content to avoid)\s*:\s*\{SOURCE_CONTENT_TO_AVOID\}\.?\s*/gi,
+      " "
+    )
+    .replace(
+      /\s*[^.?!。！？]*(?:\{SOURCE_CONTENT_TO_AVOID\}|negative prompt)[^.?!。！？]*[.?!。！？]?/gi,
+      " "
+    )
+    .replace(
+      /\s*Avoid\s*:\s*[^.?!。！？]*(?:watermark|username|platform|logo|QR|copied|source)[^.?!。！？]*[.?!。！？]?/gi,
+      " "
+    )
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function tokenize(text: string) {

@@ -24,8 +24,10 @@ export function RunNodeView({
   width,
   height,
 }: NodeProps<FlowNode<RunNodeData, "runNode">>) {
-  const [expanded, setExpanded] = useState(false);
+  const isActiveRun = data.status === "queued" || data.status === "running";
+  const [expanded, setExpanded] = useState(() => isActiveRun);
   const [manualSize, setManualSize] = useState<ResizeParams | null>(null);
+  const previousStatus = useRef(data.status);
   const nodeRef = useRef<HTMLDivElement>(null);
   const updateNodeInternals = useUpdateNodeInternals();
   const toolParts = useMemo(
@@ -40,13 +42,12 @@ export function RunNodeView({
   const latestToolPart = toolParts.at(-1) ?? toolParts[0];
   const title = getRunTitle(data.status, latestToolPart?.state);
   const headerSummary = getRunHeaderSummary(data.status, toolParts);
-  const toggleLabel = expanded ? "收起输出" : "展开输出";
   const hasToolDetail =
     data.status !== "queued" ||
     toolParts.some((part) => part.state !== "input-streaming");
   const agentText = data.agentText?.trim() ?? "";
-  const hasRunOutput = Boolean(agentText) || hasToolDetail;
-  const isActiveRun = data.status === "queued" || data.status === "running";
+  const hasRunOutput = isActiveRun || Boolean(agentText) || hasToolDetail;
+  const toggleLabel = expanded ? "收起输出" : "展开输出";
   const nodeClassName = [
     "canvas-node",
     "run-card",
@@ -78,6 +79,21 @@ export function RunNodeView({
     hasRunOutput,
     manualSize,
   });
+
+  useEffect(() => {
+    const previous = previousStatus.current;
+    previousStatus.current = data.status;
+    const wasActiveRun = previous === "queued" || previous === "running";
+
+    if (data.status === "success" && previous !== "success") {
+      queueMicrotask(() => setExpanded(false));
+      return;
+    }
+
+    if (isActiveRun && !wasActiveRun) {
+      queueMicrotask(() => setExpanded(true));
+    }
+  }, [data.status, isActiveRun]);
 
   useEffect(() => {
     updateNodeInternals(id);

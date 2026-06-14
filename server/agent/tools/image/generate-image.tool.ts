@@ -12,7 +12,10 @@ import {
   storeGeneratedImageFromUrl,
 } from "../../../storage.ts";
 import type { CucumberAgentContext } from "../../context.ts";
-import { buildGenerateImageSeedreamInput } from "./generate-image.request.ts";
+import {
+  buildGenerateImageSeedreamInput,
+  normalizeSeedreamProviderPrompt,
+} from "./generate-image.request.ts";
 
 const generateImageInputSchema = z.object({
   aspectRatio: z.string().min(1).optional(),
@@ -106,7 +109,9 @@ export async function executeGenerateImageTool({
     );
   }
 
-  const prompt = parsed.data.prompt?.trim() || context.prompt?.trim();
+  const prompt = normalizeSeedreamProviderPrompt(
+    parsed.data.prompt?.trim() || context.prompt?.trim() || ""
+  );
   if (!prompt) {
     return { error: "empty_prompt: no image prompt was provided." };
   }

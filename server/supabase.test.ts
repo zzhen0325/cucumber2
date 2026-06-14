@@ -4,7 +4,6 @@ import {
   createAgentSkillDefinition,
   createProject,
   getAgentSkillDefinition,
-  getDefaultAgentSkillDefinition,
   listProjects,
   ProjectVersionConflictError,
   softDeleteAgentSkillDefinition,
@@ -80,40 +79,25 @@ describe("agent skill definitions", () => {
     process.env.CUCUMBER_DEV_INMEMORY_DB = "1";
   });
 
-  it("keeps one enabled default per image prompt-expansion purpose", async () => {
-    const first = await createAgentSkillDefinition(skillInput("skill-default-a"));
-    const second = await createAgentSkillDefinition(skillInput("skill-default-b"));
+  it("creates and disables skills without default state", async () => {
+    const skill = await createAgentSkillDefinition(skillInput("skill-enabled"));
 
-    expect(first.isDefault).toBe(true);
-    expect(second.isDefault).toBe(true);
-    await expect(getAgentSkillDefinition(first.id)).resolves.toMatchObject({
-      isDefault: false,
+    expect(skill).toMatchObject({
+      enabled: true,
+      name: "skill-enabled",
     });
-    await expect(
-      getDefaultAgentSkillDefinition({
-        agentScope: "image",
-        purpose: "prompt_expansion",
-      })
-    ).resolves.toMatchObject({ id: second.id, name: "skill-default-b" });
+    expect(skill).not.toHaveProperty("isDefault");
 
     const disabled = await updateAgentSkillDefinition({
-      id: second.id,
+      id: skill.id,
       enabled: false,
     });
-    expect(disabled).toMatchObject({ enabled: false, isDefault: false });
-    await expect(
-      getDefaultAgentSkillDefinition({
-        agentScope: "image",
-        purpose: "prompt_expansion",
-      })
-    ).resolves.toBeNull();
+    expect(disabled).toMatchObject({ enabled: false });
+    expect(disabled).not.toHaveProperty("isDefault");
   });
 
   it("soft-deletes skills from list/detail helpers", async () => {
-    const skill = await createAgentSkillDefinition({
-      ...skillInput("skill-delete-me"),
-      isDefault: false,
-    });
+    const skill = await createAgentSkillDefinition(skillInput("skill-delete-me"));
 
     await expect(softDeleteAgentSkillDefinition(skill.id)).resolves.toBe(true);
     await expect(getAgentSkillDefinition(skill.id)).resolves.toBeNull();
@@ -136,7 +120,6 @@ Return one expanded image prompt.
     description: "Expand compact prompts.",
     enabled: true,
     frontmatter: { description: "Expand compact prompts.", name },
-    isDefault: true,
     name,
     purpose: "prompt_expansion" as const,
     skillMd,

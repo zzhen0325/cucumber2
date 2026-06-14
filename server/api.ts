@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { loadEnvFile } from "node:process";
 import { serve } from "@hono/node-server";
@@ -16,6 +17,7 @@ import {
   readSeedreamUpscaleConfigFromEnv,
   upscaleSeedreamImage,
 } from "../seedream.ts";
+import JSZip from "jszip";
 import type {
   AgentCanvasEdge,
   AgentCanvasNode,
@@ -27,6 +29,10 @@ import { executeAgentRun } from "./agent/index.ts";
 import { handleInternalMcpRequest } from "./agent/mcp/internal-mcp-server.ts";
 import { getAgentModelConfiguration } from "./agent/model-config.ts";
 import { importAgentSkillZip } from "./agent/skills/skill-import.ts";
+import {
+  listActivatedSkillResources,
+  readActivatedSkillResourceBytes,
+} from "./agent/skills/skill-resources.ts";
 import { parseAgentSkillMarkdown } from "./agent/skills/skill-parser.ts";
 import {
   createSessionToken,
@@ -58,11 +64,13 @@ import {
   updateProjectForUser,
   upsertAgentSkillDefinitionByName,
   ProjectVersionConflictError,
+  type AgentSkillDefinition,
   type AppUser,
 } from "./supabase.ts";
 import {
   createSignedAssetUpload,
   completeSignedAssetUpload,
+  downloadAgentSkillPackage,
   MAX_AGENT_ASSET_BYTES,
   readArtifactContent,
   resolveStorageBackedImageContext,
@@ -155,7 +163,6 @@ const skillDefinitionPurposeSchema = z.string().trim().min(1).max(80);
 const skillCreateSchema = z.object({
   agentScope: skillDefinitionScopeSchema.optional(),
   enabled: z.boolean().default(true),
-  isDefault: z.boolean().default(false),
   purpose: skillDefinitionPurposeSchema.optional(),
   skillMd: z.string().trim().min(1).max(60_000),
 });
@@ -164,7 +171,6 @@ const skillUpdateSchema = z
   .object({
     agentScope: skillDefinitionScopeSchema.optional(),
     enabled: z.boolean().optional(),
-    isDefault: z.boolean().optional(),
     purpose: skillDefinitionPurposeSchema.optional(),
     skillMd: z.string().trim().min(1).max(60_000).optional(),
   })
@@ -175,7 +181,6 @@ const skillUpdateSchema = z
 const skillImportSchema = z.object({
   enabled: z.boolean().default(true),
   fileName: z.string().trim().min(1).max(260),
-  isDefault: z.boolean().default(true),
   zipBase64: z.string().trim().min(1),
 });
 
@@ -278,6 +283,70 @@ app.get("/api/agent-skills", async (c) => {
   return c.json({ skills });
 });
 
+app.get("/api/agent-skills/:skillId/resources/content", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const skillId = z.string().uuid().parse(c.req.param("skillId"));
+  const resourcePath = z.string().trim().min(1).max(1024).parse(c.req.query("path"));
+  const skill = await getAgentSkillDefinition(skillId);
+  if (!skill) {
+    return c.json({ error: "Skill 不存在" }, 404);
+  }
+
+  const resource = await readActivatedSkillResourceBytes({
+    resourcePath,
+    skill,
+  });
+  const headers = new Headers({
+    "Cache-Control": "private, max-age=300",
+    "Content-Length": String(resource.sizeBytes),
+    "Content-Type": resource.mimeType,
+  });
+  return new Response(resource.bytes, { headers });
+});
+
+app.get("/api/agent-skills/:skillId/resources", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const skillId = z.string().uuid().parse(c.req.param("skillId"));
+  const skill = await getAgentSkillDefinition(skillId);
+  if (!skill) {
+    return c.json({ error: "Skill 不存在" }, 404);
+  }
+
+  const resources = await listActivatedSkillResources(skill);
+  return c.json({ resources });
+});
+
+app.get("/api/agent-skills/:skillId/package", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const skillId = z.string().uuid().parse(c.req.param("skillId"));
+  const skill = await getAgentSkillDefinition(skillId);
+  if (!skill) {
+    return c.json({ error: "Skill 不存在" }, 404);
+  }
+
+  const bytes = await buildAgentSkillSourcePackage(skill);
+  const filename = `${sanitizeDownloadFileName(skill.name || "agent-skill")}.zip`;
+  const headers = new Headers({
+    "Cache-Control": "private, max-age=300",
+    "Content-Disposition": `attachment; filename="${filename}"`,
+    "Content-Length": String(bytes.byteLength),
+    "Content-Type": "application/zip",
+  });
+  return new Response(bytes, { headers });
+});
+
 app.get("/api/agent-skills/:skillId", async (c) => {
   const user = await requireUser(c);
   if (!user) {
@@ -312,7 +381,6 @@ app.post("/api/agent-skills", async (c) => {
     description: parsed.description,
     enabled: input.enabled,
     frontmatter: parsed.frontmatter,
-    isDefault: input.isDefault,
     name: parsed.name,
     purpose: input.purpose ?? parsed.purpose,
     scripts: parsed.scripts,
@@ -350,7 +418,6 @@ app.post("/api/agent-skills/import", async (c) => {
     description: imported.description,
     enabled: input.enabled,
     frontmatter: imported.frontmatter,
-    isDefault: input.isDefault,
     name: imported.name,
     packageBucket: packageLocation.bucket,
     packagePath: packageLocation.path,
@@ -391,7 +458,6 @@ app.patch("/api/agent-skills/:skillId", async (c) => {
     description: parsed?.description,
     enabled: input.enabled,
     frontmatter: parsed?.frontmatter,
-    isDefault: input.isDefault,
     name: parsed?.name,
     purpose: input.purpose ?? parsed?.purpose,
     scripts: parsed?.scripts,
@@ -1011,6 +1077,46 @@ function unauthorized(c: Context) {
 
 function notFound(c: Context) {
   return c.json({ error: "项目不存在" }, 404);
+}
+
+async function buildAgentSkillSourcePackage(skill: AgentSkillDefinition) {
+  if (skill.packageBucket && skill.packagePath && skill.packageSha256) {
+    const bytes = await downloadAgentSkillPackage({
+      bucket: skill.packageBucket,
+      path: skill.packagePath,
+    });
+    const actualSha256 = createHash("sha256").update(bytes).digest("hex");
+    if (actualSha256 !== skill.packageSha256) {
+      throw new Error(`Skill package hash mismatch for ${skill.name}.`);
+    }
+    return bytes;
+  }
+
+  const zip = new JSZip();
+  zip.file("SKILL.md", skill.skillMd);
+  const resources = await listActivatedSkillResources(skill);
+  for (const resource of resources) {
+    const content = await readActivatedSkillResourceBytes({
+      resourcePath: resource.path,
+      skill,
+    });
+    zip.file(resource.path, content.bytes);
+  }
+
+  return zip.generateAsync({
+    compression: "DEFLATE",
+    compressionOptions: { level: 6 },
+    type: "uint8array",
+  });
+}
+
+function sanitizeDownloadFileName(value: string) {
+  const normalized = value
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+  return normalized || "agent-skill";
 }
 
 function loadServerEnv() {

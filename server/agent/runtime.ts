@@ -180,7 +180,6 @@ export async function executeAgentRun({
               bindings: skill.bindings,
               description: skill.description,
               id: skill.id,
-              isDefault: skill.isDefault,
               name: skill.name,
               purpose: skill.purpose,
               reasons: skill.reasons,

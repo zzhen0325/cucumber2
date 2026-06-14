@@ -19,8 +19,9 @@
 - `run_skill_script` 继续负责执行技能脚本；zip 导入支持 `scripts[]` 声明脚本，也会按 Agent Skills 标准从 `scripts/` 自动发现 bash/node/python 脚本。资源读取和脚本执行是两个并列通道。
 - 新增 `render_visual_style_prompt` 工具；任何已激活且绑定该工具、或标记 `visual-style`/`style-json` 的技能都可用。工具读取 `references/styles/<slug>/style.json` 或 `styles/<slug>/style.json` 并渲染最终图片 prompt，不直接写数据库或画布。
 - Image Agent 对新图片生成优先使用 visual style library：`activate_skill` -> `render_visual_style_prompt` -> `generate_image`。旧 `expand_image_prompt` 保留为没有 style-library 候选或用户明确要求普通扩写时的后备。
-- 新迁移 `20260614162000_visual_prompt_cookbook_skill.sql` 将 cookbook 设为默认 image/prompt_expansion 技能，并取消旧 `imagegen-prompt-expander` 的默认状态。
+- 新迁移 `20260614162000_visual_prompt_cookbook_skill.sql` 新增内置 image/prompt_expansion cookbook 技能；运行时按启用状态和上下文相关性检索技能。
 - 新迁移 `20260614170000_asset_skill_packages.sql` 将技能 zip 包上限扩到 100MB，并允许完整 Agent Skills 包上传资源文件。
+- 技能管理页新增包内容浏览：详情页展示 `SKILL.md`、references、scripts、assets 和 style 资源，支持文本预览、图片预览和技能源文件 zip 下载；zip 技能下载原始包，内置/手动技能动态打包。
 
 ## 2026-06-11 Agent Runtime Cutover
 
@@ -99,8 +100,8 @@
 - 新增 `agent_skill_definitions` 作为当前 OpenAI Agents SDK runtime 的全局技能表；不恢复 Agent v1 Skill API、审批或执行器。
 - 技能表升级为 Agent OS metadata：`agent_scope`/`purpose` 不再只限 image/prompt_expansion，并新增 tags、triggers、bindings、scripts、package bucket/path/hash/size。
 - `agent-skill-packages` 成为技能 zip 包私有 bucket，单包 100MB；zip 导入接受一个 `SKILL.md` 和同一包根下的标准 Agent Skills 文件结构，拒绝路径穿越、多个 `SKILL.md`、重复脚本名和缺失的已声明脚本。
-- 新增 `/api/agent-skills` CRUD 和 `/api/agent-skills/import`，所有接口要求登录；列表不返回完整 `skillMd`，详情返回完整内容用于编辑。
-- 管理工作台“技能”页展示 scope、purpose、tags、bindings、scripts、package hash、启用和默认状态。
+- 新增 `/api/agent-skills` CRUD、`/api/agent-skills/import`、资源浏览和 source package 下载接口，所有接口要求登录；列表不返回完整 `skillMd`，详情返回完整内容用于编辑。
+- 管理工作台“技能”页展示 scope、purpose、tags、bindings、scripts、package hash 和启用状态。
 - Agent Run 开始后服务端从可信画布快照检索最多 6 个启用技能，只把 skill cards 注入 Manager；完整 `SKILL.md` 只能通过 `activate_skill` 加载，每轮最多激活 3 个技能。
 - 新增 `read_skill_resource`，仅已激活技能可用；Agent 可以先 list 资源，再读取安全文本资源。新增 `run_skill_script`，仅已激活且含脚本的技能可用；脚本包下载后校验 SHA-256，通过 `sandbox-exec`、空 secret 环境、args/stdin、bash/node/python、15 秒超时执行。普通 stdout 会包装成结构化工具结果，原 Cucumber JSON 输出继续支持 canvasOperations。没有 sandbox 支持时失败，不做不安全 fallback。
 - Image Agent 的 `expand_image_prompt` 改为只使用已激活的 image/prompt_expansion 技能；短、关键词式或视觉细节不足的新图片请求会先激活扩写技能，再把 `expandedPrompt` 传给 `generate_image`。

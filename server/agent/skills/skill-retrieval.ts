@@ -74,8 +74,8 @@ function scoreSkill(
   skill: AgentSkillDefinitionSummary,
   query: ReturnType<typeof buildSkillRetrievalQuery>
 ): AgentSkillCard {
-  let score = skill.isDefault ? 3 : 1;
-  const reasons: string[] = skill.isDefault ? ["default"] : ["enabled"];
+  let score = 1;
+  const reasons: string[] = ["enabled"];
   const lowerText = query.text.toLowerCase();
 
   for (const keyword of skill.triggers.keywords) {

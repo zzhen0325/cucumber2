@@ -106,7 +106,6 @@ function skill(overrides: Partial<ActivatedAgentSkill> = {}): ActivatedAgentSkil
     description: "Full skill with resources and scripts.",
     frontmatter: {},
     id: "skill-full",
-    isDefault: false,
     name: "full-skill",
     packageBucket: "agent-skill-packages",
     packagePath: "skills/full-skill/package.zip",

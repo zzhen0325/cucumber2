@@ -49,7 +49,9 @@ describe("render_visual_style_prompt tool", () => {
     });
     expect(result.prompt).toContain("Mono Noir Type Portrait Poster Style");
     expect(result.prompt).toContain("fresh / after / dark.");
-    expect(result.negativePrompt).toContain("watermark");
+    expect(result.negativePrompt).toBeUndefined();
+    expect(result.prompt).not.toMatch(/negative prompt|source content to avoid|avoid this source content/i);
+    expect(result.values.SOURCE_CONTENT_TO_AVOID).toBeUndefined();
     expect(result.values.ASPECT_RATIO).toBe("16:9");
   });
 
@@ -69,6 +71,70 @@ describe("render_visual_style_prompt tool", () => {
     expect(result.selectedStyle.slug).toContain("travel");
     expect(result.prompt).toContain("tokyo day");
   });
+
+  it("treats an unknown styleSlug as a search hint instead of failing", async () => {
+    const raw = await renderVisualStylePromptTool.invoke(
+      new RunContext(agentContext()),
+      JSON.stringify({
+        prompt:
+          "Japanese household cleaning poster, blending realistic photography and playful doodle art style",
+        styleSlug: "photo-doodle",
+        values: {
+          MAIN_TEXT: "clean home",
+          SUBJECT: "Japanese home cleaning themed poster",
+        },
+      })
+    );
+    const result = typeof raw === "string" ? JSON.parse(raw) : raw;
+
+    expect(result.selectedStyle.slug).not.toBe("photo-doodle");
+    expect(result.selectedStyle.slug).toMatch(/photo|doodle|snapshot|overlay/);
+    expect(result.prompt).toContain("clean home");
+  });
+
+  it.each([
+    {
+      expectedSlug: "multi-color-beverage-splash-ad-system-style",
+      prompt:
+        "给一家真实茶饮店做夏季新品小红书竖版海报：青柠黄瓜气泡茶，标题写「清爽到冒泡」，需要产品广告感、明亮夏天、无品牌 logo。",
+      values: {
+        MAIN_TEXT: "清爽到冒泡",
+        PRODUCT_OR_PROP: "一杯无品牌透明杯装青柠黄瓜气泡茶",
+        SUBJECT: "青柠黄瓜气泡茶新品海报",
+      },
+    },
+    {
+      expectedSlug: "naive-marker-psa-poster-style",
+      prompt:
+        "社区夏季公益提醒海报，提醒老人和孩子高温天气多喝水，标题「记得喝水」，希望像手绘公告牌，亲切一点。",
+      values: {
+        MAIN_TEXT: "记得喝水",
+        SUBJECT: "老人、孩子和社区志愿者在树荫下喝水",
+      },
+    },
+    {
+      expectedSlug: "quiet-luxury-furniture-nameplate-poster-style",
+      prompt:
+        "给一把真实电商要卖的胡桃木休闲椅做首图，强调安静、高级、家具目录感，标题「WALNUT REST」。",
+      values: {
+        MAIN_TEXT: "WALNUT REST",
+        PRODUCT_OR_PROP: "一把无品牌胡桃木休闲椅，织物坐垫",
+        SUBJECT: "胡桃木休闲椅电商首图",
+      },
+    },
+  ])("chooses a suitable bundled style for real Chinese briefs", async (item) => {
+    const raw = await renderVisualStylePromptTool.invoke(
+      new RunContext(agentContext()),
+      JSON.stringify({
+        prompt: item.prompt,
+        values: item.values,
+      })
+    );
+    const result = typeof raw === "string" ? JSON.parse(raw) : raw;
+
+    expect(result.selectedStyle.slug).toBe(item.expectedSlug);
+    expect(result.prompt).not.toMatch(/\{[A-Z0-9_]+\}/);
+  });
 });
 
 function skill() {
@@ -80,7 +146,6 @@ function skill() {
     enabled: true,
     frontmatter: {},
     id: "skill-cookbook",
-    isDefault: true,
     name: "visual-prompt-cookbook",
     packageBucket: null,
     packagePath: null,

@@ -21,7 +21,6 @@ export type AgentSkillCard = {
   bindings: AgentSkillBindings;
   scripts: AgentSkillScriptSummary[];
   sourceManifest: Record<string, unknown>;
-  isDefault: boolean;
   score: number;
   reasons: string[];
 };

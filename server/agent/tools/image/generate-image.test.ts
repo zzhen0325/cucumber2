@@ -81,7 +81,9 @@ vi.mock("../../../storage.ts", () => ({
 // Imported after the mock is registered.
 const { generateImageTool } = await import("./generate-image.tool.ts");
 const { upscaleImageTool } = await import("./upscale-image.tool.ts");
-const { toSeedreamUpstreamContext } = await import("./generate-image.request.ts");
+const { SEEDREAM_PROMPT_MAX_LENGTH, toSeedreamUpstreamContext } = await import(
+  "./generate-image.request.ts"
+);
 
 function buildContext(
   overrides: Partial<CucumberAgentContext> = {}
@@ -202,6 +204,38 @@ describe("generate_image tool", () => {
 
     expect(generateSeedreamImage.mock.calls[0][0].requests[0].body.prompt).toBe(
       "默认提示词"
+    );
+  });
+
+  it("stores the actual provider-limited prompt for long style prompts", async () => {
+    isSeedreamConfigured.mockReturnValue(true);
+    generateSeedreamImage.mockImplementation(
+      async (input: { onImage?: (image: unknown) => void }) => {
+        const image = {
+          id: "seedream-1",
+          url: "https://cdn.example/1.png",
+          title: "Seedream image",
+        };
+        await input.onImage?.(image);
+        return { images: [image] };
+      }
+    );
+
+    const longPrompt = "手绘日本家居清洁海报，".repeat(120);
+    const context = buildContext();
+    const result = await invokeTool(context, { prompt: longPrompt });
+    const providerPrompt =
+      generateSeedreamImage.mock.calls[0][0].requests[0].body.prompt;
+
+    expect(providerPrompt.length).toBeLessThanOrEqual(SEEDREAM_PROMPT_MAX_LENGTH);
+    expect(result.prompt).toBe(providerPrompt);
+    expect(storeGeneratedImageFromUrl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          prompt: providerPrompt,
+          sourcePrompt: "生成一张黄瓜海报",
+        }),
+      })
     );
   });
 

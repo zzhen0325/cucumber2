@@ -65,7 +65,6 @@ function skill(overrides: Partial<ActivatedAgentSkill> = {}): ActivatedAgentSkil
     description: "Custom style cookbook.",
     frontmatter: {},
     id: "skill-visual",
-    isDefault: false,
     name: "custom-style-cookbook",
     packageBucket: "agent-skill-packages",
     packagePath: "skills/custom-style-cookbook/package.zip",

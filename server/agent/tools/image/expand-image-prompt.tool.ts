@@ -35,7 +35,7 @@ const promptExpansionRunner = new Runner({
 export const expandImagePromptTool = tool({
   name: "expand_image_prompt",
   description:
-    "Use the enabled default image prompt-expansion skill to turn a short, keyword-like, or underspecified image request into one polished image prompt. Call this before generate_image only when the user is asking to create a new image and the prompt lacks enough visual detail. Do not use for upscale-only requests.",
+    "Use an activated image prompt-expansion skill to turn a short, keyword-like, or underspecified image request into one polished prompt. Call this before generate_image only when the user is asking to create a new image and the prompt lacks enough visual detail. Do not use for upscale-only requests.",
   parameters: expandImagePromptJsonSchema as never,
   strict: false,
   errorFunction: null,

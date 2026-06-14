@@ -105,7 +105,6 @@ export type AgentSkillDefinitionSummary = {
   packageSha256: string | null;
   packageSizeBytes: number | null;
   enabled: boolean;
-  isDefault: boolean;
   sourceType: AgentSkillSourceType;
   sourceManifest: Record<string, unknown>;
   createdBy: string | null;
@@ -150,7 +149,6 @@ type SaveAgentSkillDefinitionInput = {
   description: string;
   enabled?: boolean;
   frontmatter: Record<string, unknown>;
-  isDefault?: boolean;
   name: string;
   packageBucket?: string | null;
   packagePath?: string | null;
@@ -597,46 +595,12 @@ export async function getAgentSkillDefinition(id: string) {
   return mapAgentSkillDefinitionRow(data);
 }
 
-export async function getDefaultAgentSkillDefinition({
-  agentScope,
-  purpose,
-}: {
-  agentScope: AgentSkillScope;
-  purpose: AgentSkillPurpose;
-}) {
-  const client = getSupabaseClient();
-  const { data, error } = await client
-    .from("agent_skill_definitions")
-    .select("*")
-    .eq("agent_scope", agentScope)
-    .eq("purpose", purpose)
-    .eq("enabled", true)
-    .eq("is_default", true)
-    .is("deleted_at", null)
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<AgentSkillDefinitionRow>();
-
-  if (error) {
-    throw error;
-  }
-  if (!data) {
-    return null;
-  }
-
-  return mapAgentSkillDefinitionRow(data);
-}
-
 export async function createAgentSkillDefinition(
   input: SaveAgentSkillDefinitionInput
 ) {
   const agentScope = input.agentScope ?? "general";
   const purpose = input.purpose ?? "general";
-  const enabled = input.isDefault ? true : input.enabled ?? true;
-
-  if (input.isDefault) {
-    await clearDefaultAgentSkillDefinition({ agentScope, purpose });
-  }
+  const enabled = input.enabled ?? true;
 
   const client = getSupabaseClient();
   const { data, error } = await client
@@ -649,7 +613,7 @@ export async function createAgentSkillDefinition(
       description: input.description,
       enabled,
       frontmatter: input.frontmatter,
-      is_default: input.isDefault ?? false,
+      is_default: false,
       name: input.name,
       package_bucket: input.packageBucket ?? null,
       package_path: input.packagePath ?? null,
@@ -708,21 +672,7 @@ export async function updateAgentSkillDefinition(
   if (input.sourceType !== undefined) payload.source_type = input.sourceType;
   if (input.tags !== undefined) payload.tags = input.tags;
   if (input.triggers !== undefined) payload.triggers = input.triggers;
-
-  if (input.enabled === false) {
-    payload.is_default = false;
-  }
-  if (input.isDefault !== undefined) {
-    payload.is_default = input.isDefault;
-  }
-  if (payload.is_default === true) {
-    payload.enabled = true;
-    await clearDefaultAgentSkillDefinition({
-      agentScope,
-      exceptId: input.id,
-      purpose,
-    });
-  }
+  payload.is_default = false;
 
   const client = getSupabaseClient();
   const { data, error } = await client
@@ -951,46 +901,6 @@ async function getAgentSkillDefinitionRowByName(name: string) {
   return data;
 }
 
-async function clearDefaultAgentSkillDefinition({
-  agentScope,
-  exceptId,
-  purpose,
-}: {
-  agentScope: AgentSkillScope;
-  exceptId?: string;
-  purpose: AgentSkillPurpose;
-}) {
-  const client = getSupabaseClient();
-  const { data, error } = await client
-    .from("agent_skill_definitions")
-    .select("id")
-    .eq("agent_scope", agentScope)
-    .eq("purpose", purpose)
-    .eq("enabled", true)
-    .eq("is_default", true)
-    .is("deleted_at", null)
-    .returns<Array<{ id: string }>>();
-
-  if (error) {
-    throw error;
-  }
-
-  const ids = data
-    .map((row) => row.id)
-    .filter((id) => !exceptId || id !== exceptId);
-  await Promise.all(
-    ids.map(async (id) => {
-      const { error: updateError } = await client
-        .from("agent_skill_definitions")
-        .update({ is_default: false })
-        .eq("id", id);
-      if (updateError) {
-        throw updateError;
-      }
-    })
-  );
-}
-
 export function getSupabaseClient() {
   if (cachedClient) {
     return cachedClient;
@@ -1133,7 +1043,6 @@ function mapAgentSkillDefinitionSummaryRow(
     createdBy: row.created_by,
     description: row.description,
     enabled: row.enabled,
-    isDefault: row.is_default,
     name: row.name,
     packageBucket: null,
     packagePath: null,

@@ -38,7 +38,6 @@ export type AgentSkillDefinitionSummary = {
   packageSha256: string | null;
   packageSizeBytes: number | null;
   enabled: boolean;
-  isDefault: boolean;
   sourceType: AgentSkillSourceType;
   sourceManifest: Record<string, unknown>;
   createdBy: string | null;
@@ -52,9 +51,15 @@ export type AgentSkillDefinition = AgentSkillDefinitionSummary & {
   skillMd: string;
 };
 
+export type AgentSkillResourceSummary = {
+  path: string;
+  readable: boolean;
+  sizeBytes?: number;
+  type: "asset" | "metadata" | "reference" | "script" | "style" | "unknown";
+};
+
 export type SaveAgentSkillInput = {
   enabled: boolean;
-  isDefault: boolean;
   skillMd: string;
 };
 
@@ -65,7 +70,6 @@ export type UpdateAgentSkillInput = Partial<SaveAgentSkillInput> & {
 export type ImportAgentSkillZipInput = {
   enabled: boolean;
   fileName: string;
-  isDefault: boolean;
   zipBase64: string;
 };
 
@@ -91,6 +95,65 @@ export async function loadAgentSkill(skillId: string) {
   }
 
   return (await response.json()) as { skill: AgentSkillDefinition };
+}
+
+export async function loadAgentSkillResources(skillId: string) {
+  const response = await fetch(`/api/agent-skills/${skillId}/resources`, {
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    throw new Error(await getResponseError(response));
+  }
+
+  return (await response.json()) as { resources: AgentSkillResourceSummary[] };
+}
+
+export function getAgentSkillResourceContentUrl(
+  skillId: string,
+  resourcePath: string
+) {
+  return `/api/agent-skills/${encodeURIComponent(
+    skillId
+  )}/resources/content?path=${encodeURIComponent(resourcePath)}`;
+}
+
+export async function loadAgentSkillResourceText(
+  skillId: string,
+  resourcePath: string
+) {
+  const response = await fetch(getAgentSkillResourceContentUrl(skillId, resourcePath), {
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    throw new Error(await getResponseError(response));
+  }
+
+  return response.text();
+}
+
+export async function downloadAgentSkillSourcePackage(skill: AgentSkillDefinitionSummary) {
+  const response = await fetch(`/api/agent-skills/${skill.id}/package`, {
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    throw new Error(await getResponseError(response));
+  }
+
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = `${sanitizeDownloadName(skill.name)}.zip`;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 export async function createAgentSkill(input: SaveAgentSkillInput) {
@@ -169,4 +232,14 @@ export async function fileToBase64(file: File) {
     throw new Error("无法读取 zip 文件内容");
   }
   return base64;
+}
+
+function sanitizeDownloadName(value: string) {
+  return (
+    value
+      .trim()
+      .replace(/[^a-zA-Z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "agent-skill"
+  );
 }

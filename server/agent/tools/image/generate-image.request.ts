@@ -39,25 +39,28 @@ type SeedreamGeometryInput = {
   width?: number;
 };
 
+export const SEEDREAM_PROMPT_MAX_LENGTH = 800;
+
 export function buildGenerateImageSeedreamInput(
   input: GenerateImageSeedreamRequestInput,
   config: SeedreamConfig
 ): SeedreamGenerateInput {
-  const prompt = normalizeImagePrompt(input.prompt);
+  const normalizedPrompt = normalizeImagePrompt(input.prompt);
+  const prompt = normalizeSeedreamProviderPrompt(normalizedPrompt);
   if (!prompt) {
     throw new Error("Seedream image prompt is empty.");
   }
 
   const resultCount = resolveImageResultCount(
     input.requestedResultCount,
-    [prompt],
+    [normalizedPrompt],
     config.maxOutputImages
   );
 
   return {
     requests: buildSeedreamRequestBodies(
       {
-        prompts: [prompt],
+        prompts: [normalizedPrompt],
         geometry: {
           aspectRatio: input.aspectRatio,
           height: input.height,
@@ -91,8 +94,9 @@ export function buildSeedreamRequestBodies(
         config,
         input.geometry
       );
+      const prompt = normalizeSeedreamProviderPrompt(request.prompt);
       const body: Record<string, unknown> = {
-        prompt: request.prompt,
+        prompt,
         force_single:
           request.resultCount === 1 ? config.forceSingle : false,
         ...geometry,
@@ -105,7 +109,7 @@ export function buildSeedreamRequestBodies(
         body.scale = config.scale;
       }
 
-      return { ...request, body, imageUrls };
+      return { ...request, prompt, body, imageUrls };
     }
   );
 }
@@ -469,6 +473,23 @@ function collectInputImageUrls(
   }
 
   return urls;
+}
+
+export function normalizeSeedreamProviderPrompt(prompt: string) {
+  const normalized = normalizeImagePrompt(prompt);
+  if (normalized.length <= SEEDREAM_PROMPT_MAX_LENGTH) {
+    return normalized;
+  }
+
+  let output = "";
+  for (const char of normalized) {
+    if (output.length + char.length > SEEDREAM_PROMPT_MAX_LENGTH) {
+      break;
+    }
+    output += char;
+  }
+
+  return output.replace(/[\s,，:：;；.。-]+$/, "").trim();
 }
 
 function normalizeImagePrompt(prompt: string) {

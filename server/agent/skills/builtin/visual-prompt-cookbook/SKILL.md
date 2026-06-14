@@ -48,7 +48,7 @@ Prefer this skill over generic image prompt expansion for new image generation. 
    - `aspectRatio`: optional; pass normalized aspect ratio when available.
    - `values`: a map of style variables you can infer from the user request.
 3. Pass the returned `prompt` to `generate_image`.
-4. Include the returned `negativePrompt` only when the image provider/tool accepts a separate negative prompt; otherwise keep the main prompt as-is.
+4. Do not pass or add negative prompts, source-content avoidance lists, or other avoidance text to `generate_image`.
 
 ## Style Choice
 
@@ -77,4 +77,4 @@ Fill variables concretely and preserve exact user text:
 - `WARDROBE_STYLE`: styling for people/characters; use "not applicable" for object-only images.
 - `ASPECT_RATIO`: normalized aspect ratio such as `16:9`, `9:16`, or `1:1`.
 
-Do not copy reference-specific people, brands, source text, watermarks, usernames, logos, or source compositions listed in the style system.
+Do not add separate avoidance or negative-prompt fields; keep the generated prompt focused on the desired image.
