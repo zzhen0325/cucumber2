@@ -427,6 +427,7 @@ export function SkillsPage({ className }: SkillsPageProps) {
             type="button"
             variant="outline"
             size="sm"
+            className="min-w-[61px]"
             disabled={importing}
             onClick={() => fileInputRef.current?.click()}
             title="导入 Agent Skills zip，最高 100MB，支持 SKILL.md、scripts、references、assets 和其他资源"
@@ -434,7 +435,7 @@ export function SkillsPage({ className }: SkillsPageProps) {
             {importing ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
             导入
           </Button>
-          <Button type="button" size="sm" onClick={handleNew}>
+          <Button type="button" size="sm" className="min-w-[61px]" onClick={handleNew}>
             <Plus className="size-4" />
             新建
           </Button>
@@ -470,10 +471,10 @@ export function SkillsPage({ className }: SkillsPageProps) {
                 type="button"
                 onClick={() => void handleSelect(skill.id)}
                 className={cn(
-                  "w-full rounded-lg px-3 py-2 text-left transition-colors",
+                  "w-full rounded-[8px] border px-3 py-2 text-left transition-all",
                   skill.id === selectedId && !isNew
-                    ? "bg-primary/10 text-foreground"
-                    : "hover:bg-muted"
+                    ? "border-primary bg-primary/10 text-foreground shadow-[0_4px_12px_rgba(41,191,78,0.08)]"
+                    : "border-transparent hover:border-primary/35 hover:bg-[#f4f4f2]"
                 )}
               >
                 <div className="flex min-w-0 items-center justify-between gap-2">
@@ -542,6 +543,7 @@ export function SkillsPage({ className }: SkillsPageProps) {
               <Button
                 type="button"
                 size="sm"
+                className="min-w-[61px]"
                 disabled={
                   saving ||
                   updatingEnabled ||
@@ -559,6 +561,7 @@ export function SkillsPage({ className }: SkillsPageProps) {
                   type="button"
                   variant="outline"
                   size="sm"
+                  className="min-w-[61px]"
                   disabled={downloading}
                   onClick={() => void handleDownloadPackage()}
                   title="下载技能源文件 zip"
@@ -576,6 +579,7 @@ export function SkillsPage({ className }: SkillsPageProps) {
                   type="button"
                   variant="ghost"
                   size="icon-sm"
+                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                   disabled={deleting}
                   onClick={() => void handleDelete()}
                   title="删除技能"
@@ -699,10 +703,10 @@ export function SkillsPage({ className }: SkillsPageProps) {
                             type="button"
                             onClick={() => void handleResourceSelect(resource)}
                             className={cn(
-                              "flex w-full min-w-0 items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
+                              "flex w-full min-w-0 items-start gap-2 rounded-[8px] border px-2 py-1.5 text-left transition-all",
                               resource.path === selectedResourcePath
-                                ? "bg-primary/10"
-                                : "hover:bg-muted"
+                                ? "border-primary bg-primary/10 shadow-[0_4px_12px_rgba(41,191,78,0.08)]"
+                                : "border-transparent hover:border-primary/35 hover:bg-[#f4f4f2]"
                             )}
                           >
                             <ResourceIcon resource={resource} />
