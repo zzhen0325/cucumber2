@@ -55,4 +55,19 @@ describe("input normalizer", () => {
       })
     ).toThrow("一次最多生成 4 张图片。");
   });
+
+  it("accepts P3 document specialist intents", () => {
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: "写一份项目复盘 Markdown",
+        intent: "document.create",
+      },
+      "写一份项目复盘 Markdown"
+    );
+
+    expect(normalized).toEqual({
+      rawPrompt: "写一份项目复盘 Markdown",
+      intent: "document.create",
+    });
+  });
 });

@@ -2,6 +2,22 @@
 
 本文记录 2026-06-11 Agent v2 正式切换后的变更。
 
+## 2026-06-14 P3 Specialist Agents
+
+- 新增 specialist agent registry，集中声明 specialist name、enabled intents、required tools、produced artifact types 和 handoff policy；Manager 通过 registry 生成 Agents SDK handoff，specialist model 仍由 runtime 统一注入。
+- `NormalizedIntent` 扩展到 P3 intent：`document.create`、`document.edit`、`web.fetch`、`research.answer`、`code.create`、`data.analyze`、`workflow.plan`，并保留 image/text/canvas/unsupported。
+- 新增 Cucumber Document Agent：负责 Markdown/document 生成和改写；Manager 遇到 `document.create`/`document.edit` 必须 handoff，不直接创建文档 artifact。
+- 新增 `create_text_artifact` 工具，写入私有对象存储和 `agent_artifacts`，发出 `artifact_created` 事件，由 runtime materializer 投影为 markdown/document 画布节点；工具不直接写画布节点。
+- Tool Registry 新增 `create_text_artifact`，scope 为 `write.artifact` 和 `tool.doc.create`，Trace metadata 继续走统一 redaction/registry 路径。
+- 新增 Cucumber Web Agent：负责公开 http(s) 网页 fetch/read；Manager 遇到 `web.fetch` 必须 handoff，不直接抓取网页。
+- 新增 `fetch_webpage` 工具，拒绝 localhost/private network URL，只保存最多 2MB 的 html/xhtml/plain text 内容为 webpage artifact，并返回标题、最终 URL 和文本摘录供 Web Agent 简短确认。
+- Tool Registry 新增 `fetch_webpage`，scope 为 `write.artifact` 和 `tool.web.fetch`，标记为可访问外部网络并产出 webpage artifact。
+- 新增 Cucumber Research Agent：负责 source-based research；Manager 遇到 `research.answer` 必须 handoff，但没有明确公开 URL 或可信来源时要求用户补充来源，不做通用 web search。
+- 新增 `collect_research_sources` 工具，复用公开网页 fetch 安全边界，读取最多 5 个用户提供的公开来源并返回 citation records 和文本摘录。
+- 新增 `create_research_artifact` 工具，创建带 `citations` metadata 的 research markdown artifact，继续通过 artifact event 和 materializer 投影到画布。
+- Tool Registry 新增 `collect_research_sources` 和 `create_research_artifact`，scope 为 `tool.research.answer`，其中来源收集工具同时需要 `tool.web.fetch` 并标记可访问外部网络。
+- 代码、数据和 workflow specialist 只完成 intent 分类和 Manager 能力边界提示，尚未接入工具执行。
+
 ## 2026-06-14 P0 Runtime Hardening
 
 - Agent Run Trace 继续只写 `agent_run_events`，不新增平行 Trace 表。

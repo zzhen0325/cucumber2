@@ -65,6 +65,7 @@ type StoreGeneratedImageInput = {
 
 type StoreTextArtifactInput = {
   content: string;
+  metadata?: Record<string, unknown>;
   projectId: string;
   runNodeId: string;
   sourceToolName: string;
@@ -301,6 +302,7 @@ export async function storeTextArtifactContent(
   }
 
   const metadata = compactRecord({
+    ...input.metadata,
     byteSize: bytes.byteLength,
     createdBy: input.userId,
     digest: createSha256Digest(bytes),

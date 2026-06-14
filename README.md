@@ -8,9 +8,12 @@ Infinite Canvas Agent Run MVP。前端使用 Vite、React、TypeScript、React F
 
 - API：`POST /api/agent-run`；停止运行使用同一路径的 `DELETE` 方法
 - 实现：`server/agent/`
-- 编排：每次运行创建独立 Manager/Image Agent；Manager 通过 Agents SDK handoff 委派给 Image Agent
+- 编排：每次运行创建独立 Manager 和 specialist agents；Manager 通过 Agents SDK handoff 委派给 Document Agent、Web Agent、Research Agent 或 Image Agent
 - 失败 Run 节点显示重试按钮；重试会保留原失败节点，并用原 prompt 与原上游锚点创建新的可见 Agent Run 分支
 - 图片工具：`render_visual_style_prompt` 使用已激活 visual style-library 技能的 `style.json` 生成结构化图片提示词；`visual-prompt-cookbook` 是内置实例；`expand_image_prompt` 只作为普通扩写后备；`generate_image` 调用 Seedream 生成图片，`upscale_image` 调用 Seedream 智能超清
+- 文档工具：Document Agent 使用 `create_text_artifact` 创建 Markdown/document typed artifact；工具只写 artifact 内容和事件，不直接创建画布节点，结果由 runtime materializer 投影到画布
+- 网页工具：Web Agent 使用 `fetch_webpage` 抓取公开 http(s) 页面并创建 webpage artifact；此阶段只做 fetch/read，不做浏览器自动操作、登录态访问或多页面爬取，并拒绝 localhost/private network URL
+- 调研工具：Research Agent 使用 `collect_research_sources` 读取用户提供的公开来源，再用 `create_research_artifact` 创建带 citation metadata 的 research markdown artifact；此阶段不做通用 web search，没有来源时要求用户补充 URL
 - Agent OS 技能流：兼容 Agent Skills 目录格式；服务端从持久化画布重建可信上下文，检索启用技能的 metadata，首轮只注入 skill cards；模型必须调用 `activate_skill` 才能读取完整 `SKILL.md`，包内资源通过 `read_skill_resource` 按需读取，脚本只能通过 `run_skill_script` 执行
 - 画布变更：Agent 只能提出 `CanvasOperation`，由 runtime policy 校验后投影到画布
 - Trace：`run.created` / `input.normalized` 记录服务端重建的 selected nodes、reference nodes、upstream path 和 omitted nodes；Trace 面板用用户可读摘要展示 input、skill、tool error 和 canvas policy rejection
@@ -21,7 +24,7 @@ Infinite Canvas Agent Run MVP。前端使用 Vite、React、TypeScript、React F
 
 客户端只提交 `projectId`、`runNodeId`、prompt、`promptNodeId`、主 `selectedNodeId` 和 `selectedNodeIds`。提交前会强制保存项目快照；服务端从持久化 `nodes/edges` 重建 upstream context，不信任客户端上传的节点、artifact 或 URL。多选引用会过滤掉 Run 节点，只让可引用画布节点进入上下文。
 
-模型按服务端环境固定优先级选择：Ark、DeepSeek、OpenAI。前端没有模型选择器，也没有 runtime feature flag。
+模型按服务端环境固定优先级选择：Ark、DeepSeek、OpenAI。specialist model 由 runtime 统一注入；前端没有模型选择器，也没有 runtime feature flag。
 
 ## Setup
 
@@ -115,7 +118,7 @@ zip 导入接受一个可见 `SKILL.md` 和同一包根下的标准 Agent Skills
 
 技能源文件下载通过 `/api/agent-skills/:skillId/package`：zip 导入技能返回校验后的原始包；内置或手动技能会动态打包 `SKILL.md` 和可见资源。
 
-Trace 新增 `skill.retrieved`、`skill.activated`、`skill.script.started`、`skill.script.completed`、`skill.script.failed`。Run Trace 面板显示 Skills 区；Run 节点摘要只显示技能名称，不展示 package path。工具和脚本 Trace 写入前会统一 redaction：secret/token/key/cookie/credential 等字段和 URL-bearing 字段会被替换，payload 同时记录 redaction metadata；工具 Trace metadata 来自 Tool Registry，包括 label、required scopes、artifact types 和是否可能访问外部网络。
+Trace 新增 `skill.retrieved`、`skill.activated`、`skill.script.started`、`skill.script.completed`、`skill.script.failed`。Run Trace 面板显示 Skills 区；Run 节点摘要只显示技能名称，不展示 package path。工具和脚本 Trace 写入前会统一 redaction：secret/token/key/cookie/credential 等字段和 URL-bearing 字段会被替换，payload 同时记录 redaction metadata；工具 Trace metadata 来自 Tool Registry，包括 label、required scopes、artifact types 和是否可能访问外部网络。P3 specialist registry 已接入 Document Agent、Web Agent、Research Agent 和 Image Agent；Document Agent 负责 `document.create`/`document.edit`，输出 doc/markdown artifact；Web Agent 负责 `web.fetch`，输出 webpage artifact；Research Agent 负责 source-based `research.answer`，输出带 citations metadata 的 research markdown artifact；代码、数据和 workflow specialist 尚未接入时必须明确能力边界。
 
 内置 `visual-prompt-cookbook` 基于 `server/agent/skills/builtin/visual-prompt-cookbook` 中的 68 个 `style.json` 和 136 张预览图。Image Agent 在新图片请求中优先激活绑定 `render_visual_style_prompt` 的 style-library 技能，再把返回 prompt 传给 `generate_image`；用户上传的 skill 只要绑定同一工具并提供 `references/styles/<slug>/style.json` 或 `styles/<slug>/style.json`，也可走同一机制。旧 `imagegen-prompt-expander` 保留为普通扩写技能。
 

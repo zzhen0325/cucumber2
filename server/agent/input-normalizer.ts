@@ -2,6 +2,13 @@ import { Agent, Runner } from "@openai/agents";
 import { z } from "zod";
 
 const normalizedIntentSchema = z.enum([
+  "document.create",
+  "document.edit",
+  "web.fetch",
+  "research.answer",
+  "code.create",
+  "data.analyze",
+  "workflow.plan",
   "image.generate",
   "image.upscale",
   "text.answer",
@@ -86,6 +93,8 @@ export function createInputNormalizerAgent(model?: Agent["model"]) {
     instructions: [
       "Normalize the user's request into a compact structured task object.",
       "Do not execute the task. Extract only fields that are stated or strongly implied.",
+      "Classify requests to write, draft, rewrite, or structure Markdown/documents as document.create or document.edit.",
+      "Classify web fetching, research, code generation, data analysis, and workflow planning with their matching intent even if the capability is not fully implemented yet.",
       "Classify image creation as image.generate and image upscaling/enhancement of an existing image as image.upscale.",
       "For image.generate, separate visual content from production controls such as count, aspect ratio, pixel dimensions, and usage.",
       "contentPrompt must be a clean renderable image description. Remove batch-count phrases such as four images, 四张, 一组4张.",
@@ -187,6 +196,35 @@ function buildNormalizerPrompt(input: NormalizeInput, maxOutputImages: number) {
 }
 
 function inferIntent(prompt: string): NormalizedIntent {
+  if (
+    /(改写|润色|重写|编辑|更新).*(文档|markdown|md|PRD|方案|brief|草稿|说明|邮件|纪要|提纲|大纲|稿)/i.test(
+      prompt
+    )
+  ) {
+    return "document.edit";
+  }
+  if (
+    /(写|撰写|生成|创建|整理|输出|起草).*(文档|markdown|md|PRD|方案|brief|草稿|说明|邮件|纪要|提纲|大纲|稿)|\b(markdown|document|prd|brief|proposal|draft|spec)\b/i.test(
+      prompt
+    )
+  ) {
+    return "document.create";
+  }
+  if (/(抓取|读取|总结).*(网页|网址|链接|URL)|\b(fetch|read|summarize)\b.*\b(webpage|url|link)\b/i.test(prompt)) {
+    return "web.fetch";
+  }
+  if (/(调研|研究|搜索|查找资料|引用来源|research|sources?|citations?)/i.test(prompt)) {
+    return "research.answer";
+  }
+  if (/(代码|函数|组件|脚本|diff|patch|code|function|component|script)/i.test(prompt)) {
+    return "code.create";
+  }
+  if (/(csv|表格|数据|JSON|分析数据|dataset|spreadsheet|analy[sz]e data)/i.test(prompt)) {
+    return "data.analyze";
+  }
+  if (/(计划|拆解任务|workflow|流程|checkpoint|plan)/i.test(prompt)) {
+    return "workflow.plan";
+  }
   if (/(放大|高清|超清|提升清晰|upscale|enhance)/i.test(prompt)) {
     return "image.upscale";
   }
