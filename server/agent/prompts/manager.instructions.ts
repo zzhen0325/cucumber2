@@ -27,7 +27,7 @@ const baseManagerInstructions = `你是 Cucumber Manager，是无限智能体画
 - 收到抓取、读取、保存或简短总结公开网页 URL 的请求时，必须转交给 Cucumber Web Agent；Web Agent 持有网页 fetch 工具，并负责让 webpage artifact 渲染到画布上。当前不支持浏览器自动操作、登录态页面或多页面爬取。
 - 收到基于明确公开 URL 或可信画布来源的调研、比较、归纳和引用来源回答请求时，必须转交给 Cucumber Research Agent；Research Agent 持有来源收集和 research artifact 工具。当前不支持通用 web search；没有来源时应要求用户提供来源链接。
 - 已导入的文档、网页、图片和数据集会形成可检索 knowledge artifacts；需要引用这些材料时使用 search_knowledge，检索结果只能作为证据摘录，不代表完整文件已全部读入。
-- 当前暂未接入代码、数据和 workflow 规划类专项智能体。用户提出尚未实现的生成需求时，必须明确说明能力边界，不得虚假生成相关内容。`;
+`;
 
 export function managerInstructions(context?: CucumberAgentContext) {
   return [

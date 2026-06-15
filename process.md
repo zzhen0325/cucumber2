@@ -75,7 +75,7 @@
 ## 2026-06-12 Image Request Boundary
 
 - 新增 `server/agent/tools/image/generate-image.request.ts`，集中负责图片数量、尺寸/比例和 upstream 引用图归一化。
-- `generate_image` 工具只做 Agent tool 边界、artifact 事件和 Seedream provider 调用编排。
+- `generate_image` 工具只做 Agent tool 边界、artifact 事件和图片 provider 调用编排；当前唯一支持的图片 provider 是 `IMAGE_PROVIDER=seedream`。
 - `seedream.ts` 收敛为 Seedream provider 执行层，保留配置读取、签名、提交/轮询、并发/重试、取消和 provider metadata。
 - 多张图片生成按 `SEEDREAM_MAX_CONCURRENCY` 限制完整 submit+poll 生命周期的并发数，并按 `SEEDREAM_STAGGER_MS` 间隔启动新任务；默认 `SEEDREAM_MAX_CONCURRENCY=1` 会等上一张完整出图或失败后再提交下一张，避免触发 Seedream 账号级并发限制。
 
@@ -117,6 +117,8 @@
 - 本地上传中/失败的节点不会进入项目持久化或 Agent upstream context；上传失败会留在画布上展示错误状态。
 - `generate_image` 和 `upscale_image` 收到 Seedream URL 后由服务端下载并上传到 `agent-assets`，随后才发 `artifact.created`；转存失败会走 `tool.error`/`run.failed`，不会生成假成功结果节点。toolbar 高清放大同样先转存再把真实节点写回项目。
 - 上游图片引用对 Manager prompt 仍隐藏真实 URL；调用 Seedream 前，服务端仅根据 `supabase://agent-assets/...` 临时签发 provider 可读 URL。
+- Agent 模型 provider 改为 Agents SDK 官方 `ModelProvider` + `Runner({ model, modelProvider })` 写法；Manager、specialist、input normalizer 和 prompt expansion 共用同一 Runner provider 配置。
+- 媒体 provider 独立暴露：图片 provider 已接入工具配置检查；视频 provider 仅进入 `/api/health` 配置面，尚未启用 `generate_video`、video artifact 或画布投影。
 - 私有预览统一走 `/api/projects/:projectId/artifacts/:artifactId/content`，服务端校验项目权限后 302 到短期 signed read URL。
 - P1 typed artifact shell：非图片 artifact 节点统一展示标题、摘要、来源工具/Run、创建时间、大小、预览/打开/下载入口；文本最终回复由 runtime 写入私有对象存储并通过 `artifact.created` 物化为 Markdown 节点。
 - 上下文收集默认使用 token 估算 budget，按图结构和 priority 保留选中节点，省略项写入 `contextSummary.omittedNodes` 和 Trace。

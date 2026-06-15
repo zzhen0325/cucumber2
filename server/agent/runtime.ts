@@ -30,20 +30,19 @@ import {
   materializeAgentRunSnapshot,
   shouldMaterializeRunEvent,
 } from "./materialize-run.ts";
-import { resolveAgentModel } from "./model-config.ts";
+import { getAgentRunnerConfig } from "./model-config.ts";
 import { retrieveRelevantAgentSkills } from "./skills/skill-retrieval.ts";
 import { storeTextArtifactContent } from "../storage.ts";
 import { redactTraceValue } from "./trace-redaction.ts";
 import { getToolTraceMetadata } from "./tool-registry.ts";
 
-const runner = new Runner({ workflowName: "Cucumber Agent" });
+let runner: Runner | undefined;
 
 export class OpenAIAgentsRuntime implements AgentRuntime {
   async *run(input: AgentRunInput): AsyncIterable<CucumberRunEvent> {
-    const model = resolveAgentModel();
     const normalizedInput =
       input.normalizedInput ??
-      (await normalizeAgentInput(input, { model, signal: input.signal }));
+      (await normalizeAgentInput(input, { signal: input.signal }));
     const normalizedRunInput = { ...input, normalizedInput };
     const context = buildCucumberAgentContext(normalizedRunInput);
     const mcpContextId = registerMcpRunContext(context);
@@ -52,9 +51,9 @@ export class OpenAIAgentsRuntime implements AgentRuntime {
       yield { type: "skill_retrieved", candidates: context.skillCandidates };
 
       await ensureCucumberInternalMcpConnected();
-      const managerAgent = createManagerAgent({ model });
+      const managerAgent = createManagerAgent();
 
-      const stream = await runner.run(managerAgent, buildManagerRunPrompt(normalizedRunInput), {
+      const stream = await getAgentRunner().run(managerAgent, buildManagerRunPrompt(normalizedRunInput), {
         context,
         maxTurns: 8,
         signal: input.signal,
@@ -68,6 +67,14 @@ export class OpenAIAgentsRuntime implements AgentRuntime {
 }
 
 export const agentRuntime = new OpenAIAgentsRuntime();
+
+function getAgentRunner() {
+  runner ??= new Runner({
+    workflowName: "Cucumber Agent",
+    ...getAgentRunnerConfig(),
+  });
+  return runner;
+}
 
 export async function executeAgentRun({
   writer: streamWriter,
@@ -124,11 +131,9 @@ export async function executeAgentRun({
         runtime: "openai-agents-sdk",
       }),
     });
-    const model = resolveAgentModel();
     agentInput = {
       ...agentInput,
       normalizedInput: await normalizeAgentInput(agentInput, {
-        model,
         signal: input.signal,
       }),
     };

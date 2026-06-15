@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CucumberAgentContext } from "../../context.ts";
 
 const mocks = vi.hoisted(() => ({
-  resolveAgentModel: vi.fn(),
+  getAgentRunnerConfig: vi.fn(),
   runnerRun: vi.fn(),
 }));
 
@@ -30,14 +30,19 @@ vi.mock("@openai/agents", async () => {
 });
 
 vi.mock("../../model-config.ts", () => ({
-  resolveAgentModel: () => mocks.resolveAgentModel(),
+  getAgentRunnerConfig: () => mocks.getAgentRunnerConfig(),
 }));
 
 const { expandImagePromptTool } = await import("./expand-image-prompt.tool.ts");
 
 describe("expand_image_prompt tool", () => {
   beforeEach(() => {
-    mocks.resolveAgentModel.mockReset();
+    mocks.getAgentRunnerConfig.mockReset();
+    mocks.getAgentRunnerConfig.mockReturnValue({
+      model: "test-model",
+      modelProvider: { getModel: vi.fn() },
+      tracingDisabled: true,
+    });
     mocks.runnerRun.mockReset();
   });
 

@@ -27,7 +27,10 @@ import type {
 } from "../src/types/canvas.ts";
 import { executeAgentRun } from "./agent/index.ts";
 import { handleInternalMcpRequest } from "./agent/mcp/internal-mcp-server.ts";
-import { getAgentModelConfiguration } from "./agent/model-config.ts";
+import {
+  assertImageProviderConfigured,
+  getRuntimeProviderConfiguration,
+} from "./provider-config.ts";
 import { importAgentSkillZip } from "./agent/skills/skill-import.ts";
 import {
   listActivatedSkillResources,
@@ -203,13 +206,19 @@ app.onError((error, c) => {
 });
 
 app.get("/api/health", (c) => {
-  const agent = getAgentModelConfiguration();
+  const providers = getRuntimeProviderConfiguration();
   return c.json({
     ok: true,
-    agentConfigured: agent.configured,
-    agentProvider: agent.provider,
-    agentModel: agent.model,
+    agentConfigured: providers.agent.configured,
+    agentProvider: providers.agent.provider,
+    agentModel: providers.agent.model,
+    imageConfigured: providers.image.configured,
+    imageProvider: providers.image.provider,
+    imageModel: providers.image.model,
     seedreamConfigured: isSeedreamConfigured(),
+    videoConfigured: providers.video.configured,
+    videoProvider: providers.video.provider,
+    videoModel: providers.video.model,
     supabaseConfigured: isSupabaseConfigured(),
   });
 });
@@ -674,11 +683,12 @@ app.post("/api/projects/:projectId/images/upscale", async (c) => {
     return notFound(c);
   }
 
-  if (!isSeedreamConfigured()) {
+  try {
+    assertImageProviderConfigured("upscale");
+  } catch (error) {
     return c.json(
       {
-        error:
-          "Seedream image upscale is not configured. Set SEEDREAM_ACCESS_KEY_ID and SEEDREAM_SECRET_ACCESS_KEY.",
+        error: getErrorMessage(error),
       },
       503
     );

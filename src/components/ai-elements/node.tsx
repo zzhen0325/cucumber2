@@ -40,7 +40,7 @@ export const Node = forwardRef<HTMLDivElement, NodeProps>(
   ) => (
     <Card
       className={cn(
-        "node-container relative size-full gap-0 rounded-md p-0",
+        "node-container relative size-full gap-0 rounded-[8px] p-0",
         className
       )}
       ref={ref}
@@ -68,7 +68,7 @@ export type NodeHeaderProps = ComponentProps<typeof CardHeader>;
 
 export const NodeHeader = ({ className, ...props }: NodeHeaderProps) => (
   <CardHeader
-    className={cn("gap-0.5 rounded-t-md border-b bg-secondary p-3!", className)}
+    className={cn("gap-0.5 rounded-t-[8px] border-b bg-secondary p-3!", className)}
     {...props}
   />
 );
@@ -97,7 +97,7 @@ export type NodeFooterProps = ComponentProps<typeof CardFooter>;
 
 export const NodeFooter = ({ className, ...props }: NodeFooterProps) => (
   <CardFooter
-    className={cn("rounded-b-md border-t bg-secondary p-3!", className)}
+    className={cn("rounded-b-[8px] border-t bg-secondary p-3!", className)}
     {...props}
   />
 );

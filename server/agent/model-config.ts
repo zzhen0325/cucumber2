@@ -3,106 +3,149 @@ import {
   OpenAIChatCompletionsModel,
   OpenAIResponsesModel,
   setTracingDisabled,
+  type Model,
+  type ModelProvider,
 } from "@openai/agents";
 
 /**
- * The Agent runtime uses the OpenAI Agents SDK. The provider is decided once from the
- * environment:
+ * The Agent runtime uses the official Agents SDK provider shape:
  *
- *   1. Doubao (Volcengine Ark) when `ARK_API_KEY` is set. Ark exposes an
- *      OpenAI-compatible Responses API, so we build an explicit
- *      `OpenAIResponsesModel` pointed at the Ark base URL.
- *   2. DeepSeek's OpenAI-compatible Chat Completions endpoint when
- *      `DEEPSEEK_API_KEY` is set. DeepSeek does not implement the Responses API,
- *      so a plain model string would resolve to `/responses` and 404 — we return
- *      an explicit `OpenAIChatCompletionsModel` instead.
- *   3. Native OpenAI when `OPENAI_API_KEY` is set.
+ *   const runner = new Runner({ model, modelProvider })
  *
- * Returning an explicit model instance (instead of toggling the global API mode)
- * keeps the chosen API surface deterministic. This is provider configuration,
- * not a runtime fallback: any model/tool error still surfaces normally.
+ * `model` pins the model name the SDK passes into `modelProvider.getModel()`;
+ * `modelProvider` owns the endpoint/client selection. This keeps Manager,
+ * specialists, input normalization, and prompt-expansion agents on one
+ * provider boundary without passing concrete Model instances through agents.
  */
-type AgentModel = OpenAIResponsesModel | OpenAIChatCompletionsModel;
-
-let cached: AgentModel | undefined | null = null;
-
 export type AgentModelConfiguration = {
   configured: boolean;
   provider: "ark" | "deepseek" | "openai" | null;
   model: string | null;
 };
 
+type AgentModelProviderProfile = {
+  provider: Exclude<AgentModelConfiguration["provider"], null>;
+  model: string;
+  modelProvider: ModelProvider;
+  tracingDisabled: boolean;
+};
+
+let cachedProfile: AgentModelProviderProfile | undefined;
+
 export function configureAgentModelProvider() {
-  // Kept for call-site clarity; provider wiring happens lazily in resolveAgentModel().
-  resolveAgentModel();
+  getAgentModelProviderProfile();
 }
 
-export function resolveAgentModel(): AgentModel | undefined {
-  if (cached !== null) {
-    return cached ?? undefined;
-  }
-
-  // Prefer Doubao (Ark) whenever its key is configured. Ark speaks the
-  // OpenAI-compatible Responses API.
-  const arkKey = process.env.ARK_API_KEY?.trim();
-  if (arkKey) {
-    const baseURL = readArkOpenAICompatibleBaseUrl();
-    const modelName = process.env.ARK_MODEL?.trim() || "doubao-seed-2-0-lite-260428";
-    const client = new OpenAI({ apiKey: arkKey, baseURL });
-    // Ark has no trace ingestion endpoint; disable tracing uploads.
-    setTracingDisabled(true);
-    cached = new OpenAIResponsesModel(client, modelName);
-    return cached;
-  }
-
-  // Otherwise prefer the DeepSeek OpenAI-compatible Chat Completions endpoint.
-  const deepseekKey = process.env.DEEPSEEK_API_KEY?.trim();
-  if (deepseekKey) {
-    const baseURL = process.env.DEEPSEEK_BASE_URL?.trim() || "https://api.deepseek.com";
-    const modelName = process.env.DEEPSEEK_MODEL?.trim() || "deepseek-v4-flash";
-    const client = new OpenAI({ apiKey: deepseekKey, baseURL });
-    // DeepSeek has no trace ingestion endpoint; disable tracing uploads.
-    setTracingDisabled(true);
-    cached = new OpenAIChatCompletionsModel(client, modelName);
-    return cached;
-  }
-
-  if (process.env.OPENAI_API_KEY?.trim()) {
-    cached = undefined;
-    return undefined;
-  }
-
-  throw new Error(
-    "Agent model is not configured. Set ARK_API_KEY, DEEPSEEK_API_KEY, or OPENAI_API_KEY."
-  );
+export function getAgentRunnerConfig() {
+  const profile = getAgentModelProviderProfile();
+  return {
+    model: profile.model,
+    modelProvider: profile.modelProvider,
+    tracingDisabled: profile.tracingDisabled,
+  };
 }
 
 export function getAgentModelConfiguration(): AgentModelConfiguration {
-  if (process.env.ARK_API_KEY?.trim()) {
+  const profile = readAgentModelProviderProfile();
+  if (!profile) {
+    return { configured: false, provider: null, model: null };
+  }
+  return {
+    configured: true,
+    provider: profile.provider,
+    model: profile.model,
+  };
+}
+
+function getAgentModelProviderProfile(): AgentModelProviderProfile {
+  if (cachedProfile !== undefined) {
+    return cachedProfile;
+  }
+
+  const profile = readAgentModelProviderProfile();
+  if (!profile) {
+    throw new Error(
+      "Agent model is not configured. Set ARK_API_KEY, DEEPSEEK_API_KEY, or OPENAI_API_KEY."
+    );
+  }
+
+  cachedProfile = profile;
+  return profile;
+}
+
+function readAgentModelProviderProfile(): AgentModelProviderProfile | null {
+  const arkKey = process.env.ARK_API_KEY?.trim();
+  if (arkKey) {
+    const model = process.env.ARK_MODEL?.trim() || "doubao-seed-2-0-lite-260428";
+    const client = new OpenAI({
+      apiKey: arkKey,
+      baseURL: readArkOpenAICompatibleBaseUrl(),
+    });
+    setTracingDisabled(true);
     return {
-      configured: true,
       provider: "ark",
-      model: process.env.ARK_MODEL?.trim() || "doubao-seed-2-0-lite-260428",
+      model,
+      modelProvider: new StaticModelProvider(
+        new OpenAIResponsesModel(client, model)
+      ),
+      tracingDisabled: true,
     };
   }
 
-  if (process.env.DEEPSEEK_API_KEY?.trim()) {
+  const deepseekKey = process.env.DEEPSEEK_API_KEY?.trim();
+  if (deepseekKey) {
+    const model = process.env.DEEPSEEK_MODEL?.trim() || "deepseek-v4-flash";
+    const client = new OpenAI({
+      apiKey: deepseekKey,
+      baseURL: process.env.DEEPSEEK_BASE_URL?.trim() || "https://api.deepseek.com",
+    });
+    setTracingDisabled(true);
     return {
-      configured: true,
       provider: "deepseek",
-      model: process.env.DEEPSEEK_MODEL?.trim() || "deepseek-v4-flash",
+      model,
+      modelProvider: new StaticModelProvider(
+        new OpenAIChatCompletionsModel(client, model)
+      ),
+      tracingDisabled: true,
     };
   }
 
   if (process.env.OPENAI_API_KEY?.trim()) {
+    const model = process.env.OPENAI_MODEL?.trim() || "gpt-5.4-mini";
     return {
-      configured: true,
       provider: "openai",
-      model: process.env.OPENAI_MODEL?.trim() || "sdk-default",
+      model,
+      modelProvider: new OpenAIModelProvider(model),
+      tracingDisabled: false,
     };
   }
 
-  return { configured: false, provider: null, model: null };
+  return null;
+}
+
+class StaticModelProvider implements ModelProvider {
+  private readonly model: Model;
+
+  constructor(model: Model) {
+    this.model = model;
+  }
+
+  getModel() {
+    return this.model;
+  }
+}
+
+class OpenAIModelProvider implements ModelProvider {
+  private readonly fallbackModel: string;
+
+  constructor(fallbackModel: string) {
+    this.fallbackModel = fallbackModel;
+  }
+
+  getModel(modelName?: string) {
+    const model = modelName?.trim() || this.fallbackModel;
+    return new OpenAIResponsesModel(new OpenAI(), model);
+  }
 }
 
 function readArkOpenAICompatibleBaseUrl() {

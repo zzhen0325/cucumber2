@@ -2,7 +2,6 @@ import { tool } from "@openai/agents";
 import { z } from "zod";
 
 import {
-  isSeedreamConfigured,
   readSeedreamUpscaleConfigFromEnv,
   upscaleSeedreamImage,
   type SeedreamUpscaleResolution,
@@ -12,6 +11,7 @@ import {
   resolveStorageBackedImageContext,
   storeGeneratedImageFromUrl,
 } from "../../../storage.ts";
+import { assertImageProviderConfigured } from "../../../provider-config.ts";
 import type { CucumberAgentContext } from "../../context.ts";
 
 const upscaleImageInputSchema = z.object({
@@ -57,11 +57,7 @@ export const upscaleImageTool = tool({
       };
     }
 
-    if (!isSeedreamConfigured()) {
-      throw new Error(
-        "Seedream image upscale is not configured. Set SEEDREAM_ACCESS_KEY_ID and SEEDREAM_SECRET_ACCESS_KEY."
-      );
-    }
+    assertImageProviderConfigured("upscale");
 
     const source = await resolveUpscaleSourceImage(context);
     const artifacts: ArtifactRef[] = [];

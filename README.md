@@ -1,6 +1,6 @@
 # Cucumber
 
-Infinite Canvas Agent Run MVP。前端使用 Vite、React、TypeScript、React Flow 和 AI Elements；服务端使用 Hono 与 OpenAI Agents SDK。
+Infinite Canvas Agent OS。前端使用 Vite、React、TypeScript、React Flow 和 AI Elements；服务端使用 Hono 与 OpenAI Agents SDK。
 
 ## Agent Runtime
 
@@ -27,7 +27,9 @@ Infinite Canvas Agent Run MVP。前端使用 Vite、React、TypeScript、React F
 
 客户端只提交 `projectId`、`runNodeId`、prompt、`promptNodeId`、主 `selectedNodeId` 和 `selectedNodeIds`。提交前会强制保存项目快照；服务端从持久化 `nodes/edges` 重建 upstream context，不信任客户端上传的节点、artifact 或 URL。多选引用会过滤掉 Run 节点，只让可引用画布节点进入上下文。
 
-模型按服务端环境固定优先级选择：Ark、DeepSeek、OpenAI。specialist model 由 runtime 统一注入；前端没有模型选择器，也没有 runtime feature flag。
+Agent 模型按服务端环境固定优先级选择：Ark、DeepSeek、OpenAI。runtime 使用 Agents SDK 官方 `ModelProvider` + `Runner({ model, modelProvider })` 配置，Manager、specialist、输入归一化和图片提示词扩写共用同一 provider 解析路径；前端没有模型选择器，也没有 runtime feature flag。
+
+媒体 provider 独立于 Agent 模型 provider。当前图片 provider 只支持 `IMAGE_PROVIDER=seedream`；`generate_image` 和 `upscale_image` 都会走同一个 provider 配置检查，不支持其他图片 provider 的静默兜底。视频 provider 通过 `VIDEO_PROVIDER` 暴露到 `/api/health`，但当前还没有 `generate_video` tool、video artifact 或画布投影链路。
 
 ## Setup
 
@@ -49,7 +51,12 @@ pnpm dev
 - DeepSeek：`DEEPSEEK_API_KEY`，可选 `DEEPSEEK_MODEL`、`DEEPSEEK_BASE_URL`
 - OpenAI：`OPENAI_API_KEY`，可选 `OPENAI_MODEL`
 
-图片生成还需要 `SEEDREAM_ACCESS_KEY_ID` 和 `SEEDREAM_SECRET_ACCESS_KEY`。项目、Trace 和对象存储 metadata 持久化需要 `SUPABASE_URL` 与 `SUPABASE_SECRET_KEY`。
+图片生成还需要 `IMAGE_PROVIDER=seedream`、`SEEDREAM_ACCESS_KEY_ID` 和 `SEEDREAM_SECRET_ACCESS_KEY`。项目、Trace 和对象存储 metadata 持久化需要 `SUPABASE_URL` 与 `SUPABASE_SECRET_KEY`。
+
+视频 provider 配置预留：
+
+- 通用：`VIDEO_PROVIDER`、可选 `VIDEO_MODEL`、`VIDEO_API_KEY`
+- Seedance：`VIDEO_PROVIDER=seedance`，`SEEDANCE_ACCESS_KEY_ID`、`SEEDANCE_SECRET_ACCESS_KEY`，可选 `SEEDANCE_MODEL`
 
 智能超清默认使用 `SEEDREAM_UPSCALE_REQ_KEY=jimeng_i2i_seed3_tilesr_cvtob`、`SEEDREAM_UPSCALE_RESOLUTION=4k` 和 `SEEDREAM_UPSCALE_SCALE=50`；toolbar 直连放大不创建 Agent Run，但会保存新的图片 artifact、节点和原图连线。
 
@@ -60,7 +67,7 @@ pnpm dev
 
 不要把 `SUPABASE_SECRET_KEY` / service role key 暴露到前端。
 
-`GET /api/health` 返回 `agentConfigured`、`agentProvider`、`agentModel`、`seedreamConfigured` 和 `supabaseConfigured`。
+`GET /api/health` 返回 `agentConfigured`、`agentProvider`、`agentModel`、`imageConfigured`、`imageProvider`、`imageModel`、`seedreamConfigured`、`videoConfigured`、`videoProvider`、`videoModel` 和 `supabaseConfigured`。
 
 ## Persistence
 
@@ -105,7 +112,7 @@ pnpm dev
 - `POST /api/agent-run`
 - `DELETE /api/agent-run?projectId=...&runNodeId=...`
 
-已删除 `/api/agent-run-v2`、`/api/model-providers` 和全部旧 `/api/skills`。新 `/api/agent-skills` 属于当前 OpenAI Agents SDK runtime，不恢复 Agent v1 Skill 栈。
+<br />
 
 ## Agent Skill Contract
 

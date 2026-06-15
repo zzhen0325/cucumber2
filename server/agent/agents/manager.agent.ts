@@ -12,20 +12,12 @@ import {
   createSpecialistHandoffs,
 } from "./registry.ts";
 
-// NOTE: the model is intentionally NOT set here. It is resolved lazily at run
-// time (see runtime.ts) because the model provider depends on environment
-// variables that are loaded *after* this module is imported.
-export function createManagerAgent({
-  model,
-}: {
-  model?: Agent<CucumberAgentContext>["model"];
-} = {}) {
-  const specialistRegistry = createSpecialistAgentRegistry({ model });
+export function createManagerAgent() {
+  const specialistRegistry = createSpecialistAgentRegistry();
 
   return new Agent<CucumberAgentContext>({
     name: "Cucumber Manager",
     instructions: (runContext) => managerInstructions(runContext.context),
-    ...(model ? { model } : {}),
     tools: [
       activateSkillTool,
       readSkillResourceTool,

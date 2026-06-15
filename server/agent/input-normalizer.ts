@@ -1,6 +1,8 @@
 import { Agent, Runner } from "@openai/agents";
 import { z } from "zod";
 
+import { getAgentRunnerConfig } from "./model-config.ts";
+
 const normalizedIntentSchema = z.enum([
   "document.create",
   "document.edit",
@@ -58,19 +60,18 @@ type NormalizeInput = {
 
 type NormalizeAgentInputOptions = {
   maxOutputImages?: number;
-  model?: Agent["model"];
   signal?: AbortSignal;
 };
 
-const normalizerRunner = new Runner({ workflowName: "Cucumber Input Normalizer" });
+let normalizerRunner: Runner | undefined;
 
 export async function normalizeAgentInput(
   input: NormalizeInput,
   options: NormalizeAgentInputOptions = {}
 ): Promise<NormalizedAgentInput> {
   const maxOutputImages = options.maxOutputImages ?? readMaxOutputImages();
-  const agent = createInputNormalizerAgent(options.model);
-  const result = await normalizerRunner.run(
+  const agent = createInputNormalizerAgent();
+  const result = await getNormalizerRunner().run(
     agent,
     buildNormalizerPrompt(input, maxOutputImages),
     {
@@ -87,7 +88,7 @@ export async function normalizeAgentInput(
   });
 }
 
-export function createInputNormalizerAgent(model?: Agent["model"]) {
+export function createInputNormalizerAgent() {
   return new Agent({
     name: "Cucumber Input Normalizer",
     instructions: [
@@ -102,9 +103,16 @@ export function createInputNormalizerAgent(model?: Agent["model"]) {
       "Default image resultCount to 1 when the user does not request a count.",
       "Use unsupported only for requests outside the product's current capabilities.",
     ].join("\n"),
-    ...(model ? { model } : {}),
     outputType: normalizedAgentInputSchema,
   });
+}
+
+function getNormalizerRunner() {
+  normalizerRunner ??= new Runner({
+    workflowName: "Cucumber Input Normalizer",
+    ...getAgentRunnerConfig(),
+  });
+  return normalizerRunner;
 }
 
 export function finalizeNormalizedAgentInput(

@@ -3,7 +3,6 @@ import { z } from "zod";
 
 import {
   generateSeedreamImage,
-  isSeedreamConfigured,
   readSeedreamConfigFromEnv,
 } from "../../../../seedream.ts";
 import type { ArtifactRef } from "../../../../src/types/canvas.ts";
@@ -11,6 +10,7 @@ import {
   resolveStorageBackedImageContext,
   storeGeneratedImageFromUrl,
 } from "../../../storage.ts";
+import { assertImageProviderConfigured } from "../../../provider-config.ts";
 import type { CucumberAgentContext } from "../../context.ts";
 import {
   buildGenerateImageSeedreamInput,
@@ -103,11 +103,7 @@ export async function executeGenerateImageTool({
   }
 
   // No silent fallback: surface a configuration error instead of faking output.
-  if (!isSeedreamConfigured()) {
-    throw new Error(
-      "Seedream image generation is not configured. Set SEEDREAM_ACCESS_KEY_ID and SEEDREAM_SECRET_ACCESS_KEY."
-    );
-  }
+  assertImageProviderConfigured("generation");
 
   const prompt = normalizeSeedreamProviderPrompt(
     parsed.data.prompt?.trim() || context.prompt?.trim() || ""

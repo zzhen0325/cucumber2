@@ -150,7 +150,7 @@ export function RunNodeView({
             )}
             {headerSummary && (
               <span className="run-header-summary" title={headerSummary.fullLabel}>
-                {headerSummary.visibleLabel}
+                {/* {headerSummary.visibleLabel} */}
               </span>
             )}
           </span>

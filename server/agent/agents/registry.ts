@@ -18,14 +18,10 @@ type SpecialistAgentDefinition = {
   requiredTools: string[];
 };
 
-export function createSpecialistAgentRegistry({
-  model,
-}: {
-  model?: Agent<CucumberAgentContext>["model"];
-} = {}): SpecialistAgentDefinition[] {
+export function createSpecialistAgentRegistry(): SpecialistAgentDefinition[] {
   return [
     {
-      agent: createDocumentAgent({ model }),
+      agent: createDocumentAgent(),
       enabledIntents: ["document.create", "document.edit"],
       handoffPolicy: shouldEnableDocumentHandoff,
       name: "Cucumber Document Agent",
@@ -33,7 +29,7 @@ export function createSpecialistAgentRegistry({
       requiredTools: ["create_text_artifact"],
     },
     {
-      agent: createWebAgent({ model }),
+      agent: createWebAgent(),
       enabledIntents: ["web.fetch"],
       handoffPolicy: shouldEnableWebHandoff,
       name: "Cucumber Web Agent",
@@ -41,7 +37,7 @@ export function createSpecialistAgentRegistry({
       requiredTools: ["fetch_webpage"],
     },
     {
-      agent: createResearchAgent({ model }),
+      agent: createResearchAgent(),
       enabledIntents: ["research.answer"],
       handoffPolicy: shouldEnableResearchHandoff,
       name: "Cucumber Research Agent",
@@ -49,7 +45,7 @@ export function createSpecialistAgentRegistry({
       requiredTools: ["collect_research_sources", "create_research_artifact"],
     },
     {
-      agent: createImageAgent({ model }),
+      agent: createImageAgent(),
       enabledIntents: ["image.generate", "image.upscale"],
       handoffPolicy: shouldEnableImageHandoff,
       name: "Cucumber Image Agent",

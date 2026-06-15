@@ -21,6 +21,7 @@ import {
   ArrowLeft,
   ArrowUpRight,
   Check,
+  ChevronDown,
   Circle,
   CircleDot,
   Copy,
@@ -31,19 +32,13 @@ import {
   Frame,
   Workflow,
   Globe2,
-  Hand,
-  Image,
-  Layers,
   Maximize2,
-  MousePointer2,
-  Palette,
+  Search,
   Sparkles,
   Square,
   StickyNote,
   Type,
   Triangle,
-  ZoomIn,
-  ZoomOut,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -2341,19 +2336,30 @@ function TopBar({
         title="返回项目列表"
         type="button"
       >
-        <ArrowLeft size={15} />
+        <ArrowLeft size={12} />
       </button>
-      <div className="brand-mark">
-        <Sparkles size={17} />
+      <div className="top-bar-main">
+        <div className="brand-mark">
+          <img src="/LOGO.svg" alt="cucumber logo" />
+        </div>
+        <span className="top-bar-divider" />
+        <button className="top-title-button" title={title} type="button">
+          <span>{title}</span>
+          <ChevronDown size={12} />
+        </button>
+        <button aria-label="分享" className="top-icon-button" title="分享" type="button">
+          <ArrowUpRight size={14} />
+        </button>
+        <button aria-label="评论" className="top-icon-button" title="评论" type="button">
+          <Copy size={14} />
+        </button>
+        <span
+          className={`storage-chip ${storageStatus}`}
+          title={storageError ?? getStorageStatusLabel(storageStatus)}
+        >
+          {getStorageStatusLabel(storageStatus)}
+        </span>
       </div>
-      <span>{title}</span>
-      <span
-        className={`storage-chip ${storageStatus}`}
-        title={storageError ?? getStorageStatusLabel(storageStatus)}
-      >
-        <Database size={13} />
-        {getStorageStatusLabel(storageStatus)}
-      </span>
     </div>
   );
 }
@@ -2366,13 +2372,9 @@ function ToolRail({
   onToolChange: (tool: CanvasTool) => void;
 }) {
   const tools: ToolRailItem[] = [
-    { icon: MousePointer2, label: "移动工具", tool: "select" },
-    { icon: Hand, label: "抓手工具", tool: "hand" },
-    ...manualNodeTemplates.map((template) => ({
-      icon: template.icon,
-      label: template.label,
-      tool: template.tool,
-    })),
+    { icon: Search, label: "搜索节点", tool: "select" },
+    { icon: Workflow, label: "知识花园", tool: "hand" },
+    { icon: StickyNote, label: "自由节点", tool: "stickyNote" },
   ];
 
   return (
@@ -2405,15 +2407,6 @@ function ViewportControls({
 }) {
   return (
     <div className="viewport-controls">
-      <button aria-label="Background color" disabled title="暂未开放" type="button">
-        <Palette size={14} />
-      </button>
-      <button aria-label="Layers" disabled title="暂未开放" type="button">
-        <Layers size={14} />
-      </button>
-      <button aria-label="Generated files" disabled title="暂未开放" type="button">
-        <Image size={14} />
-      </button>
       <button
         aria-label="自动布局"
         disabled={!canAutoLayout}
@@ -2423,14 +2416,18 @@ function ViewportControls({
       >
         <Workflow size={14} />
       </button>
-      <span className="divider" />
-      <button aria-label="Zoom out" disabled title="暂未开放" type="button">
-        <ZoomOut size={14} />
+      <button
+        aria-label="适应画布"
+        className="viewport-zoom-button"
+        disabled
+        title="暂未开放"
+        type="button"
+      >
+        <span className="zoom-label">100%</span>
+        <ChevronDown size={12} />
       </button>
-      <span className="zoom-label">100%</span>
-      <button aria-label="Zoom in" disabled title="暂未开放" type="button">
-        <ZoomIn size={14} />
-      </button>
+     
+     
     </div>
   );
 }

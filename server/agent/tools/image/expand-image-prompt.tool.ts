@@ -2,7 +2,7 @@ import { Agent, Runner, tool } from "@openai/agents";
 import { z } from "zod";
 
 import type { CucumberAgentContext } from "../../context.ts";
-import { resolveAgentModel } from "../../model-config.ts";
+import { getAgentRunnerConfig } from "../../model-config.ts";
 import type { ActivatedAgentSkill } from "../../skills/types.ts";
 
 const expandImagePromptInputSchema = z.object({
@@ -28,9 +28,7 @@ const expandImagePromptJsonSchema = {
   required: ["prompt"],
 } as const;
 
-const promptExpansionRunner = new Runner({
-  workflowName: "Cucumber Image Prompt Skill",
-});
+let promptExpansionRunner: Runner | undefined;
 
 export const expandImagePromptTool = tool({
   name: "expand_image_prompt",
@@ -62,14 +60,12 @@ export const expandImagePromptTool = tool({
       };
     }
 
-    const model = resolveAgentModel();
     const agent = new Agent<CucumberAgentContext>({
       name: "Cucumber Image Prompt Expander",
       instructions: buildPromptExpansionInstructions(skill.body),
-      ...(model ? { model } : {}),
       tools: [],
     });
-    const result = await promptExpansionRunner.run(
+    const result = await getPromptExpansionRunner().run(
       agent,
       buildPromptExpansionInput({
         prompt: parsed.data.prompt,
@@ -93,6 +89,14 @@ export const expandImagePromptTool = tool({
     };
   },
 });
+
+function getPromptExpansionRunner() {
+  promptExpansionRunner ??= new Runner({
+    workflowName: "Cucumber Image Prompt Skill",
+    ...getAgentRunnerConfig(),
+  });
+  return promptExpansionRunner;
+}
 
 function buildPromptExpansionInstructions(skillBody: string) {
   return [
