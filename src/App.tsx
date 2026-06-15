@@ -78,7 +78,14 @@ function App() {
     <TooltipProvider>
       {sessionStatus === "loading" && (
         <main className="app-state-screen">
-          <div className="app-state-mark" />
+          <img
+            className="app-state-logo"
+            src="/logocolor.svg"
+            width="34"
+            height="36"
+            alt=""
+            aria-hidden="true"
+          />
           <span>连接中</span>
         </main>
       )}

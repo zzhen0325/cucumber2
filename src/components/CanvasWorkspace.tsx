@@ -10,6 +10,7 @@ import {
   useNodesState,
   type Node as FlowNode,
   type NodeChange,
+  type NodeMouseHandler,
   type NodeProps,
   type NodeTypes,
   type ReactFlowInstance,
@@ -18,29 +19,28 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { BundledLanguage } from "shiki";
 import {
-  ArrowLeft,
-  ArrowUpRight,
-  Check,
-  ChevronDown,
-  Circle,
-  CircleDot,
-  Copy,
-  Database,
-  Diamond,
-  Download,
-  FileText,
-  Frame,
-  Workflow,
-  Globe2,
-  Maximize2,
-  Search,
-  Sparkles,
-  Square,
-  StickyNote,
-  Type,
-  Triangle,
-  type LucideIcon,
-} from "lucide-react";
+  ArrowLeftIcon as ArrowLeft,
+  ArrowMaximizeIcon as ArrowUpRight,
+  CheckmarkIcon as Check,
+  ChevronDownIcon as ChevronDown,
+  CircleIcon as Circle,
+  DotCircleIcon as CircleDot,
+  CopyIcon as Copy,
+  DatabaseIcon as Database,
+  DiamondIcon as Diamond,
+  ArrowDownloadIcon as Download,
+  FileTextIcon as FileText,
+  SquareMarginsIcon as Frame,
+  BranchIcon as Workflow,
+  GlobeIcon as Globe2,
+  FullScreenMaximizeIcon as Maximize2,
+  SearchIcon as Search,
+  SparkleIcon as Sparkles,
+  SquareIcon as Square,
+  NoteIcon as StickyNote,
+  TextIcon as Type,
+  TriangleIcon as Triangle,
+} from "@proicons/react";
 import {
   createContext,
   lazy,
@@ -55,6 +55,8 @@ import {
   useState,
 } from "react";
 import type { CSSProperties, FormEvent, MouseEvent as ReactMouseEvent } from "react";
+
+type IconComponent = typeof StickyNote;
 
 import { Canvas } from "@/components/ai-elements/canvas";
 import {
@@ -209,7 +211,7 @@ type ManualCanvasTool = "stickyNote" | ShapeVariant;
 type CanvasTool = "select" | "hand" | ManualCanvasTool;
 type ManualNodeTemplate =
   | {
-      icon: LucideIcon;
+      icon: IconComponent;
       kind: "stickyNote";
       label: string;
       tool: "stickyNote";
@@ -217,14 +219,14 @@ type ManualNodeTemplate =
       text: string;
     }
   | {
-      icon: LucideIcon;
+      icon: IconComponent;
       kind: "shape";
       label: string;
       tool: ShapeVariant;
       shape: ShapeVariant;
     };
 type ToolRailItem = {
-  icon: LucideIcon;
+  icon: IconComponent;
   label: string;
   tool: CanvasTool;
 };
@@ -243,6 +245,16 @@ type CreationPreview = {
     width: number;
   };
 };
+
+const LEFT_MOUSE_BUTTON = 0;
+const MIDDLE_MOUSE_BUTTON = 1;
+const PAN_ON_DRAG_BUTTONS = [MIDDLE_MOUSE_BUTTON];
+const HAND_TOOL_PAN_ON_DRAG_BUTTONS = [LEFT_MOUSE_BUTTON, MIDDLE_MOUSE_BUTTON];
+const SHIFT_MULTI_SELECTION_KEYS = ["Shift", "ShiftLeft", "ShiftRight"];
+
+function getSelectedNodeIds(nodes: AgentCanvasNode[]) {
+  return nodes.filter((node) => node.selected).map((node) => node.id);
+}
 
 const manualNodeTemplates: ManualNodeTemplate[] = [
   {
@@ -291,6 +303,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const messagesRef = useRef<ReturnType<typeof useChat>["messages"]>([]);
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
+  const selectionBeforeNodeChangeRef = useRef<string[]>([]);
   const projectTitleRef = useRef(projectTitle);
   const persistedSelectedNodeIdRef = useRef<string | null>(null);
   const isReplayModeRef = useRef(false);
@@ -713,11 +726,43 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
   const handleNodesChange = useCallback(
     (changes: NodeChange<AgentCanvasNode>[]) => {
-      setNodes((current) =>
-        applyLinkedNodeDragChanges(changes, current, edgesRef.current)
-      );
+      setNodes((current) => {
+        const next = applyLinkedNodeDragChanges(
+          changes,
+          current,
+          edgesRef.current
+        );
+
+        if (changes.some((change) => change.type === "select")) {
+          selectionBeforeNodeChangeRef.current = getSelectedNodeIds(current);
+        }
+
+        return next;
+      });
     },
     [setNodes]
+  );
+
+  const handleNodeClick = useCallback<NodeMouseHandler<AgentCanvasNode>>(
+    (event, node) => {
+      if (isReplayMode || isCreateTool || !event.shiftKey) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const baseSelectedNodeIds = selectionBeforeNodeChangeRef.current;
+      const nextSelectedNodeIds = baseSelectedNodeIds.includes(node.id)
+        ? baseSelectedNodeIds.filter(
+            (selectedNodeId) => selectedNodeId !== node.id
+          )
+        : [...baseSelectedNodeIds, node.id];
+
+      selectionBeforeNodeChangeRef.current = nextSelectedNodeIds;
+      setNodes((current) => applySelectedNodeIds(current, nextSelectedNodeIds));
+    },
+    [isCreateTool, isReplayMode, setNodes]
   );
 
   useEffect(() => {
@@ -1684,6 +1729,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
               edges={canvasEdges}
               onInit={handleCanvasInit}
               onEdgesChange={isReplayMode ? undefined : onEdgesChange}
+              onNodeClick={handleNodeClick}
               onNodesChange={isReplayMode ? undefined : handleNodesChange}
               onMouseDown={handleCreationMouseDown}
               onPaneClick={() => {
@@ -1694,7 +1740,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
               selectionMode={SelectionMode.Partial}
               nodesDraggable={!isReplayMode && !isHandTool && !isCreateTool}
               nodesConnectable={false}
-              panOnDrag={isHandTool}
+              panOnDrag={
+                isHandTool ? HAND_TOOL_PAN_ON_DRAG_BUTTONS : PAN_ON_DRAG_BUTTONS
+              }
+              selectionKeyCode={null}
+              multiSelectionKeyCode={SHIFT_MULTI_SELECTION_KEYS}
               selectionOnDrag={!isHandTool && !isCreateTool}
               proOptions={{ hideAttribution: true }}
             >

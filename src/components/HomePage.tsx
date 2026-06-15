@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { ChevronRight, Plus } from "lucide-react";
+import { ChevronRightIcon as ChevronRight, AddIcon as Plus } from "@proicons/react";
 import { useCallback, useRef, useState } from "react";
 
 import { CucumberLogo } from "@/components/icons/cucumber-logo";

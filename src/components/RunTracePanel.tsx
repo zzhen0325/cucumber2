@@ -1,4 +1,4 @@
-import { Check, CircleAlert, ListTree, Loader2, RotateCcw, X } from "lucide-react";
+import { CheckmarkIcon as Check, AlertCircleIcon as CircleAlert, BulletListTreeIcon as ListTree, SpinnerIcon as Loader2, ArrowCounterclockwiseIcon as RotateCcw, CancelIcon as X } from "@proicons/react";
 import { useMemo, type ReactNode } from "react";
 
 import type { RunStepTraceEvent } from "@/lib/graph-projection";

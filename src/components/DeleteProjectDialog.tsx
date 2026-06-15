@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Loader2 } from "lucide-react";
+import { SpinnerIcon as Loader2 } from "@proicons/react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";

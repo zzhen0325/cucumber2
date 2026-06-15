@@ -32,6 +32,9 @@ importers:
       '@openai/agents':
         specifier: ^0.11.6
         version: 0.11.6(ws@8.21.0)(zod@4.4.3)
+      '@proicons/react':
+        specifier: ^4.13.6
+        version: 4.13.6(react@19.2.7)
       '@radix-ui/react-collapsible':
         specifier: ^1.1.12
         version: 1.1.12(@types/react-dom@19.2.3(@types/react@19.2.16))(@types/react@19.2.16)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -77,9 +80,6 @@ importers:
       jszip:
         specifier: ^3.10.1
         version: 3.10.1
-      lucide-react:
-        specifier: ^1.17.0
-        version: 1.17.0(react@19.2.7)
       nanoid:
         specifier: ^5.1.11
         version: 5.1.11
@@ -705,6 +705,11 @@ packages:
 
   '@oxc-project/types@0.133.0':
     resolution: {integrity: sha512-KzkdCd6Uxqnf6l3HOw1xfatAlUURA0g14cvBYFyJ5SaNOQbOUvBr9PKArcPcrNIeRsBdgcUzOGrhKveVpvOIGA==}
+
+  '@proicons/react@4.13.6':
+    resolution: {integrity: sha512-ps9qcrnU5G3k/hTIJsU+WJZYyRvf7B86msIHmEdrJoLG8H9U892hlyAqHic2tyOCu4fikGm7sY08CiLJBQLHeA==}
+    peerDependencies:
+      react: ^19.2.0
 
   '@radix-ui/number@1.1.1':
     resolution: {integrity: sha512-MkKCwxlXTgz6CFoJx3pCwn07GKp36+aZyu/u2Ln2VrA5DcdyCZkASEDBTd8x5whTQQL5CiYf4prXKLcgQdv29g==}
@@ -3154,11 +3159,6 @@ packages:
     peerDependencies:
       react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
-  lucide-react@1.17.0:
-    resolution: {integrity: sha512-9FA9evdox/JQL5PT57fdA1x/yg8T7knJ98+zjTL3UfKza6pflQUUh3XtaQIHKvnsJw1lmsEyHVlt5jchYxOQ5w==}
-    peerDependencies:
-      react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
-
   lz-string@1.5.0:
     resolution: {integrity: sha512-h5bgJWpxJNswbU7qCrV0tIKQCaS3blPDrqKWx+QxzuzL1zGUzij9XCWLrSLsJPu5t+eWA/ycetzYAO5IOMcWAQ==}
     hasBin: true
@@ -4947,6 +4947,10 @@ snapshots:
   '@opentelemetry/api@1.9.1': {}
 
   '@oxc-project/types@0.133.0': {}
+
+  '@proicons/react@4.13.6(react@19.2.7)':
+    dependencies:
+      react: 19.2.7
 
   '@radix-ui/number@1.1.1': {}
 
@@ -7563,10 +7567,6 @@ snapshots:
       yallist: 3.1.1
 
   lucide-react@0.525.0(react@19.2.7):
-    dependencies:
-      react: 19.2.7
-
-  lucide-react@1.17.0(react@19.2.7):
     dependencies:
       react: 19.2.7
 

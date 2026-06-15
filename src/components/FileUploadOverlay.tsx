@@ -1,4 +1,4 @@
-import { CircleAlert, UploadCloud, X } from "lucide-react";
+import { AlertCircleIcon as CircleAlert, CloudArrowUpIcon as UploadCloud, CancelIcon as X } from "@proicons/react";
 
 type FileUploadOverlayProps = {
   active: boolean;

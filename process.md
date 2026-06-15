@@ -88,6 +88,7 @@
 ## 2026-06-13 Multi Node References
 
 - Agent Run 提交支持 `selectedNodeIds`，多选的可引用节点会一起生成到 Prompt 节点的引用边。
+- 画布选择工具支持 Shift 点击追加/取消多选；画布任意工具下都可用鼠标中键拖动平移，手型工具仍保留左键拖动平移。
 - 服务端继续从持久化项目快照重建 upstream context，并过滤 Run 节点；客户端提供的节点列表只作为待验证 id，不提供可信上下文。
 
 ## 2026-06-13 Internal MCP Tools

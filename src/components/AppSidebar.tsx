@@ -1,5 +1,12 @@
 import { motion } from "framer-motion";
-import { Folder, Home, LogOut, Sparkles, type LucideIcon } from "lucide-react";
+import {
+  FolderIcon as Folder,
+  HomeIcon as Home,
+  ArrowExportIcon as LogOut,
+  SparkleIcon as Sparkles,
+} from "@proicons/react";
+
+type IconComponent = typeof Home;
 
 import { CucumberLogo } from "@/components/icons/cucumber-logo";
 import { cn } from "@/lib/utils";
@@ -9,7 +16,7 @@ export type WorkspaceView = "home" | "projects" | "skills";
 type NavItem = {
   view: WorkspaceView;
   label: string;
-  icon: LucideIcon;
+  icon: IconComponent;
 };
 
 const NAV_ITEMS: NavItem[] = [

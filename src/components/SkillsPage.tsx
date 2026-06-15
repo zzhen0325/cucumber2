@@ -1,16 +1,16 @@
 import {
-  Code2,
-  Download,
-  FileArchive,
-  FileText,
-  Image as ImageIcon,
-  Loader2,
-  Plus,
-  Save,
-  Sparkles,
-  Trash2,
-  Upload,
-} from "lucide-react";
+  CodeIcon as Code2,
+  ArrowDownloadIcon as Download,
+  ArchiveIcon as FileArchive,
+  FileTextIcon as FileText,
+  PhotoIcon as ImageIcon,
+  SpinnerIcon as Loader2,
+  AddIcon as Plus,
+  SaveIcon as Save,
+  SparkleIcon as Sparkles,
+  DeleteIcon as Trash2,
+  ArrowUploadIcon as Upload,
+} from "@proicons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";

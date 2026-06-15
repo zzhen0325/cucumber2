@@ -42,12 +42,12 @@ import {
 import { cn } from "@/lib/utils";
 import type { ChatStatus, FileUIPart, SourceDocumentUIPart } from "ai";
 import {
-  ImageIcon,
-  Monitor,
-  PlusIcon,
+  PhotoIcon as ImageIcon,
+  CameraIcon as Monitor,
+  AddIcon as PlusIcon,
   SquareIcon,
-  XIcon,
-} from "lucide-react";
+  CancelIcon as XIcon,
+} from "@proicons/react";
 import { nanoid } from "nanoid";
 import type {
   ChangeEvent,

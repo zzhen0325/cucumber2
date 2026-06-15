@@ -9,13 +9,13 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { CanvasToolPart, CanvasToolState } from "@/types/canvas";
 import {
-  CheckCircleIcon,
+  CheckmarkCircleIcon as CheckCircleIcon,
   ChevronDownIcon,
   CircleIcon,
   ClockIcon,
   WrenchIcon,
-  XCircleIcon,
-} from "lucide-react";
+  CancelCircleIcon as XCircleIcon,
+} from "@proicons/react";
 import type { ComponentProps, ReactNode } from "react";
 import { isValidElement } from "react";
 import { CodeBlock } from "./code-block";

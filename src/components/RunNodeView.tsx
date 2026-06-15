@@ -1,14 +1,14 @@
 import type { Node as FlowNode, NodeProps, ResizeParams } from "@xyflow/react";
 import { useUpdateNodeInternals } from "@xyflow/react";
 import {
-  Check,
-  ChevronDown,
-  CircleAlert,
-  ListTree,
-  RotateCcw,
-  Sparkles,
-  Wrench,
-} from "lucide-react";
+  CheckmarkIcon as Check,
+  ChevronDownIcon as ChevronDown,
+  AlertCircleIcon as CircleAlert,
+  BulletListTreeIcon as ListTree,
+  ArrowCounterclockwiseIcon as RotateCcw,
+  SparkleIcon as Sparkles,
+  WrenchIcon as Wrench,
+} from "@proicons/react";
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 

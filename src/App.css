@@ -239,9 +239,39 @@
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
 }
 
+.app-state-logo {
+  display: block;
+  width: 80px;
+  height: 86px;
+  margin: 0 auto;
+  object-fit: contain;
+  transform-origin: center;
+  animation: app-state-logo-breathe 3.8s ease-in-out infinite;
+  filter: drop-shadow(0 5px 14px rgba(41, 191, 78, 0.18));
+}
+
 .app-state-mark.error {
   background: #e5484d;
   box-shadow: 0 4px 16px rgba(229, 72, 77, 0.16);
+}
+
+@keyframes app-state-logo-breathe {
+  0%,
+  100% {
+    opacity: 0.88;
+    transform: scale(0.96);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-state-logo {
+    animation: none;
+  }
 }
 
 .home-page {

@@ -1,5 +1,12 @@
 import { motion } from "framer-motion";
-import { Check, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
+import {
+  CheckmarkIcon as Check,
+  SpinnerIcon as Loader2,
+  PencilIcon as Pencil,
+  AddIcon as Plus,
+  DeleteIcon as Trash2,
+  CancelIcon as X,
+} from "@proicons/react";
 import { useState } from "react";
 import type { FormEvent } from "react";
 
