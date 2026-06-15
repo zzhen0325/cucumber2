@@ -71,8 +71,8 @@ export function isSpecialistEnabledForContext(
   context: CucumberAgentContext
 ) {
   const intent = context.normalizedInput?.intent;
-  if (intent && definition.enabledIntents.includes(intent)) {
-    return true;
+  if (intent) {
+    return definition.enabledIntents.includes(intent);
   }
   return definition.handoffPolicy(context);
 }

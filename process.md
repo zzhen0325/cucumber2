@@ -83,6 +83,7 @@
 
 - Agent Run 在 Manager 启动前通过 `server/agent/input-normalizer.ts` 生成结构化 `normalizedInput`，并写入 `input.normalized` Trace。
 - 图片生成请求会单独抽取 `contentPrompt`、`resultCount`、`aspectRatio` 或 `dimensions`；`generate_image` 接收这些结构化参数，prompt 文本推断仅作为旧调用兼容。
+- 分析、评估或给建议类视觉 brief（如图片、海报、banner、KV 需求）默认归一化为 `text.answer`；只有用户明确要求生成、创建或渲染图片时才进入 `image.generate`。
 
 ## 2026-06-13 Multi Node References
 

@@ -96,6 +96,7 @@ export function createInputNormalizerAgent() {
       "Do not execute the task. Extract only fields that are stated or strongly implied.",
       "Classify requests to write, draft, rewrite, or structure Markdown/documents as document.create or document.edit.",
       "Classify web fetching, research, code generation, data analysis, and workflow planning with their matching intent even if the capability is not fully implemented yet.",
+      "Classify requests to analyze, evaluate, critique, summarize, or give suggestions for a visual/image/banner/poster/KV brief as text.answer unless the user explicitly asks to generate/create/render the image now.",
       "Classify image creation as image.generate and image upscaling/enhancement of an existing image as image.upscale.",
       "For image.generate, separate visual content from production controls such as count, aspect ratio, pixel dimensions, and usage.",
       "contentPrompt must be a clean renderable image description. Remove batch-count phrases such as four images, 四张, 一组4张.",
@@ -123,7 +124,11 @@ export function finalizeNormalizedAgentInput(
   const maxOutputImages = options.maxOutputImages ?? readMaxOutputImages();
   const parsed = normalizedAgentInputSchema.parse(candidate);
   const raw = normalizeText(rawPrompt);
-  const intent = parsed.intent || inferIntent(raw);
+  const candidateIntent = parsed.intent || inferIntent(raw);
+  const intent =
+    candidateIntent === "image.generate" && isVisualBriefAnalysisRequest(raw)
+      ? "text.answer"
+      : candidateIntent;
 
   if (intent !== "image.generate" && intent !== "image.upscale") {
     return {
@@ -204,6 +209,9 @@ function buildNormalizerPrompt(input: NormalizeInput, maxOutputImages: number) {
 }
 
 function inferIntent(prompt: string): NormalizedIntent {
+  if (isVisualBriefAnalysisRequest(prompt)) {
+    return "text.answer";
+  }
   if (
     /(改写|润色|重写|编辑|更新).*(文档|markdown|md|PRD|方案|brief|草稿|说明|邮件|纪要|提纲|大纲|稿)/i.test(
       prompt
@@ -247,6 +255,32 @@ function inferIntent(prompt: string): NormalizedIntent {
     return "canvas.operation";
   }
   return "text.answer";
+}
+
+function isVisualBriefAnalysisRequest(prompt: string) {
+  const asksForAnalysis =
+    /(分析|评估|评价|判断|拆解|解读|梳理|诊断|优化建议|给(?:我)?(?:一些)?建议|review|analy[sz]e|critique|evaluate|assess)/i.test(
+      prompt
+    );
+  if (!asksForAnalysis) {
+    return false;
+  }
+
+  const aboutVisualBrief =
+    /(需求|主题|brief|方案|方向|画面|视觉|图片|图像|海报|banner|kv|主视觉|构图|背景|字体|元素|风格|色彩|氛围)/i.test(
+      prompt
+    );
+  if (!aboutVisualBrief) {
+    return false;
+  }
+
+  return !hasExplicitImageCreationRequest(prompt);
+}
+
+function hasExplicitImageCreationRequest(prompt: string) {
+  return /((生成|创建|画|出图|渲染|产出|输出|制作).{0,16}(图片|图像|图|海报|banner|kv|主视觉)|(图片|图像|海报|banner|kv|主视觉).{0,16}(生成|创建|渲染|产出|输出|制作)|\b(generate|create|render|make)\b.{0,48}\b(image|poster|banner|key visual)\b)/i.test(
+    prompt
+  );
 }
 
 function inferImageResultCount(prompt: string) {

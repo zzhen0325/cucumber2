@@ -38,6 +38,35 @@ describe("specialist agent registry", () => {
     ).toBe(false);
   });
 
+  it("does not let fallback policy override a normalized non-matching intent", () => {
+    expect(
+      isSpecialistEnabledForContext(
+        {
+          enabledIntents: ["image.generate", "image.upscale"],
+          handoffPolicy: () => true,
+        },
+        agentContext({
+          normalizedInput: {
+            rawPrompt: "帮我分析这个视觉需求",
+            intent: "text.answer",
+          },
+        })
+      )
+    ).toBe(false);
+  });
+
+  it("uses fallback policy only before normalized intent exists", () => {
+    expect(
+      isSpecialistEnabledForContext(
+        {
+          enabledIntents: ["image.generate", "image.upscale"],
+          handoffPolicy: () => true,
+        },
+        agentContext()
+      )
+    ).toBe(true);
+  });
+
   it("enables the web specialist from normalized web intent", () => {
     expect(
       isSpecialistEnabledForContext(

@@ -2440,7 +2440,7 @@ function EmptyState({ visible }: { visible: boolean }) {
   return (
     <div className="empty-state">
       <CircleDot size={18} />
-      <span>输入需求，生成第一个 Agent Run</span>
+      <span>输入需求，让 Agent 帮你实现它</span>
     </div>
   );
 }

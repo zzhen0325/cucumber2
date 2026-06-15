@@ -40,7 +40,7 @@ export function AppSidebar({ view, onViewChange, onLogout }: AppSidebarProps) {
   return (
     <>
       {/* Desktop sidebar rail */}
-      <aside className="hidden h-screen w-[60px] flex-col items-center gap-1 border-r border-border bg-card py-3 md:flex">
+      <aside className="hidden h-screen w-[60px] flex-col items-center gap-1 border-r border-border bg-[#f2f3f4] py-3 md:flex">
         <div className="mb-1 flex h-9 w-9 items-center justify-center">
           <motion.div
             whileHover={{ scale: 1.1, rotate: 8 }}
@@ -141,7 +141,7 @@ function NavButton({
       {active && (
         <motion.span
           layoutId="sidebar-active"
-          className="absolute inset-0 rounded-full border-l-2 border-primary bg-primary/10"
+          className="absolute inset-0 rounded-full  bg-primary/10"
           transition={{ type: "spring", stiffness: 350, damping: 30 }}
         />
       )}

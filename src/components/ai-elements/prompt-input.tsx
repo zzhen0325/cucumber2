@@ -42,7 +42,6 @@ import {
 import { cn } from "@/lib/utils";
 import type { ChatStatus, FileUIPart, SourceDocumentUIPart } from "ai";
 import {
-  CornerDownLeftIcon,
   ImageIcon,
   Monitor,
   PlusIcon,
@@ -1229,7 +1228,7 @@ export const PromptInputSubmit = ({
 }: PromptInputSubmitProps) => {
   const isGenerating = status === "submitted" || status === "streaming";
 
-  let Icon = <CornerDownLeftIcon className="size-4" />;
+  let Icon = <span aria-hidden="true" className="cucumber-send-icon" />;
 
   if (status === "submitted") {
     Icon = <Spinner />;
@@ -1253,7 +1252,7 @@ export const PromptInputSubmit = ({
 
   return (
     <InputGroupButton
-      aria-label={isGenerating ? "Stop" : "Submit"}
+      aria-label={isGenerating ? "停止" : "发送"}
       className={cn(className)}
       onClick={handleClick}
       size={size}

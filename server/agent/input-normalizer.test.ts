@@ -70,4 +70,55 @@ describe("input normalizer", () => {
       intent: "document.create",
     });
   });
+
+  it("keeps visual brief analysis as a text answer even when model proposes image generation", () => {
+    const raw =
+      "帮我分析这个需求主题是「最佳HOME产品」，整体需要体现出一种“高端感”“荣誉感”和“颁奖典礼感”，字体可以用金色显现出高级感。背景建议以红毯、聚光灯、大量摄影记者、奖杯等元素为主，同时希望能在画面中点缀一些HOME产品。";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        intent: "image.generate",
+        image: {
+          contentPrompt: raw,
+          resultCount: 4,
+          aspectRatio: "16:9",
+        },
+      },
+      raw,
+      { maxOutputImages: 4 }
+    );
+
+    expect(normalized).toEqual({
+      rawPrompt:
+        "帮我分析这个需求主题是「最佳 HOME 产品」，整体需要体现出一种“高端感”“荣誉感”和“颁奖典礼感”，字体可以用金色显现出高级感。背景建议以红毯、聚光灯、大量摄影记者、奖杯等元素为主，同时希望能在画面中点缀一些 HOME 产品。",
+      intent: "text.answer",
+    });
+  });
+
+  it("keeps explicit visual brief generation as image generation", () => {
+    const raw = "帮我分析这个HOME产品KV需求，然后生成一张16:9图片";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        intent: "image.generate",
+        image: {
+          contentPrompt: "最佳HOME产品颁奖典礼KV",
+          aspectRatio: "16:9",
+        },
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      rawPrompt: "帮我分析这个 HOME 产品 KV 需求，然后生成一张16:9 图片",
+      intent: "image.generate",
+      image: {
+        contentPrompt: "最佳 HOME 产品颁奖典礼 KV",
+        resultCount: 1,
+        aspectRatio: "16:9",
+      },
+    });
+  });
 });

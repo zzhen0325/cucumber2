@@ -1,4 +1,5 @@
 import { motion } from "framer-motion";
+import { ChevronRight, Plus } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 
 import { CucumberLogo } from "@/components/icons/cucumber-logo";
@@ -59,37 +60,37 @@ export function HomePage({
   const recentProjects = projects.slice(0, RECENT_PROJECTS_LIMIT);
 
   return (
-    <div className="flex h-full bg-white flex-col items-center overflow-auto px-5 py-10 sm:px-8 md:py-16 lg:py-20">
-      {/* Hero */}
+    <div className="home-page">
       <motion.div
         initial="hidden"
         animate="visible"
-        className="flex w-full max-w-2xl flex-col items-center text-center"
+        className="home-entry"
       >
         <motion.div
           variants={fadeUp}
           custom={0}
-          className="mb-5 flex items-center gap-2 md:mb-6"
+          className="home-topline"
         >
-          <CucumberLogo className="size-7 text-foreground md:size-8" />
-          <span className="text-lg font-semibold tracking-tight text-foreground md:text-xl">
-            cucumber
+          <span className="home-brand">
+            <CucumberLogo className="home-brand-logo" />
+            <span>cucumber</span>
           </span>
+          <span className="home-user">你好，{user.username}</span>
         </motion.div>
 
         <motion.h1
           variants={fadeUp}
           custom={1}
-          className="mb-2 text-3xl font-semibold tracking-[-0.02em] text-foreground sm:text-4xl md:mb-3"
+          className="home-title"
         >
-          你好，{user.username}
+          输入需求，让 Agent 帮你实现
         </motion.h1>
         <motion.p
           variants={fadeUp}
           custom={2}
-          className="mb-8 text-sm tracking-[-0.01em] text-muted-foreground sm:text-base md:mb-10"
+          className="home-subtitle"
         >
-          你的 AI 设计助手，从想法到作品
+          从一个想法开始，进入可编辑的无限画布。
         </motion.p>
 
         <motion.div variants={fadeUp} custom={3} className="w-full">
@@ -97,33 +98,21 @@ export function HomePage({
         </motion.div>
       </motion.div>
 
-      {/* Recent projects */}
-      <div className="mt-12 w-full max-w-5xl sm:mt-14 md:mt-16">
+      <div className="home-projects">
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5, duration: 0.4, ease: "easeOut" }}
-          className="mb-4 flex items-center justify-between md:mb-5"
+          className="home-section-heading"
         >
-          <h2 className="text-base font-medium tracking-tight text-foreground sm:text-lg">
-            最近项目
-          </h2>
+          <h2>最近项目</h2>
           <button
             type="button"
             onClick={onViewAll}
-            className="flex min-h-[44px] items-center gap-1 rounded-full px-3 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:text-base"
+            className="home-view-all"
           >
             查看全部
-            <span className="flex h-6 w-6 -rotate-90 items-center justify-center">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 13 8"
-                className="h-[6px] w-[10px]"
-              >
-                <path stroke="currentColor" d="m1 .657 5.657 5.657L12.314.657" />
-              </svg>
-            </span>
+            <ChevronRight size={14} />
           </button>
         </motion.div>
 
@@ -131,37 +120,21 @@ export function HomePage({
           variants={cardStagger}
           initial="hidden"
           animate="visible"
-          className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4"
+          className="home-project-grid"
         >
-          {/* New project card */}
           <motion.button
             variants={cardItem}
-            whileHover={{ y: -4 }}
+            whileHover={{ y: -2 }}
             whileTap={{ scale: 0.98 }}
             type="button"
             onClick={onCreate}
-            className="aspect-[286/208] cursor-pointer rounded-2xl border border-border bg-card p-2 transition-colors duration-300 hover:border-primary/40 hover:bg-muted/40 sm:p-3"
+            className="home-project-card home-project-create"
           >
-            <div className="flex h-full w-full flex-col items-center justify-center gap-2 rounded-xl bg-muted/60 sm:gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 14 14"
-                  className="h-5 w-5"
-                >
-                  <path
-                    fill="currentColor"
-                    fillRule="evenodd"
-                    d="M6.417 2.917a.583.583 0 0 1 1.166 0v3.5h3.5a.583.583 0 0 1 0 1.166h-3.5v3.5a.583.583 0 1 1-1.166 0v-3.5h-3.5a.583.583 0 1 1 0-1.166h3.5z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              </span>
-              <span className="text-xs font-medium tracking-tight text-foreground sm:text-sm">
-                新建项目
-              </span>
-            </div>
+            <span className="home-create-icon">
+              <Plus size={18} />
+            </span>
+            <span className="home-card-title">新建项目</span>
+            <span className="home-card-meta">打开一张空白画布</span>
           </motion.button>
 
           {!loading &&
@@ -169,31 +142,40 @@ export function HomePage({
               <motion.button
                 key={project.id}
                 variants={cardItem}
-                whileHover={{ y: -4 }}
+                whileHover={{ y: -2 }}
                 type="button"
                 onClick={() => onOpenProject(project.id)}
-                className="group relative aspect-[286/208] cursor-pointer rounded-2xl bg-card p-3.5 text-left transition-shadow duration-300 hover:shadow-card"
+                className="home-project-card"
               >
-                <div className="aspect-[395/227] w-full overflow-hidden rounded-xl">
-                  <div
-                    className="h-full w-full transition-transform duration-300 group-hover:scale-[1.03]"
-                    style={{ background: placeholderGradient(project.id) }}
-                  />
-                </div>
-                <div className="mt-2.5 flex items-center justify-between sm:mt-3">
-                  <div className="truncate text-xs font-medium tracking-tight text-foreground sm:text-sm">
-                    {project.title}
-                  </div>
-                </div>
-                <div className="mt-1 text-[10px] tracking-tight text-muted-foreground sm:text-[11px]">
+                <ProjectPreview tone={previewTone(project.id)} />
+                <span className="home-card-title">{project.title}</span>
+                <span className="home-card-meta">
                   {project.nodeCount} 节点 · {project.imageCount} 图片 · 更新于{" "}
                   {formatDate(project.updatedAt)}
-                </div>
+                </span>
               </motion.button>
             ))}
         </motion.div>
+
+        {!loading && !recentProjects.length && (
+          <div className="home-empty">
+            还没有项目，点击「新建项目」开始吧。
+          </div>
+        )}
       </div>
     </div>
+  );
+}
+
+function ProjectPreview({ tone }: { tone: number }) {
+  return (
+    <span className="home-project-preview" data-tone={tone}>
+      <span className="home-preview-edge home-preview-edge-a" />
+      <span className="home-preview-edge home-preview-edge-b" />
+      <span className="home-preview-node home-preview-node-a" />
+      <span className="home-preview-node home-preview-node-b" />
+      <span className="home-preview-node home-preview-node-c" />
+    </span>
   );
 }
 
@@ -231,55 +213,40 @@ function HomePrompt({ onSubmit }: { onSubmit: (prompt: string) => void }) {
       return;
     }
     textarea.style.height = "auto";
-    textarea.style.height = `${textarea.scrollHeight}px`;
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 96)}px`;
   }, []);
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card transition-colors focus-within:border-primary/50">
+    <div className="home-prompt">
       <textarea
         ref={textareaRef}
         value={value}
         onChange={(event) => setValue(event.target.value)}
         onKeyDown={handleKeyDown}
         onInput={handleInput}
-        placeholder="让 cucumber 帮你设计..."
-        rows={2}
-        className="w-full resize-none bg-transparent px-4 pt-4 pb-2 text-sm leading-relaxed tracking-tight text-foreground placeholder:text-muted-foreground focus:outline-none sm:px-5 sm:pt-5"
+        placeholder="输入需求，让 Agent 生成图片..."
+        rows={1}
+        className="home-prompt-input"
       />
 
-      <div className="flex items-center justify-end px-3 pb-3 sm:px-4 sm:pb-4">
-        <button
-          type="button"
-          onClick={handleSubmit}
-          disabled={!hasContent}
-          className={`flex h-9 w-9 items-center justify-center rounded-full transition-all ${
-            hasContent
-              ? "bg-primary text-primary-foreground hover:bg-primary/80 hover:accent-glow active:bg-primary/90"
-              : "cursor-not-allowed bg-muted text-muted-foreground"
-          }`}
-        >
-          <svg
-            className="h-[14px] w-[14px]"
-            viewBox="0 0 24 24"
-            fill="currentColor"
-            role="img"
-            aria-label="提交"
-          >
-            <path d="M11.293 3.293a1 1 0 0 1 1.414 0l8 8a1 1 0 0 1-1.414 1.414L13 6.414V20a1 1 0 1 1-2 0V6.414l-6.293 6.293a1 1 0 0 1-1.414-1.414z" />
-          </svg>
-        </button>
-      </div>
+      <button
+        type="button"
+        onClick={handleSubmit}
+        disabled={!hasContent}
+        className="home-prompt-submit"
+        aria-label="提交需求"
+        title="提交需求"
+      >
+        <span aria-hidden="true" className="cucumber-send-icon" />
+      </button>
     </div>
   );
 }
 
-/** Deterministic placeholder gradient derived from the project id. */
-function placeholderGradient(id: string): string {
+function previewTone(id: string): number {
   let hash = 0;
   for (let i = 0; i < id.length; i += 1) {
-    hash = (hash * 31 + id.charCodeAt(i)) % 360;
+    hash = (hash * 31 + id.charCodeAt(i)) % 4;
   }
-  const a = hash;
-  const b = (hash + 48) % 360;
-  return `linear-gradient(135deg, hsl(${a} 55% 88%), hsl(${b} 50% 80%))`;
+  return hash;
 }
