@@ -334,6 +334,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     AgentCanvasEdge
   > | null>(null);
   const creationDraftRef = useRef<CreationDraft | null>(null);
+  const clipboardRef = useRef<{
+    nodes: AgentCanvasNode[];
+    edges: AgentCanvasEdge[];
+  } | null>(null);
+  const pointerScreenRef = useRef<CanvasPoint | null>(null);
   const [creationPreview, setCreationPreview] = useState<CreationPreview | null>(null);
   const [imageProvider, setImageProviderState] = useState<ImageProviderSelection>(
     () => readStoredImageProvider()
@@ -1449,6 +1454,114 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     };
   }, [creationPreview, setNodes]);
 
+  const handleCopySelection = useCallback(() => {
+    if (isReplayModeRef.current) {
+      return;
+    }
+    const selected = nodesRef.current.filter((node) => node.selected);
+    if (!selected.length) {
+      return;
+    }
+    const selectedIds = new Set(selected.map((node) => node.id));
+    const internalEdges = edgesRef.current.filter(
+      (edge) => selectedIds.has(edge.source) && selectedIds.has(edge.target)
+    );
+    clipboardRef.current = {
+      nodes: structuredClone(selected),
+      edges: structuredClone(internalEdges),
+    };
+  }, []);
+
+  const handlePasteClipboard = useCallback(() => {
+    if (isReplayModeRef.current) {
+      return;
+    }
+    const clipboard = clipboardRef.current;
+    if (!clipboard || !clipboard.nodes.length) {
+      return;
+    }
+
+    const instance = flowInstance.current;
+    const sourceNodes = clipboard.nodes;
+    const minX = Math.min(...sourceNodes.map((node) => node.position.x));
+    const minY = Math.min(...sourceNodes.map((node) => node.position.y));
+
+    const pointer = pointerScreenRef.current;
+    const anchor =
+      pointer && instance
+        ? instance.screenToFlowPosition(pointer)
+        : { x: minX + 32, y: minY + 32 };
+
+    const idMap = new Map<string, string>();
+    const pastedNodes = sourceNodes.map((source) => {
+      const newId = createCanvasNodeId("paste");
+      idMap.set(source.id, newId);
+      const position = {
+        x: anchor.x + (source.position.x - minX),
+        y: anchor.y + (source.position.y - minY),
+      };
+      return createPastedNode(source, newId, position);
+    });
+
+    const pastedEdges = clipboard.edges.map((edge) => {
+      const source = idMap.get(edge.source) ?? edge.source;
+      const target = idMap.get(edge.target) ?? edge.target;
+      return {
+        ...structuredClone(edge),
+        id: `edge-${source}-${target}-${Math.random().toString(36).slice(2, 8)}`,
+        source,
+        target,
+        selected: false,
+      };
+    });
+
+    setNodes((current) => [...applySelectedNodeIds(current, []), ...pastedNodes]);
+    if (pastedEdges.length) {
+      setEdges((current) => [...current, ...pastedEdges]);
+    }
+  }, [setEdges, setNodes]);
+
+  useEffect(() => {
+    const handlePointerMove = (event: MouseEvent) => {
+      pointerScreenRef.current = { x: event.clientX, y: event.clientY };
+    };
+    window.addEventListener("mousemove", handlePointerMove);
+    return () => window.removeEventListener("mousemove", handlePointerMove);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key !== "c" && key !== "v") {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.isContentEditable ||
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA")
+      ) {
+        return;
+      }
+      const selection = window.getSelection();
+      if (key === "c" && selection && selection.toString().length > 0) {
+        return;
+      }
+      if (key === "c") {
+        handleCopySelection();
+      } else {
+        event.preventDefault();
+        handlePasteClipboard();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleCopySelection, handlePasteClipboard]);
+
   const handleUpscaleImageNode = useCallback(
     async (sourceNodeId: string) => {
       if (isReplayModeRef.current) {
@@ -2220,6 +2333,37 @@ function createCanvasNodeId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random()
     .toString(36)
     .slice(2, 8)}`;
+}
+
+function createPastedNode(
+  source: AgentCanvasNode,
+  newId: string,
+  position: CanvasPoint
+): AgentCanvasNode {
+  const data = structuredClone(source.data) as AgentCanvasNodeData;
+  // Pasted copies are standalone: drop ties to the originating run/source node
+  // and any in-flight upload state so they never block submission.
+  if ("runId" in data) {
+    delete (data as { runId?: string }).runId;
+  }
+  if ("sourceNodeId" in data) {
+    delete (data as { sourceNodeId?: string }).sourceNodeId;
+  }
+  if ("operation" in data) {
+    delete (data as { operation?: string }).operation;
+  }
+  if ("upload" in data) {
+    delete (data as { upload?: unknown }).upload;
+  }
+
+  return {
+    ...source,
+    id: newId,
+    position,
+    selected: true,
+    dragging: false,
+    data,
+  };
 }
 
 function getDefaultManualNodeDimensions(template: ManualNodeTemplate) {
