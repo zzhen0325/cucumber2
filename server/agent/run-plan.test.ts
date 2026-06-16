@@ -15,6 +15,30 @@ describe("buildRunPlan", () => {
     expect(plan).toEqual([]);
   });
 
+  it("skips prompt text edit plans even with an upstream prompt node", () => {
+    const plan = buildRunPlan(
+      input({
+        message: "取消标题",
+        normalizedInput: {
+          artifact: null,
+          intent: "text.answer",
+          negativeCapabilities: ["image-generation"],
+          operation: "edit",
+          rawPrompt: "取消标题",
+        },
+        upstreamContext: [
+          {
+            nodeId: "prompt-source",
+            prompt: "一个包含大型标题文字的红毯家居展示画面提示词",
+            type: "prompt",
+          },
+        ],
+      })
+    );
+
+    expect(plan).toEqual([]);
+  });
+
   it("creates task-specific document plans", () => {
     const plan = buildRunPlan(
       input({

@@ -116,6 +116,7 @@ import {
   getRunReferenceNodeId,
   getRunReferenceNodeIds,
 } from "@/lib/graph";
+import { getPromptNodeDimensions } from "@/lib/canvas-node-dimensions";
 import {
   diffCanvasPatch,
   hasCanvasPatchChanges,
@@ -131,6 +132,7 @@ import {
 import type {
   AgentCanvasEdge,
   AgentCanvasNode,
+  AgentCanvasNodeData,
   CodeNodeData,
   GeneratedImage,
   ImageResultNodeData,
@@ -178,10 +180,12 @@ const MarkdownNodeEditingContext = createContext<{
   onChange: () => undefined,
 });
 const ManualNodeEditingContext = createContext<{
+  onPromptTextChange: (nodeId: string, prompt: string) => void;
   readOnly: boolean;
   onShapeLabelChange: (nodeId: string, label: string) => void;
   onStickyTextChange: (nodeId: string, text: string) => void;
 }>({
+  onPromptTextChange: () => undefined,
   readOnly: true,
   onShapeLabelChange: () => undefined,
   onStickyTextChange: () => undefined,
@@ -217,9 +221,16 @@ type CanvasWorkspaceProps = {
   onBack: () => void;
 };
 
-type ManualCanvasTool = "stickyNote" | ShapeVariant;
+type ManualCanvasTool = "prompt" | "stickyNote" | ShapeVariant;
 type CanvasTool = "select" | "hand" | ManualCanvasTool;
 type ManualNodeTemplate =
+  | {
+      icon: IconComponent;
+      kind: "prompt";
+      label: string;
+      prompt: string;
+      tool: "prompt";
+    }
   | {
       icon: IconComponent;
       kind: "stickyNote";
@@ -268,6 +279,13 @@ function getSelectedNodeIds(nodes: AgentCanvasNode[]) {
 }
 
 const manualNodeTemplates: ManualNodeTemplate[] = [
+  {
+    icon: Type,
+    kind: "prompt",
+    label: "用户输入",
+    prompt: "",
+    tool: "prompt",
+  },
   {
     color: "yellow",
     icon: StickyNote,
@@ -1827,6 +1845,35 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     [isReplayMode, setNodes]
   );
 
+  const handlePromptTextChange = useCallback(
+    (nodeId: string, prompt: string) => {
+      if (isReplayMode) {
+        return;
+      }
+
+      setNodes((current) =>
+        current.map((node) => {
+          if (
+            node.id !== nodeId ||
+            node.data.kind !== "prompt" ||
+            !node.data.manual
+          ) {
+            return node;
+          }
+
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              prompt,
+            },
+          };
+        })
+      );
+    },
+    [isReplayMode, setNodes]
+  );
+
   return (
     <main
       className="app-shell"
@@ -1843,6 +1890,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       >
         <ManualNodeEditingContext.Provider
           value={{
+            onPromptTextChange: handlePromptTextChange,
             readOnly: isReplayMode,
             onShapeLabelChange: handleShapeLabelChange,
             onStickyTextChange: handleStickyTextChange,
@@ -2300,6 +2348,24 @@ function createManualCanvasNode(
   dimensions: { width: number; height: number }
 ): AgentCanvasNode {
   const createdAt = new Date().toISOString();
+  if (template.kind === "prompt") {
+    return {
+      height: dimensions.height,
+      id: createCanvasNodeId("prompt"),
+      position,
+      style: dimensions,
+      type: "promptNode",
+      width: dimensions.width,
+      data: {
+        kind: "prompt",
+        contextLabel: "Manual input",
+        createdAt,
+        manual: true,
+        prompt: template.prompt,
+      },
+    };
+  }
+
   if (template.kind === "stickyNote") {
     return {
       id: createCanvasNodeId("sticky"),
@@ -2367,6 +2433,10 @@ function createPastedNode(
 }
 
 function getDefaultManualNodeDimensions(template: ManualNodeTemplate) {
+  if (template.kind === "prompt") {
+    return getPromptNodeDimensions(template.prompt);
+  }
+
   if (template.kind === "stickyNote") {
     return { width: 220, height: 170 };
   }
@@ -2375,6 +2445,10 @@ function getDefaultManualNodeDimensions(template: ManualNodeTemplate) {
 }
 
 function getMinimumManualNodeDimensions(template: ManualNodeTemplate) {
+  if (template.kind === "prompt") {
+    return { width: 180, height: 64 };
+  }
+
   if (template.kind === "stickyNote") {
     return { width: 150, height: 110 };
   }
@@ -2591,7 +2665,11 @@ function ToolRail({
   const tools: ToolRailItem[] = [
     { icon: Search, label: "搜索节点", tool: "select" },
     { icon: Workflow, label: "知识花园", tool: "hand" },
-    { icon: StickyNote, label: "自由节点", tool: "stickyNote" },
+    ...manualNodeTemplates.map((template) => ({
+      icon: template.icon,
+      label: template.label,
+      tool: template.tool,
+    })),
   ];
 
   return (
@@ -2856,15 +2934,19 @@ function getClientError(error: unknown) {
 }
 
 function PromptNode({
+  id,
   data,
   selected,
   width,
   height,
 }: NodeProps<FlowNode<PromptNodeData, "promptNode">>) {
+  const { onPromptTextChange, readOnly } = useContext(ManualNodeEditingContext);
   const isExpanded = typeof height === "number" && height > 96;
+  const isManualPrompt = Boolean(data.manual);
   const nodeClassName = [
     "canvas-node",
     "prompt-card",
+    isManualPrompt ? "manual" : "",
     selected ? "selected" : "",
     isExpanded ? "expanded" : "",
   ]
@@ -2881,9 +2963,21 @@ function PromptNode({
       style={getResizableNodeStyle(width, height)}
     >
       <NodeContent className="prompt-content">
-        <p className="copyable-text nodrag nopan" title={data.contextLabel}>
-          {data.prompt}
-        </p>
+        {isManualPrompt ? (
+          <textarea
+            aria-label="用户输入"
+            className="prompt-node-input nodrag nopan nowheel"
+            onChange={(event) => onPromptTextChange(id, event.currentTarget.value)}
+            placeholder="输入需求..."
+            readOnly={readOnly}
+            spellCheck={false}
+            value={data.prompt}
+          />
+        ) : (
+          <p className="copyable-text nodrag nopan" title={data.contextLabel}>
+            {data.prompt}
+          </p>
+        )}
       </NodeContent>
     </Node>
   );

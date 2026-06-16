@@ -7,6 +7,7 @@
 - 输入归一化从只依赖 `intent` 升级为 artifact-first task protocol：`userGoal`、`operation`、`artifact.kind/subtype/format`、`domain`、`requiredCapabilities` 和 `negativeCapabilities`；`intent` 仅作为 Trace/UI 兼容摘要派生。
 - Specialist registry 不再按 intent 字符串开 handoff；runtime 根据 artifact protocol deterministic route。单一 image/document/web/research 任务直接启动对应 specialist，复合任务留给 Manager 编排并只开放匹配 handoff。
 - `视觉`、`H5`、营销或产品语义只作为 `domain`/上下文；流程图和时序图默认归一化为 `diagram` + `mermaid`，由 Document Agent 产出 Markdown artifact，不走图片链路。
+- 提示词/文本改写任务（例如选中长图片 prompt 后输入“取消标题”）归一化为 `artifact=null` + `operation=edit` + `negativeCapabilities=["image-generation"]`，由 Manager 直接输出修改后的文本；即使存在上游 prompt 节点也不创建任务 plan、不委派 Image Agent、不调用 `generate_image`。
 - Skill frontmatter 新增可选 `capabilities`、`produces`、`uses` 和 `notFor`；skill retrieval 先按 artifact/capability 打分，再看关键词、canvas kind 和 token overlap，并会按 `negativeCapabilities` 抑制不应出现的 image skill。
 - 新增 seed skill `sequence-diagram`，声明 `diagram/sequenceDiagram/mermaid` 能力，Document Agent 可激活后用 `create_text_artifact` 创建包含 Mermaid fenced block 的 Markdown artifact。
 - 工具入口新增 task artifact policy：图片 prompt/generation 工具只允许 image artifact task，`image-generation` negative capability 会阻止新图生成；`create_text_artifact` 只允许 markdown/document/diagram artifact task，Mermaid diagram 必须包含 mermaid fenced block。

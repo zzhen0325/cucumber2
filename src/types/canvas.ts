@@ -146,6 +146,7 @@ export type PromptNodeData = {
   prompt: string;
   contextLabel: string;
   createdAt: string;
+  manual?: boolean;
 };
 
 export type RunNodeData = {

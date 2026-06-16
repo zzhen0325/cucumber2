@@ -181,6 +181,7 @@ export function createInputNormalizerAgent() {
       "Classify 流程时序图 / sequence diagram as operation=create, artifact.kind=diagram, artifact.subtype=sequenceDiagram, artifact.format=mermaid, requiredCapabilities including sequence-diagram and markdown-artifact, negativeCapabilities including image-generation.",
       "Classify 流程图 / flowchart as diagram/flowchart/mermaid unless the user asks for a poster or rendered image.",
       "Classify PRD, brief,方案,说明,邮件草稿,纪要 as document or markdown artifacts.",
+      "Classify requests to edit, rewrite, polish, expand, shorten, remove parts from, or otherwise revise a prompt/text/description as operation=edit with artifact=null and negativeCapabilities including image-generation. Terse commands such as 取消标题, 去掉标题, 删除文案, or remove the title should revise the selected/upstream prompt text and must not generate images unless the user explicitly asks to generate/create/render an image now.",
       "Classify requests to analyze, evaluate, critique, summarize, or give suggestions for a visual/image/banner/poster/KV brief as operation=analyze or answer with no image artifact unless the user explicitly asks to generate/create/render the image now; include negativeCapabilities image-generation.",
       "Classify image creation as artifact.kind=image with png format, and image upscaling/enhancement of an existing image as operation=transform, artifact.kind=image.",
       "For image artifacts, separate visual content from production controls such as count, aspect ratio, pixel dimensions, and usage.",
@@ -210,20 +211,24 @@ export function finalizeNormalizedAgentInput(
   const parsed = normalizedAgentInputSchema.parse(candidate);
   const raw = normalizeText(rawPrompt);
   const ruleBased = inferTaskProtocol(raw);
-  const artifact = normalizeArtifact(raw, parsed.artifact ?? ruleBased.artifact);
+  const promptTextEdit = isPromptTextEditRequest(raw);
+  const artifact = promptTextEdit
+    ? null
+    : normalizeArtifact(raw, parsed.artifact ?? ruleBased.artifact);
   const operation = normalizeOperation(
     raw,
-    parsed.operation ?? ruleBased.operation ?? "answer",
+    promptTextEdit ? "edit" : parsed.operation ?? ruleBased.operation ?? "answer",
     artifact
   );
   const domain = parsed.domain ?? ruleBased.domain;
   const requiredCapabilities = uniqueCapabilityList([
     ...(ruleBased.requiredCapabilities ?? []),
     ...(parsed.requiredCapabilities ?? []),
-  ]);
+  ]).filter((capability) => !promptTextEdit || !isImageTaskCapability(capability));
   const negativeCapabilities = uniqueCapabilityList([
     ...(ruleBased.negativeCapabilities ?? []),
     ...(parsed.negativeCapabilities ?? []),
+    ...(promptTextEdit ? ["image-generation"] : []),
   ]);
   const intent = inferIntentFromProtocol({
     artifact,
@@ -447,6 +452,16 @@ function inferTaskProtocol(prompt: string): Pick<
 > {
   const domain = inferDomain(prompt);
 
+  if (isPromptTextEditRequest(prompt)) {
+    return {
+      artifact: null,
+      domain,
+      negativeCapabilities: ["image-generation"],
+      operation: "edit",
+      requiredCapabilities: [],
+    };
+  }
+
   if (isVisualBriefAnalysisRequest(prompt)) {
     return {
       artifact: null,
@@ -636,6 +651,9 @@ function normalizeOperation(
   operation: TaskOperation,
   artifact: NormalizedAgentInput["artifact"] | null | undefined
 ): TaskOperation {
+  if (isPromptTextEditRequest(rawPrompt)) {
+    return "edit";
+  }
   if (isVisualBriefAnalysisRequest(rawPrompt)) {
     return "analyze";
   }
@@ -669,6 +687,35 @@ function inferDomain(prompt: string): TaskDomain {
 
 function inferEditOperation(prompt: string) {
   return /(改写|润色|重写|编辑|更新|修改|rewrite|edit|update|revise)/i.test(prompt);
+}
+
+function isImageTaskCapability(capability: string) {
+  return /image|图片|图像|upscale|视觉风格|prompt[-_ ]?expansion/i.test(capability);
+}
+
+export function isPromptTextEditRequest(prompt: string) {
+  if (
+    hasExplicitImageCreationRequest(prompt) ||
+    /(放大|高清|超清|提升清晰|upscale|enhance)/i.test(prompt)
+  ) {
+    return false;
+  }
+
+  const editVerb =
+    /(修改|改写|润色|重写|编辑|更新|调整|优化|扩写|精简|缩短|删除|去掉|移除|取消|不要|替换|保留|rewrite|revise|edit|polish|optimi[sz]e|expand|shorten|remove|delete|drop|without)/i;
+  const promptTarget =
+    /(提示词|prompt|指令|文本|文案|描述|这段|上面这段|当前内容|原文|description|copy|text)/i;
+
+  if (
+    new RegExp(`${editVerb.source}.{0,32}${promptTarget.source}`, "i").test(prompt) ||
+    new RegExp(`${promptTarget.source}.{0,32}${editVerb.source}`, "i").test(prompt)
+  ) {
+    return true;
+  }
+
+  return /^(?:把|请|帮我|麻烦)?\s*(?:取消|去掉|删除|移除|不要|隐藏|删掉|remove|delete|drop)\s*(?:所有|全部|主|大)?\s*(?:标题|副标题|字幕|文案|文字|title|headline|caption)s?\s*$/i.test(
+    prompt
+  );
 }
 
 function inferImageSubtype(prompt: string): TaskArtifactSubtype | undefined {

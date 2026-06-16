@@ -1,5 +1,8 @@
 import type { AgentRunInput } from "./context.ts";
-import type { NormalizedIntent } from "./input-normalizer.ts";
+import {
+  isPromptTextEditRequest,
+  type NormalizedIntent,
+} from "./input-normalizer.ts";
 
 export type RunPlanPhase = "prepare" | "route" | "execute" | "materialize";
 
@@ -120,6 +123,10 @@ function shouldCreateRunPlan(input: AgentRunInput) {
     return true;
   }
 
+  if (isPromptTextEditRun(input)) {
+    return false;
+  }
+
   const intent = input.normalizedInput?.intent ?? "text.answer";
   if (ALWAYS_PLAN_INTENTS.has(intent)) {
     return true;
@@ -129,6 +136,14 @@ function shouldCreateRunPlan(input: AgentRunInput) {
   }
 
   return hasComplexitySignal(input);
+}
+
+function isPromptTextEditRun(input: AgentRunInput) {
+  return (
+    input.normalizedInput?.operation === "edit" &&
+    !input.normalizedInput.artifact &&
+    isPromptTextEditRequest(input.message)
+  );
 }
 
 function hasComplexitySignal(input: AgentRunInput) {

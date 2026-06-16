@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   finalizeNormalizedAgentInput,
   normalizeImageRequestSlots,
+  selectAgentRoute,
 } from "./input-normalizer.ts";
 
 describe("input normalizer", () => {
@@ -156,6 +157,59 @@ describe("input normalizer", () => {
       intent: "text.answer",
     });
     expect(normalized.image).toBeUndefined();
+  });
+
+  it("keeps prompt text edits out of image generation even when the model proposes image generation", () => {
+    const raw = "取消标题";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "create",
+        artifact: { kind: "image", subtype: "poster", format: "png" },
+        requiredCapabilities: ["image-generation", "tool.image.generate"],
+        intent: "image.generate",
+        image: {
+          contentPrompt:
+            "这是一个3D渲染风格的红毯家居生活用品展示场景，画面前景有大型3D标题文字。",
+          resultCount: 4,
+        },
+      },
+      raw,
+      { maxOutputImages: 4 }
+    );
+
+    expect(normalized).toMatchObject({
+      rawPrompt: "取消标题",
+      operation: "edit",
+      artifact: null,
+      negativeCapabilities: ["image-generation"],
+      requiredCapabilities: [],
+      intent: "text.answer",
+    });
+    expect(normalized.image).toBeUndefined();
+    expect(selectAgentRoute(normalized)).toBe("manager");
+  });
+
+  it("keeps explicit generation requests on the image route after prompt edits", () => {
+    const raw = "把这个提示词改成不要标题，然后生成一张图";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "create",
+        artifact: { kind: "image", format: "png" },
+        image: { contentPrompt: "无标题红毯家居展示场景" },
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "create",
+      artifact: { kind: "image", format: "png" },
+      intent: "image.generate",
+    });
+    expect(selectAgentRoute(normalized)).toBe("image");
   });
 
   it("routes sequence diagrams to mermaid document artifacts", () => {

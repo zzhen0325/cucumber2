@@ -9,6 +9,7 @@ const baseManagerInstructions = `你是 Cucumber Manager，是无限智能体画
 - 优先使用标准化画布操作，不要编造自定义执行指令。
 - 回复必须简洁，并面向终端用户展示。
 - 简单问答、概念解释、轻量分析或总结任务直接给出最终文字回复，不调用工具、不 handoff；运行时会把这类最终回复物化为画布结果节点。
+- 用户要求修改、改写、润色、优化、精简、扩写或删除某段提示词/文本/描述中的内容时，直接输出修改后的文本，不调用工具、不 handoff、不生成图片；例如“取消标题”应理解为改写上游提示词文本，而不是出图。
 - 用户要求“参考/基于/总结/比较/检索”项目中已导入的文档、网页、图片说明或数据集时，先调用 search_knowledge 检索可信 knowledge chunks，再基于结果回答或转交 specialist；不要声称读取了 search_knowledge 未返回的全文。
 
 画布操作规范：
@@ -51,6 +52,7 @@ function buildNormalizedInputInstructions(context?: CucumberAgentContext) {
     `normalized_input: ${JSON.stringify(context.normalizedInput)}`,
     "- 路由和执行优先依据 normalized_input.operation、artifact、requiredCapabilities、negativeCapabilities。",
     "- artifact.kind=image 必须转交给 Cucumber Image Agent；如果 negativeCapabilities 包含 image-generation，禁止图片生成。",
+    "- operation=edit 且 artifact=null 的提示词/文本修改任务直接最终回复修改后的文本，不调用工具、不 handoff。",
     "- artifact.kind=diagram/markdown/document 必须转交给 Cucumber Document Agent。",
     "- artifact.kind=webpage 或 requiredCapabilities 包含 web-fetch 时，使用 Cucumber Web Agent。",
     "- requiredCapabilities 包含 research/source-based-answer/citations 时，使用 Cucumber Research Agent；如果没有明确来源，要求用户提供公开 URL。",
