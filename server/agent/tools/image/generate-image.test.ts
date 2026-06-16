@@ -5,8 +5,10 @@ import type { CucumberAgentContext } from "../../context.ts";
 import type { UpstreamContextItem } from "../../../../src/types/canvas.ts";
 
 const generateSeedreamImage = vi.fn();
+const generateCozeImage = vi.fn();
 const upscaleSeedreamImage = vi.fn();
 const isSeedreamConfigured = vi.fn();
+const isCozeImageConfigured = vi.fn();
 const resolveStorageBackedImageContext = vi.fn(async (items: UpstreamContextItem[]) =>
   items.map((item) =>
     item.artifact?.contentRef?.startsWith("supabase://")
@@ -52,6 +54,16 @@ const testSeedreamConfig = {
   staggerMs: 0,
   maxRetries: 4,
 };
+const testCozeConfig = {
+  url: "https://coze.example/run",
+  token: "test-token",
+  maxInputImages: 8,
+  maxOutputImages: 4,
+  referenceImagesKey: "urls",
+  size: {},
+  watermark: {},
+  model: {},
+};
 
 vi.mock("../../../../seedream.ts", async () => {
   const actual = await vi.importActual<typeof import("../../../../seedream.ts")>(
@@ -67,6 +79,18 @@ vi.mock("../../../../seedream.ts", async () => {
       reqKey: "jimeng_i2i_seed3_tilesr_cvtob",
     }),
     upscaleSeedreamImage: (...args: unknown[]) => upscaleSeedreamImage(...args),
+  };
+});
+
+vi.mock("../../../../coze.ts", async () => {
+  const actual = await vi.importActual<typeof import("../../../../coze.ts")>(
+    "../../../../coze.ts"
+  );
+  return {
+    ...actual,
+    generateCozeImage: (...args: unknown[]) => generateCozeImage(...args),
+    isCozeImageConfigured: () => isCozeImageConfigured(),
+    readCozeImageConfigFromEnv: () => testCozeConfig,
   };
 });
 
@@ -115,10 +139,19 @@ async function invokeTool(context: CucumberAgentContext, input: unknown) {
 }
 
 describe("generate_image tool", () => {
+  const originalImageProvider = process.env.IMAGE_PROVIDER;
+
   beforeEach(() => {
+    if (originalImageProvider === undefined) {
+      delete process.env.IMAGE_PROVIDER;
+    } else {
+      process.env.IMAGE_PROVIDER = originalImageProvider;
+    }
     generateSeedreamImage.mockReset();
+    generateCozeImage.mockReset();
     upscaleSeedreamImage.mockReset();
     isSeedreamConfigured.mockReset();
+    isCozeImageConfigured.mockReset();
     resolveStorageBackedImageContext.mockClear();
     storeGeneratedImageFromUrl.mockClear();
   });
@@ -353,6 +386,68 @@ describe("generate_image tool", () => {
       "https://signed.example/ref.png",
     ]);
     expect(JSON.stringify(context.pendingEvents)).not.toContain("signed.example");
+  });
+
+  it("can generate through Coze with server-resolved reference images", async () => {
+    isCozeImageConfigured.mockReturnValue(true);
+    generateCozeImage.mockImplementation(
+      async (input: { onImage?: (image: unknown) => void }) => {
+        const image = {
+          id: "coze-1",
+          metadata: { provider: "coze" },
+          title: "Coze image",
+          url: "https://cdn.example/coze.png",
+        };
+        await input.onImage?.(image);
+        return { images: [image] };
+      }
+    );
+    const context = buildContext({
+      imageProvider: "coze",
+      upstreamContext: [
+        {
+          artifact: {
+            contentRef: "supabase://agent-assets/projects/project-1/uploads/ref.png",
+            id: "ref",
+            type: "image",
+            uri: "/api/projects/project-1/artifacts/ref/content",
+          },
+          contentRef: "supabase://agent-assets/projects/project-1/uploads/ref.png",
+          imageUrl: "/api/projects/project-1/artifacts/ref/content",
+          nodeId: "image-1",
+          type: "image",
+        },
+      ],
+    });
+
+    const result = await invokeTool(context, {
+      prompt: "参考图生成",
+      width: 1536,
+      height: 1024,
+    });
+
+    expect(result.generated).toBe(1);
+    expect(JSON.stringify(result)).not.toContain("cdn.example");
+    expect(generateCozeImage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: "参考图生成",
+        resultCount: 1,
+        width: 1536,
+        height: 1024,
+        imageUrls: ["https://signed.example/ref.png"],
+      }),
+      testCozeConfig
+    );
+    expect(storeGeneratedImageFromUrl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        artifactId: "coze-1",
+        metadata: expect.objectContaining({
+          provider: "coze",
+          prompt: "参考图生成",
+        }),
+        sourceUrl: "https://cdn.example/coze.png",
+      })
+    );
   });
 
   it("upscales the selected image and emits artifact_created events without leaking urls", async () => {

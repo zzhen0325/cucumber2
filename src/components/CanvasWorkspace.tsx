@@ -88,6 +88,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   getCanvasLayoutSignature,
   layoutAgentCanvasGraph,
 } from "@/lib/canvas-layout";
@@ -191,6 +198,7 @@ type AgentRunRequestBody = {
   projectId: string;
   runNodeId: string;
   canvasContext: {
+    imageProvider?: ImageProviderSelection;
     prompt: string;
     promptNodeId: string;
     retryFrom?: {
@@ -201,6 +209,8 @@ type AgentRunRequestBody = {
     selectedNodeIds: string[];
   };
 };
+
+type ImageProviderSelection = "seedream" | "coze";
 
 type CanvasWorkspaceProps = {
   projectId: string;
@@ -251,6 +261,7 @@ const MIDDLE_MOUSE_BUTTON = 1;
 const PAN_ON_DRAG_BUTTONS = [MIDDLE_MOUSE_BUTTON];
 const HAND_TOOL_PAN_ON_DRAG_BUTTONS = [LEFT_MOUSE_BUTTON, MIDDLE_MOUSE_BUTTON];
 const SHIFT_MULTI_SELECTION_KEYS = ["Shift", "ShiftLeft", "ShiftRight"];
+const IMAGE_PROVIDER_STORAGE_KEY = "cucumber:image-provider";
 
 function getSelectedNodeIds(nodes: AgentCanvasNode[]) {
   return nodes.filter((node) => node.selected).map((node) => node.id);
@@ -324,6 +335,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   > | null>(null);
   const creationDraftRef = useRef<CreationDraft | null>(null);
   const [creationPreview, setCreationPreview] = useState<CreationPreview | null>(null);
+  const [imageProvider, setImageProviderState] = useState<ImageProviderSelection>(
+    () => readStoredImageProvider()
+  );
   const isReplayMode = Boolean(replaySnapshot);
   const isHandTool = canvasTool === "hand";
   const activeManualTemplate = getManualNodeTemplateForTool(canvasTool);
@@ -1053,6 +1067,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     []
   );
 
+  const setImageProvider = useCallback((provider: ImageProviderSelection) => {
+    setImageProviderState(provider);
+    window.localStorage.setItem(IMAGE_PROVIDER_STORAGE_KEY, provider);
+  }, []);
+
   const startAgentRun = useCallback(
     async ({
       clearComposer = false,
@@ -1099,6 +1118,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         projectId,
         runNodeId: draft.runNode.id,
         canvasContext: {
+          imageProvider,
           prompt: value,
           promptNodeId: draft.promptNode.id,
           retryFrom,
@@ -1136,6 +1156,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     },
     [
       hasLocalUploadNodes,
+      imageProvider,
       isBusy,
       markRunError,
       saveProjectSnapshot,
@@ -1802,12 +1823,14 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         busy={isBusy}
         canSubmit={canSubmit}
         contextCount={contextCount}
+        imageProvider={imageProvider}
         prompt={prompt}
         referenceContextCount={referenceContextCount}
         referenceNode={referenceNode}
         referenceNodeCount={referenceNodeIds.length}
         replayActive={isReplayMode}
         selectionCount={selectedNodeIds.length}
+        setImageProvider={setImageProvider}
         setPrompt={setPrompt}
         stop={handleStop}
         onSubmit={handleSubmit}
@@ -2499,12 +2522,14 @@ function Composer({
   busy,
   canSubmit,
   contextCount,
+  imageProvider,
   prompt,
   referenceContextCount,
   referenceNode,
   referenceNodeCount,
   replayActive,
   selectionCount,
+  setImageProvider,
   setPrompt,
   stop,
   onSubmit,
@@ -2512,12 +2537,14 @@ function Composer({
   busy: boolean;
   canSubmit: boolean;
   contextCount: number;
+  imageProvider: ImageProviderSelection;
   prompt: string;
   referenceContextCount: number;
   referenceNode?: AgentCanvasNode;
   referenceNodeCount: number;
   replayActive: boolean;
   selectionCount: number;
+  setImageProvider: (value: ImageProviderSelection) => void;
   setPrompt: (value: string) => void;
   stop: () => void;
   onSubmit: (
@@ -2569,15 +2596,22 @@ function Composer({
           />
         </PromptInputBody>
         <PromptInputFooter className="composer-footer">
-          <ComposerFooterStatus
-            label={
-              hasReference
-                ? hasMultipleReferences
-                  ? `继续基于 ${referenceNodeCount} 个引用节点生成分支`
-                  : "继续基于引用节点生成分支"
-                : footerContextLabel
-            }
-          />
+          <div className="composer-footer-tools">
+            <ComposerFooterStatus
+              label={
+                hasReference
+                  ? hasMultipleReferences
+                    ? `继续基于 ${referenceNodeCount} 个引用节点生成分支`
+                    : "继续基于引用节点生成分支"
+                  : footerContextLabel
+              }
+            />
+            <ImageProviderSelect
+              disabled={busy || replayActive}
+              value={imageProvider}
+              onChange={setImageProvider}
+            />
+          </div>
           <PromptInputSubmit
             disabled={busy ? false : !prompt.trim() || !canSubmit}
             onStop={stop}
@@ -2601,6 +2635,38 @@ function ComposerFooterStatus({
   );
 }
 
+function ImageProviderSelect({
+  disabled,
+  value,
+  onChange,
+}: {
+  disabled: boolean;
+  value: ImageProviderSelection;
+  onChange: (value: ImageProviderSelection) => void;
+}) {
+  return (
+    <Select
+      disabled={disabled}
+      value={value}
+      onValueChange={(nextValue) =>
+        onChange(nextValue === "coze" ? "coze" : "seedream")
+      }
+    >
+      <SelectTrigger
+        aria-label="选择图像 provider"
+        className="composer-provider-select"
+        title="选择图像 provider"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent align="end" className="composer-provider-menu">
+        <SelectItem value="seedream">Seedream</SelectItem>
+        <SelectItem value="coze">Coze</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
+
 function getReferenceNodeLabel(node?: AgentCanvasNode) {
   if (!node) {
     return "";
@@ -2619,6 +2685,15 @@ function getReferenceNodeLabel(node?: AgentCanvasNode) {
   }
 
   return "";
+}
+
+function readStoredImageProvider(): ImageProviderSelection {
+  if (typeof window === "undefined") {
+    return "seedream";
+  }
+  return window.localStorage.getItem(IMAGE_PROVIDER_STORAGE_KEY) === "coze"
+    ? "coze"
+    : "seedream";
 }
 
 function getStorageStatusLabel(status: StorageStatus) {

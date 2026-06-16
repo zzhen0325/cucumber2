@@ -126,6 +126,60 @@ describe("agent event graph projection", () => {
     });
   });
 
+  it("does not synthesize a fixed run plan when no plan event exists", () => {
+    const projection = projectRunTraceToCanvas({
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", { prompt: "你好", promptNodeId: "prompt-1" }),
+        event("input.normalized", "input", {
+          normalizedInput: { intent: "text.answer", rawPrompt: "你好" },
+        }),
+      ],
+    });
+    const run = projection.nodes.find((node) => node.id === "run-1");
+
+    expect(run?.data).toMatchObject({
+      kind: "run",
+      plan: [],
+    });
+  });
+
+  it("projects task-specific plan item phases", () => {
+    const projection = projectRunTraceToCanvas({
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", { prompt: "写文档", promptNodeId: "prompt-1" }),
+        event("input.normalized", "input", {
+          normalizedInput: { intent: "document.create", rawPrompt: "写文档" },
+        }),
+        event("run.plan.created", "plan", {
+          items: [
+            { id: "document-brief", label: "梳理文档目标和上游素材", phase: "prepare" },
+            { id: "document-agent", label: "委派 Document Agent", phase: "route" },
+            { id: "document-create", label: "创建文档 artifact", phase: "execute" },
+            { id: "document-materialize", label: "投影为画布文档节点", phase: "materialize" },
+          ],
+        }),
+        event("tool.input", "create_text_artifact", {
+          toolCallId: "call-1",
+          toolName: "create_text_artifact",
+          input: { title: "文档" },
+        }),
+      ],
+    });
+    const run = projection.nodes.find((node) => node.id === "run-1");
+
+    expect(run?.data).toMatchObject({
+      kind: "run",
+      plan: [
+        { id: "document-brief", status: "success" },
+        { id: "document-agent", status: "success" },
+        { id: "document-create", status: "running" },
+        { id: "document-materialize", status: "queued" },
+      ],
+    });
+  });
+
   it("keeps prompt expansion and image generation as separate visible tools", () => {
     const projection = projectRunTraceToCanvas({
       projectId: "project-1",

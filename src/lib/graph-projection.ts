@@ -594,7 +594,9 @@ function buildToolParts(
         input: previous?.input,
         output: previous?.output,
         errorText: summarizeRunError(rawErrorText, {
-          errorSource: /generate_image|upscale_image/.test(toolName)
+          errorSource: /coze/i.test(rawErrorText ?? "")
+            ? "coze"
+            : /generate_image|upscale_image/.test(toolName)
             ? "seedream"
             : "tool",
           toolName,
@@ -695,20 +697,16 @@ function buildRunPlanItems(
   runStatus: AgentRunStatus
 ): RunPlanItem[] {
   const planEvent = events.findLast((event) => event.type === "run.plan.created");
+  if (!planEvent) {
+    return [];
+  }
   const rawItems = readArray(planEvent?.payload.items).flatMap((item) => {
     const record = readRecord(item);
     const id = readString(record?.id);
     const label = readString(record?.label);
-    return id && label ? [{ id, label }] : [];
+    const phase = readRunPlanPhase(record?.phase);
+    return id && label ? [{ id, label, ...(phase ? { phase } : {}) }] : [];
   });
-  const items = rawItems.length
-    ? rawItems
-    : [
-        { id: "prepare", label: "整理需求和上下文" },
-        { id: "route", label: "选择合适的 Agent / 工具" },
-        { id: "execute", label: "执行任务" },
-        { id: "materialize", label: "写入画布结果" },
-      ];
   const failure = events.findLast(
     (event) =>
       event.type === "tool.error" ||
@@ -741,9 +739,9 @@ function buildRunPlanItems(
       event.type === "run.completed"
   );
 
-  return items.map((item) => ({
+  return rawItems.map((item) => ({
     ...item,
-    status: getPlanItemStatus(item.id, {
+    status: getPlanItemStatus(item.phase ?? item.id, {
       failure,
       hasExecution,
       hasInput,
@@ -801,6 +799,19 @@ function getPlanItemStatus(
   }
 
   return "queued";
+}
+
+function readRunPlanPhase(value: unknown): RunPlanItem["phase"] | undefined {
+  const phase = readString(value);
+  if (
+    phase === "prepare" ||
+    phase === "route" ||
+    phase === "execute" ||
+    phase === "materialize"
+  ) {
+    return phase;
+  }
+  return undefined;
 }
 
 function getCurrentRunStep(
@@ -1506,6 +1517,9 @@ function summarizeRunError(
   }
   if (errorSource === "seedream" || /seedream/i.test(detail ?? "")) {
     return "Seedream 调用失败。";
+  }
+  if (errorSource === "coze" || /coze/i.test(detail ?? "")) {
+    return "Coze 调用失败。";
   }
   if (errorSource === "tool" || toolName) {
     return toolName ? `${humanizeRuntimeLabel(toolName) ?? "工具"} 调用失败。` : "工具调用失败。";

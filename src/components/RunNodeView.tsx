@@ -339,7 +339,7 @@ export function ToolPartView({
 function RunPlanView({ plan }: { plan: NonNullable<RunNodeData["plan"]> }) {
   return (
     <div className="run-plan-list" aria-label="任务计划">
-      {plan.slice(0, 4).map((item) => (
+      {plan.map((item) => (
         <div className={`run-plan-item ${item.status}`} key={item.id}>
           <span className={`run-plan-dot ${item.status}`}>
             <RunStatusIcon status={item.status} />

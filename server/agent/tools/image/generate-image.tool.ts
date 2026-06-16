@@ -5,6 +5,10 @@ import {
   generateSeedreamImage,
   readSeedreamConfigFromEnv,
 } from "../../../../seedream.ts";
+import {
+  generateCozeImage,
+  readCozeImageConfigFromEnv,
+} from "../../../../coze.ts";
 import type { ArtifactRef } from "../../../../src/types/canvas.ts";
 import {
   resolveStorageBackedImageContext,
@@ -15,6 +19,8 @@ import type { CucumberAgentContext } from "../../context.ts";
 import {
   buildGenerateImageSeedreamInput,
   normalizeSeedreamProviderPrompt,
+  resolveImageResultCount,
+  toSeedreamUpstreamContext,
 } from "./generate-image.request.ts";
 
 const generateImageInputSchema = z.object({
@@ -64,7 +70,7 @@ export const generateImageJsonSchema = {
 } as const;
 
 export const generateImageToolDescription =
-  "Generate image artifacts from a text prompt using the Seedream image service. Generated images are rendered onto the canvas automatically as image result nodes. This tool does not write the database directly; it produces in-memory artifacts that the Cucumber runtime emits. Reference images are forwarded to the service directly and never exposed to you, so do not try to read or fabricate image URLs.";
+  "Generate image artifacts from a text prompt using the configured image service. Generated images are rendered onto the canvas automatically as image result nodes. This tool does not write the database directly; it produces in-memory artifacts that the Cucumber runtime emits. Reference images are forwarded to the service directly and never exposed to you, so do not try to read or fabricate image URLs.";
 
 export const generateImageTool = tool({
   name: "generate_image",
@@ -103,7 +109,10 @@ export async function executeGenerateImageTool({
   }
 
   // No silent fallback: surface a configuration error instead of faking output.
-  assertImageProviderConfigured("generation");
+  const imageProvider = assertImageProviderConfigured(
+    "generation",
+    context.imageProvider
+  );
 
   const prompt = normalizeSeedreamProviderPrompt(
     parsed.data.prompt?.trim() || context.prompt?.trim() || ""
@@ -150,26 +159,49 @@ export async function executeGenerateImageTool({
     }
   };
 
-  const config = readSeedreamConfigFromEnv();
   const upstreamContext = await resolveStorageBackedImageContext(
     context.upstreamContext
   );
-  await generateSeedreamImage(
-    buildGenerateImageSeedreamInput(
+
+  if (imageProvider.provider === "coze") {
+    const config = readCozeImageConfigFromEnv();
+    await generateCozeImage(
       {
         prompt,
-        requestedResultCount: parsed.data.resultCount,
-        aspectRatio: parsed.data.aspectRatio,
+        resultCount: resolveImageResultCount(
+          parsed.data.resultCount,
+          [prompt],
+          config.maxOutputImages
+        ),
         width: parsed.data.width,
         height: parsed.data.height,
-        upstreamContext,
+        imageUrls: toSeedreamUpstreamContext(upstreamContext)
+          .flatMap((item) => item.type === "image" && item.imageUrl ? [item.imageUrl] : [])
+          .slice(0, config.maxInputImages),
         onImage: emitArtifact,
         signal: signal ?? context.signal,
       },
       config
-    ),
-    config
-  );
+    );
+  } else {
+    const config = readSeedreamConfigFromEnv();
+    await generateSeedreamImage(
+      buildGenerateImageSeedreamInput(
+        {
+          prompt,
+          requestedResultCount: parsed.data.resultCount,
+          aspectRatio: parsed.data.aspectRatio,
+          width: parsed.data.width,
+          height: parsed.data.height,
+          upstreamContext,
+          onImage: emitArtifact,
+          signal: signal ?? context.signal,
+        },
+        config
+      ),
+      config
+    );
+  }
 
   return {
     generated: artifacts.length,

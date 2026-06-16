@@ -33,6 +33,7 @@ import {
 import { getAgentRunnerConfig } from "./model-config.ts";
 import { retrieveRelevantAgentSkills } from "./skills/skill-retrieval.ts";
 import { storeTextArtifactContent } from "../storage.ts";
+import { buildRunPlan } from "./run-plan.ts";
 import { redactTraceValue } from "./trace-redaction.ts";
 import { getToolTraceMetadata } from "./tool-registry.ts";
 
@@ -154,17 +155,19 @@ export async function executeAgentRun({
       }),
     });
     const runPlan = buildRunPlan(agentInput);
-    await writeRunEvent({
-      projectId: input.projectId,
-      runNodeId: input.runNodeId,
-      stepId: "plan",
-      type: "run.plan.created",
-      payload: {
-        items: runPlan,
-        retryFrom: agentInput.retryFrom ?? null,
-        runtime: "openai-agents-sdk",
-      },
-    });
+    if (runPlan.length > 0) {
+      await writeRunEvent({
+        projectId: input.projectId,
+        runNodeId: input.runNodeId,
+        stepId: "plan",
+        type: "run.plan.created",
+        payload: {
+          items: runPlan,
+          retryFrom: agentInput.retryFrom ?? null,
+          runtime: "openai-agents-sdk",
+        },
+      });
+    }
 
     for await (const event of agentRuntime.run(agentInput)) {
       if (event.type === "text_delta") {
@@ -535,6 +538,13 @@ function classifyRunFailure({
   const toolName = typeof toolError?.payload.toolName === "string"
     ? toolError.payload.toolName
     : "";
+  if (/coze/i.test(message)) {
+    return {
+      errorCode: "coze_failed",
+      errorSource: "coze",
+    };
+  }
+
   if (/seedream/i.test(message) || /generate_image|upscale_image/.test(toolName)) {
     return {
       errorCode: "seedream_failed",
@@ -659,50 +669,4 @@ function buildManagerRunPrompt(input: AgentRunInput) {
         ].join("\n")
       : "",
   ].filter(Boolean).join("\n\n");
-}
-
-function buildRunPlan(input: AgentRunInput) {
-  const intent = input.normalizedInput?.intent ?? "text.answer";
-  const retryPrefix = input.retryFrom ? "重试：" : "";
-  const taskLabel = getTaskExecutionLabel(intent);
-
-  return [
-    {
-      id: "prepare",
-      label: input.retryFrom
-        ? `定位失败步骤：${input.retryFrom.label ?? input.retryFrom.stepId}`
-        : "整理需求和上下文",
-    },
-    {
-      id: "route",
-      label: `${retryPrefix}选择合适的 Agent / 工具`,
-    },
-    {
-      id: "execute",
-      label: `${retryPrefix}${taskLabel}`,
-    },
-    {
-      id: "materialize",
-      label: "写入画布结果",
-    },
-  ];
-}
-
-function getTaskExecutionLabel(intent: string) {
-  const labels: Record<string, string> = {
-    "canvas.operation": "更新画布",
-    "code.create": "处理代码请求",
-    "data.analyze": "分析数据请求",
-    "document.create": "生成文档产物",
-    "document.edit": "改写文档产物",
-    "image.generate": "生成图片产物",
-    "image.upscale": "高清放大图片",
-    "research.answer": "整理调研来源",
-    "text.answer": "生成文字回复",
-    "web.fetch": "抓取网页内容",
-    "workflow.plan": "拆解任务计划",
-    unsupported: "确认能力边界",
-  };
-
-  return labels[intent] ?? "执行任务";
 }

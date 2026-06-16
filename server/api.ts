@@ -17,6 +17,7 @@ import {
   readSeedreamUpscaleConfigFromEnv,
   upscaleSeedreamImage,
 } from "../seedream.ts";
+import { isCozeImageConfigured } from "../coze.ts";
 import JSZip from "jszip";
 import type {
   AgentCanvasEdge,
@@ -93,6 +94,7 @@ const authInputSchema = z.object({
 });
 
 const canvasContextSchema = z.object({
+  imageProvider: z.enum(["seedream", "coze"]).optional(),
   prompt: z.string().trim().min(1),
   promptNodeId: z.string().nullable().optional(),
   retryFrom: z
@@ -216,6 +218,7 @@ app.get("/api/health", (c) => {
     imageProvider: providers.image.provider,
     imageModel: providers.image.model,
     seedreamConfigured: isSeedreamConfigured(),
+    cozeImageConfigured: isCozeImageConfigured(),
     videoConfigured: providers.video.configured,
     videoProvider: providers.video.provider,
     videoModel: providers.video.model,

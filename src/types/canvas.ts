@@ -137,6 +137,7 @@ export type RunSummaryItem = {
 export type RunPlanItem = {
   id: string;
   label: string;
+  phase?: "prepare" | "route" | "execute" | "materialize";
   status: AgentRunStatus;
 };
 

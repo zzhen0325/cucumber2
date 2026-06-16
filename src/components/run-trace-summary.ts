@@ -360,6 +360,7 @@ function readRecord(value: unknown) {
 function getErrorSourceLabel(source: string) {
   const labels: Record<string, string> = {
     context: "上下文校验",
+    coze: "Coze",
     model: "模型",
     seedream: "Seedream",
     skill_script: "技能脚本",

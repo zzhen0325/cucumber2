@@ -13,6 +13,7 @@ import type {
 } from "../../src/types/canvas.ts";
 import type { CanvasOperation } from "../../src/types/runtime.ts";
 import type { AgentProject } from "../supabase.ts";
+import type { ImageProviderSelection } from "../provider-config.ts";
 import type { NormalizedAgentInput } from "./input-normalizer.ts";
 import type { ActivatedAgentSkill, AgentSkillCard } from "./skills/types.ts";
 
@@ -22,6 +23,7 @@ export type CanvasSnapshot = {
 };
 
 export type AgentRunRequestContext = {
+  imageProvider?: ImageProviderSelection;
   prompt: string;
   promptNodeId?: string | null;
   retryFrom?: AgentRetryContext | null;
@@ -36,6 +38,7 @@ export type AgentRunInput = {
   canvasId: string;
   runNodeId: string;
   message: string;
+  imageProvider?: ImageProviderSelection;
   normalizedInput?: NormalizedAgentInput;
   promptNodeId: string | null;
   retryFrom?: AgentRetryContext | null;
@@ -166,6 +169,7 @@ export type CucumberAgentContext = {
   pushLiveEvent?: (event: PendingCucumberEvent) => void;
   skillCandidates: AgentSkillCard[];
   prompt: string;
+  imageProvider?: ImageProviderSelection;
   normalizedInput?: NormalizedAgentInput;
   retryFrom?: AgentRetryContext | null;
   selectedNodeId: string | null;
@@ -281,6 +285,7 @@ export function buildAgentRunInput({
       edges: projectSnapshot.edges,
     },
     message: canvasContext.prompt,
+    imageProvider: canvasContext.imageProvider,
     promptNodeId,
     projectId,
     retryFrom: normalizeRetryContext(canvasContext.retryFrom),
@@ -310,6 +315,7 @@ export function buildCucumberAgentContext(input: AgentRunInput): CucumberAgentCo
     producedArtifacts: [],
     projectId: input.projectId,
     prompt: input.message,
+    imageProvider: input.imageProvider,
     normalizedInput: input.normalizedInput,
     retryFrom: input.retryFrom ?? null,
     runNodeId: input.runNodeId,

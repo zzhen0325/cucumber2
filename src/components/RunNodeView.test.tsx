@@ -101,6 +101,21 @@ describe("RunNodeView", () => {
     expect(screen.getByText("整理需求和上下文")).toBeTruthy();
   });
 
+  it("renders all task-specific plan items", () => {
+    renderRunNode({
+      plan: [
+        { id: "one", label: "步骤一", status: "success" },
+        { id: "two", label: "步骤二", status: "success" },
+        { id: "three", label: "步骤三", status: "running" },
+        { id: "four", label: "步骤四", status: "queued" },
+        { id: "five", label: "步骤五", status: "queued" },
+      ],
+      status: "running",
+    });
+
+    expect(screen.getByText("步骤五")).toBeTruthy();
+  });
+
   it("dispatches retry events for failed tool steps", () => {
     const listener = vi.fn();
     window.addEventListener("cucumber:retry-run", listener);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SeedreamConfig } from "../../../../seedream.ts";
+import { buildCozeImageRequestBody, type CozeImageConfig } from "../../../../coze.ts";
 import {
   SEEDREAM_PROMPT_MAX_LENGTH,
   buildSeedreamRequestBodies,
@@ -25,6 +26,16 @@ const testSeedreamConfig: SeedreamConfig = {
   maxConcurrency: 2,
   staggerMs: 0,
   maxRetries: 4,
+};
+const testCozeConfig: CozeImageConfig = {
+  url: "https://coze.example/run",
+  token: "test-token",
+  maxInputImages: 8,
+  maxOutputImages: 4,
+  referenceImagesKey: "urls",
+  size: {},
+  watermark: {},
+  model: {},
 };
 
 describe("generate image request normalization", () => {
@@ -251,5 +262,27 @@ describe("generate image request normalization", () => {
         testSeedreamConfig
       )[0].body
     ).toMatchObject({ size: 4096 * 4096 });
+  });
+
+  it("builds Coze request bodies with prompt, reference images, and size objects", () => {
+    expect(
+      buildCozeImageRequestBody({
+        config: {
+          ...testCozeConfig,
+          watermark: { enabled: false },
+          model: { value: "seedream" },
+        },
+        prompt: "黄瓜海报",
+        imageUrls: ["https://cdn.example/ref.png"],
+        width: 1024,
+        height: 1536,
+      })
+    ).toEqual({
+      prompt: "黄瓜海报",
+      reference_images: { urls: ["https://cdn.example/ref.png"] },
+      size: { value: "1024x1536" },
+      watermark: { enabled: false },
+      model: { value: "seedream" },
+    });
   });
 });

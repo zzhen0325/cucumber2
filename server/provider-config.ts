@@ -1,4 +1,5 @@
 import { isSeedreamConfigured } from "../seedream.ts";
+import { isCozeImageConfigured } from "../coze.ts";
 import { getAgentModelConfiguration } from "./agent/model-config.ts";
 
 export type RuntimeProviderConfiguration = {
@@ -6,6 +7,8 @@ export type RuntimeProviderConfiguration = {
   provider: string | null;
   model: string | null;
 };
+
+export type ImageProviderSelection = "seedream" | "coze";
 
 export function getRuntimeProviderConfiguration() {
   return {
@@ -15,8 +18,21 @@ export function getRuntimeProviderConfiguration() {
   };
 }
 
-export function getImageProviderConfiguration(): RuntimeProviderConfiguration {
-  const provider = process.env.IMAGE_PROVIDER?.trim() || "seedream";
+export function getImageProviderConfiguration(
+  providerOverride?: ImageProviderSelection | null
+): RuntimeProviderConfiguration {
+  const provider = providerOverride ?? process.env.IMAGE_PROVIDER?.trim() ?? "seedream";
+  if (provider === "coze") {
+    return {
+      configured: isCozeImageConfigured(),
+      provider,
+      model:
+        process.env.IMAGE_MODEL?.trim() ||
+        process.env.COZE_IMAGE_MODEL?.trim() ||
+        null,
+    };
+  }
+
   if (provider !== "seedream") {
     return {
       configured: false,
@@ -35,8 +51,20 @@ export function getImageProviderConfiguration(): RuntimeProviderConfiguration {
   };
 }
 
-export function assertImageProviderConfigured(action: "generation" | "upscale") {
-  const image = getImageProviderConfiguration();
+export function assertImageProviderConfigured(
+  action: "generation" | "upscale",
+  providerOverride?: ImageProviderSelection | null
+) {
+  const image = getImageProviderConfiguration(providerOverride);
+  if (image.provider === "coze" && action === "generation") {
+    if (!image.configured) {
+      throw new Error(
+        "Coze image generation is not configured. Set COZE_IMAGE_TOKEN."
+      );
+    }
+    return image;
+  }
+
   if (image.provider !== "seedream") {
     throw new Error(
       `Image ${action} provider "${image.provider ?? "none"}" is not supported. Set IMAGE_PROVIDER=seedream.`
@@ -47,6 +75,7 @@ export function assertImageProviderConfigured(action: "generation" | "upscale") 
       `Seedream image ${action} is not configured. Set SEEDREAM_ACCESS_KEY_ID and SEEDREAM_SECRET_ACCESS_KEY.`
     );
   }
+  return image;
 }
 
 export function getVideoProviderConfiguration(): RuntimeProviderConfiguration {

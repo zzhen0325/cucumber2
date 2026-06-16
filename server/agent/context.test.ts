@@ -71,6 +71,24 @@ describe("agent context", () => {
     expect(buildCucumberAgentContext(input).knownNodeIds).not.toContain("foreign-node");
   });
 
+  it("carries the requested image provider into the agent context", () => {
+    const input = buildAgentRunInput({
+      userId: "user-1",
+      projectId: "project-1",
+      runNodeId: "run-2",
+      canvasContext: {
+        imageProvider: "coze",
+        prompt: "使用 Coze 生成图片",
+        promptNodeId: "prompt-2",
+        selectedNodeId: null,
+      },
+      projectSnapshot: snapshot(),
+    });
+
+    expect(input.imageProvider).toBe("coze");
+    expect(buildCucumberAgentContext(input).imageProvider).toBe("coze");
+  });
+
   it("rebuilds upstream context from multiple selected project nodes", () => {
     const input = buildAgentRunInput({
       userId: "user-1",

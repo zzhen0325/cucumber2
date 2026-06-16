@@ -244,13 +244,18 @@ export async function storeGeneratedImageFromUrl(
     throw error;
   }
 
+  const provider =
+    typeof input.metadata?.provider === "string"
+      ? input.metadata.provider
+      : "seedream";
+  const origin = provider === "coze" ? "coze_generated" : "seedream_generated";
   const metadata = compactRecord({
     ...input.metadata,
     byteSize: bytes.byteLength,
     createdBy: input.userId,
     digest: createSha256Digest(bytes),
     mimeType,
-    origin: "seedream_generated",
+    origin,
     previewKind: "image",
     projectId: input.projectId,
     size: bytes.byteLength,
@@ -268,7 +273,7 @@ export async function storeGeneratedImageFromUrl(
     id: input.artifactId,
     metadata,
     mimeType,
-    origin: "seedream_generated",
+    origin,
     projectId: input.projectId,
     runNodeId: input.runNodeId,
     sizeBytes: bytes.byteLength,
