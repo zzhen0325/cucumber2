@@ -659,12 +659,13 @@ export function SkillsPage({ className }: SkillsPageProps) {
                 </div>
                 <Textarea
                   value={draft.skillMd}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const skillMd = event.currentTarget.value;
                     setDraft((current) => ({
                       ...current,
-                      skillMd: event.currentTarget.value,
-                    }))
-                  }
+                      skillMd,
+                    }));
+                  }}
                   spellCheck={false}
                   className="min-h-[560px] resize-y font-mono text-xs leading-5"
                   aria-label="SKILL.md"

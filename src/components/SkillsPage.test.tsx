@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SkillsPage } from "./SkillsPage";
 import {
@@ -39,6 +39,10 @@ const updateAgentSkillMock = vi.mocked(updateAgentSkill);
 
 describe("SkillsPage", () => {
   let skill: AgentSkillDefinition;
+
+  afterEach(() => {
+    cleanup();
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -109,6 +113,23 @@ describe("SkillsPage", () => {
     expect(screen.getAllByText("scripts/render.mjs").length).toBeGreaterThan(0);
     expect(screen.getAllByText("assets/preview.png").length).toBeGreaterThan(0);
     expect((await screen.findAllByText("{\"style\":\"clean\"}")).length).toBeGreaterThan(0);
+  });
+
+  it("keeps the new skill editor mounted when SKILL.md text changes", async () => {
+    render(<SkillsPage />);
+
+    await screen.findAllByText("zip-style-skill");
+    fireEvent.click(screen.getByRole("button", { name: "新建" }));
+
+    const editor = screen.getByLabelText("SKILL.md") as HTMLTextAreaElement;
+    fireEvent.change(editor, {
+      target: {
+        value: "---\nname: custom-skill\n---\n# Custom Skill",
+      },
+    });
+
+    expect(screen.getByText("新技能")).toBeTruthy();
+    expect(editor.value).toContain("custom-skill");
   });
 });
 
