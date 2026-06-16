@@ -23,6 +23,10 @@ describe("input normalizer", () => {
 
     expect(normalized).toMatchObject({
       rawPrompt: "日本家居 banner KV 16:9 主体是女生打扫家里的插画,四张",
+      operation: "create",
+      artifact: { kind: "image", subtype: "banner", format: "png" },
+      domain: "visual-design",
+      requiredCapabilities: ["image-generation"],
       intent: "image.generate",
       image: {
         contentPrompt: "日本家居 banner KV，主体是女生打扫家里的插画",
@@ -65,8 +69,11 @@ describe("input normalizer", () => {
       "写一份项目复盘 Markdown"
     );
 
-    expect(normalized).toEqual({
+    expect(normalized).toMatchObject({
       rawPrompt: "写一份项目复盘 Markdown",
+      userGoal: "写一份项目复盘 Markdown",
+      operation: "create",
+      artifact: { kind: "markdown", format: "markdown" },
       intent: "document.create",
     });
   });
@@ -89,9 +96,13 @@ describe("input normalizer", () => {
       { maxOutputImages: 4 }
     );
 
-    expect(normalized).toEqual({
+    expect(normalized).toMatchObject({
       rawPrompt:
         "帮我分析这个需求主题是「最佳 HOME 产品」，整体需要体现出一种“高端感”“荣誉感”和“颁奖典礼感”，字体可以用金色显现出高级感。背景建议以红毯、聚光灯、大量摄影记者、奖杯等元素为主，同时希望能在画面中点缀一些 HOME 产品。",
+      operation: "analyze",
+      artifact: null,
+      domain: "visual-design",
+      negativeCapabilities: ["image-generation"],
       intent: "text.answer",
     });
   });
@@ -113,12 +124,130 @@ describe("input normalizer", () => {
 
     expect(normalized).toMatchObject({
       rawPrompt: "帮我分析这个 HOME 产品 KV 需求，然后生成一张16:9 图片",
+      operation: "create",
+      artifact: { kind: "image", subtype: "banner", format: "png" },
+      domain: "visual-design",
       intent: "image.generate",
       image: {
         contentPrompt: "最佳 HOME 产品颁奖典礼 KV",
         resultCount: 1,
         aspectRatio: "16:9",
       },
+    });
+  });
+
+  it("keeps image style analysis out of image generation", () => {
+    const raw = "分析这张图的风格";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        intent: "image.generate",
+        image: { contentPrompt: raw },
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "analyze",
+      artifact: null,
+      domain: "visual-design",
+      negativeCapabilities: ["image-generation"],
+      intent: "text.answer",
+    });
+    expect(normalized.image).toBeUndefined();
+  });
+
+  it("routes sequence diagrams to mermaid document artifacts", () => {
+    const raw = "帮我创建一个视觉 H5 需求的流程时序图";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "create",
+        artifact: { kind: "image", subtype: "poster", format: "png" },
+        domain: "visual-design",
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      rawPrompt: "帮我创建一个视觉 H5 需求的流程时序图",
+      operation: "create",
+      artifact: {
+        kind: "diagram",
+        subtype: "sequenceDiagram",
+        format: "mermaid",
+      },
+      domain: "visual-design",
+      requiredCapabilities: expect.arrayContaining([
+        "sequence-diagram",
+        "markdown-artifact",
+      ]),
+      negativeCapabilities: ["image-generation"],
+      intent: "document.create",
+    });
+    expect(normalized.image).toBeUndefined();
+  });
+
+  it("routes visual H5 flowcharts to mermaid diagrams, not images", () => {
+    const raw = "做一个 H5 视觉需求流程图";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "create",
+        artifact: { kind: "diagram", subtype: "flowchart", format: "mermaid" },
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "create",
+      artifact: { kind: "diagram", subtype: "flowchart", format: "mermaid" },
+      domain: "visual-design",
+      negativeCapabilities: ["image-generation"],
+      intent: "document.create",
+    });
+  });
+
+  it("keeps flowchart-style posters on the image route", () => {
+    const raw = "生成一张流程图风格海报";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "create",
+        artifact: { kind: "image", subtype: "poster", format: "png" },
+        image: { contentPrompt: raw },
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "create",
+      artifact: { kind: "image", subtype: "poster", format: "png" },
+      intent: "image.generate",
+    });
+  });
+
+  it("keeps webpage-to-document requests as composite document tasks", () => {
+    const raw = "把这个页面总结成文档";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "transform",
+        artifact: { kind: "document", format: "markdown" },
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "transform",
+      artifact: { kind: "document", format: "markdown" },
+      requiredCapabilities: expect.arrayContaining(["web-fetch"]),
+      intent: "document.create",
     });
   });
 });

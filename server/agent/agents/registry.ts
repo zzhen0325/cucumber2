@@ -1,9 +1,11 @@
 import { handoff, type Agent } from "@openai/agents";
 
 import type { ArtifactType } from "../../../src/types/canvas.ts";
-import type { NormalizedIntent } from "../input-normalizer.ts";
+import {
+  selectAgentRoutesForTask,
+  type SpecialistRoute,
+} from "../input-normalizer.ts";
 import type { CucumberAgentContext } from "../context.ts";
-import { hasBuiltInImageIntent } from "../skills/skill-retrieval.ts";
 import { createDocumentAgent } from "./document.agent.ts";
 import { createImageAgent } from "./image.agent.ts";
 import { createResearchAgent } from "./research.agent.ts";
@@ -11,7 +13,7 @@ import { createWebAgent } from "./web.agent.ts";
 
 type SpecialistAgentDefinition = {
   agent: Agent<CucumberAgentContext>;
-  enabledIntents: NormalizedIntent[];
+  enabledRoutes: SpecialistRoute[];
   handoffPolicy: (context: CucumberAgentContext) => boolean;
   name: string;
   producedArtifactTypes: ArtifactType[];
@@ -22,7 +24,7 @@ export function createSpecialistAgentRegistry(): SpecialistAgentDefinition[] {
   return [
     {
       agent: createDocumentAgent(),
-      enabledIntents: ["document.create", "document.edit"],
+      enabledRoutes: ["document"],
       handoffPolicy: shouldEnableDocumentHandoff,
       name: "Cucumber Document Agent",
       producedArtifactTypes: ["doc"],
@@ -30,7 +32,7 @@ export function createSpecialistAgentRegistry(): SpecialistAgentDefinition[] {
     },
     {
       agent: createWebAgent(),
-      enabledIntents: ["web.fetch"],
+      enabledRoutes: ["web"],
       handoffPolicy: shouldEnableWebHandoff,
       name: "Cucumber Web Agent",
       producedArtifactTypes: ["webpage"],
@@ -38,7 +40,7 @@ export function createSpecialistAgentRegistry(): SpecialistAgentDefinition[] {
     },
     {
       agent: createResearchAgent(),
-      enabledIntents: ["research.answer"],
+      enabledRoutes: ["research"],
       handoffPolicy: shouldEnableResearchHandoff,
       name: "Cucumber Research Agent",
       producedArtifactTypes: ["doc"],
@@ -46,7 +48,7 @@ export function createSpecialistAgentRegistry(): SpecialistAgentDefinition[] {
     },
     {
       agent: createImageAgent(),
-      enabledIntents: ["image.generate", "image.upscale"],
+      enabledRoutes: ["image"],
       handoffPolicy: shouldEnableImageHandoff,
       name: "Cucumber Image Agent",
       producedArtifactTypes: ["image"],
@@ -67,12 +69,12 @@ export function createSpecialistHandoffs(
 }
 
 export function isSpecialistEnabledForContext(
-  definition: Pick<SpecialistAgentDefinition, "enabledIntents" | "handoffPolicy">,
+  definition: Pick<SpecialistAgentDefinition, "enabledRoutes" | "handoffPolicy">,
   context: CucumberAgentContext
 ) {
-  const intent = context.normalizedInput?.intent;
-  if (intent) {
-    return definition.enabledIntents.includes(intent);
+  if (context.normalizedInput) {
+    const routes = selectAgentRoutesForTask(context.normalizedInput);
+    return routes.some((route) => definition.enabledRoutes.includes(route));
   }
   return definition.handoffPolicy(context);
 }
@@ -107,15 +109,6 @@ function shouldEnableResearchHandoff(context: CucumberAgentContext) {
 }
 
 function shouldEnableImageHandoff(context: CucumberAgentContext) {
-  if (
-    hasBuiltInImageIntent({
-      message: context.prompt,
-      upstreamContext: context.upstreamContext,
-    })
-  ) {
-    return true;
-  }
-
   return [...context.skillCandidates, ...context.activatedSkills].some(
     (skill) =>
       skill.agentScope === "image" ||

@@ -2,6 +2,7 @@ import { tool } from "@openai/agents";
 import { z } from "zod";
 
 import type { CucumberAgentContext } from "../../context.ts";
+import { assertImageToolAllowed } from "../../policy/task-artifact-policy.ts";
 import {
   loadVisualStyleLibrary,
   type StyleCatalogItem,
@@ -60,6 +61,7 @@ export const renderVisualStylePromptTool = tool({
   },
   async execute(rawArgs, runContext) {
     const context = requireCucumberContext(runContext?.context);
+    assertImageToolAllowed(context, "render_visual_style_prompt");
     const parsed = renderVisualStylePromptInputSchema.safeParse(rawArgs);
     if (!parsed.success) {
       return {

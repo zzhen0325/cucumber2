@@ -1,12 +1,16 @@
 import type { AgentCanvasNode } from "../../../src/types/canvas.ts";
 import { listAgentSkillDefinitions, type AgentSkillDefinitionSummary } from "../../supabase.ts";
 import type { AgentRunInput } from "../context.ts";
+import {
+  hasNegativeCapability,
+  isImageArtifactTask,
+} from "../input-normalizer.ts";
 import type { AgentSkillCard } from "./types.ts";
 
 const MAX_SKILL_CANDIDATES = 6;
 
 const imageIntentPattern =
-  /(生成图片|生图|出图|画一张|画个|图片|海报|插画|视觉|参考图|高清|超清|放大|upscale|4k|8k|image|poster|illustration)/i;
+  /(生成图片|生图|出图|画一张|画个|图片|海报|插画|参考图|高清|超清|放大|upscale|4k|8k|image|poster|illustration)/i;
 
 export async function retrieveRelevantAgentSkills(
   input: AgentRunInput
@@ -64,7 +68,11 @@ function buildSkillRetrievalQuery(input: AgentRunInput) {
 
   return {
     canvasKinds,
-    hasImageIntent: hasBuiltInImageIntent(input),
+    hasImageIntent:
+      isImageArtifactTask(input.normalizedInput) ||
+      (!hasNegativeCapability(input.normalizedInput, "image-generation") &&
+        hasBuiltInImageIntent(input)),
+    normalizedInput: input.normalizedInput,
     text,
     tokens: tokenize(text),
   };
@@ -74,9 +82,24 @@ function scoreSkill(
   skill: AgentSkillDefinitionSummary,
   query: ReturnType<typeof buildSkillRetrievalQuery>
 ): AgentSkillCard {
-  let score = 1;
-  const reasons: string[] = ["enabled"];
+  let score = 0;
+  const reasons: string[] = [];
   const lowerText = query.text.toLowerCase();
+  const suppressImage = hasNegativeCapability(query.normalizedInput, "image-generation");
+  const skillIsImage = isImageSkill(skill);
+
+  if (suppressImage && skillIsImage) {
+    return toSkillCard(skill, {
+      reasons: ["negative-capability:image-generation"],
+      score: 0,
+    });
+  }
+
+  const capabilityScore = scoreCapabilityMatch(skill, query);
+  if (capabilityScore.score > 0) {
+    score += capabilityScore.score;
+    reasons.push(...capabilityScore.reasons);
+  }
 
   for (const keyword of skill.triggers.keywords) {
     if (keyword && lowerText.includes(keyword.toLowerCase())) {
@@ -94,10 +117,7 @@ function scoreSkill(
 
   if (
     query.hasImageIntent &&
-    (skill.agentScope === "image" ||
-      skill.purpose === "prompt_expansion" ||
-      skill.bindings.agents.some((agent) => /image/i.test(agent)) ||
-      skill.bindings.tools.some((tool) => /image|prompt/i.test(tool)))
+    skillIsImage
   ) {
     score += 24;
     reasons.push("image-intent");
@@ -134,10 +154,110 @@ function scoreSkill(
     reasons.push(`overlap:${overlap}`);
   }
 
-  return {
-    ...skill,
+  return toSkillCard(skill, {
     reasons,
     score,
+  });
+}
+
+function scoreCapabilityMatch(
+  skill: AgentSkillDefinitionSummary,
+  query: ReturnType<typeof buildSkillRetrievalQuery>
+) {
+  const normalizedInput = query.normalizedInput;
+  if (!normalizedInput) {
+    return { reasons: [] as string[], score: 0 };
+  }
+
+  let score = 0;
+  const reasons: string[] = [];
+  const artifact = normalizedInput.artifact;
+  const requiredCapabilities = new Set(normalizedInput.requiredCapabilities ?? []);
+
+  for (const capability of skill.capabilities) {
+    if (capability.operation && capability.operation === normalizedInput.operation) {
+      score += 12;
+      reasons.push(`operation:${capability.operation}`);
+    }
+    if (artifact && capability.artifact?.kind === artifact.kind) {
+      score += 42;
+      reasons.push(`artifact.kind:${artifact.kind}`);
+    }
+    if (
+      artifact?.subtype &&
+      capability.artifact?.subtype === artifact.subtype
+    ) {
+      score += 34;
+      reasons.push(`artifact.subtype:${artifact.subtype}`);
+    }
+    if (
+      artifact?.format &&
+      capability.artifact?.format === artifact.format
+    ) {
+      score += 24;
+      reasons.push(`artifact.format:${artifact.format}`);
+    }
+    if (normalizedInput.domain && capability.domain === normalizedInput.domain) {
+      score += 8;
+      reasons.push(`domain:${normalizedInput.domain}`);
+    }
+    for (const required of capability.requiredCapabilities) {
+      if (requiredCapabilities.has(required)) {
+        score += 20;
+        reasons.push(`capability:${required}`);
+      }
+    }
+  }
+
+  for (const produced of skill.produces) {
+    if (
+      (artifact?.kind === "diagram" && produced === "markdown") ||
+      produced === artifact?.kind ||
+      produced === artifact?.format
+    ) {
+      score += 18;
+      reasons.push(`produces:${produced}`);
+    }
+  }
+
+  for (const used of skill.uses) {
+    if (
+      requiredCapabilities.has(used) ||
+      (artifact?.kind === "diagram" && used === "create_text_artifact")
+    ) {
+      score += 12;
+      reasons.push(`uses:${used}`);
+    }
+  }
+
+  for (const negative of normalizedInput.negativeCapabilities ?? []) {
+    if (skill.notFor.includes(negative)) {
+      score -= 10;
+      reasons.push(`not-for:${negative}`);
+    }
+  }
+
+  return { reasons, score: Math.max(0, score) };
+}
+
+function isImageSkill(skill: AgentSkillDefinitionSummary) {
+  return (
+    skill.agentScope === "image" ||
+    skill.purpose === "prompt_expansion" ||
+    skill.bindings.agents.some((agent) => /image/i.test(agent)) ||
+    skill.bindings.tools.some((tool) => /image|prompt/i.test(tool)) ||
+    skill.capabilities.some((capability) => capability.artifact?.kind === "image")
+  );
+}
+
+function toSkillCard(
+  skill: AgentSkillDefinitionSummary,
+  scored: { reasons: string[]; score: number }
+): AgentSkillCard {
+  return {
+    ...skill,
+    reasons: scored.reasons,
+    score: scored.score,
     scripts: skill.scripts.map(({ description, input, name, output, path, runtime }) => ({
       description,
       input,

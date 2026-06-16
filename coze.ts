@@ -22,10 +22,9 @@ export type CozeImageConfig = {
   token: string;
   maxInputImages: number;
   maxOutputImages: number;
-  referenceImagesKey: string;
-  size: Record<string, unknown>;
-  watermark: Record<string, unknown>;
-  model: Record<string, unknown>;
+  size?: string;
+  watermark?: boolean;
+  model?: string;
 };
 
 const DEFAULT_COZE_IMAGE_URL = "https://fr8nsskrnk.coze.site/run";
@@ -105,15 +104,21 @@ export function buildCozeImageRequestBody({
   width?: number;
   height?: number;
 }) {
-  return {
+  const body: Record<string, unknown> = {
     prompt,
-    reference_images: imageUrls.length
-      ? { [config.referenceImagesKey]: imageUrls }
-      : {},
-    size: buildCozeSizeObject(config.size, width, height),
-    watermark: config.watermark,
-    model: config.model,
+    reference_images: imageUrls.map((url) => ({ url })),
   };
+  const size = buildCozeSizeValue(config.size, width, height);
+  if (size !== undefined) {
+    body.size = size;
+  }
+  if (config.watermark !== undefined) {
+    body.watermark = config.watermark;
+  }
+  if (config.model) {
+    body.model = config.model;
+  }
+  return body;
 }
 
 export function isCozeImageConfigured() {
@@ -126,11 +131,9 @@ export function readCozeImageConfigFromEnv(): CozeImageConfig {
     token: readRequiredEnv("COZE_IMAGE_TOKEN", "COZE_API_TOKEN"),
     maxInputImages: readNumberEnv("COZE_IMAGE_MAX_INPUT_IMAGES", 8),
     maxOutputImages: readNumberEnv("COZE_IMAGE_MAX_OUTPUT_IMAGES", 4),
-    referenceImagesKey:
-      process.env.COZE_IMAGE_REFERENCE_IMAGES_KEY?.trim() || "urls",
-    size: readObjectEnv("COZE_IMAGE_SIZE"),
-    watermark: readObjectEnv("COZE_IMAGE_WATERMARK"),
-    model: readObjectEnv("COZE_IMAGE_MODEL"),
+    size: readStringEnv("COZE_IMAGE_SIZE"),
+    watermark: readBooleanEnv("COZE_IMAGE_WATERMARK"),
+    model: readStringEnv("COZE_IMAGE_MODEL"),
   };
 }
 
@@ -166,8 +169,8 @@ async function callCozeImageWorkflow({
   };
 }
 
-function buildCozeSizeObject(
-  defaultSize: Record<string, unknown>,
+function buildCozeSizeValue(
+  defaultSize: string | undefined,
   width?: number,
   height?: number
 ) {
@@ -175,7 +178,7 @@ function buildCozeSizeObject(
     if (width === undefined || height === undefined) {
       throw new Error("Coze explicit dimensions require both width and height.");
     }
-    return { value: `${width}x${height}` };
+    return `${width}x${height}`;
   }
   return defaultSize;
 }
@@ -255,20 +258,23 @@ function readNumberEnv(name: string, fallback: number) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function readObjectEnv(name: string) {
+function readStringEnv(name: string) {
   const raw = process.env[name]?.trim();
+  return raw || undefined;
+}
+
+function readBooleanEnv(name: string) {
+  const raw = process.env[name]?.trim().toLowerCase();
   if (!raw) {
-    return {};
+    return undefined;
   }
-
-  if (raw.startsWith("{")) {
-    const parsed = parseJson(raw);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
+  if (raw === "true" || raw === "1") {
+    return true;
   }
-
-  return { value: raw };
+  if (raw === "false" || raw === "0") {
+    return false;
+  }
+  throw new Error(`${name} must be true or false.`);
 }
 
 function parseJson(text: string) {

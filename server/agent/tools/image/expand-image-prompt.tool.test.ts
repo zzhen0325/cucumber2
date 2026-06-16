@@ -111,6 +111,7 @@ function skill() {
     frontmatter: {},
     id: "skill-1",
     name: "imagegen-prompt-expander",
+    capabilities: [],
     description: "Expand compact prompts.",
     body: "Expand one image prompt.",
     enabled: true,
@@ -118,7 +119,9 @@ function skill() {
     packagePath: null,
     packageSha256: null,
     packageSizeBytes: null,
+    notFor: [],
     purpose: "prompt_expansion",
+    produces: [],
     reasons: ["test"],
     score: 10,
     scripts: [],
@@ -126,6 +129,7 @@ function skill() {
     sourceManifest: {},
     tags: [],
     triggers: { canvasKinds: [], keywords: [] },
+    uses: [],
   };
 }
 

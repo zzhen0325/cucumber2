@@ -146,16 +146,19 @@ function skill() {
       tools: ["render_visual_style_prompt"],
     },
     body: "Use Visual Prompt Cookbook.",
+    capabilities: [],
     description: "Reusable visual prompt cookbook.",
     enabled: true,
     frontmatter: {},
     id: "skill-cookbook",
     name: "visual-prompt-cookbook",
+    notFor: [],
     packageBucket: null,
     packagePath: null,
     packageSha256: null,
     packageSizeBytes: null,
     purpose: "prompt_expansion",
+    produces: [],
     reasons: ["test"],
     score: 10,
     scripts: [],
@@ -165,6 +168,7 @@ function skill() {
     },
     tags: ["style-json"],
     triggers: { canvasKinds: [], keywords: [] },
+    uses: [],
   };
 }
 

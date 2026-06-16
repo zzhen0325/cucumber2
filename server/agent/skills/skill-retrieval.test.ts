@@ -124,6 +124,104 @@ describe("skill retrieval", () => {
 
     expect(candidates[0]?.name).toBe("research-notes");
   });
+
+  it("retrieves diagram skills by artifact capability before image keywords", async () => {
+    mocks.listAgentSkillDefinitions.mockResolvedValue([
+      skill({
+        agentScope: "image",
+        bindings: {
+          agents: ["Cucumber Image Agent"],
+          scopes: ["tool.image.prompt", "tool.image.generate"],
+          tools: ["render_visual_style_prompt", "generate_image"],
+        },
+        capabilities: [
+          {
+            artifact: { kind: "image", subtype: "poster", format: "png" },
+            requiredCapabilities: ["image-generation"],
+            negativeCapabilities: [],
+          },
+        ],
+        name: "visual-prompt-cookbook",
+        purpose: "prompt_expansion",
+        tags: ["style-json"],
+        triggers: { canvasKinds: [], keywords: ["视觉", "海报"] },
+      }),
+      skill({
+        agentScope: "document",
+        bindings: {
+          agents: ["Cucumber Document Agent"],
+          scopes: ["tool.doc.create", "write.artifact"],
+          tools: ["create_text_artifact"],
+        },
+        capabilities: [
+          {
+            artifact: {
+              kind: "diagram",
+              subtype: "sequenceDiagram",
+              format: "mermaid",
+            },
+            requiredCapabilities: ["sequence-diagram", "markdown-artifact"],
+            negativeCapabilities: [],
+          },
+        ],
+        name: "sequence-diagram",
+        notFor: ["image-generation"],
+        produces: ["markdown"],
+        purpose: "diagram",
+        triggers: { canvasKinds: [], keywords: ["时序图"] },
+        uses: ["create_text_artifact"],
+      }),
+    ]);
+
+    const candidates = await retrieveRelevantAgentSkills(
+      input({
+        message: "帮我创建一个视觉 H5 需求的流程时序图",
+        normalizedInput: {
+          rawPrompt: "帮我创建一个视觉 H5 需求的流程时序图",
+          userGoal: "帮我创建一个视觉 H5 需求的流程时序图",
+          operation: "create",
+          artifact: {
+            kind: "diagram",
+            subtype: "sequenceDiagram",
+            format: "mermaid",
+          },
+          domain: "visual-design",
+          requiredCapabilities: ["sequence-diagram", "markdown-artifact"],
+          negativeCapabilities: ["image-generation"],
+        },
+      })
+    );
+
+    expect(candidates[0]).toMatchObject({
+      name: "sequence-diagram",
+      reasons: expect.arrayContaining([
+        "artifact.kind:diagram",
+        "artifact.subtype:sequenceDiagram",
+        "artifact.format:mermaid",
+        "capability:sequence-diagram",
+      ]),
+    });
+    expect(candidates.map((candidate) => candidate.name)).not.toContain(
+      "visual-prompt-cookbook"
+    );
+  });
+
+  it("does not treat visual wording alone as image intent", async () => {
+    mocks.listAgentSkillDefinitions.mockResolvedValue([
+      skill({
+        agentScope: "image",
+        name: "visual-prompt-cookbook",
+        purpose: "prompt_expansion",
+        triggers: { canvasKinds: [], keywords: ["生成图片"] },
+      }),
+    ]);
+
+    const candidates = await retrieveRelevantAgentSkills(
+      input({ message: "帮我分析这个视觉需求" })
+    );
+
+    expect(candidates).toEqual([]);
+  });
 });
 
 function input(overrides: Partial<AgentRunInput> = {}): AgentRunInput {
@@ -164,6 +262,10 @@ function skill(overrides: Record<string, unknown>) {
     description: "Skill description",
     agentScope: "general",
     purpose: "general",
+    capabilities: [],
+    produces: [],
+    uses: [],
+    notFor: [],
     tags: [],
     triggers: { canvasKinds: [], keywords: [] },
     bindings: { agents: [], scopes: [], tools: [] },

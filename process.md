@@ -2,6 +2,15 @@
 
 本文记录 2026-06-11 Agent v2 正式切换后的变更。
 
+## 2026-06-16 Artifact-First Routing
+
+- 输入归一化从只依赖 `intent` 升级为 artifact-first task protocol：`userGoal`、`operation`、`artifact.kind/subtype/format`、`domain`、`requiredCapabilities` 和 `negativeCapabilities`；`intent` 仅作为 Trace/UI 兼容摘要派生。
+- Specialist registry 不再按 intent 字符串开 handoff；runtime 根据 artifact protocol deterministic route。单一 image/document/web/research 任务直接启动对应 specialist，复合任务留给 Manager 编排并只开放匹配 handoff。
+- `视觉`、`H5`、营销或产品语义只作为 `domain`/上下文；流程图和时序图默认归一化为 `diagram` + `mermaid`，由 Document Agent 产出 Markdown artifact，不走图片链路。
+- Skill frontmatter 新增可选 `capabilities`、`produces`、`uses` 和 `notFor`；skill retrieval 先按 artifact/capability 打分，再看关键词、canvas kind 和 token overlap，并会按 `negativeCapabilities` 抑制不应出现的 image skill。
+- 新增 seed skill `sequence-diagram`，声明 `diagram/sequenceDiagram/mermaid` 能力，Document Agent 可激活后用 `create_text_artifact` 创建包含 Mermaid fenced block 的 Markdown artifact。
+- 工具入口新增 task artifact policy：图片 prompt/generation 工具只允许 image artifact task，`image-generation` negative capability 会阻止新图生成；`create_text_artifact` 只允许 markdown/document/diagram artifact task，Mermaid diagram 必须包含 mermaid fenced block。
+
 ## 2026-06-16 Dynamic Run Plan
 
 - `run.plan.created` 不再是所有运行都会写入的四步固定骨架；runtime 只在复杂任务、带上游/多图/长 prompt/显式计划分析类请求或重试运行时创建 plan。
@@ -81,7 +90,7 @@
 ## 2026-06-12 Image Request Boundary
 
 - 新增 `server/agent/tools/image/generate-image.request.ts`，集中负责图片数量、尺寸/比例和 upstream 引用图归一化。
-- `generate_image` 工具只做 Agent tool 边界、artifact 事件和图片 provider 调用编排；图片生成 provider 支持 `IMAGE_PROVIDER=seedream` 或 `IMAGE_PROVIDER=coze`，其中 Coze 请求体为 `prompt`、`reference_images`、`size`、`watermark`、`model`。
+- `generate_image` 工具只做 Agent tool 边界、artifact 事件和图片 provider 调用编排；图片生成 provider 支持 `IMAGE_PROVIDER=seedream` 或 `IMAGE_PROVIDER=coze`，其中 Coze 请求体为 `prompt`、`reference_images`、`size`、`watermark`、`model`；`reference_images` 是由上游图片 URL 生成的 `{ url }` file dict 数组，`size/model` 是字符串，`watermark` 是布尔值，空配置不发送占位字段。
 - 底部输入器可选择本轮图片 provider；客户端只提交白名单 `imageProvider`，服务端写入 agent context 后由 `generate_image` 选择 provider，`upscale_image` 仍只走 Seedream。
 - `seedream.ts` 收敛为 Seedream provider 执行层，保留配置读取、签名、提交/轮询、并发/重试、取消和 provider metadata。
 - 多张图片生成按 `SEEDREAM_MAX_CONCURRENCY` 限制完整 submit+poll 生命周期的并发数，并按 `SEEDREAM_STAGGER_MS` 间隔启动新任务；默认 `SEEDREAM_MAX_CONCURRENCY=1` 会等上一张完整出图或失败后再提交下一张，避免触发 Seedream 账号级并发限制。

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import type { CucumberAgentContext } from "../../context.ts";
 import { getAgentRunnerConfig } from "../../model-config.ts";
+import { assertImageToolAllowed } from "../../policy/task-artifact-policy.ts";
 import type { ActivatedAgentSkill } from "../../skills/types.ts";
 
 const expandImagePromptInputSchema = z.object({
@@ -43,6 +44,7 @@ export const expandImagePromptTool = tool({
   },
   async execute(rawArgs, runContext, details) {
     const context = requireCucumberContext(runContext?.context);
+    assertImageToolAllowed(context, "expand_image_prompt");
     const parsed = expandImagePromptInputSchema.safeParse(rawArgs);
     if (!parsed.success) {
       return {

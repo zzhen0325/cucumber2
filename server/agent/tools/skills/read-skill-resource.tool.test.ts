@@ -103,15 +103,18 @@ function skill(overrides: Partial<ActivatedAgentSkill> = {}): ActivatedAgentSkil
     agentScope: "general",
     bindings: { agents: [], scopes: [], tools: [] },
     body: "Use references/guide.md before answering.",
+    capabilities: [],
     description: "Full skill with resources and scripts.",
     frontmatter: {},
     id: "skill-full",
     name: "full-skill",
+    notFor: [],
     packageBucket: "agent-skill-packages",
     packagePath: "skills/full-skill/package.zip",
     packageSha256: "sha",
     packageSizeBytes: 1,
     purpose: "general",
+    produces: [],
     reasons: [],
     score: 10,
     scripts: [
@@ -126,6 +129,7 @@ function skill(overrides: Partial<ActivatedAgentSkill> = {}): ActivatedAgentSkil
     sourceManifest: { skillPath: "full-skill/SKILL.md" },
     tags: [],
     triggers: { canvasKinds: [], keywords: [] },
+    uses: [],
     ...overrides,
   };
 }

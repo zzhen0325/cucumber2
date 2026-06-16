@@ -32,10 +32,9 @@ const testCozeConfig: CozeImageConfig = {
   token: "test-token",
   maxInputImages: 8,
   maxOutputImages: 4,
-  referenceImagesKey: "urls",
-  size: {},
-  watermark: {},
-  model: {},
+  size: undefined,
+  watermark: undefined,
+  model: undefined,
 };
 
 describe("generate image request normalization", () => {
@@ -264,13 +263,13 @@ describe("generate image request normalization", () => {
     ).toMatchObject({ size: 4096 * 4096 });
   });
 
-  it("builds Coze request bodies with prompt, reference images, and size objects", () => {
+  it("builds Coze request bodies with prompt, reference image file dicts, and scalar options", () => {
     expect(
       buildCozeImageRequestBody({
         config: {
           ...testCozeConfig,
-          watermark: { enabled: false },
-          model: { value: "seedream" },
+          watermark: false,
+          model: "seedream",
         },
         prompt: "黄瓜海报",
         imageUrls: ["https://cdn.example/ref.png"],
@@ -279,10 +278,23 @@ describe("generate image request normalization", () => {
       })
     ).toEqual({
       prompt: "黄瓜海报",
-      reference_images: { urls: ["https://cdn.example/ref.png"] },
-      size: { value: "1024x1536" },
-      watermark: { enabled: false },
-      model: { value: "seedream" },
+      reference_images: [{ url: "https://cdn.example/ref.png" }],
+      size: "1024x1536",
+      watermark: false,
+      model: "seedream",
+    });
+  });
+
+  it("omits empty Coze scalar options instead of sending placeholders", () => {
+    expect(
+      buildCozeImageRequestBody({
+        config: testCozeConfig,
+        prompt: "黄瓜海报",
+        imageUrls: [],
+      })
+    ).toEqual({
+      prompt: "黄瓜海报",
+      reference_images: [],
     });
   });
 });

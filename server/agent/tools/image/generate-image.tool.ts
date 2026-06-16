@@ -16,6 +16,7 @@ import {
 } from "../../../storage.ts";
 import { assertImageProviderConfigured } from "../../../provider-config.ts";
 import type { CucumberAgentContext } from "../../context.ts";
+import { assertImageToolAllowed } from "../../policy/task-artifact-policy.ts";
 import {
   buildGenerateImageSeedreamInput,
   normalizeSeedreamProviderPrompt,
@@ -99,6 +100,7 @@ export async function executeGenerateImageTool({
   context: CucumberAgentContext;
   signal?: AbortSignal;
 }) {
+  assertImageToolAllowed(context, "generate_image");
   const parsed = generateImageInputSchema.safeParse(args);
   if (!parsed.success) {
     return {

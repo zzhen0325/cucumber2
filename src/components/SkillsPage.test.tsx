@@ -143,6 +143,7 @@ function createSkill(
       tools: ["render_visual_style_prompt"],
     },
     body: "# Zip Style Skill",
+    capabilities: [],
     createdAt: "2026-06-14T09:00:00.000Z",
     createdBy: "user-1",
     description: "Zip skill with scripts",
@@ -150,11 +151,13 @@ function createSkill(
     frontmatter: {},
     id: "skill-zip",
     name: "zip-style-skill",
+    notFor: [],
     packageBucket: "agent-skill-packages",
     packagePath: "skills/zip-style-skill/package.zip",
     packageSha256: "abc123",
     packageSizeBytes: 1024,
     purpose: "prompt_expansion",
+    produces: [],
     scripts: [
       {
         description: "Render prompt",
@@ -172,6 +175,7 @@ function createSkill(
       keywords: ["style"],
     },
     updatedAt: "2026-06-14T09:00:00.000Z",
+    uses: [],
     ...overrides,
   };
 }
@@ -180,16 +184,19 @@ function toSummary(skill: AgentSkillDefinition): AgentSkillDefinitionSummary {
   return {
     agentScope: skill.agentScope,
     bindings: skill.bindings,
+    capabilities: skill.capabilities,
     createdAt: skill.createdAt,
     createdBy: skill.createdBy,
     description: skill.description,
     enabled: skill.enabled,
     id: skill.id,
     name: skill.name,
+    notFor: skill.notFor,
     packageBucket: skill.packageBucket,
     packagePath: skill.packagePath,
     packageSha256: skill.packageSha256,
     packageSizeBytes: skill.packageSizeBytes,
+    produces: skill.produces,
     purpose: skill.purpose,
     scripts: skill.scripts,
     sourceManifest: skill.sourceManifest,
@@ -197,5 +204,6 @@ function toSummary(skill: AgentSkillDefinition): AgentSkillDefinitionSummary {
     tags: skill.tags,
     triggers: skill.triggers,
     updatedAt: skill.updatedAt,
+    uses: skill.uses,
   };
 }

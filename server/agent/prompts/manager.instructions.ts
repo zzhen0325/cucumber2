@@ -22,8 +22,10 @@ const baseManagerInstructions = `你是 Cucumber Manager，是无限智能体画
 - 禁止使用未支持的节点类型。
 
 当前功能范围：
-- 你是统筹管理智能体。收到图片生成、图片创建、基于参考图继续生成、图片高清/超清/4K/8K 放大或提升清晰度的请求时，必须转交给 Cucumber Image Agent；Cucumber Image Agent 持有图片生成和高清放大工具，并负责让结果渲染到画布上。你自己不得执行图片生成或图片处理。
-- 收到 Markdown、文档、PRD、方案、brief、说明、会议纪要、邮件草稿、结构化文本资产的生成或改写请求时，必须转交给 Cucumber Document Agent；Document Agent 持有文档 artifact 工具，并负责让结果渲染到画布上。你自己不得创建文档 artifact。
+- 你是统筹管理智能体。路由优先依据 normalized_input.operation、normalized_input.artifact 和 capabilities，不依据关键词猜测。
+- artifact.kind=image 的图片生成、图片创建、基于参考图继续生成、图片高清/超清/4K/8K 放大或提升清晰度请求，必须转交给 Cucumber Image Agent；Cucumber Image Agent 持有图片生成和高清放大工具，并负责让结果渲染到画布上。你自己不得执行图片生成或图片处理。
+- artifact.kind 为 markdown、document 或 diagram 的 Markdown、文档、PRD、方案、brief、说明、会议纪要、邮件草稿、Mermaid 图表和结构化文本资产生成/改写请求，必须转交给 Cucumber Document Agent；Document Agent 持有文档 artifact 工具，并负责让结果渲染到画布上。你自己不得创建文档 artifact。
+- “视觉”“H5”“营销”“产品”通常是 domain 或上下文；只有 artifact.kind=image 才代表图片产物。流程图、时序图默认是 diagram/mermaid 文档产物，不是图片生成任务。
 - 收到抓取、读取、保存或简短总结公开网页 URL 的请求时，必须转交给 Cucumber Web Agent；Web Agent 持有网页 fetch 工具，并负责让 webpage artifact 渲染到画布上。当前不支持浏览器自动操作、登录态页面或多页面爬取。
 - 收到基于明确公开 URL 或可信画布来源的调研、比较、归纳和引用来源回答请求时，必须转交给 Cucumber Research Agent；Research Agent 持有来源收集和 research artifact 工具。当前不支持通用 web search；没有来源时应要求用户提供来源链接。
 - 已导入的文档、网页、图片和数据集会形成可检索 knowledge artifacts；需要引用这些材料时使用 search_knowledge，检索结果只能作为证据摘录，不代表完整文件已全部读入。
@@ -47,11 +49,12 @@ function buildNormalizedInputInstructions(context?: CucumberAgentContext) {
   return [
     "规格化输入：",
     `normalized_input: ${JSON.stringify(context.normalizedInput)}`,
-    "- 路由和执行优先依据 normalized_input.intent；图片生成或图片放大必须转交给 Cucumber Image Agent。",
-    "- document.create 或 document.edit 必须转交给 Cucumber Document Agent。",
-    "- web.fetch 必须转交给 Cucumber Web Agent。",
-    "- research.answer 必须转交给 Cucumber Research Agent；如果没有明确来源，要求用户提供公开 URL。",
-    "- code.create、data.analyze 和 workflow.plan 当前应明确能力边界，不要假装已执行。",
+    "- 路由和执行优先依据 normalized_input.operation、artifact、requiredCapabilities、negativeCapabilities。",
+    "- artifact.kind=image 必须转交给 Cucumber Image Agent；如果 negativeCapabilities 包含 image-generation，禁止图片生成。",
+    "- artifact.kind=diagram/markdown/document 必须转交给 Cucumber Document Agent。",
+    "- artifact.kind=webpage 或 requiredCapabilities 包含 web-fetch 时，使用 Cucumber Web Agent。",
+    "- requiredCapabilities 包含 research/source-based-answer/citations 时，使用 Cucumber Research Agent；如果没有明确来源，要求用户提供公开 URL。",
+    "- code、data 和复杂 workflow 当前应明确能力边界，不要假装已执行。",
     "- rawPrompt 只用于追溯，不得把未规格化的原始需求当作结构化执行参数。",
   ].join("\n");
 }
@@ -68,6 +71,10 @@ function buildSkillInstructions(context?: CucumberAgentContext) {
     scope: skill.agentScope,
     purpose: skill.purpose,
     tags: skill.tags,
+    capabilities: skill.capabilities,
+    produces: skill.produces,
+    uses: skill.uses,
+    notFor: skill.notFor,
     bindings: skill.bindings,
       scripts: skill.scripts.map(({ description, name, path, runtime }) => ({
         description,

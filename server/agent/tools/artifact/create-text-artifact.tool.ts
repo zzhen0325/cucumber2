@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { ArtifactRef } from "../../../../src/types/canvas.ts";
 import { storeTextArtifactContent } from "../../../storage.ts";
 import type { CucumberAgentContext } from "../../context.ts";
+import { assertTextArtifactToolAllowed } from "../../policy/task-artifact-policy.ts";
 
 const createTextArtifactInputSchema = z.object({
   content: z.string().trim().min(1),
@@ -44,6 +45,7 @@ export const createTextArtifactTool = tool({
   errorFunction: null,
   async execute(rawArgs, runContext) {
     const context = requireCucumberContext(runContext?.context);
+    assertTextArtifactToolAllowed(context);
     const parsed = createTextArtifactInputSchema.safeParse(rawArgs);
     if (!parsed.success) {
       return {
@@ -51,6 +53,15 @@ export const createTextArtifactTool = tool({
           .map((issue) => `${issue.path.join(".")} ${issue.message}`)
           .join("; ")}`,
       };
+    }
+    if (
+      context.normalizedInput?.artifact?.kind === "diagram" &&
+      context.normalizedInput.artifact.format === "mermaid" &&
+      !/```mermaid[\s\S]+```/i.test(parsed.data.content)
+    ) {
+      throw new Error(
+        "tool_policy_rejected: Mermaid diagram artifacts must include a fenced mermaid code block."
+      );
     }
 
     const artifact = await storeTextArtifactContent({

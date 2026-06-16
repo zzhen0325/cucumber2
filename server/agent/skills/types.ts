@@ -1,5 +1,6 @@
 import type {
   AgentSkillBindings,
+  AgentSkillCapability,
   AgentSkillPurpose,
   AgentSkillScope,
   AgentSkillScriptManifest,
@@ -16,6 +17,10 @@ export type AgentSkillCard = {
   description: string;
   agentScope: AgentSkillScope;
   purpose: AgentSkillPurpose;
+  capabilities: AgentSkillCapability[];
+  produces: string[];
+  uses: string[];
+  notFor: string[];
   tags: string[];
   triggers: AgentSkillTriggers;
   bindings: AgentSkillBindings;

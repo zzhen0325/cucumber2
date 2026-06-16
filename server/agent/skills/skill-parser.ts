@@ -22,6 +22,18 @@ export type AgentSkillBindings = {
   scopes: ToolScope[];
 };
 
+export type AgentSkillCapability = {
+  operation?: string;
+  artifact?: {
+    kind?: string;
+    subtype?: string;
+    format?: string;
+  };
+  domain?: string;
+  requiredCapabilities: string[];
+  negativeCapabilities: string[];
+};
+
 export type AgentSkillScriptRuntime = "bash" | "node" | "python";
 
 export type AgentSkillScriptManifest = {
@@ -37,14 +49,18 @@ export type ParsedAgentSkill = {
   agentScope: AgentSkillScope;
   body: string;
   bindings: AgentSkillBindings;
+  capabilities: AgentSkillCapability[];
   description: string;
   frontmatter: Record<string, unknown>;
   name: string;
+  notFor: string[];
   purpose: AgentSkillPurpose;
+  produces: string[];
   scripts: AgentSkillScriptManifest[];
   skillMd: string;
   tags: string[];
   triggers: AgentSkillTriggers;
+  uses: string[];
 };
 
 const skillNamePattern = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
@@ -80,6 +96,10 @@ export function parseAgentSkillMarkdown(markdown: string): ParsedAgentSkill {
   const tags = readStringArray(parsedFrontmatter.tags, "tags");
   const triggers = parseTriggers(parsedFrontmatter.triggers);
   const bindings = parseBindings(parsedFrontmatter.bindings);
+  const capabilities = parseCapabilities(parsedFrontmatter.capabilities);
+  const produces = readStringArray(parsedFrontmatter.produces, "produces");
+  const uses = readStringArray(parsedFrontmatter.uses, "uses");
+  const notFor = readStringArray(parsedFrontmatter.notFor ?? parsedFrontmatter.not_for, "notFor");
   const scripts = parseScripts(parsedFrontmatter.scripts);
   const body = lines.slice(closingIndex + 1).join("\n").trim();
 
@@ -100,14 +120,18 @@ export function parseAgentSkillMarkdown(markdown: string): ParsedAgentSkill {
     agentScope,
     body,
     bindings,
+    capabilities,
     description,
     frontmatter: parsedFrontmatter,
     name,
+    notFor,
     purpose,
+    produces,
     scripts,
     skillMd,
     tags,
     triggers,
+    uses,
   };
 }
 
@@ -164,6 +188,44 @@ function parseBindings(value: unknown): AgentSkillBindings {
       ...getRequiredScopesForToolBindings(tools),
     ]),
     tools,
+  };
+}
+
+export function parseCapabilities(value: unknown): AgentSkillCapability[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error("SKILL.md capabilities must be an array.");
+  }
+
+  return value.map((entry, index) => parseCapability(entry, `capabilities[${index}]`));
+}
+
+function parseCapability(value: unknown, label: string): AgentSkillCapability {
+  if (!isRecord(value)) {
+    throw new Error(`SKILL.md ${label} must be a YAML object.`);
+  }
+
+  const artifactRecord = isRecord(value.artifact) ? value.artifact : {};
+  const artifact = compactRecord({
+    kind: readStringEntry(value["artifact.kind"] ?? artifactRecord.kind),
+    subtype: readStringEntry(value["artifact.subtype"] ?? artifactRecord.subtype),
+    format: readStringEntry(value["artifact.format"] ?? artifactRecord.format),
+  });
+
+  return {
+    operation: readStringEntry(value.operation),
+    artifact: Object.keys(artifact).length ? artifact : undefined,
+    domain: readStringEntry(value.domain),
+    requiredCapabilities: readStringArray(
+      value.requiredCapabilities ?? value.required_capabilities,
+      `${label}.requiredCapabilities`
+    ),
+    negativeCapabilities: readStringArray(
+      value.negativeCapabilities ?? value.negative_capabilities,
+      `${label}.negativeCapabilities`
+    ),
   };
 }
 
@@ -269,6 +331,10 @@ function readRequiredEntryString(
   return value.trim();
 }
 
+function readStringEntry(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
 function readStringArray(value: unknown, label: string) {
   if (value === undefined || value === null) {
     return [];
@@ -288,6 +354,14 @@ function readStringArray(value: unknown, label: string) {
     }
   }
   return result;
+}
+
+function compactRecord<T extends Record<string, unknown>>(record: T) {
+  return Object.fromEntries(
+    Object.entries(record).filter(([, value]) => value !== undefined)
+  ) as {
+    [K in keyof T as undefined extends T[K] ? K : K]: Exclude<T[K], undefined>;
+  };
 }
 
 function uniqueSortedScopes(scopes: string[]) {

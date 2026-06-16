@@ -8,13 +8,18 @@ describe("specialist agent registry", () => {
     expect(
       isSpecialistEnabledForContext(
         {
-          enabledIntents: ["document.create", "document.edit"],
+          enabledRoutes: ["document"],
           handoffPolicy: () => false,
         },
         agentContext({
           normalizedInput: {
             rawPrompt: "写一份 PRD",
-            intent: "document.create",
+            userGoal: "写一份 PRD",
+            operation: "create",
+            artifact: { kind: "document", subtype: "prd", format: "markdown" },
+            domain: "product",
+            requiredCapabilities: ["markdown-artifact"],
+            negativeCapabilities: [],
           },
         })
       )
@@ -25,13 +30,18 @@ describe("specialist agent registry", () => {
     expect(
       isSpecialistEnabledForContext(
         {
-          enabledIntents: ["document.create", "document.edit"],
+          enabledRoutes: ["document"],
           handoffPolicy: () => false,
         },
         agentContext({
           normalizedInput: {
             rawPrompt: "解释一下这个概念",
-            intent: "text.answer",
+            userGoal: "解释一下这个概念",
+            operation: "answer",
+            artifact: null,
+            domain: "general",
+            requiredCapabilities: [],
+            negativeCapabilities: [],
           },
         })
       )
@@ -42,13 +52,18 @@ describe("specialist agent registry", () => {
     expect(
       isSpecialistEnabledForContext(
         {
-          enabledIntents: ["image.generate", "image.upscale"],
+          enabledRoutes: ["image"],
           handoffPolicy: () => true,
         },
         agentContext({
           normalizedInput: {
             rawPrompt: "帮我分析这个视觉需求",
-            intent: "text.answer",
+            userGoal: "帮我分析这个视觉需求",
+            operation: "analyze",
+            artifact: null,
+            domain: "visual-design",
+            requiredCapabilities: [],
+            negativeCapabilities: ["image-generation"],
           },
         })
       )
@@ -59,7 +74,7 @@ describe("specialist agent registry", () => {
     expect(
       isSpecialistEnabledForContext(
         {
-          enabledIntents: ["image.generate", "image.upscale"],
+          enabledRoutes: ["image"],
           handoffPolicy: () => true,
         },
         agentContext()
@@ -71,13 +86,18 @@ describe("specialist agent registry", () => {
     expect(
       isSpecialistEnabledForContext(
         {
-          enabledIntents: ["web.fetch"],
+          enabledRoutes: ["web"],
           handoffPolicy: () => false,
         },
         agentContext({
           normalizedInput: {
             rawPrompt: "读取 https://example.com",
-            intent: "web.fetch",
+            userGoal: "读取 https://example.com",
+            operation: "create",
+            artifact: { kind: "webpage", format: "html" },
+            domain: "general",
+            requiredCapabilities: ["web-fetch"],
+            negativeCapabilities: [],
           },
         })
       )
@@ -88,17 +108,55 @@ describe("specialist agent registry", () => {
     expect(
       isSpecialistEnabledForContext(
         {
-          enabledIntents: ["research.answer"],
+          enabledRoutes: ["research"],
           handoffPolicy: () => false,
         },
         agentContext({
           normalizedInput: {
             rawPrompt: "调研 https://example.com 并引用来源",
-            intent: "research.answer",
+            userGoal: "调研 https://example.com 并引用来源",
+            operation: "answer",
+            artifact: null,
+            domain: "general",
+            requiredCapabilities: ["source-based-answer", "citations"],
+            negativeCapabilities: [],
           },
         })
       )
     ).toBe(true);
+  });
+
+  it("enables document and web handoffs for a composite webpage-to-document task", () => {
+    const context = agentContext({
+      normalizedInput: {
+        rawPrompt: "把这个页面总结成文档",
+        userGoal: "把这个页面总结成文档",
+        operation: "transform",
+        artifact: { kind: "document", format: "markdown" },
+        domain: "general",
+        requiredCapabilities: ["web-fetch", "markdown-artifact"],
+        negativeCapabilities: [],
+      },
+    });
+
+    expect(
+      isSpecialistEnabledForContext(
+        { enabledRoutes: ["web"], handoffPolicy: () => false },
+        context
+      )
+    ).toBe(true);
+    expect(
+      isSpecialistEnabledForContext(
+        { enabledRoutes: ["document"], handoffPolicy: () => false },
+        context
+      )
+    ).toBe(true);
+    expect(
+      isSpecialistEnabledForContext(
+        { enabledRoutes: ["image"], handoffPolicy: () => false },
+        context
+      )
+    ).toBe(false);
   });
 });
 

@@ -12,6 +12,19 @@ export type AgentSkillTriggers = {
 export type AgentSkillBindings = {
   tools: string[];
   agents: string[];
+  scopes?: string[];
+};
+
+export type AgentSkillCapability = {
+  operation?: string;
+  artifact?: {
+    kind?: string;
+    subtype?: string;
+    format?: string;
+  };
+  domain?: string;
+  requiredCapabilities: string[];
+  negativeCapabilities: string[];
 };
 
 export type AgentSkillScriptManifest = {
@@ -29,6 +42,10 @@ export type AgentSkillDefinitionSummary = {
   description: string;
   agentScope: AgentSkillScope;
   purpose: AgentSkillPurpose;
+  capabilities: AgentSkillCapability[];
+  produces: string[];
+  uses: string[];
+  notFor: string[];
   tags: string[];
   triggers: AgentSkillTriggers;
   bindings: AgentSkillBindings;

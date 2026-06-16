@@ -11,8 +11,10 @@ import type {
   CanvasPatch,
 } from "../src/types/canvas.ts";
 import type { AgentEvent, AgentEventType } from "../src/types/runtime.ts";
+import { parseCapabilities } from "./agent/skills/skill-parser.ts";
 import type {
   AgentSkillBindings,
+  AgentSkillCapability,
   AgentSkillPurpose,
   AgentSkillScope,
   AgentSkillScriptManifest,
@@ -113,6 +115,10 @@ export type AgentSkillDefinitionSummary = {
   description: string;
   agentScope: AgentSkillScope;
   purpose: AgentSkillPurpose;
+  capabilities: AgentSkillCapability[];
+  produces: string[];
+  uses: string[];
+  notFor: string[];
   tags: string[];
   triggers: AgentSkillTriggers;
   bindings: AgentSkillBindings;
@@ -1174,19 +1180,23 @@ function mapAgentKnowledgeChunkRow(
 function mapAgentSkillDefinitionSummaryRow(
   row: AgentSkillDefinitionRow
 ): AgentSkillDefinitionSummary {
+  const frontmatter = row.frontmatter ?? {};
   return {
     id: row.id,
     agentScope: row.agent_scope,
     bindings: normalizeSkillBindings(row.bindings),
+    capabilities: normalizeSkillCapabilities(frontmatter),
     createdAt: row.created_at,
     createdBy: row.created_by,
     description: row.description,
     enabled: row.enabled,
     name: row.name,
+    notFor: normalizeFrontmatterStringArray(frontmatter.notFor ?? frontmatter.not_for),
     packageBucket: null,
     packagePath: null,
     packageSha256: row.package_sha256 ?? null,
     packageSizeBytes: row.package_size_bytes ?? null,
+    produces: normalizeFrontmatterStringArray(frontmatter.produces),
     purpose: row.purpose,
     scripts: row.scripts ?? [],
     sourceManifest: row.source_manifest ?? {},
@@ -1194,6 +1204,7 @@ function mapAgentSkillDefinitionSummaryRow(
     tags: row.tags ?? [],
     triggers: row.triggers ?? { canvasKinds: [], keywords: [] },
     updatedAt: row.updated_at,
+    uses: normalizeFrontmatterStringArray(frontmatter.uses),
   };
 }
 
@@ -1205,6 +1216,30 @@ function normalizeSkillBindings(
     scopes: bindings?.scopes ?? [],
     tools: bindings?.tools ?? [],
   };
+}
+
+function normalizeSkillCapabilities(
+  frontmatter: Record<string, unknown>
+): AgentSkillCapability[] {
+  try {
+    return parseCapabilities(frontmatter.capabilities);
+  } catch {
+    return [];
+  }
+}
+
+function normalizeFrontmatterStringArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return [
+    ...new Set(
+      value
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    ),
+  ];
 }
 
 function mapAgentSkillDefinitionRow(

@@ -13,6 +13,7 @@ import {
 } from "../../../storage.ts";
 import { assertImageProviderConfigured } from "../../../provider-config.ts";
 import type { CucumberAgentContext } from "../../context.ts";
+import { assertImageToolAllowed } from "../../policy/task-artifact-policy.ts";
 
 const upscaleImageInputSchema = z.object({
   resolution: z.enum(["4k", "8k"]).optional(),
@@ -48,6 +49,7 @@ export const upscaleImageTool = tool({
   errorFunction: null,
   async execute(rawArgs, runContext, details) {
     const context = requireCucumberContext(runContext?.context);
+    assertImageToolAllowed(context, "upscale_image");
     const parsed = upscaleImageInputSchema.safeParse(rawArgs);
     if (!parsed.success) {
       return {

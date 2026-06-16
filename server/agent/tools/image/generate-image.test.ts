@@ -59,10 +59,9 @@ const testCozeConfig = {
   token: "test-token",
   maxInputImages: 8,
   maxOutputImages: 4,
-  referenceImagesKey: "urls",
-  size: {},
-  watermark: {},
-  model: {},
+  size: undefined,
+  watermark: undefined,
+  model: undefined,
 };
 
 vi.mock("../../../../seedream.ts", async () => {

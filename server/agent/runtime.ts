@@ -2,7 +2,11 @@ import { Runner } from "@openai/agents";
 
 import type { AgentEvent } from "../../src/types/runtime.ts";
 import type { CanvasOperation } from "../../src/types/runtime.ts";
+import { createDocumentAgent } from "./agents/document.agent.ts";
+import { createImageAgent } from "./agents/image.agent.ts";
 import { createManagerAgent } from "./agents/manager.agent.ts";
+import { createResearchAgent } from "./agents/research.agent.ts";
+import { createWebAgent } from "./agents/web.agent.ts";
 import {
   AgentContextValidationError,
   buildAgentRunInput,
@@ -18,7 +22,10 @@ import {
 } from "./events/runtime-event-writer.ts";
 import { openAIStreamToCucumberEvents } from "./events/openai-stream-to-cucumber-events.ts";
 import { getAgentErrorMessage, isAbortError } from "./errors.ts";
-import { normalizeAgentInput } from "./input-normalizer.ts";
+import {
+  normalizeAgentInput,
+  selectAgentRoute,
+} from "./input-normalizer.ts";
 import {
   ensureCucumberInternalMcpConnected,
 } from "./mcp/internal-mcp-client.ts";
@@ -52,9 +59,9 @@ export class OpenAIAgentsRuntime implements AgentRuntime {
       yield { type: "skill_retrieved", candidates: context.skillCandidates };
 
       await ensureCucumberInternalMcpConnected();
-      const managerAgent = createManagerAgent();
+      const startAgent = createStartingAgentForRun(normalizedInput);
 
-      const stream = await getAgentRunner().run(managerAgent, buildManagerRunPrompt(normalizedRunInput), {
+      const stream = await getAgentRunner().run(startAgent, buildManagerRunPrompt(normalizedRunInput), {
         context,
         maxTurns: 8,
         signal: input.signal,
@@ -75,6 +82,24 @@ function getAgentRunner() {
     ...getAgentRunnerConfig(),
   });
   return runner;
+}
+
+function createStartingAgentForRun(
+  normalizedInput: NonNullable<AgentRunInput["normalizedInput"]>
+) {
+  switch (selectAgentRoute(normalizedInput)) {
+    case "document":
+      return createDocumentAgent();
+    case "image":
+      return createImageAgent();
+    case "research":
+      return createResearchAgent();
+    case "web":
+      return createWebAgent();
+    case "manager":
+    default:
+      return createManagerAgent();
+  }
 }
 
 export async function executeAgentRun({
@@ -201,15 +226,19 @@ export async function executeAgentRun({
             candidates: event.candidates.map((skill) => ({
               agentScope: skill.agentScope,
               bindings: skill.bindings,
+              capabilities: skill.capabilities,
               description: skill.description,
               id: skill.id,
               name: skill.name,
+              notFor: skill.notFor,
+              produces: skill.produces,
               purpose: skill.purpose,
               reasons: skill.reasons,
               score: skill.score,
               scripts: skill.scripts,
               tags: skill.tags,
               triggers: skill.triggers,
+              uses: skill.uses,
             })),
             runtime: "openai-agents-sdk",
           },

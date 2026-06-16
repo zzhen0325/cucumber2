@@ -63,7 +63,56 @@ Return one expanded prompt.
         scopes: ["read.skill", "tool.image.prompt"],
         tools: ["expand_image_prompt"],
       },
+      capabilities: [],
+      produces: [],
+      uses: [],
+      notFor: [],
     });
+  });
+
+  it("parses artifact capability metadata", () => {
+    const parsed = parseAgentSkillMarkdown(`---
+name: sequence-diagram
+description: Create sequence diagrams.
+agent_scope: document
+purpose: diagram
+capabilities:
+  - artifact.kind: diagram
+    artifact.subtype: sequenceDiagram
+    artifact.format: mermaid
+    requiredCapabilities:
+      - sequence-diagram
+      - markdown-artifact
+produces:
+  - markdown
+uses:
+  - create_text_artifact
+notFor:
+  - image-generation
+bindings:
+  tools:
+    - create_text_artifact
+---
+
+# Sequence Diagram
+
+Create Mermaid diagrams.
+`);
+
+    expect(parsed.capabilities).toEqual([
+      {
+        artifact: {
+          kind: "diagram",
+          subtype: "sequenceDiagram",
+          format: "mermaid",
+        },
+        requiredCapabilities: ["sequence-diagram", "markdown-artifact"],
+        negativeCapabilities: [],
+      },
+    ]);
+    expect(parsed.produces).toEqual(["markdown"]);
+    expect(parsed.uses).toEqual(["create_text_artifact"]);
+    expect(parsed.notFor).toEqual(["image-generation"]);
   });
 
   it("rejects unknown tool bindings and scopes", () => {
