@@ -2782,7 +2782,7 @@ function Composer({
       ? `${referenceNodeCount} 个引用节点 · ${referenceContextCount} upstream items`
       : `${referenceContextCount} upstream items`
     : hasMultiSelection
-      ? "选中的 Run 节点不会引用"
+      ? "选中节点无可引用内容"
       : `${contextCount} upstream items`;
 
   return (

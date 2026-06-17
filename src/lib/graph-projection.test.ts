@@ -38,6 +38,7 @@ describe("agent event graph projection", () => {
       kind: "run",
       status: "success",
       agentText: "图片已生成",
+      outputKind: "artifact",
     });
     expect(image?.data).toMatchObject({
       kind: "imageResult",
@@ -299,10 +300,11 @@ describe("agent event graph projection", () => {
       kind: "run",
       status: "success",
       agentText: "历史最终输出",
+      outputKind: "simple",
     });
   });
 
-  it("creates a prompt result node for simple text replies", () => {
+  it("keeps simple text replies in the run node", () => {
     const projection = projectRunTraceToCanvas({
       runNodeId: "run-1",
       events: [
@@ -318,27 +320,67 @@ describe("agent event graph projection", () => {
       ],
     });
     const inputPrompt = projection.nodes.find((node) => node.id === "prompt-new");
-    const resultPrompt = projection.nodes.find(
-      (node) => node.id === "prompt-result-run-1"
-    );
-    const resultEdge = projection.edges.find(
-      (edge) => edge.source === "run-1" && edge.target === "prompt-result-run-1"
-    );
+    const runNode = projection.nodes.find((node) => node.id === "run-1");
 
     expect(inputPrompt?.data).toMatchObject({
       kind: "prompt",
       prompt: "黄瓜是什么？",
     });
     expect(inputPrompt?.data).not.toHaveProperty("response");
-    expect(resultPrompt?.type).toBe("promptNode");
-    expect(resultPrompt?.data).toMatchObject({
-      kind: "prompt",
-      prompt: "黄瓜是一种常见的葫芦科蔬菜。",
-      contextLabel: "Agent reply",
+    expect(runNode?.data).toMatchObject({
+      kind: "run",
+      status: "success",
+      agentText: "黄瓜是一种常见的葫芦科蔬菜。",
+      outputKind: "simple",
     });
-    expect(resultEdge).toMatchObject({
-      source: "run-1",
-      target: "prompt-result-run-1",
+    expect(
+      projection.nodes.find((node) => node.id === "prompt-result-run-1")
+    ).toBeUndefined();
+    expect(
+      projection.edges.find(
+        (edge) => edge.source === "run-1" && edge.target === "prompt-result-run-1"
+      )
+    ).toBeUndefined();
+  });
+
+  it("ignores legacy final_output artifacts for simple text replies", () => {
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", {
+          prompt: "哈喽",
+          promptNodeId: "prompt-1",
+        }),
+        event("artifact.created", "final_output", {
+          artifact: {
+            id: "legacy-text-1",
+            metadata: {
+              format: "markdown",
+              preview: "你好呀",
+              sourceRunNodeId: "run-1",
+              sourceToolName: "final_output",
+            },
+            title: "Agent reply",
+            type: "doc",
+          },
+          toolName: "final_output",
+        }),
+        event("run.completed", "run", {
+          artifactIds: ["legacy-text-1"],
+          finalOutput: "你好呀",
+        }),
+      ],
+    });
+
+    expect(
+      projection.nodes.find((node) => node.id === "markdown-legacy-text-1")
+    ).toBeUndefined();
+    expect(projection.nodes.find((node) => node.id === "run-1")?.data).toMatchObject({
+      kind: "run",
+      agentText: "你好呀",
+      outputKind: "simple",
+      status: "success",
     });
   });
 
@@ -476,7 +518,7 @@ describe("agent event graph projection", () => {
           prompt: "总结画布",
           promptNodeId: "prompt-1",
         }),
-        event("artifact.created", "final_output", {
+        event("artifact.created", "create_text_artifact", {
           artifact: {
             contentRef:
               "supabase://agent-assets/projects/project-1/runs/run-1/artifacts/text-1.md",
@@ -489,7 +531,7 @@ describe("agent event graph projection", () => {
               preview: "# 总结\n\n这是一个 markdown 结果。",
               previewKind: "markdown",
               sourceRunNodeId: "run-1",
-              sourceToolName: "final_output",
+              sourceToolName: "create_text_artifact",
             },
             title: "Agent reply",
             type: "doc",
@@ -513,7 +555,7 @@ describe("agent event graph projection", () => {
           id: "text-1",
           metadata: expect.objectContaining({
             digest: "sha256:abc",
-            sourceToolName: "final_output",
+            sourceToolName: "create_text_artifact",
           }),
         },
       },

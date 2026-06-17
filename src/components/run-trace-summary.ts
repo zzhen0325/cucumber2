@@ -170,7 +170,12 @@ export function summarizeTraceEvent(event: RunStepTraceEvent) {
   }
 
   if (event.type.startsWith("run.step.")) {
-    return readString(event.payload.label) ?? event.stepId;
+    const label = readString(event.payload.label) ?? event.stepId;
+    const duration = formatDurationMs(readNumber(event.payload.durationMs));
+    const error = event.errorText ?? readString(event.payload.errorText);
+    return [label, duration, error ? truncate(error, 120) : undefined]
+      .filter(Boolean)
+      .join(" · ");
   }
 
   if (event.type === "tool.input" || event.type === "tool.output") {
@@ -187,7 +192,13 @@ export function shortId(value: string) {
 function buildTraceSteps(events: RunStepTraceEvent[]) {
   const steps = new Map<
     string,
-    { id: string; label: string; status: "running" | "success" | "error"; toolName?: string }
+    {
+      durationLabel?: string;
+      id: string;
+      label: string;
+      status: "running" | "success" | "error";
+      toolName?: string;
+    }
   >();
   for (const event of events) {
     if (
@@ -210,6 +221,7 @@ function buildTraceSteps(events: RunStepTraceEvent[]) {
         ? readString(event.payload.scriptName) ?? event.stepId
         : readString(event.payload.toolName) ?? event.stepId;
     steps.set(event.stepId, {
+      durationLabel: formatDurationMs(readNumber(event.payload.durationMs)),
       id: event.stepId,
       label: toolName,
       status:
@@ -369,6 +381,16 @@ function getErrorSourceLabel(source: string) {
     canvas_policy: "画布策略",
   };
   return labels[source] ?? source;
+}
+
+function formatDurationMs(durationMs: number | undefined) {
+  if (durationMs === undefined) {
+    return undefined;
+  }
+  if (durationMs < 1000) {
+    return `${Math.round(durationMs)}ms`;
+  }
+  return `${(durationMs / 1000).toFixed(durationMs < 10_000 ? 1 : 0)}s`;
 }
 
 function truncate(value: string, maxLength: number) {

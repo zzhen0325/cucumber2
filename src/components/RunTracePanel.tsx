@@ -107,7 +107,7 @@ export function RunTracePanel({
             <EventList events={summary.skillEvents} />
           </TraceSection>
 
-          <TraceSection title="Tools">
+          <TraceSection title="Steps & Tools">
             <div className="trace-step-list">
               {summary.steps.map((step) => (
                 <div className="trace-step-row" key={step.id}>
@@ -115,7 +115,9 @@ export function RunTracePanel({
                     {step.status === "error" ? <CircleAlert size={11} /> : step.status === "success" ? <Check size={11} /> : <Loader2 size={11} />}
                   </span>
                   <strong>{step.label}</strong>
-                  <small>{step.status}</small>
+                  <small>
+                    {[step.status, step.durationLabel].filter(Boolean).join(" · ")}
+                  </small>
                 </div>
               ))}
             </div>

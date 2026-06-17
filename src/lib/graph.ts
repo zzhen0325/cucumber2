@@ -78,8 +78,11 @@ export const isImageResultNode = (node?: AgentCanvasNode) =>
   node?.data.kind === "imageResult";
 
 export function getRunReferenceNodeId(node?: AgentCanvasNode) {
-  if (!node || node.data.kind === "run") {
+  if (!node) {
     return null;
+  }
+  if (node.data.kind === "run") {
+    return isSimpleRunOutput(node.data) ? node.id : null;
   }
   if (
     node.data.kind === "imageResult" &&
@@ -89,6 +92,24 @@ export function getRunReferenceNodeId(node?: AgentCanvasNode) {
   }
 
   return node.id;
+}
+
+export function isSimpleRunOutput(data: RunNodeData) {
+  const agentText = data.agentText?.trim();
+  if (data.outputKind === "simple") {
+    return Boolean(agentText);
+  }
+  if (data.outputKind === "artifact") {
+    return false;
+  }
+  if (data.status !== "success" || !agentText) {
+    return false;
+  }
+
+  const hasMaterializedSummary = data.summaryItems?.some(
+    (item) => item.kind === "artifact" || item.kind === "canvas"
+  );
+  return !hasMaterializedSummary && !hasArtifactProducingTool(data);
 }
 
 export function getRunReferenceNodeIds(nodes: AgentCanvasNode[]) {
@@ -867,6 +888,23 @@ function contextItemsFromNode(
     ];
   }
 
+  if (node.data.kind === "run" && isSimpleRunOutput(node.data)) {
+    const summary = node.data.agentText?.trim();
+    if (!summary) {
+      return [];
+    }
+    return [
+      {
+        nodeId: node.id,
+        type: "doc",
+        prompt: node.data.prompt,
+        summary,
+        title: "Run reply",
+        priority: getContextPriority("doc", isSelectedNode),
+      },
+    ];
+  }
+
   if (node.data.kind === "stickyNote") {
     const summary = node.data.text.trim() || "空便签";
     return [
@@ -913,6 +951,15 @@ function contextItemsFromNode(
   }
 
   return [];
+}
+
+function hasArtifactProducingTool(data: RunNodeData) {
+  const toolParts = data.toolParts ?? (data.toolPart ? [data.toolPart] : []);
+  return toolParts.some((part) =>
+    /(?:generate_image|upscale_image|create_text_artifact|fetch_webpage|research)/.test(
+      part.type
+    )
+  );
 }
 
 type ArtifactBackedCanvasNode = AgentCanvasNode & {

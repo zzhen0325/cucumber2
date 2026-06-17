@@ -183,6 +183,7 @@ export function createInputNormalizerAgent() {
       "Classify PRD, brief,方案,说明,邮件草稿,纪要 as document or markdown artifacts.",
       "Classify requests to edit, rewrite, polish, expand, shorten, remove parts from, or otherwise revise a prompt/text/description as operation=edit with artifact=null and negativeCapabilities including image-generation. Terse commands such as 取消标题, 去掉标题, 删除文案, or remove the title should revise the selected/upstream prompt text and must not generate images unless the user explicitly asks to generate/create/render an image now.",
       "Classify requests to analyze, evaluate, critique, summarize, or give suggestions for a visual/image/banner/poster/KV brief as operation=analyze or answer with no image artifact unless the user explicitly asks to generate/create/render the image now; include negativeCapabilities image-generation.",
+      "Classify explicit long-form output requests such as detailed explanation, complete plan, roadmap, proposal, research analysis, report, 文档, 详细说明, 完整规划, 调研分析, or 长文 as operation=create or analyze with artifact.kind=document or markdown. Short QA remains artifact=null.",
       "Classify image creation as artifact.kind=image with png format, and image upscaling/enhancement of an existing image as operation=transform, artifact.kind=image.",
       "For image artifacts, separate visual content from production controls such as count, aspect ratio, pixel dimensions, and usage.",
       "contentPrompt must be a clean renderable image description. Remove batch-count phrases such as four images, 四张, 一组4张.",
@@ -536,6 +537,20 @@ function inferTaskProtocol(prompt: string): Pick<
     };
   }
 
+  if (isLongFormDocumentRequest(prompt)) {
+    return {
+      artifact: {
+        kind: /markdown|md/i.test(prompt) ? "markdown" : "document",
+        subtype: inferLongFormDocumentSubtype(prompt),
+        format: "markdown",
+      },
+      domain,
+      negativeCapabilities: ["image-generation"],
+      operation: inferEditOperation(prompt) ? "edit" : "create",
+      requiredCapabilities: inferLongFormDocumentCapabilities(prompt),
+    };
+  }
+
   if (/(brief|方案|说明|邮件|纪要|提纲|大纲|稿|文档|markdown|md)/i.test(prompt)) {
     return {
       artifact: {
@@ -660,6 +675,9 @@ function normalizeOperation(
   if (isImageArtifact(artifact) && /(放大|高清|超清|提升清晰|upscale|enhance)/i.test(rawPrompt)) {
     return "transform";
   }
+  if (isDocumentArtifactKind(artifact) && operation === "answer") {
+    return "create";
+  }
   return operation;
 }
 
@@ -667,6 +685,15 @@ function isImageArtifact(
   artifact: NormalizedAgentInput["artifact"] | null | undefined
 ): artifact is NonNullable<NormalizedAgentInput["artifact"]> & { kind: "image" } {
   return artifact?.kind === "image";
+}
+
+function isDocumentArtifactKind(
+  artifact: NormalizedAgentInput["artifact"] | null | undefined
+) {
+  return Boolean(
+    artifact &&
+      ["diagram", "document", "markdown"].includes(artifact.kind)
+  );
 }
 
 function inferDomain(prompt: string): TaskDomain {
@@ -687,6 +714,47 @@ function inferDomain(prompt: string): TaskDomain {
 
 function inferEditOperation(prompt: string) {
   return /(改写|润色|重写|编辑|更新|修改|rewrite|edit|update|revise)/i.test(prompt);
+}
+
+function isLongFormDocumentRequest(prompt: string) {
+  if (hasExplicitImageCreationRequest(prompt)) {
+    return false;
+  }
+
+  const explicitLongForm =
+    /(长文|长篇|详细说明|详细解释|完整说明|完整规划|深度分析|深入分析|全面分析|调研分析|研究分析|调研报告|研究报告|分析报告|规划方案|执行计划|路线图|roadmap|whitepaper|report|write-?up)/i;
+  if (explicitLongForm.test(prompt)) {
+    return true;
+  }
+  if (/(给我|帮我|做|制定|输出|生成|创建|写|整理).{0,20}(规划|计划|roadmap|路线图)/i.test(prompt)) {
+    return true;
+  }
+
+  const longFormCue =
+    /(详细|完整|系统|深入|深度|全面|展开|一份|一篇|报告|文档|markdown|md|撰写|写|生成|创建|输出|整理成)/i;
+  const longFormTarget =
+    /(说明|解释|讲解|规划|计划|方案|调研|研究|分析|总结|复盘|对比|proposal|plan|report|brief)/i;
+
+  return longFormCue.test(prompt) && longFormTarget.test(prompt);
+}
+
+function inferLongFormDocumentSubtype(
+  prompt: string
+): TaskArtifactSubtype | undefined {
+  if (/(brief|方案|规划|计划|roadmap|路线图|proposal)/i.test(prompt)) {
+    return "brief";
+  }
+  return undefined;
+}
+
+function inferLongFormDocumentCapabilities(prompt: string) {
+  return uniqueCapabilityList([
+    "markdown-artifact",
+    ...(/https?:\/\//i.test(prompt) ? ["web-fetch"] : []),
+    ...(/引用|来源|出处|citation|citations|sources?/i.test(prompt)
+      ? ["source-based-answer", "citations"]
+      : []),
+  ]);
 }
 
 function isImageTaskCapability(capability: string) {
@@ -739,6 +807,10 @@ function uniqueCapabilityList(values: string[]) {
 }
 
 function isVisualBriefAnalysisRequest(prompt: string) {
+  if (isLongFormDocumentRequest(prompt)) {
+    return false;
+  }
+
   const asksForAnalysis =
     /(分析|评估|评价|判断|拆解|解读|梳理|诊断|优化建议|给(?:我)?(?:一些)?建议|review|analy[sz]e|critique|evaluate|assess)/i.test(
       prompt

@@ -23,10 +23,11 @@ describe("agent canvas graph", () => {
     expect(draft.upstreamContext).toEqual([]);
   });
 
-  it("uses only non-run nodes as references", () => {
+  it("uses only stable canvas outputs and simple run replies as references", () => {
     expect(getRunReferenceNodeId(promptNode("prompt-1", "初始需求"))).toBe("prompt-1");
     expect(getRunReferenceNodeId(imageNode("image-1"))).toBe("image-1");
     expect(getRunReferenceNodeId(runNode("run-1"))).toBeNull();
+    expect(getRunReferenceNodeId(simpleRunNode("run-simple"))).toBe("run-simple");
   });
 
   it("rebuilds ordered upstream context from graph edges", () => {
@@ -73,6 +74,29 @@ describe("agent canvas graph", () => {
     expect(draft.upstreamContext.map((item) => item.nodeId)).toEqual([
       "prompt-1",
       "image-1",
+    ]);
+  });
+
+  it("creates a follow-up branch from a selected simple run reply", () => {
+    const nodes = [promptNode("prompt-1", "黄瓜是什么？"), simpleRunNode("run-1")];
+    const edges = [edge("prompt-1", "run-1")];
+    const draft = createRunDraft("继续解释它的营养价值", "run-1", nodes, edges);
+
+    expect(draft.edges[0]).toMatchObject({
+      source: "run-1",
+      target: draft.promptNode.id,
+    });
+    expect(draft.upstreamContext).toEqual([
+      expect.objectContaining({
+        nodeId: "prompt-1",
+        type: "prompt",
+      }),
+      expect.objectContaining({
+        nodeId: "run-1",
+        prompt: "黄瓜是什么？",
+        summary: "黄瓜是一种常见的葫芦科蔬菜。",
+        type: "doc",
+      }),
     ]);
   });
 
@@ -141,6 +165,21 @@ function runNode(id: string): AgentCanvasNode {
     type: "runNode",
     position: { x: 0, y: 124 },
     data: { kind: "run", prompt: "初始需求", status: "success" },
+  };
+}
+
+function simpleRunNode(id: string): AgentCanvasNode {
+  return {
+    id,
+    type: "runNode",
+    position: { x: 0, y: 124 },
+    data: {
+      agentText: "黄瓜是一种常见的葫芦科蔬菜。",
+      kind: "run",
+      outputKind: "simple",
+      prompt: "黄瓜是什么？",
+      status: "success",
+    },
   };
 }
 

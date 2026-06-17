@@ -15,6 +15,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Node, NodeContent } from "@/components/ai-elements/node";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
+import { isSimpleRunOutput } from "@/lib/graph";
 import type { CanvasToolPart, RunNodeData } from "@/types/canvas";
 
 export function RunNodeView({
@@ -25,7 +26,10 @@ export function RunNodeView({
   height,
 }: NodeProps<FlowNode<RunNodeData, "runNode">>) {
   const isActiveRun = data.status === "queued" || data.status === "running";
-  const [expanded, setExpanded] = useState(() => isActiveRun);
+  const simpleRunOutput = isSimpleRunOutput(data);
+  const [expanded, setExpanded] = useState(
+    () => isActiveRun || simpleRunOutput
+  );
   const [manualSize, setManualSize] = useState<ResizeParams | null>(null);
   const previousStatus = useRef(data.status);
   const nodeRef = useRef<HTMLDivElement>(null);
@@ -40,7 +44,7 @@ export function RunNodeView({
     [data.toolPart, data.toolParts]
   );
   const latestToolPart = toolParts.at(-1) ?? toolParts[0];
-  const title = getRunTitle(data.status, latestToolPart?.state);
+  const title = getRunTitle(data.status, latestToolPart?.state, data.currentStep);
   const headerSummary = getRunHeaderSummary(data.status, toolParts, data.currentStep);
   const hasToolDetail =
     data.status !== "queued" ||
@@ -48,6 +52,7 @@ export function RunNodeView({
   const agentText = data.agentText?.trim() ?? "";
   const hasPlan = Boolean(data.plan?.length);
   const hasRunOutput = isActiveRun || Boolean(agentText) || hasToolDetail || hasPlan;
+  const pendingAgentText = getPendingAgentText(data.status, headerSummary);
   const toggleLabel = expanded ? "收起输出" : "展开输出";
   const nodeClassName = [
     "canvas-node",
@@ -63,6 +68,8 @@ export function RunNodeView({
       JSON.stringify({
         agentText,
         expanded,
+        outputKind: data.outputKind,
+        simpleRunOutput,
         status: data.status,
         currentStep: data.currentStep,
         plan: data.plan,
@@ -75,7 +82,16 @@ export function RunNodeView({
           type: part.type,
         })),
       }),
-    [agentText, data.currentStep, data.plan, data.status, expanded, toolParts]
+    [
+      agentText,
+      data.currentStep,
+      data.outputKind,
+      data.plan,
+      data.status,
+      expanded,
+      simpleRunOutput,
+      toolParts,
+    ]
   );
   const nodeStyle = getResizableNodeStyle(width, height, {
     expanded,
@@ -88,7 +104,11 @@ export function RunNodeView({
     previousStatus.current = data.status;
     const wasActiveRun = previous === "queued" || previous === "running";
 
-    if (data.status === "success" && previous !== "success") {
+    if (
+      data.status === "success" &&
+      previous !== "success" &&
+      !simpleRunOutput
+    ) {
       queueMicrotask(() => setExpanded(false));
       return;
     }
@@ -96,7 +116,7 @@ export function RunNodeView({
     if (isActiveRun && !wasActiveRun) {
       queueMicrotask(() => setExpanded(true));
     }
-  }, [data.status, isActiveRun]);
+  }, [data.status, isActiveRun, simpleRunOutput]);
 
   useEffect(() => {
     updateNodeInternals(id);
@@ -211,7 +231,7 @@ export function RunNodeView({
                 </MessageResponse>
               ) : (
                 <Shimmer as="p" className="agent-text-output muted" duration={1.8}>
-                  Thinking...
+                  {pendingAgentText}
                 </Shimmer>
               )}
             </div>
@@ -382,7 +402,8 @@ function dispatchRetryRun(
 
 function getRunTitle(
   status: RunNodeData["status"],
-  state?: CanvasToolPart["state"]
+  state?: CanvasToolPart["state"],
+  currentStep?: RunNodeData["currentStep"]
 ) {
   if (status === "error" || state === "output-error") {
     return "生成失败";
@@ -393,7 +414,26 @@ function getRunTitle(
   if (state === "input-available" || state === "output-available") {
     return "调用工具";
   }
-  return "Thinking...";
+  return currentStep?.label ?? (status === "queued" ? "准备 Agent" : "Agent 处理中");
+}
+
+function getPendingAgentText(
+  status: RunNodeData["status"],
+  headerSummary: { visibleLabel: string } | null
+) {
+  if (headerSummary?.visibleLabel) {
+    return headerSummary.visibleLabel;
+  }
+  if (status === "queued") {
+    return "准备启动 Agent";
+  }
+  if (status === "running") {
+    return "等待模型输出";
+  }
+  if (status === "error") {
+    return "运行失败，请查看错误详情。";
+  }
+  return "已完成，结果已写入画布。";
 }
 
 function getToolName(toolPart: CanvasToolPart) {

@@ -1418,7 +1418,7 @@
   width: 16px !important;
   height: 16px !important;
   border: 0 !important;
-  border-radius: 10px !important;
+  border-radius: 2px !important;
   background: transparent !important;
   box-shadow: none !important;
   color: transparent !important;
@@ -1427,25 +1427,25 @@
 .canvas-node-resizer-handle.top.left {
   border-top: 3px solid #d9d8d4 !important;
   border-left: 3px solid #d9d8d4 !important;
-  border-top-left-radius: 18px !important;
+  border-top-left-radius: 8px !important;
 }
 
 .canvas-node-resizer-handle.top.right {
   border-top: 3px solid #d9d8d4 !important;
   border-right: 3px solid #d9d8d4 !important;
-  border-top-right-radius: 18px !important;
+  border-top-right-radius: 8px !important;
 }
 
 .canvas-node-resizer-handle.bottom.left {
   border-bottom: 3px solid #d9d8d4 !important;
   border-left: 3px solid #d9d8d4 !important;
-  border-bottom-left-radius: 18px !important;
+  border-bottom-left-radius: 8px !important;
 }
 
 .canvas-node-resizer-handle.bottom.right {
   border-right: 3px solid #d9d8d4 !important;
   border-bottom: 3px solid #d9d8d4 !important;
-  border-bottom-right-radius: 18px !important;
+  border-bottom-right-radius: 8px !important;
 }
 
 .prompt-card {
@@ -1471,7 +1471,7 @@
   line-height: var(--canvas-node-body-line);
   text-align: left;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
 }
 
 .prompt-node-input {
@@ -2859,7 +2859,7 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
-  border-radius: 28px;
+  border-radius: 8px;
   background: #ffffff;
 }
 

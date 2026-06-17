@@ -4,6 +4,44 @@ import type { CucumberAgentContext, CucumberRunEvent } from "../context";
 import { openAIStreamToCucumberEvents } from "./openai-stream-to-cucumber-events";
 
 describe("OpenAI Agents stream adapter", () => {
+  it("emits text deltas from the Agents SDK normalized stream shape", async () => {
+    const context = agentContext();
+    const stream = fakeStream([
+      {
+        type: "raw_model_stream_event",
+        data: { type: "output_text_delta", delta: "正在分析" },
+      },
+      {
+        type: "raw_model_stream_event",
+        data: { type: "output_text_delta", delta: "画布" },
+      },
+    ], "正在分析画布");
+
+    const events = await collect(openAIStreamToCucumberEvents(stream, context));
+
+    expect(events).toEqual(
+      expect.arrayContaining([
+        { type: "text_delta", text: "正在分析" },
+        { type: "text_delta", text: "画布" },
+        { type: "run_completed", finalOutput: "正在分析画布", artifactIds: [] },
+      ])
+    );
+  });
+
+  it("keeps compatibility with direct legacy OpenAI text deltas", async () => {
+    const context = agentContext();
+    const stream = fakeStream([
+      {
+        type: "raw_model_stream_event",
+        data: { type: "response.output_text.delta", delta: "旧协议" },
+      },
+    ], "旧协议");
+
+    const events = await collect(openAIStreamToCucumberEvents(stream, context));
+
+    expect(events).toContainEqual({ type: "text_delta", text: "旧协议" });
+  });
+
   it("projects agents, handoffs, tools, artifacts, final output, and artifact ids", async () => {
     const context = agentContext();
     const stream = fakeStream([

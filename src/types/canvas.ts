@@ -154,6 +154,7 @@ export type RunNodeData = {
   prompt: string;
   status: AgentRunStatus;
   agentText?: string;
+  outputKind?: "simple" | "artifact";
   toolParts?: CanvasToolPart[];
   toolPart?: CanvasToolPart;
   error?: string;

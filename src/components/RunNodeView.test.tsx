@@ -30,7 +30,8 @@ describe("RunNodeView", () => {
     expect(screen.getByRole("button", { name: "收起输出" }).getAttribute(
       "aria-expanded"
     )).toBe("true");
-    expect(screen.getAllByText("Thinking...")).toHaveLength(2);
+    expect(screen.getByText("准备 Agent")).toBeTruthy();
+    expect(screen.getByText("准备启动 Agent")).toBeTruthy();
   });
 
   it("keeps tool and skill calls collapsed when the run is expanded", () => {
@@ -55,9 +56,10 @@ describe("RunNodeView", () => {
     expect(screen.getByText("参数")).toBeTruthy();
   });
 
-  it("collapses automatically when generation succeeds", async () => {
+  it("collapses automatically when artifact generation succeeds", async () => {
     const { rerender } = renderRunNode({
       agentText: "正在生成",
+      outputKind: "artifact",
       status: "running",
     });
 
@@ -68,6 +70,7 @@ describe("RunNodeView", () => {
         data={{
           agentText: "完成",
           kind: "run",
+          outputKind: "artifact",
           prompt: "生成图片",
           status: "success",
         }}
@@ -80,6 +83,44 @@ describe("RunNodeView", () => {
     expect(screen.getByRole("button", { name: "展开输出" }).getAttribute(
       "aria-expanded"
     )).toBe("false");
+  });
+
+  it("keeps simple text output expanded when generation succeeds", async () => {
+    const { rerender } = renderRunNode({
+      agentText: "正在分析",
+      status: "running",
+    });
+
+    rerender(
+      <RunNodeHarness
+        data={{
+          agentText: "黄瓜是一种常见的葫芦科蔬菜。",
+          kind: "run",
+          outputKind: "simple",
+          prompt: "黄瓜是什么？",
+          status: "success",
+        }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Agent run stream")).toBeTruthy();
+    });
+    expect(screen.getByText("黄瓜是一种常见的葫芦科蔬菜。")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "收起输出" }).getAttribute(
+      "aria-expanded"
+    )).toBe("true");
+  });
+
+  it("expands persisted simple text output by default", () => {
+    renderRunNode({
+      agentText: "黄瓜是一种常见的葫芦科蔬菜。",
+      outputKind: "simple",
+      status: "success",
+    });
+
+    expect(screen.getByLabelText("Agent run stream")).toBeTruthy();
+    expect(screen.getByText("黄瓜是一种常见的葫芦科蔬菜。")).toBeTruthy();
   });
 
   it("shows a compact plan and current step", () => {

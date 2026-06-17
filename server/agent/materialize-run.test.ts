@@ -209,7 +209,7 @@ describe("agent run materializer", () => {
     expect(next.edges.some((edge) => edge.target === "artifact-image-1")).toBe(false);
   });
 
-  it("materializes simple replies as a result prompt node", () => {
+  it("keeps simple replies in the run node without creating a result node", () => {
     const project = projectSnapshot();
     project.nodes.push(
       {
@@ -279,16 +279,17 @@ describe("agent run materializer", () => {
       prompt: "旧问题",
     });
     expect(next.nodes.find((node) => node.id === "prompt-old")?.data).not.toHaveProperty("response");
-    expect(next.nodes.find((node) => node.id === "prompt-result-run-new")?.data).toMatchObject({
-      kind: "prompt",
-      prompt: "黄瓜是一种常见的葫芦科蔬菜。",
-      contextLabel: "Agent reply",
+    expect(next.nodes.find((node) => node.id === "run-new")?.data).toMatchObject({
+      kind: "run",
+      status: "success",
+      agentText: "黄瓜是一种常见的葫芦科蔬菜。",
     });
+    expect(next.nodes.find((node) => node.id === "prompt-result-run-new")).toBeUndefined();
     expect(
       next.edges.find(
         (edge) => edge.source === "run-new" && edge.target === "prompt-result-run-new"
       )
-    ).toBeTruthy();
+    ).toBeUndefined();
   });
 });
 

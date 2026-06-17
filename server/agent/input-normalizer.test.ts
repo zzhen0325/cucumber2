@@ -159,6 +159,91 @@ describe("input normalizer", () => {
     expect(normalized.image).toBeUndefined();
   });
 
+  it("keeps short QA on the manager route", () => {
+    const raw = "解释一下 React Flow 是什么";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "answer",
+        artifact: null,
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "answer",
+      artifact: null,
+      intent: "text.answer",
+    });
+    expect(selectAgentRoute(normalized)).toBe("manager");
+  });
+
+  it("routes explicit long-form explanations to the document specialist", () => {
+    const raw = "详细解释一下 Agent Runtime 的工作方式";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "answer",
+        artifact: null,
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "create",
+      artifact: { kind: "document", format: "markdown" },
+      requiredCapabilities: ["markdown-artifact"],
+      negativeCapabilities: ["image-generation"],
+      intent: "document.create",
+    });
+    expect(selectAgentRoute(normalized)).toBe("document");
+  });
+
+  it("routes planning requests that should become long text to the document specialist", () => {
+    const raw = "给我一个三阶段产品规划";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "answer",
+        artifact: null,
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "create",
+      artifact: { kind: "document", subtype: "brief", format: "markdown" },
+      domain: "product",
+      requiredCapabilities: ["markdown-artifact"],
+      intent: "document.create",
+    });
+    expect(selectAgentRoute(normalized)).toBe("document");
+  });
+
+  it("routes long-form research analysis to a document artifact when no source citations are requested", () => {
+    const raw = "做一份 AI 画布产品机会点的调研分析";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "answer",
+        artifact: null,
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "create",
+      artifact: { kind: "document", format: "markdown" },
+      requiredCapabilities: ["markdown-artifact"],
+      intent: "document.create",
+    });
+    expect(selectAgentRoute(normalized)).toBe("document");
+  });
+
   it("keeps prompt text edits out of image generation even when the model proposes image generation", () => {
     const raw = "取消标题";
 

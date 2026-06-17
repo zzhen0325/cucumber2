@@ -136,6 +136,48 @@ describe("agent context", () => {
     });
   });
 
+  it("allows a simple run reply as trusted follow-up context", () => {
+    const projectSnapshot = snapshot();
+    projectSnapshot.nodes.push({
+      id: "run-simple",
+      type: "runNode",
+      position: { x: 260, y: 124 },
+      data: {
+        agentText: "黄瓜是一种常见的葫芦科蔬菜。",
+        kind: "run",
+        outputKind: "simple",
+        prompt: "黄瓜是什么？",
+        status: "success",
+      },
+    });
+
+    const input = buildAgentRunInput({
+      userId: "user-1",
+      projectId: "project-1",
+      runNodeId: "run-2",
+      canvasContext: {
+        prompt: "继续解释营养价值",
+        promptNodeId: "prompt-2",
+        selectedNodeId: "run-simple",
+      },
+      projectSnapshot,
+    });
+
+    expect(input.selectedNodeId).toBe("run-simple");
+    expect(input.upstreamContext).toEqual([
+      expect.objectContaining({
+        nodeId: "run-simple",
+        prompt: "黄瓜是什么？",
+        summary: "黄瓜是一种常见的葫芦科蔬菜。",
+        type: "doc",
+      }),
+    ]);
+    expect(input.contextSummary).toMatchObject({
+      referenceNodes: [{ id: "run-simple", kind: "run" }],
+      omittedNodes: [],
+    });
+  });
+
   it("applies the default context budget and reports omitted nodes", () => {
     const projectSnapshot = snapshot();
     if (projectSnapshot.nodes[0].data.kind !== "prompt") {

@@ -39,12 +39,21 @@ import {
 } from "./materialize-run.ts";
 import { getAgentRunnerConfig } from "./model-config.ts";
 import { retrieveRelevantAgentSkills } from "./skills/skill-retrieval.ts";
-import { storeTextArtifactContent } from "../storage.ts";
 import { buildRunPlan } from "./run-plan.ts";
 import { redactTraceValue } from "./trace-redaction.ts";
 import { getToolTraceMetadata } from "./tool-registry.ts";
 
 let runner: Runner | undefined;
+
+type RunPhase = "prepare" | "route" | "execute" | "materialize";
+
+type RunPhaseTimer = {
+  label: string;
+  phase: RunPhase;
+  startedAt: string;
+  startedMs: number;
+  stepId: string;
+};
 
 export class OpenAIAgentsRuntime implements AgentRuntime {
   async *run(input: AgentRunInput): AsyncIterable<CucumberRunEvent> {
@@ -55,18 +64,65 @@ export class OpenAIAgentsRuntime implements AgentRuntime {
     const context = buildCucumberAgentContext(normalizedRunInput);
     const mcpContextId = registerMcpRunContext(context);
     try {
-      context.skillCandidates = await retrieveRelevantAgentSkills(normalizedRunInput);
+      const skillPhase = startRunPhase(
+        "skills.retrieve",
+        "检索可用技能",
+        "route"
+      );
+      yield runPhaseStarted(skillPhase);
+      try {
+        context.skillCandidates = await retrieveRelevantAgentSkills(normalizedRunInput);
+        yield runPhaseCompleted(skillPhase, {
+          candidateCount: context.skillCandidates.length,
+        });
+      } catch (error) {
+        yield runPhaseFailed(skillPhase, error);
+        throw error;
+      }
       yield { type: "skill_retrieved", candidates: context.skillCandidates };
 
-      await ensureCucumberInternalMcpConnected();
+      const mcpPhase = startRunPhase(
+        "mcp.connect",
+        "连接内部 MCP 工具",
+        "route"
+      );
+      yield runPhaseStarted(mcpPhase);
+      try {
+        await ensureCucumberInternalMcpConnected();
+        yield runPhaseCompleted(mcpPhase);
+      } catch (error) {
+        yield runPhaseFailed(mcpPhase, error);
+        throw error;
+      }
       const startAgent = createStartingAgentForRun(normalizedInput);
 
-      const stream = await getAgentRunner().run(startAgent, buildManagerRunPrompt(normalizedRunInput), {
-        context,
-        maxTurns: 8,
-        signal: input.signal,
-        stream: true,
+      const agentStartPhase = startRunPhase(
+        "agent.start",
+        "启动 Agent Runner",
+        "route"
+      );
+      yield runPhaseStarted(agentStartPhase, {
+        agentName: startAgent.name,
       });
+      let stream;
+      try {
+        stream = await getAgentRunner().run(startAgent, buildManagerRunPrompt(normalizedRunInput), {
+          context,
+          maxTurns: 8,
+          signal: input.signal,
+          stream: true,
+        });
+        yield runPhaseCompleted(agentStartPhase, {
+          agentName: startAgent.name,
+          maxTurns: 8,
+        });
+      } catch (error) {
+        yield runPhaseFailed(agentStartPhase, error, {
+          agentName: startAgent.name,
+          maxTurns: 8,
+        });
+        throw error;
+      }
       yield* openAIStreamToCucumberEvents(stream, context);
     } finally {
       unregisterMcpRunContext(mcpContextId);
@@ -82,6 +138,72 @@ function getAgentRunner() {
     ...getAgentRunnerConfig(),
   });
   return runner;
+}
+
+function startRunPhase(
+  stepId: string,
+  label: string,
+  phase: RunPhase
+): RunPhaseTimer {
+  return {
+    label,
+    phase,
+    startedAt: new Date().toISOString(),
+    startedMs: Date.now(),
+    stepId,
+  };
+}
+
+function runPhaseStarted(
+  timer: RunPhaseTimer,
+  details?: Record<string, unknown>
+): CucumberRunEvent {
+  return {
+    type: "run_phase_started",
+    details,
+    label: timer.label,
+    phase: timer.phase,
+    startedAt: timer.startedAt,
+    stepId: timer.stepId,
+  };
+}
+
+function runPhaseCompleted(
+  timer: RunPhaseTimer,
+  details?: Record<string, unknown>
+): CucumberRunEvent {
+  return {
+    type: "run_phase_completed",
+    completedAt: new Date().toISOString(),
+    details,
+    durationMs: elapsedRunPhaseMs(timer),
+    label: timer.label,
+    phase: timer.phase,
+    startedAt: timer.startedAt,
+    stepId: timer.stepId,
+  };
+}
+
+function runPhaseFailed(
+  timer: RunPhaseTimer,
+  error: unknown,
+  details?: Record<string, unknown>
+): CucumberRunEvent {
+  return {
+    type: "run_phase_failed",
+    details,
+    durationMs: elapsedRunPhaseMs(timer),
+    errorText: getAgentErrorMessage(error),
+    failedAt: new Date().toISOString(),
+    label: timer.label,
+    phase: timer.phase,
+    startedAt: timer.startedAt,
+    stepId: timer.stepId,
+  };
+}
+
+function elapsedRunPhaseMs(timer: RunPhaseTimer) {
+  return Math.max(0, Date.now() - timer.startedMs);
 }
 
 function createStartingAgentForRun(
@@ -130,6 +252,41 @@ export async function executeAgentRun({
     event: Omit<AgentEvent, "createdAt"> & { createdAt?: string }
   ) => trackEvent(await eventWriter.writeEvent(event));
 
+  const writeRunPhaseEvent = async (event: CucumberRunEvent) => {
+    if (event.type === "run_phase_started") {
+      await writeRunEvent({
+        projectId: input.projectId,
+        runNodeId: input.runNodeId,
+        stepId: event.stepId,
+        type: "run.step.started",
+        payload: buildRunPhasePayload(event),
+      });
+      return;
+    }
+
+    if (event.type === "run_phase_completed") {
+      await writeRunEvent({
+        projectId: input.projectId,
+        runNodeId: input.runNodeId,
+        stepId: event.stepId,
+        type: "run.step.completed",
+        payload: buildRunPhasePayload(event),
+      });
+      return;
+    }
+
+    if (event.type === "run_phase_failed") {
+      await writeRunEvent({
+        projectId: input.projectId,
+        runNodeId: input.runNodeId,
+        stepId: event.stepId,
+        type: "run.step.failed",
+        payload: buildRunPhasePayload(event),
+        errorText: event.errorText,
+      });
+    }
+  };
+
   const flushAndMaterializeRun = async () => {
     await eventWriter.flush();
     await materializeAgentRunSnapshot({
@@ -141,6 +298,11 @@ export async function executeAgentRun({
   };
 
   try {
+    const contextPhase = startRunPhase(
+      "context.build",
+      "重建可信画布上下文",
+      "prepare"
+    );
     agentInput = buildAgentRunInput(input);
     await writeRunEvent({
       projectId: input.projectId,
@@ -157,12 +319,35 @@ export async function executeAgentRun({
         runtime: "openai-agents-sdk",
       }),
     });
-    agentInput = {
-      ...agentInput,
-      normalizedInput: await normalizeAgentInput(agentInput, {
-        signal: input.signal,
-      }),
-    };
+    await writeRunPhaseEvent(
+      runPhaseCompleted(contextPhase, {
+        edgeCount: agentInput.canvasSnapshot.edges.length,
+        nodeCount: agentInput.canvasSnapshot.nodes.length,
+        selectedNodeCount: agentInput.selectedNodeIds.length,
+        upstreamContextCount: agentInput.upstreamContext.length,
+      })
+    );
+    const normalizePhase = startRunPhase(
+      "input.normalize",
+      "归一化用户输入",
+      "prepare"
+    );
+    await writeRunPhaseEvent(runPhaseStarted(normalizePhase));
+    try {
+      agentInput = {
+        ...agentInput,
+        normalizedInput: await normalizeAgentInput(agentInput, {
+          signal: input.signal,
+        }),
+      };
+    } catch (error) {
+      await writeRunPhaseEvent(runPhaseFailed(normalizePhase, error));
+      throw error;
+    }
+    const normalizedInput = agentInput.normalizedInput;
+    if (!normalizedInput) {
+      throw new Error("Input normalization did not produce a normalized input.");
+    }
     await writeRunEvent({
       projectId: input.projectId,
       runNodeId: input.runNodeId,
@@ -179,6 +364,19 @@ export async function executeAgentRun({
         runtime: "openai-agents-sdk",
       }),
     });
+    await writeRunPhaseEvent(
+      runPhaseCompleted(normalizePhase, {
+        intent: normalizedInput.intent,
+        operation: normalizedInput.operation,
+        artifactKind: normalizedInput.artifact?.kind,
+      })
+    );
+    const planPhase = startRunPhase(
+      "plan.build",
+      "生成运行计划",
+      "prepare"
+    );
+    await writeRunPhaseEvent(runPhaseStarted(planPhase));
     const runPlan = buildRunPlan(agentInput);
     if (runPlan.length > 0) {
       await writeRunEvent({
@@ -193,8 +391,22 @@ export async function executeAgentRun({
         },
       });
     }
+    await writeRunPhaseEvent(
+      runPhaseCompleted(planPhase, {
+        itemCount: runPlan.length,
+      })
+    );
 
     for await (const event of agentRuntime.run(agentInput)) {
+      if (
+        event.type === "run_phase_started" ||
+        event.type === "run_phase_completed" ||
+        event.type === "run_phase_failed"
+      ) {
+        await writeRunPhaseEvent(event);
+        continue;
+      }
+
       if (event.type === "text_delta") {
         if (!textStarted) {
           textStarted = true;
@@ -418,28 +630,6 @@ export async function executeAgentRun({
     }
 
     closeTextStream();
-    if (finalOutput?.trim() && artifactIds.length === 0) {
-      const artifact = await storeTextArtifactContent({
-        content: finalOutput,
-        projectId: input.projectId,
-        runNodeId: input.runNodeId,
-        sourceToolName: "final_output",
-        title: "Agent reply",
-        userId: input.userId,
-      });
-      artifactIds = [artifact.id];
-      await writeRunEvent({
-        projectId: input.projectId,
-        runNodeId: input.runNodeId,
-        stepId: "final_output",
-        type: "artifact.created",
-        payload: {
-          artifact,
-          runtime: "openai-agents-sdk",
-          toolName: "final_output",
-        },
-      });
-    }
     await eventWriter.flush();
     await writeRunEvent({
       projectId: input.projectId,
@@ -630,6 +820,27 @@ function buildRedactedPayload(payload: Record<string, unknown>) {
     ...(redacted.value as Record<string, unknown>),
     redaction: redacted.summary,
   };
+}
+
+function buildRunPhasePayload(
+  event: Extract<
+    CucumberRunEvent,
+    | { type: "run_phase_started" }
+    | { type: "run_phase_completed" }
+    | { type: "run_phase_failed" }
+  >
+) {
+  return buildRedactedPayload({
+    details: event.details,
+    durationMs: "durationMs" in event ? event.durationMs : undefined,
+    completedAt: "completedAt" in event ? event.completedAt : undefined,
+    failedAt: "failedAt" in event ? event.failedAt : undefined,
+    errorText: "errorText" in event ? event.errorText : undefined,
+    label: event.label,
+    phase: event.phase,
+    runtime: "openai-agents-sdk",
+    startedAt: event.startedAt,
+  });
 }
 
 async function writeCanvasOperationEvents({

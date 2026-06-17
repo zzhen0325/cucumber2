@@ -168,10 +168,18 @@ function* drainPendingEvents(context: CucumberAgentContext): Iterable<PendingCuc
 }
 
 function readTextDelta(data: unknown) {
-  if (!isRecord(data) || data.type !== "response.output_text.delta") {
+  if (!isRecord(data)) {
     return null;
   }
-  return typeof data.delta === "string" ? data.delta : null;
+
+  if (
+    data.type === "output_text_delta" ||
+    data.type === "response.output_text.delta"
+  ) {
+    return typeof data.delta === "string" ? data.delta : null;
+  }
+
+  return null;
 }
 
 function readToolName(item: unknown) {

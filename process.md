@@ -8,6 +8,7 @@
 - Specialist registry 不再按 intent 字符串开 handoff；runtime 根据 artifact protocol deterministic route。单一 image/document/web/research 任务直接启动对应 specialist，复合任务留给 Manager 编排并只开放匹配 handoff。
 - `视觉`、`H5`、营销或产品语义只作为 `domain`/上下文；流程图和时序图默认归一化为 `diagram` + `mermaid`，由 Document Agent 产出 Markdown artifact，不走图片链路。
 - 提示词/文本改写任务（例如选中长图片 prompt 后输入“取消标题”）归一化为 `artifact=null` + `operation=edit` + `negativeCapabilities=["image-generation"]`，由 Manager 直接输出修改后的文本；即使存在上游 prompt 节点也不创建任务 plan、不委派 Image Agent、不调用 `generate_image`。
+- Manager 作为通用对话默认处理者：短问答、概念解释、轻量分析和简短总结保持 `artifact=null`，由 Manager 直接回复；明确要求详细说明、完整规划、长篇方案、调研分析、报告或文档时归一化为 document/markdown artifact，交由 Document Agent 创建可沉淀的长文本产物。
 - Skill frontmatter 新增可选 `capabilities`、`produces`、`uses` 和 `notFor`；skill retrieval 先按 artifact/capability 打分，再看关键词、canvas kind 和 token overlap，并会按 `negativeCapabilities` 抑制不应出现的 image skill。
 - 新增 seed skill `sequence-diagram`，声明 `diagram/sequenceDiagram/mermaid` 能力，Document Agent 可激活后用 `create_text_artifact` 创建包含 Mermaid fenced block 的 Markdown artifact。
 - 工具入口新增 task artifact policy：图片 prompt/generation 工具只允许 image artifact task，`image-generation` negative capability 会阻止新图生成；`create_text_artifact` 只允许 markdown/document/diagram artifact task，Mermaid diagram 必须包含 mermaid fenced block。
@@ -46,6 +47,7 @@
 
 - Agent Run Trace 继续只写 `agent_run_events`，不新增平行 Trace 表。
 - `run.created` 和 `input.normalized` payload 增加服务端重建的 context summary，包含 selected nodes、reference nodes、upstream path 和 omitted nodes/reason；Trace 面板新增 Context/Input 摘要。
+- Agent Run 启动阶段新增轻量 `run.step.*` 耗时 Trace，覆盖 `context.build`、`input.normalize`、`plan.build`、`skills.retrieve`、`mcp.connect` 和 `agent.start`，用于定位“准备 Agent”阶段的慢点。
 - `input.normalized`、`skill.retrieved`、`skill.activated`、`skill.script.*`、`tool.error`、`canvas.operation.rejected` 和 `run.failed` 在 Trace 面板中显示用户可读摘要，不再只依赖截断 JSON。
 - `buildAgentRunInput` 的上下文校验失败会被 runtime 捕获并写入 `run.failed`，错误来源标记为 `context`，Run 节点显示短错误。
 - Run 节点错误文案收敛为短来源提示；完整 provider、工具、Seedream、技能脚本和上下文诊断保留在 Trace payload/errorText。
@@ -84,9 +86,9 @@
 
 - 前端开始消费 AI SDK UI assistant `text` parts，并将当前 Run 的实时文字投影到 `RunNodeData.agentText`。
 - Run 节点文字优先级为 `run.completed.finalOutput` 高于当前 streamed text，高于运行状态占位文案；历史 Trace 回放不依赖实时 text Map。
-- Run 节点默认收起，仅展示 Agent 流式文字和工具调用摘要；详细 Agent/handoff/timeline 诊断继续通过 Trace 面板查看。
+- Run 节点默认收起，仅展示 Agent 流式文字和工具调用摘要；简单文本输出完成后保持展开，详细 Agent/handoff/timeline 诊断继续通过 Trace 面板查看。
 - Run 节点内部滚动区使用 React Flow `nodrag`、`nopan`、`nowheel`，避免滚动文字或工具详情时拖动、平移画布。
-- 简单问答、解释、轻量分析或总结任务不调用工具时，`run.completed.finalOutput` 会物化为 Run 节点下游的新 Prompt 结果节点；原始用户输入 Prompt 节点保持不变。
+- 简单问答、解释、轻量分析或简短总结任务不调用工具时，`run.completed.finalOutput` 只显示在 Run 节点内；不再自动创建下游 Prompt/Markdown 结果节点。用户选中该 Run 后可以继续提交下一轮对话，服务端会从持久化画布重建该 Run 的文本上下文。
 
 ## 2026-06-12 Image Request Boundary
 
@@ -106,7 +108,7 @@
 
 - Agent Run 提交支持 `selectedNodeIds`，多选的可引用节点会一起生成到 Prompt 节点的引用边。
 - 画布选择工具支持 Shift 点击追加/取消多选；画布任意工具下都可用鼠标中键拖动平移，手型工具仍保留左键拖动平移。
-- 服务端继续从持久化项目快照重建 upstream context，并过滤 Run 节点；客户端提供的节点列表只作为待验证 id，不提供可信上下文。
+- 服务端继续从持久化项目快照重建 upstream context，并过滤不可引用的 Run 节点；简单文本输出 Run 可作为下一轮文本上下文。客户端提供的节点列表只作为待验证 id，不提供可信上下文。
 
 ## 2026-06-13 Internal MCP Tools
 
@@ -139,7 +141,7 @@
 - Agent 模型 provider 改为 Agents SDK 官方 `ModelProvider` + `Runner({ model, modelProvider })` 写法；Manager、specialist、input normalizer 和 prompt expansion 共用同一 Runner provider 配置。
 - 媒体 provider 独立暴露：图片 provider 已接入工具配置检查；视频 provider 仅进入 `/api/health` 配置面，尚未启用 `generate_video`、video artifact 或画布投影。
 - 私有预览统一走 `/api/projects/:projectId/artifacts/:artifactId/content`，服务端校验项目权限后 302 到短期 signed read URL。
-- P1 typed artifact shell：非图片 artifact 节点统一展示标题、摘要、来源工具/Run、创建时间、大小、预览/打开/下载入口；文本最终回复由 runtime 写入私有对象存储并通过 `artifact.created` 物化为 Markdown 节点。
+- P1 typed artifact shell：非图片 artifact 节点统一展示标题、摘要、来源工具/Run、创建时间、大小、预览/打开/下载入口；短文本最终回复保留在 Run 节点，只有 Document/Web/Research 等工具真实创建 artifact 时才物化为 Markdown/document/webpage 节点。
 - 上下文收集默认使用 token 估算 budget，按图结构和 priority 保留选中节点，省略项写入 `contextSummary.omittedNodes` 和 Trace。
 
 ## 2026-06-12 Cloud Skill Management

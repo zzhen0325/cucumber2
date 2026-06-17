@@ -14,6 +14,7 @@ import type {
   GeneratedImage,
   ImageRequestPreview,
   RunPlanItem,
+  RunNodeData,
   RunStepTimelineItem,
   RunSummaryItem,
 } from "../types/canvas";
@@ -23,7 +24,6 @@ const DEFAULT_PROMPT_POSITION = { x: 260, y: 210 };
 const RUN_OFFSET_Y = 124;
 const ARTIFACT_NODE_GAP_Y = 162;
 const ARTIFACT_NODE_GAP_X = 257;
-const DIRECT_TEXT_RESULT_OFFSET_Y = 360;
 
 export type RunStepTraceEvent = AgentEvent;
 
@@ -267,7 +267,7 @@ export function projectRunTraceToCanvas({
   const stepTimeline = buildStepTimeline(orderedEvents);
   const currentStep = getCurrentRunStep(orderedEvents, runStatus, stepTimeline, plan);
   const agentText = buildAgentText(orderedEvents, runStatus, streamedAgentText);
-  const directTextResult = readDirectTextResult(orderedEvents);
+  const outputKind = getRunOutputKind(orderedEvents, runStatus);
   const runWasAborted = isAbortedRun(orderedEvents);
   const promptDimensions = getPromptNodeDimensions(prompt);
   const promptNode: AgentCanvasNode = getExistingOrProjectedNode(
@@ -300,6 +300,7 @@ export function projectRunTraceToCanvas({
         prompt,
         status: runStatus,
         agentText,
+        outputKind,
         currentStep,
         plan,
         toolPart: toolParts.at(-1),
@@ -353,45 +354,13 @@ export function projectRunTraceToCanvas({
   projectedNodes.push(...pendingImageProjection.resultNodes);
   projectedEdges.push(...pendingImageProjection.resultEdges);
 
-  if (directTextResult) {
-    const resultPromptNodeId = `prompt-result-${targetRunNodeId}`;
-    const resultPromptDimensions = getPromptNodeDimensions(directTextResult.text);
-    const resultPromptNode = getExistingOrProjectedNode(
-      existingNodes,
-      resultPromptNodeId,
-      {
-        height: resultPromptDimensions.height,
-        id: resultPromptNodeId,
-        type: "promptNode",
-        position: getExistingPosition(existingNodes, resultPromptNodeId) ?? {
-          x: runNode.position.x,
-          y: runNode.position.y + DIRECT_TEXT_RESULT_OFFSET_Y,
-        },
-        style: resultPromptDimensions,
-        width: resultPromptDimensions.width,
-        data: {
-          kind: "prompt",
-          prompt: directTextResult.text,
-          contextLabel: "Agent reply",
-          createdAt: directTextResult.createdAt,
-        },
-      }
-    );
-    projectedNodes.push(resultPromptNode);
-    projectedEdges.push(
-      getExistingOrProjectedEdge(existingEdges, targetRunNodeId, resultPromptNodeId, {
-        id: `edge-${targetRunNodeId}-${resultPromptNodeId}`,
-        source: targetRunNodeId,
-        target: resultPromptNodeId,
-        type: "animated",
-      })
-    );
-  }
-
   for (const event of orderedEvents) {
     if (event.type === "artifact.created") {
       const artifact = readArtifactRef(event.payload.artifact);
       if (!artifact) {
+        continue;
+      }
+      if (isLegacyFinalOutputArtifact(event, artifact)) {
         continue;
       }
       if (processedArtifactIds.has(artifact.id)) {
@@ -627,6 +596,37 @@ function buildStepTimeline(events: RunStepTraceEvent[]): RunStepTimelineItem[] {
   const completed = events.some((event) => event.type === "run.completed");
 
   for (const event of events) {
+    if (
+      event.type === "run.step.started" ||
+      event.type === "run.step.completed" ||
+      event.type === "run.step.failed"
+    ) {
+      const previous = timeline.get(event.stepId);
+      const label = readString(event.payload.label) ?? previous?.label ?? event.stepId;
+      timeline.set(event.stepId, {
+        id: event.stepId,
+        label,
+        status:
+          event.type === "run.step.failed"
+            ? "error"
+            : event.type === "run.step.completed"
+              ? "success"
+              : "running",
+        startedAt:
+          readString(event.payload.startedAt) ??
+          previous?.startedAt ??
+          event.createdAt,
+        completedAt:
+          event.type === "run.step.completed"
+            ? readString(event.payload.completedAt) ?? event.createdAt
+            : event.type === "run.step.failed"
+              ? readString(event.payload.failedAt) ?? event.createdAt
+              : undefined,
+        toolName: previous?.toolName,
+        errorText: event.errorText ?? readString(event.payload.errorText),
+      });
+    }
+
     if (event.type === "tool.input" || event.type === "tool.output") {
       const previous = timeline.get(event.stepId);
       timeline.set(event.stepId, {
@@ -1265,6 +1265,16 @@ function getArtifactNodeId(artifact: ArtifactRef) {
   return `${getArtifactNodeKind(artifact)}-${artifact.id}`;
 }
 
+function isLegacyFinalOutputArtifact(
+  event: RunStepTraceEvent,
+  artifact: ArtifactRef
+) {
+  return (
+    readString(event.payload.toolName) === "final_output" ||
+    readString(artifact.metadata?.sourceToolName) === "final_output"
+  );
+}
+
 function isMarkdownArtifact(artifact: ArtifactRef) {
   const format = readString(artifact.metadata?.format)?.toLowerCase();
   const mimeType = readString(artifact.metadata?.mimeType)?.toLowerCase();
@@ -1435,31 +1445,36 @@ function buildAgentText(
   return undefined;
 }
 
-function readDirectTextResult(events: RunStepTraceEvent[]) {
-  const completed = events.findLast((event) => event.type === "run.completed");
-  const finalOutput = readString(completed?.payload.finalOutput);
+function getRunOutputKind(
+  events: RunStepTraceEvent[],
+  status: AgentRunStatus
+): RunNodeData["outputKind"] {
+  if (status !== "success") {
+    return undefined;
+  }
+
+  const finalOutput = readString(
+    events.findLast((event) => event.type === "run.completed")?.payload.finalOutput
+  );
   if (!finalOutput) {
     return undefined;
   }
 
-  const hasCanvasArtifact = events.some((event) => event.type === "artifact.created");
-  const hasAppliedCanvasOperation = events.some(
-    (event) => event.type === "canvas.operation.applied"
-  );
-  const hasToolLifecycle = events.some(
-    (event) =>
-      event.type === "tool.input" ||
-      event.type === "tool.output" ||
-      event.type === "tool.error"
-  );
-  if (hasCanvasArtifact || hasAppliedCanvasOperation || hasToolLifecycle) {
-    return undefined;
-  }
+  return hasMaterializedRunOutput(events) ? "artifact" : "simple";
+}
 
-  return {
-    createdAt: completed?.createdAt ?? new Date(0).toISOString(),
-    text: finalOutput,
-  };
+function hasMaterializedRunOutput(events: RunStepTraceEvent[]) {
+  return events.some((event) => {
+    if (event.type === "canvas.operation.applied") {
+      return true;
+    }
+    if (event.type !== "artifact.created") {
+      return false;
+    }
+
+    const artifact = readArtifactRef(event.payload.artifact);
+    return Boolean(artifact && !isLegacyFinalOutputArtifact(event, artifact));
+  });
 }
 
 function readRunError(events: RunStepTraceEvent[]) {

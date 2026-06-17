@@ -82,6 +82,35 @@ export type AgentRetryContext = {
 
 export type CucumberRunEvent =
   | { type: "text_delta"; text: string }
+  | {
+      type: "run_phase_started";
+      details?: Record<string, unknown>;
+      label: string;
+      phase: "prepare" | "route" | "execute" | "materialize";
+      startedAt: string;
+      stepId: string;
+    }
+  | {
+      type: "run_phase_completed";
+      completedAt: string;
+      details?: Record<string, unknown>;
+      durationMs: number;
+      label: string;
+      phase: "prepare" | "route" | "execute" | "materialize";
+      startedAt: string;
+      stepId: string;
+    }
+  | {
+      type: "run_phase_failed";
+      details?: Record<string, unknown>;
+      durationMs: number;
+      errorText: string;
+      failedAt: string;
+      label: string;
+      phase: "prepare" | "route" | "execute" | "materialize";
+      startedAt: string;
+      stepId: string;
+    }
   | { type: "agent_active"; agentName: string }
   | { type: "handoff_requested"; fromAgent?: string; toAgent?: string }
   | { type: "handoff_completed"; fromAgent?: string; toAgent?: string }
@@ -142,6 +171,9 @@ export type CucumberRunEvent =
 export type PendingCucumberEvent = Exclude<
   CucumberRunEvent,
   | { type: "text_delta" }
+  | { type: "run_phase_started" }
+  | { type: "run_phase_completed" }
+  | { type: "run_phase_failed" }
   | { type: "run_completed" }
   | { type: "error" }
   | { type: "agent_active" }
