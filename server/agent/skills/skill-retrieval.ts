@@ -1,11 +1,12 @@
 import type { AgentCanvasNode } from "../../../src/types/canvas.ts";
-import { listAgentSkillDefinitions, type AgentSkillDefinitionSummary } from "../../supabase.ts";
+import type { AgentSkillDefinitionSummary } from "../../supabase.ts";
 import type { AgentRunInput } from "../context.ts";
 import {
   hasNegativeCapability,
   isImageArtifactTask,
 } from "../input-normalizer.ts";
 import type { AgentSkillCard } from "./types.ts";
+import { listCachedAgentSkillDefinitions } from "./skill-registry.ts";
 
 const MAX_SKILL_CANDIDATES = 6;
 
@@ -15,7 +16,11 @@ const imageIntentPattern =
 export async function retrieveRelevantAgentSkills(
   input: AgentRunInput
 ): Promise<AgentSkillCard[]> {
-  const skills = (await listAgentSkillDefinitions()).filter((skill) => skill.enabled);
+  if (shouldSkipSkillRetrieval(input)) {
+    return [];
+  }
+
+  const skills = (await listCachedAgentSkillDefinitions()).filter((skill) => skill.enabled);
   const query = buildSkillRetrievalQuery(input);
 
   return skills
@@ -28,6 +33,27 @@ export async function retrieveRelevantAgentSkills(
       return left.name.localeCompare(right.name);
     })
     .slice(0, MAX_SKILL_CANDIDATES);
+}
+
+function shouldSkipSkillRetrieval(input: AgentRunInput) {
+  const normalizedInput = input.normalizedInput;
+  return Boolean(
+    normalizedInput &&
+      !normalizedInput.artifact &&
+      normalizedInput.operation === "answer" &&
+      !(normalizedInput.requiredCapabilities ?? []).length &&
+      !(normalizedInput.negativeCapabilities ?? []).length &&
+      !input.selectedNodeIds.length &&
+      !input.upstreamContext.length &&
+      input.message.trim().length <= 160 &&
+      !hasComplexSkillSignal(input.message)
+  );
+}
+
+function hasComplexSkillSignal(message: string) {
+  return /https?:\/\/|调研|研究|报告|文档|方案|规划|引用|来源|citation|sources?|markdown|流程图|时序图|diagram/i.test(
+    message
+  );
 }
 
 export function hasBuiltInImageIntent(input: Pick<AgentRunInput, "message" | "upstreamContext">) {

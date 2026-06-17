@@ -45,6 +45,16 @@ export function createAgentEventWriter({
 }): AgentEventWriter {
   const pendingPersistence: Promise<void>[] = [];
   const persistenceErrors: unknown[] = [];
+  let persistenceChain = Promise.resolve();
+
+  const queuePersistence = (event: AgentEvent) => {
+    persistenceChain = persistenceChain
+      .then(() => recordAgentEvent(event))
+      .catch((error: unknown) => {
+        persistenceErrors.push(error);
+      });
+    pendingPersistence.push(persistenceChain);
+  };
 
   return {
     async flush() {
@@ -68,11 +78,7 @@ export function createAgentEventWriter({
         data: event,
         transient: false,
       });
-      pendingPersistence.push(
-        recordAgentEvent(event).catch((error: unknown) => {
-          persistenceErrors.push(error);
-        })
-      );
+      queuePersistence(event);
       return event;
     },
 

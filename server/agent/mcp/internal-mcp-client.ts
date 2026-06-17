@@ -50,6 +50,15 @@ export async function ensureCucumberInternalMcpConnected() {
   await connectPromise;
 }
 
+export async function prewarmCucumberInternalMcpConnection() {
+  await ensureCucumberInternalMcpConnected();
+}
+
+export function resetCucumberInternalMcpConnectionForTests() {
+  connectPromise = null;
+  cucumberInternalMcpServer = null;
+}
+
 function getInternalMcpUrl() {
   return (
     process.env.CUCUMBER_INTERNAL_MCP_URL ??

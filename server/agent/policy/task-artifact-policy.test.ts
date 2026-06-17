@@ -52,6 +52,51 @@ describe("task artifact policy", () => {
     ).not.toThrow();
   });
 
+  it("allows text artifact creation for generated HTML webpage tasks", () => {
+    expect(() =>
+      assertTextArtifactToolAllowed(
+        context({
+          normalizedInput: {
+            rawPrompt: "做个 30 秒 HTML 动画",
+            userGoal: "做个 30 秒 HTML 动画",
+            operation: "create",
+            artifact: {
+              kind: "webpage",
+              subtype: "animation",
+              format: "html",
+            },
+            domain: "visual-design",
+            requiredCapabilities: ["html-artifact", "animation"],
+            negativeCapabilities: ["image-generation"],
+          },
+        })
+      )
+    ).not.toThrow();
+  });
+
+  it("rejects image generation for generated HTML webpage tasks", () => {
+    expect(() =>
+      assertImageToolAllowed(
+        context({
+          normalizedInput: {
+            rawPrompt: "做个 30 秒 HTML 动画",
+            userGoal: "做个 30 秒 HTML 动画",
+            operation: "create",
+            artifact: {
+              kind: "webpage",
+              subtype: "animation",
+              format: "html",
+            },
+            domain: "visual-design",
+            requiredCapabilities: ["html-artifact", "animation"],
+            negativeCapabilities: ["image-generation"],
+          },
+        }),
+        "generate_image"
+      )
+    ).toThrow("tool_policy_rejected");
+  });
+
   it("rejects text artifact creation for image tasks", () => {
     expect(() =>
       assertTextArtifactToolAllowed(

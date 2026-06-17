@@ -950,9 +950,17 @@ function readExpectedImageRequest(
   const generateInput = events
     .filter((event) => event.type === "tool.input")
     .findLast((event) => readToolName(event.payload.toolName) === "generate_image");
-  if (!generateInput) {
+  const normalizedImageRequest = readNormalizedImageRequest(events);
+  if (!generateInput && events.some((event) => event.type === "artifact.created")) {
     return null;
   }
+  if (!generateInput && !normalizedImageRequest) {
+    return null;
+  }
+  if (!generateInput) {
+    return normalizedImageRequest;
+  }
+
   const input = readRecord(generateInput.payload.input);
   const requestedCount = readNumber(input?.resultCount);
   const imagePrompt = readString(input?.prompt) ?? prompt;
@@ -971,7 +979,39 @@ function readExpectedImageRequest(
           }
         : explicitAspectRatio
           ? { aspectRatio: explicitAspectRatio }
-          : readImageRequestPreview(imagePrompt),
+        : readImageRequestPreview(imagePrompt),
+  };
+}
+
+function readNormalizedImageRequest(
+  events: RunStepTraceEvent[]
+): { count: number; preview: Omit<ImageRequestPreview, "index" | "count"> } | null {
+  const inputEvent = events.findLast((event) => event.type === "input.normalized");
+  const normalizedInput = readRecord(inputEvent?.payload.normalizedInput);
+  const artifact = readRecord(normalizedInput?.artifact);
+  if (readString(artifact?.kind) !== "image") {
+    return null;
+  }
+  const image = readRecord(normalizedInput?.image);
+  const dimensions = readRecord(image?.dimensions);
+  const width = readNumber(dimensions?.width);
+  const height = readNumber(dimensions?.height);
+  const aspectRatio = readString(image?.aspectRatio);
+  const prompt = readString(image?.contentPrompt) ?? readString(normalizedInput?.rawPrompt) ?? "";
+  const count = Math.max(1, Math.floor(readNumber(image?.resultCount) ?? 1));
+
+  return {
+    count,
+    preview:
+      width && height
+        ? {
+            width,
+            height,
+            aspectRatio: simplifyAspectRatio(width, height),
+          }
+        : aspectRatio
+          ? { aspectRatio }
+          : readImageRequestPreview(prompt),
   };
 }
 

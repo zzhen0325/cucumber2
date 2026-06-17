@@ -30,8 +30,7 @@ describe("RunNodeView", () => {
     expect(screen.getByRole("button", { name: "收起输出" }).getAttribute(
       "aria-expanded"
     )).toBe("true");
-    expect(screen.getByText("准备 Agent")).toBeTruthy();
-    expect(screen.getByText("准备启动 Agent")).toBeTruthy();
+    expect(screen.getAllByText("等待服务响应")).toHaveLength(2);
   });
 
   it("keeps tool and skill calls collapsed when the run is expanded", () => {

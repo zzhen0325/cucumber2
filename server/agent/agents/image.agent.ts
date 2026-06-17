@@ -11,8 +11,10 @@ import { renderVisualStylePromptTool } from "../tools/image/render-visual-style-
 import { upscaleImageTool } from "../tools/image/upscale-image.tool.ts";
 import { imageInstructions } from "../prompts/image.instructions.ts";
 
+let imageAgent: Agent<CucumberAgentContext> | undefined;
+
 export function createImageAgent() {
-  return new Agent<CucumberAgentContext>({
+  imageAgent ??= new Agent<CucumberAgentContext>({
     name: "Cucumber Image Agent",
     handoffDescription:
       "Image specialist. Delegate here for any request that needs images generated, created, edited, or upscaled (with or without reference images on the canvas).",
@@ -33,4 +35,5 @@ export function createImageAgent() {
       upscaleImageTool,
     ],
   });
+  return imageAgent;
 }

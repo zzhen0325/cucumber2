@@ -65,6 +65,66 @@ describe("create_text_artifact tool", () => {
       }),
     ]);
   });
+
+  it("stores generated HTML as a webpage artifact", async () => {
+    mocks.storeTextArtifactContent.mockResolvedValue({
+      contentRef:
+        "supabase://agent-assets/projects/project-1/runs/run-1/artifacts/text-1.html",
+      id: "text-1",
+      metadata: {
+        format: "html",
+        language: "html",
+        mimeType: "text/html",
+        previewKind: "webpage",
+        sourceRunNodeId: "run-1",
+        sourceToolName: "create_text_artifact",
+      },
+      title: "Agent 工作原理动画",
+      type: "webpage",
+    });
+    const context = agentContext({
+      normalizedInput: {
+        rawPrompt: "用 huashu skill 帮我做个 30 秒的 HTML 动画",
+        userGoal: "用 huashu skill 帮我做个 30 秒的 HTML 动画",
+        operation: "create",
+        artifact: { kind: "webpage", subtype: "animation", format: "html" },
+        domain: "visual-design",
+        requiredCapabilities: ["html-artifact", "animation"],
+        negativeCapabilities: ["image-generation"],
+      },
+    });
+
+    const raw = await createTextArtifactTool.invoke(
+      new RunContext(context),
+      JSON.stringify({
+        content:
+          "```html\n<!doctype html><html><head><title>Agent</title></head><body><main>Agent</main></body></html>\n```",
+        format: "html",
+        title: "Agent 工作原理动画",
+      })
+    );
+    const output = typeof raw === "string" ? JSON.parse(raw) : raw;
+
+    expect(mocks.storeTextArtifactContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content:
+          "<!doctype html><html><head><title>Agent</title></head><body><main>Agent</main></body></html>",
+        metadata: { language: "html" },
+        projectId: "project-1",
+        runNodeId: "run-1",
+        sourceToolName: "create_text_artifact",
+        title: "Agent 工作原理动画",
+        type: "webpage",
+        userId: "user-1",
+      })
+    );
+    expect(output).toMatchObject({
+      artifactId: "text-1",
+      artifactType: "webpage",
+      format: "html",
+      title: "Agent 工作原理动画",
+    });
+  });
 });
 
 function agentContext(

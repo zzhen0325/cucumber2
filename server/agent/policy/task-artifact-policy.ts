@@ -1,8 +1,8 @@
 import type { CucumberAgentContext } from "../context.ts";
 import {
   hasNegativeCapability,
-  isDocumentArtifactTask,
   isImageArtifactTask,
+  isTextArtifactTask,
 } from "../input-normalizer.ts";
 
 export function assertImageToolAllowed(
@@ -36,9 +36,9 @@ export function assertTextArtifactToolAllowed(context: CucumberAgentContext) {
     return;
   }
 
-  if (!isDocumentArtifactTask(normalizedInput)) {
+  if (!isTextArtifactTask(normalizedInput)) {
     throw new Error(
-      "tool_policy_rejected: create_text_artifact can only run for markdown, document, or diagram artifact tasks."
+      "tool_policy_rejected: create_text_artifact can only run for markdown, document, diagram, code, or webpage artifact tasks."
     );
   }
 }

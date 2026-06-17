@@ -2,16 +2,27 @@
 
 本文记录 2026-06-11 Agent v2 正式切换后的变更。
 
+## 2026-06-17 Runtime Fast Path
+
+- `/api/agent-run` 入口保持 AI SDK HTTP stream 不变；新增 `Quick Router` 在本地规则层先判定 `smalltalk`、`simple_chat`、`simple_canvas`、`image_task` 和 `complex_agent_task`，并在 `run.created` / `input.normalized` payload 中写入 route、routerSource、skippedSteps 和 cache 状态。
+- `smalltalk` 直接写 Trace、流式文本和 `run.completed`；`simple_chat` 使用缓存的轻量 chat Agent/Runner，不加载 skills、MCP、handoff 或动态计划；`simple_canvas` 只处理确定性的安全画布操作，并继续通过 canvas policy 写 `canvas.operation.*`。
+- `image_task` 可在 `input.normalized` 后由投影层先创建 loading 图片结果节点；完整 artifact 仍由 `generate_image` 产生并按 artifact id 幂等物化，不重复生成结果节点。
+- `complex_agent_task` 才进入完整 Agent Runner；compact context、skill retrieval 和 MCP/tool prepare 在依赖允许时并行。`plan.build` 只在复杂、图片或非空动态计划时写 Trace，简单任务不再写空计划步骤。
+- Agent world 进程级缓存 Manager、Document/Web/Research/Image agents、handoff registry、normalizer Agent、Runner 和 simple chat Runner；per-run instructions/context 仍从 `runContext` 注入，不写入单例。
+- 内部 MCP 使用全局 Streamable HTTP 连接池，共享连接 promise，失败后重置；非图片 Fast Path 不连接 MCP。技能 registry 增加 60s 内存缓存，应用内 create/update/import/delete skill 后立即 invalidation。
+- 打开项目成功后服务端 fire-and-forget 预热 model provider、Agent world、skill registry 和 MCP pool；预热失败只记录日志，不阻塞画布加载。
+
 ## 2026-06-16 Artifact-First Routing
 
 - 输入归一化从只依赖 `intent` 升级为 artifact-first task protocol：`userGoal`、`operation`、`artifact.kind/subtype/format`、`domain`、`requiredCapabilities` 和 `negativeCapabilities`；`intent` 仅作为 Trace/UI 兼容摘要派生。
 - Specialist registry 不再按 intent 字符串开 handoff；runtime 根据 artifact protocol deterministic route。单一 image/document/web/research 任务直接启动对应 specialist，复合任务留给 Manager 编排并只开放匹配 handoff。
 - `视觉`、`H5`、营销或产品语义只作为 `domain`/上下文；流程图和时序图默认归一化为 `diagram` + `mermaid`，由 Document Agent 产出 Markdown artifact，不走图片链路。
+- 明确的 HTML 页面、H5 页面、交互 demo 或 HTML 动画请求归一化为 `webpage` + `html`，并加上 `negativeCapabilities=["image-generation"]`；生成 HTML 由 Document Agent 创建 webpage artifact，抓取公开 URL 才走 Web Agent。
 - 提示词/文本改写任务（例如选中长图片 prompt 后输入“取消标题”）归一化为 `artifact=null` + `operation=edit` + `negativeCapabilities=["image-generation"]`，由 Manager 直接输出修改后的文本；即使存在上游 prompt 节点也不创建任务 plan、不委派 Image Agent、不调用 `generate_image`。
 - Manager 作为通用对话默认处理者：短问答、概念解释、轻量分析和简短总结保持 `artifact=null`，由 Manager 直接回复；明确要求详细说明、完整规划、长篇方案、调研分析、报告或文档时归一化为 document/markdown artifact，交由 Document Agent 创建可沉淀的长文本产物。
 - Skill frontmatter 新增可选 `capabilities`、`produces`、`uses` 和 `notFor`；skill retrieval 先按 artifact/capability 打分，再看关键词、canvas kind 和 token overlap，并会按 `negativeCapabilities` 抑制不应出现的 image skill。
 - 新增 seed skill `sequence-diagram`，声明 `diagram/sequenceDiagram/mermaid` 能力，Document Agent 可激活后用 `create_text_artifact` 创建包含 Mermaid fenced block 的 Markdown artifact。
-- 工具入口新增 task artifact policy：图片 prompt/generation 工具只允许 image artifact task，`image-generation` negative capability 会阻止新图生成；`create_text_artifact` 只允许 markdown/document/diagram artifact task，Mermaid diagram 必须包含 mermaid fenced block。
+- 工具入口新增 task artifact policy：图片 prompt/generation 工具只允许 image artifact task，`image-generation` negative capability 会阻止新图生成；`create_text_artifact` 只允许 markdown/document/diagram/code/webpage 文本类 artifact task，Mermaid diagram 必须包含 mermaid fenced block，webpage artifact 必须是完整 HTML document。
 
 ## 2026-06-16 Dynamic Run Plan
 
@@ -30,10 +41,10 @@
 ## 2026-06-14 P3 Specialist Agents
 
 - 新增 specialist agent registry，集中声明 specialist name、enabled intents、required tools、produced artifact types 和 handoff policy；Manager 通过 registry 生成 Agents SDK handoff，specialist model 仍由 runtime 统一注入。
-- `NormalizedIntent` 扩展到 P3 intent：`document.create`、`document.edit`、`web.fetch`、`research.answer`、`code.create`、`data.analyze`、`workflow.plan`，并保留 image/text/canvas/unsupported。
-- 新增 Cucumber Document Agent：负责 Markdown/document 生成和改写；Manager 遇到 `document.create`/`document.edit` 必须 handoff，不直接创建文档 artifact。
-- 新增 `create_text_artifact` 工具，写入私有对象存储和 `agent_artifacts`，发出 `artifact_created` 事件，由 runtime materializer 投影为 markdown/document 画布节点；工具不直接写画布节点。
-- Tool Registry 新增 `create_text_artifact`，scope 为 `write.artifact` 和 `tool.doc.create`，Trace metadata 继续走统一 redaction/registry 路径。
+- `NormalizedIntent` 扩展到 P3 intent：`document.create`、`document.edit`、`web.fetch`、`webpage.create`、`research.answer`、`code.create`、`data.analyze`、`workflow.plan`，并保留 image/text/canvas/unsupported。
+- 新增 Cucumber Document Agent：负责 Markdown/document/diagram/code/webpage 文本类 artifact 生成和改写；Manager 遇到 `document.create`/`document.edit`/`webpage.create` 必须 handoff，不直接创建内容 artifact。
+- 新增 `create_text_artifact` 工具，写入私有对象存储和 `agent_artifacts`，发出 `artifact_created` 事件，由 runtime materializer 投影为 markdown/document/code/webpage 画布节点；工具不直接写画布节点。
+- Tool Registry 新增 `create_text_artifact`，scope 为 `write.artifact` 和 `tool.doc.create`，产出 doc/code/webpage，Trace metadata 继续走统一 redaction/registry 路径。
 - 新增 Cucumber Web Agent：负责公开 http(s) 网页 fetch/read；Manager 遇到 `web.fetch` 必须 handoff，不直接抓取网页。
 - 新增 `fetch_webpage` 工具，拒绝 localhost/private network URL，只保存最多 2MB 的 html/xhtml/plain text 内容为 webpage artifact，并返回标题、最终 URL 和文本摘录供 Web Agent 简短确认。
 - Tool Registry 新增 `fetch_webpage`，scope 为 `write.artifact` 和 `tool.web.fetch`，标记为可访问外部网络并产出 webpage artifact。

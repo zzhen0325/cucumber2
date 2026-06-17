@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CanvasWorkspace } from "@/components/CanvasWorkspace";
 import { AuthPage } from "@/components/AuthPage";
+import { LoadingScreen } from "@/components/LoadingScreen";
 import { WorkspaceShell } from "@/components/WorkspaceShell";
 import { getCurrentUser, logout, type AppUser } from "@/lib/auth-storage";
 
@@ -77,17 +78,7 @@ function App() {
   return (
     <TooltipProvider>
       {sessionStatus === "loading" && (
-        <main className="app-state-screen">
-          <img
-            className="app-state-logo"
-            src="/logocolor.svg"
-            width="34"
-            height="36"
-            alt=""
-            aria-hidden="true"
-          />
-          <span>连接中</span>
-        </main>
+        <LoadingScreen />
       )}
 
       {sessionStatus === "error" && (

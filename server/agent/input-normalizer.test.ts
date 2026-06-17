@@ -137,6 +137,34 @@ describe("input normalizer", () => {
     });
   });
 
+  it("routes HTML animation requests to webpage artifacts instead of image generation", () => {
+    const raw = "用huashu skill 帮我做个30秒的HTML动画，讲agent怎么工作";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "create",
+        artifact: { kind: "image", subtype: "poster", format: "png" },
+        requiredCapabilities: ["image-generation"],
+        intent: "image.generate",
+        image: { contentPrompt: raw },
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      rawPrompt: "用 huashu skill 帮我做个30 秒的 HTML 动画，讲 agent 怎么工作",
+      operation: "create",
+      artifact: { kind: "webpage", subtype: "animation", format: "html" },
+      domain: "visual-design",
+      requiredCapabilities: expect.arrayContaining(["html-artifact", "animation"]),
+      negativeCapabilities: ["image-generation"],
+      intent: "webpage.create",
+    });
+    expect(normalized.image).toBeUndefined();
+    expect(selectAgentRoute(normalized)).toBe("document");
+  });
+
   it("keeps image style analysis out of image generation", () => {
     const raw = "分析这张图的风格";
 

@@ -12,10 +12,10 @@ import {
   createSpecialistHandoffs,
 } from "./registry.ts";
 
-export function createManagerAgent() {
-  const specialistRegistry = createSpecialistAgentRegistry();
+let managerAgent: Agent<CucumberAgentContext> | undefined;
 
-  return new Agent<CucumberAgentContext>({
+export function createManagerAgent() {
+  managerAgent ??= new Agent<CucumberAgentContext>({
     name: "Cucumber Manager",
     instructions: (runContext) => managerInstructions(runContext.context),
     tools: [
@@ -25,6 +25,7 @@ export function createManagerAgent() {
       searchKnowledgeTool,
       proposeCanvasOperationsTool,
     ],
-    handoffs: createSpecialistHandoffs(specialistRegistry),
+    handoffs: createSpecialistHandoffs(createSpecialistAgentRegistry()),
   });
+  return managerAgent;
 }

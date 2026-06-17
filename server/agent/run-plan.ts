@@ -19,6 +19,7 @@ const ALWAYS_PLAN_INTENTS = new Set<NormalizedIntent>([
   "document.edit",
   "research.answer",
   "web.fetch",
+  "webpage.create",
   "workflow.plan",
 ]);
 
@@ -53,6 +54,13 @@ export function buildRunPlan(input: AgentRunInput): RuntimeRunPlanItem[] {
         step("web-agent", "委派 Web Agent", "route"),
         step("web-fetch", "抓取网页并保存 webpage artifact", "execute"),
         step("web-materialize", "投影网页摘要节点", "materialize"),
+      ];
+    case "webpage.create":
+      return [
+        step("html-brief", "梳理 HTML 产物目标和交互要求", "prepare"),
+        step("document-agent", "委派 Document Agent", "route"),
+        step("html-create", "创建 HTML webpage artifact", "execute"),
+        step("html-materialize", "投影为网页预览节点", "materialize"),
       ];
     case "research.answer":
       return [

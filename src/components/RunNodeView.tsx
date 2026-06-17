@@ -414,7 +414,7 @@ function getRunTitle(
   if (state === "input-available" || state === "output-available") {
     return "调用工具";
   }
-  return currentStep?.label ?? (status === "queued" ? "准备 Agent" : "Agent 处理中");
+  return currentStep?.label ?? (status === "queued" ? "等待服务响应" : "Agent 处理中");
 }
 
 function getPendingAgentText(
@@ -425,7 +425,7 @@ function getPendingAgentText(
     return headerSummary.visibleLabel;
   }
   if (status === "queued") {
-    return "准备启动 Agent";
+    return "等待服务响应";
   }
   if (status === "running") {
     return "等待模型输出";

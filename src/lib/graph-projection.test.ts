@@ -145,6 +145,38 @@ describe("agent event graph projection", () => {
     });
   });
 
+  it("projects pending image nodes from normalized image input before tool input", () => {
+    const projection = projectRunTraceToCanvas({
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", { prompt: "生成两张 16:9 海报", promptNodeId: "prompt-1" }),
+        event("input.normalized", "input", {
+          normalizedInput: {
+            rawPrompt: "生成两张 16:9 海报",
+            operation: "create",
+            artifact: { kind: "image", subtype: "poster", format: "png" },
+            intent: "image.generate",
+            image: {
+              contentPrompt: "海报",
+              resultCount: 2,
+              aspectRatio: "16:9",
+            },
+          },
+        }),
+      ],
+    });
+
+    const imageNodes = projection.nodes.filter(
+      (node) => node.data.kind === "imageResult"
+    );
+    expect(imageNodes).toHaveLength(2);
+    expect(imageNodes[0].data).toMatchObject({
+      kind: "imageResult",
+      status: "loading",
+      request: { index: 1, count: 2, aspectRatio: "16:9" },
+    });
+  });
+
   it("projects task-specific plan item phases", () => {
     const projection = projectRunTraceToCanvas({
       runNodeId: "run-1",

@@ -55,6 +55,25 @@ describe("buildRunPlan", () => {
     ]);
   });
 
+  it("creates task-specific generated webpage plans", () => {
+    const plan = buildRunPlan(
+      input({
+        message: "做个 30 秒 HTML 动画",
+        normalizedInput: {
+          intent: "webpage.create",
+          rawPrompt: "做个 30 秒 HTML 动画",
+        },
+      })
+    );
+
+    expect(plan).toMatchObject([
+      { id: "html-brief", label: "梳理 HTML 产物目标和交互要求", phase: "prepare" },
+      { id: "document-agent", label: "委派 Document Agent", phase: "route" },
+      { id: "html-create", label: "创建 HTML webpage artifact", phase: "execute" },
+      { id: "html-materialize", label: "投影为网页预览节点", phase: "materialize" },
+    ]);
+  });
+
   it("skips simple single-image plans but plans multi-image work", () => {
     expect(
       buildRunPlan(

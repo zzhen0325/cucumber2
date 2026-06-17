@@ -8,7 +8,8 @@ import { assertTextArtifactToolAllowed } from "../../policy/task-artifact-policy
 
 const createTextArtifactInputSchema = z.object({
   content: z.string().trim().min(1),
-  format: z.enum(["markdown", "document"]).default("markdown"),
+  format: z.enum(["markdown", "document", "html", "code"]).optional(),
+  language: z.string().trim().min(1).max(64).optional(),
   title: z.string().trim().min(1).max(160),
 });
 
@@ -23,9 +24,14 @@ const createTextArtifactJsonSchema = {
     },
     format: {
       type: "string",
-      enum: ["markdown", "document"],
+      enum: ["markdown", "document", "html", "code"],
       description:
-        "Output surface. Use markdown for notes, briefs, specs, summaries, and editable Markdown drafts; use document for longer document-style drafts.",
+        "Output surface. Use markdown for notes, briefs, specs, and summaries; document for longer document drafts; html for generated HTML pages/animations; code for source code artifacts.",
+    },
+    language: {
+      type: "string",
+      maxLength: 64,
+      description: "Optional code language label, such as html, css, ts, or json.",
     },
     title: {
       type: "string",
@@ -54,23 +60,33 @@ export const createTextArtifactTool = tool({
           .join("; ")}`,
       };
     }
+    const artifactType = getArtifactTypeForContext(context, parsed.data.format);
+    const content = normalizeArtifactContent(parsed.data.content, parsed.data.format);
     if (
       context.normalizedInput?.artifact?.kind === "diagram" &&
       context.normalizedInput.artifact.format === "mermaid" &&
-      !/```mermaid[\s\S]+```/i.test(parsed.data.content)
+      !/```mermaid[\s\S]+```/i.test(content)
     ) {
       throw new Error(
         "tool_policy_rejected: Mermaid diagram artifacts must include a fenced mermaid code block."
       );
     }
+    if (artifactType === "webpage" && !looksLikeHtmlDocument(content)) {
+      throw new Error(
+        "tool_policy_rejected: webpage artifacts must contain a complete HTML document."
+      );
+    }
 
     const artifact = await storeTextArtifactContent({
-      content: parsed.data.content,
+      content,
+      metadata: {
+        language: parsed.data.language ?? inferLanguage(artifactType, parsed.data.format),
+      },
       projectId: context.projectId,
       runNodeId: context.runNodeId,
       sourceToolName: "create_text_artifact",
       title: parsed.data.title,
-      type: "doc",
+      type: artifactType,
       userId: context.userId,
     });
 
@@ -80,12 +96,58 @@ export const createTextArtifactTool = tool({
     return {
       artifactId: artifact.id,
       artifactType: artifact.type,
-      format: parsed.data.format,
+      format: parsed.data.format ?? inferFormat(artifactType),
       note: "Text artifact created and rendered to the canvas.",
       title: artifact.title,
     };
   },
 });
+
+function getArtifactTypeForContext(
+  context: CucumberAgentContext,
+  requestedFormat: z.infer<typeof createTextArtifactInputSchema>["format"]
+) {
+  const kind = context.normalizedInput?.artifact?.kind;
+  if (kind === "webpage" || requestedFormat === "html") {
+    return "webpage" as const;
+  }
+  if (kind === "code" || requestedFormat === "code") {
+    return "code" as const;
+  }
+  return "doc" as const;
+}
+
+function normalizeArtifactContent(content: string, format: string | undefined) {
+  if (format !== "html" && format !== "code") {
+    return content;
+  }
+  const match = content.match(/^```(?:html|css|js|javascript|ts|typescript|json)?\s*\n([\s\S]*?)\n```$/i);
+  return match?.[1]?.trim() ?? content;
+}
+
+function looksLikeHtmlDocument(content: string) {
+  return /<!doctype\s+html/i.test(content) || /<html[\s>]/i.test(content);
+}
+
+function inferLanguage(
+  artifactType: "code" | "doc" | "webpage",
+  format: string | undefined
+) {
+  if (artifactType === "webpage") {
+    return "html";
+  }
+  return format === "code" ? "text" : undefined;
+}
+
+function inferFormat(artifactType: "code" | "doc" | "webpage") {
+  if (artifactType === "webpage") {
+    return "html";
+  }
+  if (artifactType === "code") {
+    return "code";
+  }
+  return "markdown";
+}
 
 function emitArtifactCreated(context: CucumberAgentContext, artifact: ArtifactRef) {
   const event = {

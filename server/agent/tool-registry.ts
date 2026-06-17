@@ -130,14 +130,15 @@ export const toolRegistry = {
     name: "create_text_artifact",
     traceLabel: "Create text artifact",
     requiredScopes: ["write.artifact", "tool.doc.create"],
-    producedArtifactTypes: ["doc"],
+    producedArtifactTypes: ["doc", "code", "webpage"],
     canCallExternalNetwork: false,
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         content: { type: "string" },
-        format: { type: "string", enum: ["markdown", "document"] },
+        format: { type: "string", enum: ["markdown", "document", "html", "code"] },
+        language: { type: "string" },
         title: { type: "string" },
       },
       required: ["title", "content"],

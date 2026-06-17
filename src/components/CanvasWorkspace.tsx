@@ -133,6 +133,7 @@ import type {
   AgentCanvasEdge,
   AgentCanvasNode,
   AgentCanvasNodeData,
+  AgentRunStatus,
   CodeNodeData,
   GeneratedImage,
   ImageResultNodeData,
@@ -273,6 +274,7 @@ const PAN_ON_DRAG_BUTTONS = [MIDDLE_MOUSE_BUTTON];
 const HAND_TOOL_PAN_ON_DRAG_BUTTONS = [LEFT_MOUSE_BUTTON, MIDDLE_MOUSE_BUTTON];
 const SHIFT_MULTI_SELECTION_KEYS = ["Shift", "ShiftLeft", "ShiftRight"];
 const IMAGE_PROVIDER_STORAGE_KEY = "cucumber:image-provider";
+const TRACE_RECONCILE_DELAYS_MS = [0, 1500, 4000, 8000] as const;
 
 function getSelectedNodeIds(nodes: AgentCanvasNode[]) {
   return nodes.filter((node) => node.selected).map((node) => node.id);
@@ -328,6 +330,8 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const loadedProjectIdRef = useRef<string | null>(null);
   const streamedRuntimeEvents = useRef<StreamedRuntimeEvents>([]);
   const streamedAgentTextByRunId = useRef(new Map<string, string>());
+  const traceReconcileTimers = useRef<number[]>([]);
+  const traceRunIdRef = useRef<string | null>(null);
   const hasLoadedProject = useRef(false);
   const messagesRef = useRef<ReturnType<typeof useChat>["messages"]>([]);
   const nodesRef = useRef(nodes);
@@ -403,6 +407,19 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   useEffect(() => {
     loadedProjectIdRef.current = loadedProjectId;
   }, [loadedProjectId]);
+
+  useEffect(() => {
+    traceRunIdRef.current = traceRunId;
+  }, [traceRunId]);
+
+  const clearTraceReconcileTimers = useCallback(() => {
+    for (const timer of traceReconcileTimers.current) {
+      window.clearTimeout(timer);
+    }
+    traceReconcileTimers.current = [];
+  }, []);
+
+  useEffect(() => clearTraceReconcileTimers, [clearTraceReconcileTimers]);
 
   const projectStreamedRuntimeEvents = useCallback(
     (
@@ -538,6 +555,110 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     [setNodes]
   );
 
+  const mergePersistedRunTrace = useCallback(
+    (runId: string, events: RunStepTraceEvent[]) => {
+      if (!events.length) {
+        return false;
+      }
+
+      const projectId = loadedProjectIdRef.current ?? undefined;
+      const projection = projectRuntimeEventsToCanvas({
+        projectId,
+        runNodeId: runId,
+        events,
+        existingSnapshot: {
+          nodes: nodesRef.current,
+          edges: edgesRef.current,
+        },
+        streamedAgentTextByRunId: streamedAgentTextByRunId.current,
+      });
+
+      setNodes((current) => {
+        const next = mergeCanvasUpserts(
+          { edges: edgesRef.current, nodes: current },
+          { edges: projection.edges, nodes: projection.nodes }
+        ).nodes;
+        nodesRef.current = next;
+        return next;
+      });
+      setEdges((current) => {
+        const next = mergeCanvasUpserts(
+          { edges: current, nodes: nodesRef.current },
+          { edges: projection.edges, nodes: projection.nodes }
+        ).edges;
+        edgesRef.current = next;
+        return next;
+      });
+
+      if (traceRunIdRef.current === runId) {
+        setTraceEvents(events);
+      }
+
+      return hasTerminalRunEvent(events);
+    },
+    [setEdges, setNodes]
+  );
+
+  const reconcileRunFromPersistedTrace = useCallback(
+    (runId: string | null, fallbackError: string) => {
+      if (!runId) {
+        return;
+      }
+      const projectId = loadedProjectIdRef.current;
+      if (!projectId) {
+        markRunError(runId, fallbackError);
+        return;
+      }
+
+      clearTraceReconcileTimers();
+      let sawPersistedEvents = false;
+
+      const runAttempt = (attempt: number) => {
+        void loadRunTrace(projectId, runId)
+          .then(({ events }) => {
+            if (events.length) {
+              sawPersistedEvents = true;
+              if (mergePersistedRunTrace(runId, events)) {
+                return;
+              }
+            }
+
+            const nextDelay = TRACE_RECONCILE_DELAYS_MS[attempt + 1];
+            if (
+              nextDelay === undefined ||
+              !isActiveRunNode(nodesRef.current, runId)
+            ) {
+              if (!sawPersistedEvents) {
+                markRunError(runId, fallbackError);
+              }
+              return;
+            }
+
+            const timer = window.setTimeout(() => runAttempt(attempt + 1), nextDelay);
+            traceReconcileTimers.current.push(timer);
+          })
+          .catch(() => {
+            const nextDelay = TRACE_RECONCILE_DELAYS_MS[attempt + 1];
+            if (nextDelay === undefined) {
+              if (!sawPersistedEvents) {
+                markRunError(runId, fallbackError);
+              }
+              return;
+            }
+            const timer = window.setTimeout(() => runAttempt(attempt + 1), nextDelay);
+            traceReconcileTimers.current.push(timer);
+          });
+      };
+
+      runAttempt(0);
+    },
+    [
+      clearTraceReconcileTimers,
+      markRunError,
+      mergePersistedRunTrace,
+    ]
+  );
+
   const settleRunIfOutputReady = useCallback(
     (runId: string | null) => {
       if (!runId) {
@@ -657,7 +778,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       if (isAbort) {
         markRunStopped(runId);
       } else if (isDisconnect) {
-        markRunError(runId, "Agent 连接已中断。");
+        reconcileRunFromPersistedTrace(runId, "Agent 连接已中断。");
+      } else if (isError) {
+        reconcileRunFromPersistedTrace(runId, "Agent 流式响应异常。");
       } else if (!isError) {
         settleRunIfOutputReady(runId);
         window.requestAnimationFrame(() => {
@@ -666,7 +789,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       }
     },
     onError: (nextError) => {
-      markRunError(activeRunId.current, nextError.message);
+      reconcileRunFromPersistedTrace(activeRunId.current, nextError.message);
     },
   });
 
@@ -1132,6 +1255,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       const draft = createRunDraft(value, selectedNodeIds, currentNodes, currentEdges);
       activeRunId.current = draft.runNode.id;
       activeRunMessageStartIndex.current = messagesRef.current.length;
+      clearTraceReconcileTimers();
       streamedRuntimeEvents.current = streamedRuntimeEvents.current.filter(
         (event) => event.runNodeId !== draft.runNode.id
       );
@@ -1152,7 +1276,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       const nextNodes = [
         ...applySelectedNodeIds(currentNodes, []),
         draft.promptNode,
-        draft.runNode,
+        withRunClientStep(draft.runNode, "client.connect", "连接 Agent"),
       ];
       const nextEdges = [...currentEdges, ...draft.edges];
       nodesRef.current = nextNodes;
@@ -1160,11 +1284,24 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       setNodes(nextNodes);
       setEdges(nextEdges);
 
-      const saved = await saveProjectSnapshot();
-      if (!saved) {
-        markRunError(draft.runNode.id, "项目快照保存失败，Agent 未启动。");
-        return;
-      }
+      void saveProjectSnapshot()
+        .then((saved) => {
+          if (saved) {
+            return;
+          }
+          if (!isActiveRunNode(nodesRef.current, draft.runNode.id)) {
+            return;
+          }
+          markRunError(draft.runNode.id, "项目快照保存失败，Agent 未启动。");
+          void stop();
+        })
+        .catch((saveError: unknown) => {
+          if (!isActiveRunNode(nodesRef.current, draft.runNode.id)) {
+            return;
+          }
+          markRunError(draft.runNode.id, `项目快照保存失败：${getClientError(saveError)}`);
+          void stop();
+        });
 
       if (clearComposer) {
         setPrompt("");
@@ -1178,6 +1315,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       );
     },
     [
+      clearTraceReconcileTimers,
       hasLocalUploadNodes,
       imageProvider,
       isBusy,
@@ -1188,6 +1326,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       setNodes,
       showUploadError,
       storageError,
+      stop,
     ]
   );
 
@@ -1364,9 +1503,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
   useEffect(() => {
     if (error) {
-      markRunError(activeRunId.current, error.message);
+      reconcileRunFromPersistedTrace(activeRunId.current, error.message);
     }
-  }, [error, markRunError]);
+  }, [error, reconcileRunFromPersistedTrace]);
 
   useEffect(() => {
     const runId = activeRunId.current;
@@ -2071,6 +2210,49 @@ function applySelectedNodeIds(
     const selected = selectedNodeIdSet.has(node.id);
     return node.selected === selected ? node : { ...node, selected };
   });
+}
+
+function isActiveRunStatus(status: AgentRunStatus) {
+  return status === "queued" || status === "running";
+}
+
+function isActiveRunNode(nodes: AgentCanvasNode[], runId: string) {
+  return nodes.some(
+    (node) =>
+      node.id === runId &&
+      node.data.kind === "run" &&
+      isActiveRunStatus(node.data.status)
+  );
+}
+
+function hasTerminalRunEvent(events: RunStepTraceEvent[]) {
+  return events.some(
+    (event) => event.type === "run.completed" || event.type === "run.failed"
+  );
+}
+
+function withRunClientStep(
+  node: AgentCanvasNode,
+  stepId: string,
+  label: string
+): AgentCanvasNode {
+  if (node.data.kind !== "run") {
+    return node;
+  }
+
+  return {
+    ...node,
+    data: {
+      ...node.data,
+      currentStep: {
+        id: stepId,
+        label,
+        startedAt: new Date().toISOString(),
+        status: "running",
+      },
+      status: "running",
+    },
+  };
 }
 
 function applyLinkedNodeDragChanges(

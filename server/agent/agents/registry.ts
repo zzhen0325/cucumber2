@@ -20,14 +20,16 @@ type SpecialistAgentDefinition = {
   requiredTools: string[];
 };
 
+let specialistAgentRegistry: SpecialistAgentDefinition[] | undefined;
+
 export function createSpecialistAgentRegistry(): SpecialistAgentDefinition[] {
-  return [
+  specialistAgentRegistry ??= [
     {
       agent: createDocumentAgent(),
       enabledRoutes: ["document"],
       handoffPolicy: shouldEnableDocumentHandoff,
       name: "Cucumber Document Agent",
-      producedArtifactTypes: ["doc"],
+      producedArtifactTypes: ["doc", "code", "webpage"],
       requiredTools: ["create_text_artifact"],
     },
     {
@@ -55,6 +57,7 @@ export function createSpecialistAgentRegistry(): SpecialistAgentDefinition[] {
       requiredTools: ["generate_image", "upscale_image"],
     },
   ];
+  return specialistAgentRegistry;
 }
 
 export function createSpecialistHandoffs(
@@ -84,7 +87,9 @@ function shouldEnableDocumentHandoff(context: CucumberAgentContext) {
     (skill) =>
       skill.agentScope === "document" ||
       skill.bindings.agents.some((agent) => /document/i.test(agent)) ||
-      skill.bindings.tools.some((toolName) => /create_text_artifact|doc|markdown/i.test(toolName))
+      skill.bindings.tools.some((toolName) =>
+        /create_text_artifact|doc|markdown|html|webpage|code/i.test(toolName)
+      )
   );
 }
 

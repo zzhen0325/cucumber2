@@ -11,9 +11,11 @@ vi.mock("../../supabase.ts", () => ({
 }));
 
 const { retrieveRelevantAgentSkills } = await import("./skill-retrieval.ts");
+const { invalidateAgentSkillRegistryCache } = await import("./skill-registry.ts");
 
 describe("skill retrieval", () => {
   beforeEach(() => {
+    invalidateAgentSkillRegistryCache();
     mocks.listAgentSkillDefinitions.mockReset();
   });
 
@@ -221,6 +223,108 @@ describe("skill retrieval", () => {
     );
 
     expect(candidates).toEqual([]);
+  });
+
+  it("prefers HTML artifact skills over image skills for HTML animation requests", async () => {
+    mocks.listAgentSkillDefinitions.mockResolvedValue([
+      skill({
+        agentScope: "image",
+        bindings: {
+          agents: ["Cucumber Image Agent"],
+          scopes: ["tool.image.prompt", "tool.image.generate"],
+          tools: ["render_visual_style_prompt", "generate_image"],
+        },
+        capabilities: [
+          {
+            artifact: { kind: "image", subtype: "poster", format: "png" },
+            requiredCapabilities: ["image-generation"],
+            negativeCapabilities: [],
+          },
+        ],
+        name: "visual-prompt-cookbook",
+        purpose: "prompt_expansion",
+        triggers: { canvasKinds: [], keywords: ["视觉", "动画"] },
+      }),
+      skill({
+        agentScope: "document",
+        bindings: {
+          agents: ["Cucumber Document Agent"],
+          scopes: ["tool.doc.create", "write.artifact"],
+          tools: ["create_text_artifact"],
+        },
+        capabilities: [
+          {
+            artifact: { kind: "webpage", subtype: "animation", format: "html" },
+            requiredCapabilities: ["html-artifact", "animation"],
+            negativeCapabilities: [],
+          },
+        ],
+        name: "huashu-design",
+        notFor: ["image-generation"],
+        produces: ["html"],
+        purpose: "html_design",
+        triggers: { canvasKinds: [], keywords: ["huashu", "HTML动画"] },
+        uses: ["create_text_artifact"],
+      }),
+    ]);
+
+    const candidates = await retrieveRelevantAgentSkills(
+      input({
+        message: "用huashu skill 帮我做个30秒的HTML动画，讲agent怎么工作",
+        normalizedInput: {
+          rawPrompt: "用 huashu skill 帮我做个30 秒的 HTML 动画，讲 agent 怎么工作",
+          userGoal: "用 huashu skill 帮我做个30 秒的 HTML 动画，讲 agent 怎么工作",
+          operation: "create",
+          artifact: { kind: "webpage", subtype: "animation", format: "html" },
+          domain: "visual-design",
+          requiredCapabilities: ["html-artifact", "animation"],
+          negativeCapabilities: ["image-generation"],
+        },
+      })
+    );
+
+    expect(candidates[0]).toMatchObject({
+      name: "huashu-design",
+      reasons: expect.arrayContaining([
+        "artifact.kind:webpage",
+        "artifact.subtype:animation",
+        "artifact.format:html",
+        "capability:html-artifact",
+      ]),
+    });
+    expect(candidates.map((candidate) => candidate.name)).not.toContain(
+      "visual-prompt-cookbook"
+    );
+  });
+
+  it("does not skip retrieval for complex signals even when normalized as an answer", async () => {
+    mocks.listAgentSkillDefinitions.mockResolvedValue([
+      skill({
+        agentScope: "general",
+        description: "Write markdown research notes.",
+        name: "research-notes",
+        purpose: "markdown",
+        tags: ["research", "markdown"],
+        triggers: { canvasKinds: ["prompt"], keywords: ["调研"] },
+      }),
+    ]);
+
+    const candidates = await retrieveRelevantAgentSkills(
+      input({
+        message: "帮我调研一下这个功能",
+        normalizedInput: {
+          rawPrompt: "帮我调研一下这个功能",
+          userGoal: "帮我调研一下这个功能",
+          operation: "answer",
+          artifact: null,
+          requiredCapabilities: [],
+          negativeCapabilities: [],
+        },
+      })
+    );
+
+    expect(candidates[0]?.name).toBe("research-notes");
+    expect(mocks.listAgentSkillDefinitions).toHaveBeenCalledTimes(1);
   });
 });
 

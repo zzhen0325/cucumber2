@@ -28,6 +28,7 @@ import type {
 } from "../src/types/canvas.ts";
 import { executeAgentRun } from "./agent/index.ts";
 import { handleInternalMcpRequest } from "./agent/mcp/internal-mcp-server.ts";
+import { scheduleAgentRunPrewarm } from "./agent/prewarm.ts";
 import {
   assertImageProviderConfigured,
   getRuntimeProviderConfiguration,
@@ -38,6 +39,7 @@ import {
   readActivatedSkillResourceBytes,
 } from "./agent/skills/skill-resources.ts";
 import { parseAgentSkillMarkdown } from "./agent/skills/skill-parser.ts";
+import { invalidateAgentSkillRegistryCache } from "./agent/skills/skill-registry.ts";
 import {
   createSessionToken,
   hashPassword,
@@ -69,6 +71,7 @@ import {
   upsertAgentSkillDefinitionByName,
   ProjectVersionConflictError,
   type AgentSkillDefinition,
+  type AgentProject,
   type AppUser,
 } from "./supabase.ts";
 import {
@@ -410,6 +413,7 @@ app.post("/api/agent-skills", async (c) => {
     tags: parsed.tags,
     triggers: parsed.triggers,
   });
+  invalidateAgentSkillRegistryCache();
 
   return c.json({ skill });
 });
@@ -454,6 +458,7 @@ app.post("/api/agent-skills/import", async (c) => {
     tags: imported.tags,
     triggers: imported.triggers,
   });
+  invalidateAgentSkillRegistryCache();
 
   return c.json({ skill });
 });
@@ -490,6 +495,7 @@ app.patch("/api/agent-skills/:skillId", async (c) => {
   if (!skill) {
     return c.json({ error: "Skill 不存在" }, 404);
   }
+  invalidateAgentSkillRegistryCache();
 
   return c.json({ skill });
 });
@@ -505,6 +511,7 @@ app.delete("/api/agent-skills/:skillId", async (c) => {
   if (!deleted) {
     return c.json({ error: "Skill 不存在" }, 404);
   }
+  invalidateAgentSkillRegistryCache();
 
   return c.json({ ok: true });
 });
@@ -531,6 +538,7 @@ app.get("/api/projects/:projectId", async (c) => {
   if (!project) {
     return notFound(c);
   }
+  scheduleAgentRunPrewarm();
 
   return c.json({ project });
 });
@@ -863,10 +871,32 @@ app.post("/api/agent-run", async (c) => {
   const parsedCanvasContext = canvasContextSchema.parse(body.canvasContext ?? {});
   const projectId = z.string().uuid().parse(body.projectId);
   const runNodeId = z.string().min(1).parse(body.runNodeId);
-  const project = await getProjectForUser(projectId, user.id);
+  const project = await waitForProjectSnapshotForRun({
+    projectId,
+    promptNodeId: parsedCanvasContext.promptNodeId ?? null,
+    runNodeId,
+    selectedNodeIds: normalizeSelectedNodeIdsForRun(
+      parsedCanvasContext.selectedNodeIds,
+      parsedCanvasContext.selectedNodeId ?? null
+    ),
+    signal: c.req.raw.signal,
+    userId: user.id,
+  });
 
   if (!project) {
     return notFound(c);
+  }
+  if (
+    !hasAgentRunSnapshot(project, {
+      promptNodeId: parsedCanvasContext.promptNodeId ?? null,
+      runNodeId,
+      selectedNodeIds: normalizeSelectedNodeIdsForRun(
+        parsedCanvasContext.selectedNodeIds,
+        parsedCanvasContext.selectedNodeId ?? null
+      ),
+    })
+  ) {
+    return c.json({ error: "项目快照尚未保存完成，请稍后重试。" }, 409);
   }
   const retryFrom = await resolveRetryContext({
     project,
@@ -878,14 +908,13 @@ app.post("/api/agent-run", async (c) => {
     retryFrom,
   };
 
-  const updatedProject = await updateProjectForUser({
+  void updateProjectForUser({
     projectId,
     userId: user.id,
     lastRunId: runNodeId,
+  }).catch((error: unknown) => {
+    console.error("[agent-run:last-run]", error);
   });
-  if (!updatedProject) {
-    return notFound(c);
-  }
 
   const activeRunKey = getActiveAgentRunKey(user.id, projectId, runNodeId);
   const controller = new AbortController();
@@ -898,7 +927,7 @@ app.post("/api/agent-run", async (c) => {
         await executeAgentRun({
           canvasContext,
           projectId,
-          projectSnapshot: updatedProject,
+          projectSnapshot: project,
           runNodeId,
           signal: controller.signal,
           userId: user.id,
@@ -915,6 +944,96 @@ app.post("/api/agent-run", async (c) => {
 
   return createUIMessageStreamResponse({ stream });
 });
+
+async function waitForProjectSnapshotForRun({
+  projectId,
+  promptNodeId,
+  runNodeId,
+  selectedNodeIds,
+  signal,
+  userId,
+}: {
+  projectId: string;
+  promptNodeId: string | null;
+  runNodeId: string;
+  selectedNodeIds: string[];
+  signal?: AbortSignal;
+  userId: string;
+}) {
+  const deadline = Date.now() + 8_000;
+  let latestProject: AgentProject | null = null;
+
+  while (!signal?.aborted) {
+    const project = await getProjectForUser(projectId, userId);
+    if (!project) {
+      return null;
+    }
+    latestProject = project;
+    if (hasAgentRunSnapshot(project, { promptNodeId, runNodeId, selectedNodeIds })) {
+      return project;
+    }
+    if (Date.now() >= deadline) {
+      return latestProject;
+    }
+    await waitForSnapshotPoll(signal);
+  }
+
+  return latestProject;
+}
+
+function hasAgentRunSnapshot(
+  project: AgentProject,
+  {
+    promptNodeId,
+    runNodeId,
+    selectedNodeIds,
+  }: {
+    promptNodeId: string | null;
+    runNodeId: string;
+    selectedNodeIds: string[];
+  }
+) {
+  const nodeIds = new Set(project.nodes.map((node) => node.id));
+  return (
+    nodeIds.has(runNodeId) &&
+    (!promptNodeId || nodeIds.has(promptNodeId)) &&
+    selectedNodeIds.every((nodeId) => nodeIds.has(nodeId))
+  );
+}
+
+function normalizeSelectedNodeIdsForRun(
+  selectedNodeIds: string[] | undefined,
+  selectedNodeId: string | null
+) {
+  const ids = new Set<string>();
+  if (selectedNodeId) {
+    ids.add(selectedNodeId);
+  }
+  for (const nodeId of selectedNodeIds ?? []) {
+    if (nodeId) {
+      ids.add(nodeId);
+    }
+  }
+  return [...ids];
+}
+
+function waitForSnapshotPoll(signal?: AbortSignal) {
+  return new Promise<void>((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const timeout = setTimeout(resolve, 100);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timeout);
+        resolve();
+      },
+      { once: true }
+    );
+  });
+}
 
 async function resolveRetryContext({
   project,

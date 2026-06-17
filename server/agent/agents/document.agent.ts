@@ -7,11 +7,13 @@ import { searchKnowledgeTool } from "../tools/knowledge/search-knowledge.tool.ts
 import { activateSkillTool } from "../tools/skills/activate-skill.tool.ts";
 import { readSkillResourceTool } from "../tools/skills/read-skill-resource.tool.ts";
 
+let documentAgent: Agent<CucumberAgentContext> | undefined;
+
 export function createDocumentAgent() {
-  return new Agent<CucumberAgentContext>({
+  documentAgent ??= new Agent<CucumberAgentContext>({
     name: "Cucumber Document Agent",
     handoffDescription:
-      "Document specialist. Delegate here for markdown/document creation, rewriting, structured drafts, PRDs, briefs, notes, and summaries that should become canvas artifacts.",
+      "Text artifact specialist. Delegate here for markdown/document/diagram/html webpage/code creation, rewriting, structured drafts, PRDs, briefs, notes, demos, and summaries that should become canvas artifacts.",
     instructions: (runContext) => documentInstructions(runContext.context),
     tools: [
       activateSkillTool,
@@ -20,4 +22,5 @@ export function createDocumentAgent() {
       createTextArtifactTool,
     ],
   });
+  return documentAgent;
 }

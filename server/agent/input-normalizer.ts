@@ -31,6 +31,7 @@ export const taskArtifactSubtypeValues = [
   "banner",
   "table",
   "mindmap",
+  "animation",
 ] as const;
 
 export const taskArtifactFormatValues = [
@@ -59,6 +60,7 @@ const normalizedIntentSchema = z.enum([
   "document.create",
   "document.edit",
   "web.fetch",
+  "webpage.create",
   "research.answer",
   "code.create",
   "data.analyze",
@@ -142,6 +144,7 @@ type NormalizeAgentInputOptions = {
 };
 
 let normalizerRunner: Runner | undefined;
+let normalizerAgent: Agent<unknown, typeof normalizedAgentInputSchema> | undefined;
 
 export async function normalizeAgentInput(
   input: NormalizeInput,
@@ -167,7 +170,7 @@ export async function normalizeAgentInput(
 }
 
 export function createInputNormalizerAgent() {
-  return new Agent({
+  normalizerAgent ??= new Agent({
     name: "Cucumber Input Normalizer",
     instructions: [
       "Normalize the user's request into a compact artifact-first task object.",
@@ -180,6 +183,8 @@ export function createInputNormalizerAgent() {
       "The words visual, 视觉, H5, campaign, product, marketing, engineering usually describe domain or context. They do not imply artifact.kind=image by themselves.",
       "Classify 流程时序图 / sequence diagram as operation=create, artifact.kind=diagram, artifact.subtype=sequenceDiagram, artifact.format=mermaid, requiredCapabilities including sequence-diagram and markdown-artifact, negativeCapabilities including image-generation.",
       "Classify 流程图 / flowchart as diagram/flowchart/mermaid unless the user asks for a poster or rendered image.",
+      "Classify HTML pages, H5 pages, interactive prototypes, HTML demos, and HTML animations as operation=create, artifact.kind=webpage, artifact.format=html, requiredCapabilities including html-artifact, and negativeCapabilities including image-generation.",
+      "HTML animation requests such as 30秒 HTML 动画 are webpage/html artifacts, not image artifacts, unless the user explicitly asks to generate a raster image/poster/banner.",
       "Classify PRD, brief,方案,说明,邮件草稿,纪要 as document or markdown artifacts.",
       "Classify requests to edit, rewrite, polish, expand, shorten, remove parts from, or otherwise revise a prompt/text/description as operation=edit with artifact=null and negativeCapabilities including image-generation. Terse commands such as 取消标题, 去掉标题, 删除文案, or remove the title should revise the selected/upstream prompt text and must not generate images unless the user explicitly asks to generate/create/render an image now.",
       "Classify requests to analyze, evaluate, critique, summarize, or give suggestions for a visual/image/banner/poster/KV brief as operation=analyze or answer with no image artifact unless the user explicitly asks to generate/create/render the image now; include negativeCapabilities image-generation.",
@@ -193,6 +198,7 @@ export function createInputNormalizerAgent() {
     ].join("\n"),
     outputType: normalizedAgentInputSchema,
   });
+  return normalizerAgent;
 }
 
 function getNormalizerRunner() {
@@ -225,7 +231,9 @@ export function finalizeNormalizedAgentInput(
   const requiredCapabilities = uniqueCapabilityList([
     ...(ruleBased.requiredCapabilities ?? []),
     ...(parsed.requiredCapabilities ?? []),
-  ]).filter((capability) => !promptTextEdit || !isImageTaskCapability(capability));
+  ]).filter(
+    (capability) => isImageArtifact(artifact) || !isImageTaskCapability(capability)
+  );
   const negativeCapabilities = uniqueCapabilityList([
     ...(ruleBased.negativeCapabilities ?? []),
     ...(parsed.negativeCapabilities ?? []),
@@ -334,6 +342,13 @@ export function isDocumentArtifactTask(input?: NormalizedAgentInput | null) {
   );
 }
 
+export function isTextArtifactTask(input?: NormalizedAgentInput | null) {
+  const kind = input?.artifact?.kind;
+  return Boolean(
+    kind && ["diagram", "document", "markdown", "code", "webpage"].includes(kind)
+  );
+}
+
 export function isWebArtifactTask(input?: NormalizedAgentInput | null) {
   return input?.artifact?.kind === "webpage";
 }
@@ -371,6 +386,16 @@ export function selectAgentRoutesForTask(
   const routes: Exclude<SpecialistRoute, "manager">[] = [];
   if (isImageArtifactTask(input)) {
     routes.push("image");
+    return routes;
+  }
+  if (input.artifact?.kind === "webpage") {
+    routes.push(
+      (input.requiredCapabilities ?? []).includes("web-fetch") ? "web" : "document"
+    );
+    return routes;
+  }
+  if (input.artifact?.kind === "code") {
+    routes.push("document");
     return routes;
   }
   if (
@@ -420,7 +445,9 @@ export function inferIntentFromProtocol({
     return operation === "transform" ? "image.upscale" : "image.generate";
   }
   if (artifact?.kind === "webpage") {
-    return "web.fetch";
+    return /(https?:\/\/|抓取|读取|fetch|read|save|保存)/i.test(rawPrompt)
+      ? "web.fetch"
+      : "webpage.create";
   }
   if (artifact?.kind === "diagram" || artifact?.kind === "document" || artifact?.kind === "markdown") {
     return operation === "edit" ? "document.edit" : "document.create";
@@ -498,6 +525,20 @@ function inferTaskProtocol(prompt: string): Pick<
       negativeCapabilities: ["image-generation"],
       operation: inferEditOperation(prompt) ? "edit" : "create",
       requiredCapabilities: ["flowchart", "markdown-artifact"],
+    };
+  }
+
+  if (isHtmlArtifactCreationRequest(prompt)) {
+    return {
+      artifact: {
+        kind: "webpage",
+        subtype: inferHtmlArtifactSubtype(prompt),
+        format: "html",
+      },
+      domain,
+      negativeCapabilities: ["image-generation"],
+      operation: inferEditOperation(prompt) ? "edit" : "create",
+      requiredCapabilities: inferHtmlArtifactCapabilities(prompt),
     };
   }
 
@@ -651,8 +692,18 @@ function normalizeArtifact(
   if (/(流程\s*时序图|时序图|sequence\s*diagram)/i.test(rawPrompt)) {
     return { kind: "diagram", subtype: "sequenceDiagram", format: "mermaid" };
   }
-  if (/(流程图|flowchart|流程\s*图)/i.test(rawPrompt) && artifact.kind !== "image") {
+  if (
+    /(流程图|flowchart|流程\s*图)/i.test(rawPrompt) &&
+    !hasExplicitImageCreationRequest(rawPrompt)
+  ) {
     return { kind: "diagram", subtype: "flowchart", format: "mermaid" };
+  }
+  if (isHtmlArtifactCreationRequest(rawPrompt)) {
+    return {
+      kind: "webpage",
+      subtype: inferHtmlArtifactSubtype(rawPrompt),
+      format: "html",
+    };
   }
   return {
     kind: artifact.kind,
@@ -697,7 +748,7 @@ function isDocumentArtifactKind(
 }
 
 function inferDomain(prompt: string): TaskDomain {
-  if (/(视觉|H5|海报|banner|KV|主视觉|画面|构图|风格|色彩|poster|visual)/i.test(prompt)) {
+  if (/(视觉|H5|HTML|网页|页面|动画|动效|海报|banner|KV|主视觉|画面|构图|风格|色彩|poster|visual|animation|motion)/i.test(prompt)) {
     return "visual-design";
   }
   if (/(PRD|产品|需求|用户|roadmap|feature)/i.test(prompt)) {
@@ -754,6 +805,46 @@ function inferLongFormDocumentCapabilities(prompt: string) {
     ...(/引用|来源|出处|citation|citations|sources?/i.test(prompt)
       ? ["source-based-answer", "citations"]
       : []),
+  ]);
+}
+
+function isHtmlArtifactCreationRequest(prompt: string) {
+  if (hasExplicitImageCreationRequest(prompt)) {
+    return false;
+  }
+  if (/(抓取|读取|总结|概括|整理|fetch|read|summari[sz]e)/i.test(prompt)) {
+    return false;
+  }
+
+  const hasHtmlSurface =
+    /\bhtml\b|网页|网页文件|web\s?page|webpage|页面|H5|h5/i.test(prompt);
+  if (!hasHtmlSurface) {
+    return false;
+  }
+
+  const asksToCreate =
+    /(做|制作|生成|创建|写|产出|输出|实现|开发|搭建|build|create|make|write|implement)/i.test(
+      prompt
+    );
+  const htmlOutput =
+    /(动画|动效|交互|互动|demo|演示|原型|prototype|页面|网页|webpage|website|landing|H5|h5)/i.test(
+      prompt
+    );
+
+  return asksToCreate && htmlOutput;
+}
+
+function inferHtmlArtifactSubtype(prompt: string): TaskArtifactSubtype | undefined {
+  if (/(动画|动效|motion|animation|30秒|60fps|视频素材)/i.test(prompt)) {
+    return "animation";
+  }
+  return undefined;
+}
+
+function inferHtmlArtifactCapabilities(prompt: string) {
+  return uniqueCapabilityList([
+    "html-artifact",
+    ...(inferHtmlArtifactSubtype(prompt) === "animation" ? ["animation"] : []),
   ]);
 }
 

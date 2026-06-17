@@ -104,6 +104,33 @@ describe("specialist agent registry", () => {
     ).toBe(true);
   });
 
+  it("routes generated webpage artifacts to the document specialist, not the fetch specialist", () => {
+    const context = agentContext({
+      normalizedInput: {
+        rawPrompt: "做个 30 秒 HTML 动画",
+        userGoal: "做个 30 秒 HTML 动画",
+        operation: "create",
+        artifact: { kind: "webpage", subtype: "animation", format: "html" },
+        domain: "visual-design",
+        requiredCapabilities: ["html-artifact", "animation"],
+        negativeCapabilities: ["image-generation"],
+      },
+    });
+
+    expect(
+      isSpecialistEnabledForContext(
+        { enabledRoutes: ["document"], handoffPolicy: () => false },
+        context
+      )
+    ).toBe(true);
+    expect(
+      isSpecialistEnabledForContext(
+        { enabledRoutes: ["web"], handoffPolicy: () => false },
+        context
+      )
+    ).toBe(false);
+  });
+
   it("enables the research specialist from normalized research intent", () => {
     expect(
       isSpecialistEnabledForContext(
