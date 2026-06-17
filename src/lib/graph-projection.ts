@@ -10,6 +10,7 @@ import type {
   AgentCanvasNodeData,
   AgentRunStatus,
   ArtifactRef,
+  ArtifactPreviewKind,
   CanvasToolPart,
   GeneratedImage,
   ImageRequestPreview,
@@ -325,6 +326,15 @@ export function projectRunTraceToCanvas({
       )
     : { resultNodes: [], resultEdges: [] };
   const pendingImageNodes = [...pendingImageProjection.resultNodes];
+  const pendingArtifactProjection = !runWasAborted
+    ? createPendingArtifactResultNodes({
+        existingNodes,
+        requests: readExpectedArtifactRequests(orderedEvents, prompt),
+        runNode,
+        runStatus,
+      })
+    : { resultNodes: [], resultEdges: [] };
+  const pendingArtifactNodes = [...pendingArtifactProjection.resultNodes];
   const projectedNodes = [promptNode, runNode];
   const projectedEdges: AgentCanvasEdge[] = [];
   const rejectedPatches: RejectedGraphPatch[] = [];
@@ -353,6 +363,8 @@ export function projectRunTraceToCanvas({
 
   projectedNodes.push(...pendingImageProjection.resultNodes);
   projectedEdges.push(...pendingImageProjection.resultEdges);
+  projectedNodes.push(...pendingArtifactProjection.resultNodes);
+  projectedEdges.push(...pendingArtifactProjection.resultEdges);
 
   for (const event of orderedEvents) {
     if (event.type === "artifact.created") {
@@ -371,6 +383,10 @@ export function projectRunTraceToCanvas({
       const existingArtifactNodeId = findArtifactNodeId(existingNodes, artifact.id);
       const pendingImageNode =
         artifact.type === "image" ? pendingImageNodes.shift() : undefined;
+      const pendingArtifactNode =
+        artifact.type === "image"
+          ? undefined
+          : shiftPendingArtifactNodeForArtifact(pendingArtifactNodes, artifact);
       if (
         existingArtifactNodeId &&
         pendingImageNode &&
@@ -378,16 +394,26 @@ export function projectRunTraceToCanvas({
       ) {
         removeProjectedNode(projectedNodes, projectedEdges, pendingImageNode.id);
       }
+      if (
+        existingArtifactNodeId &&
+        pendingArtifactNode &&
+        pendingArtifactNode.id !== existingArtifactNodeId
+      ) {
+        removeProjectedNode(projectedNodes, projectedEdges, pendingArtifactNode.id);
+      }
       const artifactNodeId =
         existingArtifactNodeId ??
         pendingImageNode?.id ??
+        pendingArtifactNode?.id ??
         readString(event.payload.canvasNodeId) ?? getArtifactNodeId(artifact);
       const artifactNode = createArtifactCanvasNode({
         artifact,
         existingNodes,
         index: projectedNodes.length,
         nodeId: artifactNodeId,
-        position: existingArtifactNodeId ? undefined : pendingImageNode?.position,
+        position: existingArtifactNodeId
+          ? undefined
+          : pendingImageNode?.position ?? pendingArtifactNode?.position,
         request:
           pendingImageNode?.data.kind === "imageResult"
             ? pendingImageNode.data.request
@@ -983,6 +1009,122 @@ function readExpectedImageRequest(
   };
 }
 
+function readExpectedArtifactRequests(
+  events: RunStepTraceEvent[],
+  prompt: string
+): PendingArtifactRequest[] {
+  const inputEvent = events.findLast((event) => event.type === "input.normalized");
+  const normalizedInput = readRecord(inputEvent?.payload.normalizedInput);
+  const artifact = readRecord(normalizedInput?.artifact);
+  const kind = readString(artifact?.kind);
+  if (!kind || kind === "image" || kind === "canvas") {
+    return [];
+  }
+
+  const request = pendingRequestFromNormalizedArtifact({
+    format: readString(artifact?.format),
+    kind,
+    prompt,
+    subtype: readString(artifact?.subtype),
+  });
+  return request ? [request] : [];
+}
+
+function pendingRequestFromNormalizedArtifact({
+  format,
+  kind,
+  prompt,
+  subtype,
+}: {
+  format?: string;
+  kind: string;
+  prompt: string;
+  subtype?: string;
+}): PendingArtifactRequest | null {
+  const title = getPendingArtifactTitle({ format, kind, prompt, subtype });
+  const summary = "正在生成，结果会自动写入这个节点。";
+
+  if (kind === "markdown" || kind === "document" || kind === "diagram") {
+    return {
+      artifactType: "doc",
+      format: kind === "diagram" ? (format ?? "mermaid") : (format ?? "markdown"),
+      kind: "markdown",
+      nodeIdPrefix: "markdown",
+      previewKind: "markdown",
+      summary,
+      title,
+    };
+  }
+  if (kind === "code") {
+    return {
+      artifactType: "code",
+      format: format ?? "markdown",
+      kind: "code",
+      nodeIdPrefix: "code",
+      previewKind: "code",
+      summary,
+      title,
+    };
+  }
+  if (kind === "webpage") {
+    return {
+      artifactType: "webpage",
+      format: format ?? "html",
+      kind: "webpage",
+      nodeIdPrefix: "webpage",
+      previewKind: "webpage",
+      summary,
+      title,
+    };
+  }
+  if (kind === "data") {
+    return {
+      artifactType: "dataset",
+      format,
+      kind: "artifact",
+      nodeIdPrefix: "dataset",
+      previewKind: "dataset",
+      summary,
+      title,
+    };
+  }
+
+  return null;
+}
+
+function getPendingArtifactTitle({
+  format,
+  kind,
+  prompt,
+  subtype,
+}: {
+  format?: string;
+  kind: string;
+  prompt: string;
+  subtype?: string;
+}) {
+  if (kind === "diagram") {
+    if (subtype === "sequenceDiagram") {
+      return "Sequence diagram";
+    }
+    if (subtype === "flowchart") {
+      return "Flowchart";
+    }
+    return "Diagram";
+  }
+  if (kind === "webpage") {
+    return format === "html" ? "HTML page" : "Webpage";
+  }
+  if (kind === "code") {
+    return "Code artifact";
+  }
+  if (kind === "data") {
+    return "Dataset";
+  }
+  const promptTitle = prompt.trim().replace(/\s+/g, " ").slice(0, 42);
+  return promptTitle || (kind === "markdown" ? "Markdown document" : "Document");
+}
+
 function readNormalizedImageRequest(
   events: RunStepTraceEvent[]
 ): { count: number; preview: Omit<ImageRequestPreview, "index" | "count"> } | null {
@@ -1194,6 +1336,219 @@ function createArtifactCanvasNode({
                   }
               : { ...baseData, kind },
   } as AgentCanvasNode);
+}
+
+type PendingArtifactRequest = {
+  artifactType: ArtifactRef["type"];
+  format?: string;
+  kind: PendingArtifactNodeKind;
+  nodeIdPrefix: string;
+  previewKind?: ArtifactPreviewKind;
+  summary: string;
+  title: string;
+};
+type PendingArtifactNodeKind =
+  | "artifact"
+  | "markdown"
+  | "decision"
+  | "memory"
+  | "toolResult"
+  | "document"
+  | "code"
+  | "webpage";
+
+function createPendingArtifactResultNodes({
+  existingNodes,
+  requests,
+  runNode,
+  runStatus,
+}: {
+  existingNodes: AgentCanvasNode[];
+  requests: PendingArtifactRequest[];
+  runNode: AgentCanvasNode;
+  runStatus: AgentRunStatus;
+}) {
+  if (!requests.length) {
+    return { resultNodes: [], resultEdges: [] };
+  }
+
+  const resultNodes: AgentCanvasNode[] = [];
+  const resultEdges: AgentCanvasEdge[] = [];
+  const baseY = runNode.position.y + ARTIFACT_NODE_GAP_Y;
+
+  requests.forEach((request, index) => {
+    const nodeId = `${request.nodeIdPrefix}-pending-${runNode.id}-${index + 1}`;
+    const existingPosition = getExistingPosition(existingNodes, nodeId);
+    const preferredRect = {
+      x: runNode.position.x + index * ARTIFACT_NODE_GAP_X,
+      y: baseY,
+      width: request.kind === "markdown" || request.kind === "webpage" ? 420 : 240,
+      height: request.kind === "markdown" ? 360 : request.kind === "webpage" ? 320 : 132,
+    };
+    const x = resolvePendingArtifactX(preferredRect, [
+      ...existingNodes,
+      ...resultNodes,
+    ]);
+    const artifact = createPendingArtifactRef(runNode, request, index);
+    const title =
+      runStatus === "error"
+        ? `${request.title} 生成失败`
+        : request.title;
+    const summary =
+      runStatus === "error"
+        ? "生成失败，请查看 Run 详情。"
+        : request.summary;
+
+    resultNodes.push(
+      getExistingOrProjectedNode(existingNodes, nodeId, {
+        id: nodeId,
+        type: getNodeTypeForKind(request.kind),
+        position: existingPosition ?? { x, y: preferredRect.y },
+        width: preferredRect.width,
+        height: preferredRect.height,
+        style: {
+          width: preferredRect.width,
+          height: preferredRect.height,
+        },
+        data: createPendingArtifactNodeData({
+          artifact,
+          kind: request.kind,
+          runNode,
+          summary,
+          title,
+        }),
+      } as AgentCanvasNode)
+    );
+    resultEdges.push({
+      id: `edge-${runNode.id}-${nodeId}`,
+      source: runNode.id,
+      target: nodeId,
+      type: "animated",
+    });
+  });
+
+  return { resultNodes, resultEdges };
+}
+
+function createPendingArtifactNodeData({
+  artifact,
+  kind,
+  runNode,
+  summary,
+  title,
+}: {
+  artifact: ArtifactRef;
+  kind: PendingArtifactRequest["kind"];
+  runNode: AgentCanvasNode;
+  summary: string;
+  title: string;
+}): AgentCanvasNodeData {
+  const baseData = {
+    artifact,
+    prompt: runNode.data.kind === "run" ? runNode.data.prompt : undefined,
+    runId: runNode.id,
+    summary,
+    title,
+  };
+
+  if (kind === "markdown") {
+    return {
+      ...baseData,
+      kind,
+      content: summary,
+    };
+  }
+  if (kind === "decision") {
+    return { ...baseData, kind, decision: summary };
+  }
+  if (kind === "memory") {
+    return { ...baseData, kind, memory: summary };
+  }
+  if (kind === "toolResult") {
+    return { ...baseData, kind };
+  }
+  if (kind === "code") {
+    return {
+      ...baseData,
+      kind,
+      language: readString(artifact.metadata?.language) ?? readString(artifact.metadata?.format),
+    };
+  }
+  if (kind === "webpage") {
+    return {
+      ...baseData,
+      kind,
+    };
+  }
+  return { ...baseData, kind };
+}
+
+function createPendingArtifactRef(
+  runNode: AgentCanvasNode,
+  request: PendingArtifactRequest,
+  index: number
+): ArtifactRef {
+  return {
+    id: `pending-${runNode.id}-${request.nodeIdPrefix}-${index + 1}`,
+    type: request.artifactType,
+    title: request.title,
+    summary: request.summary,
+    preview: request.summary,
+    previewKind: request.previewKind,
+    metadata: {
+      format: request.format,
+      pending: true,
+      previewKind: request.previewKind,
+      sourceRunNodeId: runNode.id,
+      summary: request.summary,
+    },
+  };
+}
+
+function resolvePendingArtifactX(
+  preferredRect: {
+    height: number;
+    width: number;
+    x: number;
+    y: number;
+  },
+  nodes: AgentCanvasNode[]
+) {
+  const rects = nodes.map((node) => ({
+    height: readNodeDimension(node, "height") ?? 132,
+    width: readNodeDimension(node, "width") ?? 240,
+    x: node.position.x,
+    y: node.position.y,
+  }));
+  if (!rects.some((rect) => rectsOverlap(preferredRect, rect))) {
+    return preferredRect.x;
+  }
+  return preferredRect.x + ARTIFACT_NODE_GAP_X;
+}
+
+function rectsOverlap(
+  left: { height: number; width: number; x: number; y: number },
+  right: { height: number; width: number; x: number; y: number }
+) {
+  return !(
+    left.x + left.width < right.x ||
+    right.x + right.width < left.x ||
+    left.y + left.height < right.y ||
+    right.y + right.height < left.y
+  );
+}
+
+function shiftPendingArtifactNodeForArtifact(
+  pendingNodes: AgentCanvasNode[],
+  artifact: ArtifactRef
+) {
+  const targetKind = getArtifactNodeKind(artifact);
+  const index = pendingNodes.findIndex((node) => node.data.kind === targetKind);
+  if (index < 0) {
+    return undefined;
+  }
+  const [node] = pendingNodes.splice(index, 1);
+  return node;
 }
 
 function pendingImageDimensions(

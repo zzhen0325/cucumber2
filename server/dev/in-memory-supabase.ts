@@ -36,9 +36,8 @@ function withDefaults(table: string, value: Row): Row {
     if (row.updated_at == null) row.updated_at = nowIso();
     if (row.deleted_at === undefined) row.deleted_at = null;
     if (row.version == null) row.version = 0;
-    if (row.nodes == null) row.nodes = [];
-    if (row.edges == null) row.edges = [];
     if (row.node_count == null) row.node_count = 0;
+    if (row.edge_count == null) row.edge_count = 0;
     if (row.image_count == null) row.image_count = 0;
     if (row.snapshot_bytes == null) row.snapshot_bytes = 0;
     if (row.selected_node_id === undefined) row.selected_node_id = null;
@@ -62,6 +61,28 @@ function withDefaults(table: string, value: Row): Row {
     if (row.size_bytes === undefined) row.size_bytes = null;
     if (row.origin == null) row.origin = "user_upload";
     if (row.created_by === undefined) row.created_by = null;
+    if (row.summary === undefined) row.summary = null;
+    if (row.preview_text === undefined) row.preview_text = null;
+    if (row.preview_kind === undefined) row.preview_kind = null;
+    if (row.version == null) row.version = 0;
+    if (row.deleted_at === undefined) row.deleted_at = null;
+    if (row.updated_at == null) row.updated_at = nowIso();
+  }
+  if (table === "agent_canvas_nodes") {
+    if (row.version == null) row.version = 0;
+    if (row.deleted_at === undefined) row.deleted_at = null;
+    if (row.updated_at == null) row.updated_at = nowIso();
+  }
+  if (table === "agent_canvas_edges") {
+    if (row.version == null) row.version = 0;
+    if (row.deleted_at === undefined) row.deleted_at = null;
+    if (row.updated_at == null) row.updated_at = nowIso();
+  }
+  if (table === "agent_artifact_contents") {
+    if (row.size_bytes == null) row.size_bytes = 0;
+    if (row.version == null) row.version = 0;
+    if (row.deleted_at === undefined) row.deleted_at = null;
+    if (row.updated_at == null) row.updated_at = nowIso();
   }
   if (table === "agent_knowledge_chunks") {
     if (row.source_node_id === undefined) row.source_node_id = null;
@@ -103,6 +124,185 @@ class InMemoryDb {
 
   from(name: string) {
     return new InMemoryQuery(this, name);
+  }
+
+  async rpc(name: string, args: Record<string, unknown>) {
+    if (name === "apply_canvas_patch") {
+      return this.applyCanvasPatch(args);
+    }
+    if (name === "upsert_text_artifact_content") {
+      return this.upsertTextArtifactContent(args);
+    }
+    return { data: null, error: new Error(`Unsupported RPC ${name}`) };
+  }
+
+  private async applyCanvasPatch(args: Record<string, unknown>) {
+    const projectId = args.p_project_id;
+    const userId = args.p_user_id;
+    const projects = this.table("agent_projects");
+    const project = projects.find(
+      (row) =>
+        row.id === projectId &&
+        row.user_id === userId &&
+        row.deleted_at == null
+    );
+    if (!project) {
+      return { data: null, error: new Error("project_not_found") };
+    }
+    const expectedVersion = args.p_expected_version;
+    if (
+      typeof expectedVersion === "number" &&
+      project.version !== expectedVersion
+    ) {
+      return { data: null, error: new Error("version_conflict") };
+    }
+
+    const now = nowIso();
+    for (const row of (args.p_node_upserts as Row[] | undefined) ?? []) {
+      upsertComposite(this.table("agent_canvas_nodes"), row, [
+        "project_id",
+        "node_id",
+      ]);
+    }
+    for (const nodeId of (args.p_node_deletes as string[] | undefined) ?? []) {
+      const row = this.table("agent_canvas_nodes").find(
+        (candidate) =>
+          candidate.project_id === projectId && candidate.node_id === nodeId
+      );
+      if (row) {
+        row.deleted_at = now;
+        row.updated_at = now;
+      }
+    }
+    for (const row of (args.p_edge_upserts as Row[] | undefined) ?? []) {
+      upsertComposite(this.table("agent_canvas_edges"), row, [
+        "project_id",
+        "edge_id",
+      ]);
+    }
+    for (const edgeId of (args.p_edge_deletes as string[] | undefined) ?? []) {
+      const row = this.table("agent_canvas_edges").find(
+        (candidate) =>
+          candidate.project_id === projectId && candidate.edge_id === edgeId
+      );
+      if (row) {
+        row.deleted_at = now;
+        row.updated_at = now;
+      }
+    }
+
+    const nodeRows = this.table("agent_canvas_nodes").filter(
+      (row) => row.project_id === projectId && row.deleted_at == null
+    );
+    const edgeRows = this.table("agent_canvas_edges").filter(
+      (row) => row.project_id === projectId && row.deleted_at == null
+    );
+    project.version = Number(project.version ?? 0) + 1;
+    project.selected_node_id = args.p_selected_node_id ?? null;
+    project.last_run_id = args.p_last_run_id ?? null;
+    project.node_count = nodeRows.length;
+    project.edge_count = edgeRows.length;
+    project.image_count = nodeRows.filter((row) => row.kind === "imageResult").length;
+    project.snapshot_bytes = 0;
+    project.updated_at = now;
+
+    return {
+      data: {
+        id: project.id,
+        title: project.title,
+        selectedNodeId: project.selected_node_id,
+        lastRunId: project.last_run_id,
+        version: project.version,
+        nodeCount: project.node_count,
+        edgeCount: project.edge_count,
+        imageCount: project.image_count,
+        snapshotBytes: project.snapshot_bytes,
+        createdAt: project.created_at,
+        updatedAt: project.updated_at,
+      },
+      error: null,
+    };
+  }
+
+  private async upsertTextArtifactContent(args: Record<string, unknown>) {
+    const project = this.table("agent_projects").find(
+      (row) =>
+        row.id === args.p_project_id &&
+        row.user_id === args.p_user_id &&
+        row.deleted_at == null
+    );
+    if (!project) {
+      return { data: null, error: new Error("project_not_found") };
+    }
+
+    const artifactId = String(args.p_artifact_id);
+    const artifacts = this.table("agent_artifacts");
+    const existing = artifacts.find(
+      (row) => row.id === artifactId && row.deleted_at == null
+    );
+    if (
+      existing &&
+      typeof args.p_expected_version === "number" &&
+      existing.version !== args.p_expected_version
+    ) {
+      return { data: null, error: new Error("artifact_version_conflict") };
+    }
+    const version = existing ? Number(existing.version ?? 0) + 1 : 0;
+    const now = nowIso();
+    const sizeBytes = Buffer.byteLength(String(args.p_content_text ?? "")) +
+      Buffer.byteLength(JSON.stringify(args.p_content_json ?? ""));
+
+    const artifact = upsertComposite(artifacts, {
+      id: artifactId,
+      project_id: args.p_project_id,
+      run_node_id: null,
+      type: args.p_type ?? "doc",
+      uri: null,
+      title: args.p_title ?? null,
+      metadata: args.p_metadata ?? {},
+      content_ref: null,
+      mime_type: args.p_mime_type,
+      size_bytes: sizeBytes,
+      origin: "user_upload",
+      created_by: args.p_user_id,
+      summary: args.p_summary ?? null,
+      preview_text: args.p_preview_text ?? null,
+      preview_kind: args.p_preview_kind ?? null,
+      version,
+      deleted_at: null,
+      updated_at: now,
+    }, ["id"]);
+
+    upsertComposite(this.table("agent_artifact_contents"), {
+      project_id: args.p_project_id,
+      artifact_id: artifactId,
+      content_format: args.p_content_format,
+      mime_type: args.p_mime_type,
+      content_text: args.p_content_text ?? null,
+      content_json: args.p_content_json ?? null,
+      plain_text: args.p_plain_text ?? null,
+      digest: null,
+      size_bytes: sizeBytes,
+      version,
+      deleted_at: null,
+      updated_at: now,
+    }, ["project_id", "artifact_id"]);
+
+    return {
+      data: {
+        id: artifactId,
+        type: artifact.type,
+        title: artifact.title,
+        summary: artifact.summary,
+        preview: artifact.preview_text,
+        previewKind: artifact.preview_kind,
+        mimeType: artifact.mime_type,
+        sizeBytes: artifact.size_bytes,
+        version,
+        updatedAt: now,
+      },
+      error: null,
+    };
   }
 }
 
@@ -308,6 +508,38 @@ class InMemoryQuery implements PromiseLike<{ data: unknown; error: null; count?:
   }
 }
 
+function upsertComposite(rows: Row[], value: Row, keys: string[]) {
+  const existing = rows.find((row) =>
+    keys.every((key) => row[key] === value[key])
+  );
+  if (existing) {
+    Object.assign(existing, value, {
+      updated_at: nowIso(),
+      version: value.version ?? Number(existing.version ?? 0) + 1,
+    });
+    return existing;
+  }
+
+  const row = { ...value };
+  if (row.id == null && keys.includes("id")) {
+    row.id = randomUUID();
+  }
+  if (row.created_at == null) {
+    row.created_at = nowIso();
+  }
+  if (row.updated_at == null) {
+    row.updated_at = nowIso();
+  }
+  if (row.version == null) {
+    row.version = 0;
+  }
+  if (row.deleted_at === undefined) {
+    row.deleted_at = null;
+  }
+  rows.push(row);
+  return row;
+}
+
 type StoredObject = {
   body: unknown;
   contentType: string;
@@ -456,6 +688,9 @@ export function createInMemorySupabaseClient() {
   return {
     from(name: string) {
       return db.from(name);
+    },
+    rpc(name: string, args: Record<string, unknown>) {
+      return db.rpc(name, args);
     },
     storage: db.storage,
   };

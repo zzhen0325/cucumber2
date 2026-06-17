@@ -11,6 +11,7 @@ import {
   AgentContextValidationError,
   buildAgentRunInput,
   buildCucumberAgentContext,
+  hydrateAgentRunInputArtifacts,
   type AgentRunInput,
   type AgentRuntime,
   type CucumberRunEvent,
@@ -35,6 +36,7 @@ import {
 } from "./mcp/context-registry.ts";
 import {
   materializeAgentRunSnapshot,
+  shouldBlockRunForMaterialization,
   shouldMaterializeRunEvent,
 } from "./materialize-run.ts";
 import { getAgentRunnerConfig } from "./model-config.ts";
@@ -350,16 +352,19 @@ export async function executeAgentRun({
   let finalOutput: string | undefined;
   let artifactIds: string[] = [];
   let materializationQueued = false;
-  let materializationRunning = false;
+  let materializationDrainPromise: Promise<void> | null = null;
   const runEvents: AgentEvent[] = [];
 
   const trackEvent = async (event: AgentEvent) => {
     runEvents.push(event);
     if (shouldMaterializeRunEvent(event.type)) {
-      if (shouldDeferRunMaterialization()) {
+      if (
+        shouldDeferRunMaterialization() ||
+        !shouldBlockRunForMaterialization(event.type)
+      ) {
         scheduleMaterializeRun();
       } else {
-        await flushAndMaterializeRun();
+        await flushQueuedMaterializeRun();
       }
     }
     return event;
@@ -416,25 +421,30 @@ export async function executeAgentRun({
 
   const scheduleMaterializeRun = () => {
     materializationQueued = true;
-    if (!materializationRunning) {
-      void drainMaterializeRunQueue();
-    }
+    void ensureMaterializeDrain();
+  };
+
+  const flushQueuedMaterializeRun = async () => {
+    materializationQueued = true;
+    await ensureMaterializeDrain();
+  };
+
+  const ensureMaterializeDrain = () => {
+    materializationDrainPromise ??= drainMaterializeRunQueue().finally(() => {
+      materializationDrainPromise = null;
+      if (materializationQueued) {
+        void ensureMaterializeDrain();
+      }
+    });
+    return materializationDrainPromise;
   };
 
   const drainMaterializeRunQueue = async () => {
-    materializationRunning = true;
-    try {
-      while (materializationQueued) {
-        materializationQueued = false;
-        await flushAndMaterializeRun().catch((error: unknown) => {
-          console.error("[agent-run:materialize]", error);
-        });
-      }
-    } finally {
-      materializationRunning = false;
-      if (materializationQueued) {
-        void drainMaterializeRunQueue();
-      }
+    while (materializationQueued) {
+      materializationQueued = false;
+      await flushAndMaterializeRun().catch((error: unknown) => {
+        console.error("[agent-run:materialize]", error);
+      });
     }
   };
 
@@ -449,7 +459,7 @@ export async function executeAgentRun({
       "重建可信画布上下文",
       "prepare"
     );
-    agentInput = buildAgentRunInput(input);
+    agentInput = await hydrateAgentRunInputArtifacts(buildAgentRunInput(input));
     quickRoute = routeAgentRunQuick(agentInput);
     await writeRunEvent({
       projectId: input.projectId,
@@ -653,21 +663,7 @@ export async function executeAgentRun({
       finishMessage("error");
       scheduleMaterializeRun();
     } else {
-      await eventWriter.flush().catch((flushError: unknown) => {
-        if (!aborted) {
-          console.error("[agent-run:persist]", flushError);
-        }
-      });
-      await materializeAgentRunSnapshot({
-        events: runEvents,
-        projectId: input.projectId,
-        runNodeId: input.runNodeId,
-        userId: input.userId,
-      }).catch((materializeError: unknown) => {
-        if (!aborted) {
-          console.error("[agent-run:materialize]", materializeError);
-        }
-      });
+      await flushQueuedMaterializeRun();
       finishMessage("error");
     }
   }

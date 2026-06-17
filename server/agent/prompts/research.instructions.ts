@@ -52,7 +52,10 @@ function buildContextInstructions(context?: CucumberAgentContext) {
           metadata: item.artifact.metadata,
         }
       : undefined,
+    content: item.content,
+    contentFormat: item.contentFormat,
     contentRef: item.contentRef,
+    mimeType: item.mimeType,
     nodeId: item.nodeId,
     prompt: item.prompt,
     summary: item.summary,

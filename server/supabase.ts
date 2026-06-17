@@ -2,13 +2,10 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { createInMemorySupabaseClient, isInMemoryDbEnabled } from "./dev/in-memory-supabase.ts";
 import { canAccessProject } from "./project-access.ts";
-import { applyCanvasPatch, hasCanvasPatchChanges } from "../src/lib/canvas-patch.ts";
-import { getProjectSnapshotStats } from "../src/lib/project-summary.ts";
+import { assertLeanArtifactMetadata } from "../src/lib/canvas-persistence.ts";
 import type {
-  AgentCanvasEdge,
-  AgentCanvasNode,
+  ArtifactPreviewKind,
   ArtifactType,
-  CanvasPatch,
 } from "../src/types/canvas.ts";
 import type { AgentEvent, AgentEventType } from "../src/types/runtime.ts";
 import { parseCapabilities } from "./agent/skills/skill-parser.ts";
@@ -32,32 +29,11 @@ export type ProjectSummary = {
   id: string;
   title: string;
   nodeCount: number;
+  edgeCount: number;
   imageCount: number;
   createdAt: string;
   updatedAt: string;
 };
-
-export type AgentProject = {
-  id: string;
-  title: string;
-  nodes: AgentCanvasNode[];
-  edges: AgentCanvasEdge[];
-  selectedNodeId: string | null;
-  lastRunId: string | null;
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export class ProjectVersionConflictError extends Error {
-  readonly project: AgentProject;
-
-  constructor(project: AgentProject) {
-    super("Project version conflict.");
-    this.name = "ProjectVersionConflictError";
-    this.project = project;
-  }
-}
 
 export type AgentEventRecord = {
   id: string;
@@ -90,6 +66,11 @@ export type AgentArtifactRecord = {
   storagePath: string | null;
   mimeType: string | null;
   sizeBytes: number | null;
+  summary: string | null;
+  previewText: string | null;
+  previewKind: ArtifactPreviewKind | null;
+  version: number | null;
+  updatedAt: string | null;
   origin: AgentArtifactOrigin;
   createdBy: string | null;
   createdAt: string;
@@ -152,18 +133,6 @@ type CreateSessionInput = {
   expiresAt: string;
 };
 
-type UpdateProjectInput = {
-  projectId: string;
-  userId: string;
-  title?: string;
-  nodes?: AgentCanvasNode[];
-  edges?: AgentCanvasEdge[];
-  canvasPatch?: CanvasPatch;
-  selectedNodeId?: string | null;
-  lastRunId?: string | null;
-  expectedVersion?: number;
-};
-
 type SaveAgentSkillDefinitionInput = {
   agentScope?: AgentSkillScope;
   body: string;
@@ -206,32 +175,21 @@ type SessionRow = {
   last_seen_at: string;
 };
 
-type ProjectRow = {
+type ProjectAccessRow = {
   id: string;
   user_id: string | null;
-  title: string;
-  nodes: unknown[];
-  edges: unknown[];
-  node_count: number | null;
-  image_count: number | null;
-  snapshot_bytes: number | null;
-  selected_node_id: string | null;
-  last_run_id: string | null;
-  version: number | null;
   deleted_at: string | null;
+};
+
+type ProjectSummaryRow = {
+  id: string;
+  title: string;
+  node_count: number | null;
+  edge_count: number | null;
+  image_count: number | null;
   created_at: string;
   updated_at: string;
 };
-
-type ProjectSummaryRow = Pick<
-  ProjectRow,
-  | "created_at"
-  | "id"
-  | "image_count"
-  | "node_count"
-  | "title"
-  | "updated_at"
->;
 
 type AgentEventRow = {
   id: string;
@@ -259,6 +217,12 @@ type AgentArtifactRow = {
   storage_path: string | null;
   mime_type: string | null;
   size_bytes: number | null;
+  summary: string | null;
+  preview_text: string | null;
+  preview_kind: ArtifactPreviewKind | null;
+  version: number | null;
+  deleted_at: string | null;
+  updated_at: string | null;
   origin: AgentArtifactOrigin | null;
   created_by: string | null;
   created_at: string;
@@ -472,7 +436,7 @@ export async function listProjects(userId: string) {
   const client = getSupabaseClient();
   const { data, error } = await client
     .from("agent_projects")
-    .select("id,title,node_count,image_count,created_at,updated_at")
+    .select("id,title,node_count,edge_count,image_count,created_at,updated_at")
     .eq("user_id", userId)
     .is("deleted_at", null)
     .order("updated_at", { ascending: false })
@@ -483,107 +447,6 @@ export async function listProjects(userId: string) {
   }
 
   return data.map(mapProjectSummaryRow);
-}
-
-export async function createProject(userId: string, title: string) {
-  const client = getSupabaseClient();
-  const { data, error } = await client
-    .from("agent_projects")
-    .insert({ user_id: userId, title })
-    .select()
-    .single<ProjectRow>();
-
-  if (error) {
-    throw error;
-  }
-
-  return mapProjectRow(data);
-}
-
-export async function getProjectForUser(projectId: string, userId: string) {
-  const row = await getProjectRow(projectId);
-  if (!canAccessProject(userId, mapProjectAccess(row))) {
-    return null;
-  }
-
-  return mapProjectRow(row);
-}
-
-export async function updateProjectForUser(input: UpdateProjectInput) {
-  const existing = await getProjectRow(input.projectId);
-  if (!existing || !canAccessProject(input.userId, mapProjectAccess(existing))) {
-    return null;
-  }
-
-  const payload: Record<string, unknown> = {};
-  const baseSnapshot = {
-    edges: input.edges ?? normalizeEdges(existing.edges),
-    nodes: input.nodes ?? normalizeNodes(existing.nodes),
-  };
-  const nextSnapshot = hasCanvasPatchChanges(input.canvasPatch)
-    ? applyCanvasPatch(baseSnapshot, input.canvasPatch)
-    : baseSnapshot;
-  if (input.title !== undefined) {
-    payload.title = input.title;
-  }
-  if (input.nodes !== undefined || hasCanvasPatchChanges(input.canvasPatch)) {
-    payload.nodes = nextSnapshot.nodes;
-  }
-  if (input.edges !== undefined || hasCanvasPatchChanges(input.canvasPatch)) {
-    payload.edges = nextSnapshot.edges;
-  }
-  if (
-    input.nodes !== undefined ||
-    input.edges !== undefined ||
-    hasCanvasPatchChanges(input.canvasPatch)
-  ) {
-    const stats = getProjectSnapshotStats(nextSnapshot);
-    payload.node_count = stats.nodeCount;
-    payload.image_count = stats.imageCount;
-    payload.snapshot_bytes = stats.snapshotBytes;
-  }
-  if (input.selectedNodeId !== undefined) {
-    payload.selected_node_id = input.selectedNodeId;
-  }
-  if (input.lastRunId !== undefined) {
-    payload.last_run_id = input.lastRunId;
-  }
-  if (input.expectedVersion !== undefined) {
-    payload.version = input.expectedVersion + 1;
-  }
-
-  const client = getSupabaseClient();
-  let query = client
-    .from("agent_projects")
-    .update(payload)
-    .eq("id", input.projectId)
-    .eq("user_id", input.userId)
-    .is("deleted_at", null);
-
-  if (input.expectedVersion !== undefined) {
-    query = query.eq("version", input.expectedVersion);
-  }
-
-  const { data, error } = await query.select().maybeSingle<ProjectRow>();
-
-  if (error) {
-    throw error;
-  }
-
-  if (!data) {
-    // With optimistic locking, a null row means the version no longer matches.
-    // Surface the current server state so the caller can reconcile.
-    if (input.expectedVersion !== undefined && existing) {
-      const current = await getProjectRow(input.projectId);
-      if (!canAccessProject(input.userId, mapProjectAccess(current))) {
-        return null;
-      }
-      throw new ProjectVersionConflictError(mapProjectRow(current));
-    }
-    return null;
-  }
-
-  return mapProjectRow(data);
 }
 
 export async function softDeleteProject(projectId: string, userId: string) {
@@ -848,7 +711,7 @@ export async function registerAgentArtifact(input: RegisterAgentArtifactInput) {
         type: input.type,
         uri: input.uri ?? null,
         title: input.title ?? null,
-        metadata: input.metadata ?? {},
+        metadata: assertLeanArtifactMetadata(input.metadata) ?? {},
         content_ref: input.contentRef ?? null,
         tool_call_id: input.toolCallId ?? null,
         source_node_id: input.sourceNodeId ?? null,
@@ -891,6 +754,7 @@ export async function getAgentArtifactForUser({
     .select("*")
     .eq("id", artifactId)
     .eq("project_id", projectId)
+    .is("deleted_at", null)
     .maybeSingle<AgentArtifactRow>();
 
   if (error) {
@@ -985,9 +849,9 @@ async function getProjectRow(projectId: string) {
   const client = getSupabaseClient();
   const { data, error } = await client
     .from("agent_projects")
-    .select("*")
+    .select(projectAccessSelect)
     .eq("id", projectId)
-    .maybeSingle<ProjectRow>();
+    .maybeSingle<ProjectAccessRow>();
 
   if (error) {
     throw error;
@@ -1076,7 +940,9 @@ function mapUserRow(row: UserRow): AppUser {
   };
 }
 
-function mapProjectAccess(row: ProjectRow | null) {
+const projectAccessSelect = "id,user_id,deleted_at";
+
+function mapProjectAccess(row: ProjectAccessRow | null) {
   if (!row) {
     return null;
   }
@@ -1092,36 +958,11 @@ function mapProjectSummaryRow(row: ProjectSummaryRow): ProjectSummary {
     id: row.id,
     title: row.title,
     nodeCount: row.node_count ?? 0,
+    edgeCount: row.edge_count ?? 0,
     imageCount: row.image_count ?? 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
-}
-
-function mapProjectRow(row: ProjectRow | null): AgentProject {
-  if (!row) {
-    throw new Error("Project not found.");
-  }
-
-  return {
-    id: row.id,
-    title: row.title,
-    nodes: normalizeNodes(row.nodes),
-    edges: normalizeEdges(row.edges),
-    selectedNodeId: row.selected_node_id,
-    lastRunId: row.last_run_id,
-    version: row.version ?? 0,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function normalizeNodes(nodes: unknown[]) {
-  return Array.isArray(nodes) ? (nodes as AgentCanvasNode[]) : [];
-}
-
-function normalizeEdges(edges: unknown[]) {
-  return Array.isArray(edges) ? (edges as AgentCanvasEdge[]) : [];
 }
 
 function mapAgentEventRow(row: AgentEventRow): AgentEventRecord {
@@ -1153,6 +994,11 @@ function mapAgentArtifactRow(row: AgentArtifactRow): AgentArtifactRecord {
     storagePath: row.storage_path,
     mimeType: row.mime_type,
     sizeBytes: row.size_bytes,
+    summary: row.summary,
+    previewText: row.preview_text,
+    previewKind: row.preview_kind,
+    version: row.version,
+    updatedAt: row.updated_at,
     origin: row.origin ?? "user_upload",
     createdBy: row.created_by,
     createdAt: row.created_at,

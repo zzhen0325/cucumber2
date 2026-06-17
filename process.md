@@ -2,6 +2,18 @@
 
 本文记录 2026-06-11 Agent v2 正式切换后的变更。
 
+## 2026-06-17 Canvas Row Storage
+
+- 破坏性 Supabase migration `20260617125844_canvas_rows_storage.sql` 将画布从 `agent_projects.nodes/edges` 切到 `agent_canvas_nodes`、`agent_canvas_edges` 和 `agent_artifact_contents`；旧项目测试数据会被清空，不做 backfill/dual-write。
+- 新增 `apply_canvas_patch` RPC，服务端传入 session user id，RPC 内校验 project owner、deleted 状态和 expected version，并原子 upsert/soft-delete nodes/edges、更新 counts 与 project version。
+- `GET /api/projects/:id` 返回 `project` meta + lightweight `nodes`/`edges`；`PATCH /api/projects/:id` 只更新 meta，canvas 保存改走 `PATCH /api/projects/:id/canvas` 且响应不返回完整画布。
+- `CanvasWorkspace` 改为 dirty node/edge id 集合保存，不再用整图 JSON digest。React Flow change、run draft、手动创建、粘贴、上传完成、Markdown/shape/text 编辑和 auto layout 都进入 `commitCanvasMutation`。
+- `toPersistableNode` 会清理 selected/dragging/measured 等运行时字段、跳过本地 upload 节点、移除 markdown/code/document/tool/webpage 正文类字段，并在 node_json 超过 64KB 时拒绝保存。
+- 文本类 artifact 内容新增 create/update/read API；Markdown 正文 debounce 保存到 `agent_artifact_contents`，节点只保存 artifact ref、summary/preview/version 等轻量信息。`saveProjectSnapshot` 会先 flush 待保存正文再写 canvas patch，避免用户编辑后立刻启动 Agent 时服务端读到旧正文；图片和二进制内容仍走私有 Supabase Storage。
+- Agent Run 启动与 materialize 都从新的 node/edge 表读取/写入；上游 markdown/code/document/tool result/webpage 节点只从 `node_json` 读取 artifactId，再由服务端读取 `agent_artifacts` / `agent_artifact_contents` 注入受限长度正文；materialize 只在 `input.normalized`、artifact/canvas operation/run terminal/tool error 等关键事件后落盘，非终态事件后台排队，终态事件等待队列收敛。
+- 打开项目不再自动 hydrate last run trace，也不自动拉取 artifact full content；Trace 面板、artifact 预览和 Markdown 编辑器聚焦时才按需请求详情。
+- `input.normalized` 中已经确定会产出 artifact 时会立即投影并后台物化 pending 结果节点；该机制覆盖 image、markdown/document/diagram、code、webpage 和 data，不把“节点创建”绑到最终 artifact 生成完成之后，也不让中间落库阻塞后续 Agent 执行。真实 `artifact.created` 到达后复用同一个 pending 节点更新为 ready。
+
 ## 2026-06-17 Runtime Fast Path
 
 - `/api/agent-run` 入口保持 AI SDK HTTP stream 不变；新增 `Quick Router` 在本地规则层先判定 `smalltalk`、`simple_chat`、`simple_canvas`、`image_task` 和 `complex_agent_task`，并在 `run.created` / `input.normalized` payload 中写入 route、routerSource、skippedSteps 和 cache 状态。
@@ -138,9 +150,9 @@
 ## 2026-06-12 Project Persistence
 
 - 项目列表只读取 `agent_projects` 的摘要列，不再拉取完整 `nodes/edges` JSON；`node_count`、`image_count`、`snapshot_bytes` 由服务端保存快照时同步维护。
-- 打开画布时先渲染已保存项目快照，`lastRun` Trace 只在后台补齐缺失或状态不完整的 Run 分支。
-- Agent runtime 持续写 `agent_run_events`，并在 artifact、canvas operation 和终态事件后由 runtime materializer 将可见 Run 分支物化回 `agent_projects.nodes/edges`。
-- 前端保存继续使用 version handshake 和单飞队列；无变化快照通过 digest 跳过 PATCH，变化快照通过 `canvasPatch` 增量提交节点/边 upsert/delete。
+- 打开画布时先渲染已保存项目快照；当前版本不再从 `lastRun` Trace 自动 hydrate 项目画布。
+- Agent runtime 持续写 `agent_run_events`，并在 artifact、canvas operation 和终态事件后由 runtime materializer 将可见 Run 分支物化回 `agent_canvas_nodes`/`agent_canvas_edges`；中间事件后台 materialize，终态事件等待最终快照收敛。
+- 前端保存继续使用 version handshake 和单飞队列；当前版本按 dirty node/edge id 通过 `PATCH /api/projects/:id/canvas` 增量提交节点/边 upsert/delete。
 
 ## 2026-06-12 Object Storage
 

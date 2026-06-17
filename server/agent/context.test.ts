@@ -1,13 +1,30 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   AgentContextValidationError,
   buildAgentRunInput,
   buildCucumberAgentContext,
+  hydrateAgentRunInputArtifacts,
 } from "./context";
 import type { AgentCanvasNode } from "../../src/types/canvas";
+import { createProjectForUser } from "../canvas-store";
+import { createTextArtifactContentForUser } from "../artifact-content-store";
 
 describe("agent context", () => {
+  const previousInMemoryDb = process.env.CUCUMBER_DEV_INMEMORY_DB;
+
+  beforeAll(() => {
+    process.env.CUCUMBER_DEV_INMEMORY_DB = "1";
+  });
+
+  afterAll(() => {
+    if (previousInMemoryDb === undefined) {
+      delete process.env.CUCUMBER_DEV_INMEMORY_DB;
+      return;
+    }
+    process.env.CUCUMBER_DEV_INMEMORY_DB = previousInMemoryDb;
+  });
+
   it("rebuilds upstream context from the persisted project snapshot", () => {
     const input = buildAgentRunInput({
       userId: "user-1",
@@ -175,6 +192,72 @@ describe("agent context", () => {
     expect(input.contextSummary).toMatchObject({
       referenceNodes: [{ id: "run-simple", kind: "run" }],
       omittedNodes: [],
+    });
+  });
+
+  it("hydrates artifact-backed text context from stored artifact content", async () => {
+    const userId = "user-artifact-context";
+    const project = await createProjectForUser(userId, "Artifact context");
+    const artifact = await createTextArtifactContentForUser({
+      contentFormat: "markdown-json",
+      contentJson: {
+        blockNoteBlocks: [{ type: "paragraph", content: "Stored body" }],
+      },
+      contentText: "# Stored body\n\nThis is the full trusted markdown body.",
+      mimeType: "text/markdown",
+      plainText: "# Stored body\n\nThis is the full trusted markdown body.",
+      previewKind: "markdown",
+      previewText: "Stored body preview",
+      projectId: project.id,
+      summary: "Stored body preview",
+      title: "Stored markdown",
+      type: "doc",
+      userId,
+    });
+    if (!artifact) {
+      throw new Error("Expected artifact");
+    }
+    const input = buildAgentRunInput({
+      userId,
+      projectId: project.id,
+      runNodeId: "run-2",
+      canvasContext: {
+        prompt: "基于文档继续写",
+        promptNodeId: "prompt-2",
+        selectedNodeId: "markdown-1",
+      },
+      projectSnapshot: {
+        ...snapshot(),
+        id: project.id,
+        nodes: [
+          ...snapshot().nodes,
+          {
+            id: "markdown-1",
+            position: { x: 0, y: 520 },
+            type: "markdownNode",
+            data: {
+              artifact,
+              content: "Stored body preview...内容已截断",
+              kind: "markdown",
+              summary: "Stored body preview",
+              title: "Stored markdown",
+            },
+          },
+        ],
+      },
+    });
+
+    const hydrated = await hydrateAgentRunInputArtifacts(input);
+    expect(hydrated.upstreamContext.at(-1)).toMatchObject({
+      content: "# Stored body\n\nThis is the full trusted markdown body.",
+      contentFormat: "markdown-json",
+      mimeType: "text/markdown",
+      nodeId: "markdown-1",
+      type: "doc",
+    });
+    expect(hydrated.contextSummary?.upstreamPath.at(-1)).toMatchObject({
+      nodeId: "markdown-1",
+      summary: "# Stored body\n\nThis is the full trusted markdown body.",
     });
   });
 

@@ -42,6 +42,9 @@ function buildContextInstructions(context?: CucumberAgentContext) {
   }
 
   const upstream = context.upstreamContext.slice(0, 8).map((item) => ({
+    content: item.content,
+    contentFormat: item.contentFormat,
+    mimeType: item.mimeType,
     nodeId: item.nodeId,
     prompt: item.prompt,
     summary: item.summary,

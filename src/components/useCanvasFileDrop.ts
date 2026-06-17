@@ -11,18 +11,21 @@ import {
   createCanvasNodeFromUploadedFile,
   prepareLocalCanvasUploads,
 } from "@/lib/file-upload";
+import type { CanvasLocalMutation } from "@/lib/canvas-mutation";
 import type { AgentCanvasEdge, AgentCanvasNode } from "@/types/canvas";
 
 type UseCanvasFileDropOptions = {
   canUploadFiles: boolean;
   nodes: AgentCanvasNode[];
   projectId: string | null;
+  commitCanvasMutation?: (mutation: CanvasLocalMutation) => void;
   setEdges: Dispatch<SetStateAction<AgentCanvasEdge[]>>;
   setNodes: Dispatch<SetStateAction<AgentCanvasNode[]>>;
 };
 
 export function useCanvasFileDrop({
   canUploadFiles,
+  commitCanvasMutation,
   nodes,
   projectId,
   setEdges,
@@ -161,10 +164,22 @@ export function useCanvasFileDrop({
         for (const item of preparedUploads) {
           void uploadProjectFileAsset(projectId, item.upload)
             .then((artifact) => {
-              const finalNode = createCanvasNodeFromUploadedFile(
-                item.upload,
-                artifact
-              );
+              const finalNode = replaceLocalUploadNode(
+                [item.localNode],
+                item.localNode.id,
+                createCanvasNodeFromUploadedFile(item.upload, artifact)
+              )[0];
+              if (commitCanvasMutation) {
+                commitCanvasMutation({
+                  reason: "upload-complete",
+                  patch: {
+                    nodeDeletes: [item.localNode.id],
+                    nodeUpserts: [finalNode],
+                  },
+                  persist: true,
+                });
+                return;
+              }
               setNodes((current) =>
                 replaceLocalUploadNode(current, item.localNode.id, finalNode)
               );
@@ -189,7 +204,7 @@ export function useCanvasFileDrop({
         setUploadError(getClientError(nextError));
       }
     },
-    [canUploadFiles, nodes, projectId, setEdges, setNodes]
+    [canUploadFiles, commitCanvasMutation, nodes, projectId, setEdges, setNodes]
   );
 
   return {

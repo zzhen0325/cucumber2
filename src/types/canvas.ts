@@ -40,8 +40,18 @@ export type ArtifactRef = {
   type: ArtifactType;
   uri?: string;
   title?: string;
+  summary?: string;
+  preview?: string;
+  previewKind?: ArtifactPreviewKind;
+  mimeType?: string;
+  sizeBytes?: number;
+  version?: number;
   metadata?: ArtifactMetadata;
   contentRef?: string;
+};
+
+export type ArtifactRefLite = Omit<ArtifactRef, "metadata"> & {
+  metadata?: ArtifactMetadata;
 };
 
 export type LocalUploadState = {
@@ -71,6 +81,9 @@ export type UpstreamContextItem = {
   artifact?: ArtifactRef;
   title?: string;
   contentRef?: string;
+  content?: string;
+  contentFormat?: string;
+  mimeType?: string;
   priority?: number;
   omittedReason?: string;
 };

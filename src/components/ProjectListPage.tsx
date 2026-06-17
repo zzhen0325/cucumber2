@@ -167,7 +167,8 @@ export function ProjectListPage({
                     <>
                       <span className="home-card-title">{project.title}</span>
                       <span className="home-card-meta">
-                        {project.nodeCount} 节点 · {project.imageCount} 图片 · 更新于{" "}
+                        {project.nodeCount} 节点 · {project.edgeCount} 边 ·{" "}
+                        {project.imageCount} 图片 · 更新于{" "}
                         {formatDate(project.updatedAt)}
                       </span>
                     </>

@@ -177,6 +177,88 @@ describe("agent event graph projection", () => {
     });
   });
 
+  it("projects pending artifact nodes from normalized non-image input", () => {
+    const projection = projectRunTraceToCanvas({
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", { prompt: "写一份 PRD", promptNodeId: "prompt-1" }),
+        event("input.normalized", "input", {
+          normalizedInput: {
+            rawPrompt: "写一份 PRD",
+            operation: "create",
+            artifact: { kind: "document", subtype: "prd", format: "markdown" },
+            intent: "document.create",
+          },
+        }),
+      ],
+    });
+
+    const pendingDocument = projection.nodes.find(
+      (node) => node.id === "markdown-pending-run-1-1"
+    );
+    expect(pendingDocument?.data).toMatchObject({
+      kind: "markdown",
+      artifact: {
+        id: "pending-run-1-markdown-1",
+        type: "doc",
+        metadata: { pending: true },
+      },
+      runId: "run-1",
+      summary: "正在生成，结果会自动写入这个节点。",
+    });
+    expect(
+      projection.edges.some(
+        (edge) => edge.source === "run-1" && edge.target === "markdown-pending-run-1-1"
+      )
+    ).toBe(true);
+  });
+
+  it("reuses pending artifact nodes when the final artifact arrives", () => {
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", { prompt: "写一份 PRD", promptNodeId: "prompt-1" }),
+        event("input.normalized", "input", {
+          normalizedInput: {
+            rawPrompt: "写一份 PRD",
+            operation: "create",
+            artifact: { kind: "document", subtype: "prd", format: "markdown" },
+            intent: "document.create",
+          },
+        }),
+        event("artifact.created", "create_text_artifact", {
+          artifact: {
+            id: "doc-1",
+            type: "doc",
+            title: "PRD",
+            metadata: {
+              format: "markdown",
+              preview: "PRD 正文",
+              summary: "PRD 摘要",
+            },
+          },
+          toolName: "create_text_artifact",
+        }),
+      ],
+    });
+
+    const documentNodes = projection.nodes.filter(
+      (node) => node.data.kind === "markdown"
+    );
+    expect(documentNodes).toHaveLength(1);
+    expect(documentNodes[0]).toMatchObject({
+      id: "markdown-pending-run-1-1",
+      data: {
+        kind: "markdown",
+        artifact: { id: "doc-1" },
+        content: "PRD 正文",
+        summary: "PRD 摘要",
+        title: "PRD",
+      },
+    });
+  });
+
   it("projects task-specific plan item phases", () => {
     const projection = projectRunTraceToCanvas({
       runNodeId: "run-1",

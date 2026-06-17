@@ -2,37 +2,28 @@ import { projectRunTraceToCanvas } from "../../src/lib/graph-projection.ts";
 import { diffCanvasPatch, hasCanvasPatchChanges, mergeCanvasUpserts } from "../../src/lib/canvas-patch.ts";
 import type { AgentEvent, AgentEventType } from "../../src/types/runtime.ts";
 import {
-  getProjectForUser,
-  updateProjectForUser,
+  applyCanvasPatchForUser,
+  loadCanvasSnapshotForUser,
   ProjectVersionConflictError,
-  type AgentProject,
-} from "../supabase.ts";
+  type CanvasProject,
+} from "../canvas-store.ts";
 
 const materializedEventTypes = new Set<AgentEventType>([
-  "agent.active",
   "artifact.created",
   "canvas.operation.applied",
-  "handoff.completed",
-  "handoff.requested",
   "input.normalized",
   "run.completed",
   "run.failed",
-  "run.plan.created",
-  "run.step.completed",
-  "run.step.failed",
-  "run.step.started",
-  "skill.activated",
-  "skill.retrieved",
-  "skill.script.completed",
   "skill.script.failed",
-  "skill.script.started",
   "tool.error",
-  "tool.input",
-  "tool.output",
 ]);
 
 export function shouldMaterializeRunEvent(type: AgentEventType) {
   return materializedEventTypes.has(type);
+}
+
+export function shouldBlockRunForMaterialization(type: AgentEventType) {
+  return type === "run.completed" || type === "run.failed";
 }
 
 export async function materializeAgentRunSnapshot({
@@ -53,7 +44,7 @@ export async function materializeAgentRunSnapshot({
 
   const maxAttempts = 3;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const current = await getProjectForUser(projectId, userId);
+    const current = await loadCanvasSnapshotForUser(projectId, userId);
     if (!current) {
       return null;
     }
@@ -71,10 +62,13 @@ export async function materializeAgentRunSnapshot({
     }
 
     try {
-      return await updateProjectForUser({
+      return await applyCanvasPatchForUser({
         projectId,
         userId,
-        canvasPatch,
+        nodeUpserts: canvasPatch.nodeUpserts,
+        nodeDeletes: canvasPatch.nodeDeletes,
+        edgeUpserts: canvasPatch.edgeUpserts,
+        edgeDeletes: canvasPatch.edgeDeletes,
         lastRunId: runNodeId,
         expectedVersion: current.version,
       });
@@ -92,16 +86,19 @@ export async function materializeAgentRunSnapshot({
     { nodes: current.nodes, edges: current.edges },
     next
   );
-  return updateProjectForUser({
+  return applyCanvasPatchForUser({
     projectId,
     userId,
-    canvasPatch,
+    nodeUpserts: canvasPatch.nodeUpserts,
+    nodeDeletes: canvasPatch.nodeDeletes,
+    edgeUpserts: canvasPatch.edgeUpserts,
+    edgeDeletes: canvasPatch.edgeDeletes,
     lastRunId: runNodeId,
   });
 }
 
 export function materializeSnapshot(
-  project: Pick<AgentProject, "edges" | "id" | "nodes">,
+  project: Pick<CanvasProject, "edges" | "id" | "nodes">,
   events: AgentEvent[],
   runNodeId: string
 ) {
@@ -120,7 +117,7 @@ export function materializeSnapshot(
 }
 
 function removeDuplicateRunArtifactNodes(
-  snapshot: Pick<AgentProject, "edges" | "nodes">,
+  snapshot: Pick<CanvasProject, "edges" | "nodes">,
   runNodeId: string
 ) {
   const seenArtifactIds = new Set<string>();
@@ -151,7 +148,7 @@ function removeDuplicateRunArtifactNodes(
 }
 
 function getNodeArtifactIdForRun(
-  node: AgentProject["nodes"][number],
+  node: CanvasProject["nodes"][number],
   runNodeId: string
 ) {
   if (node.data.kind === "imageResult" && node.data.runId === runNodeId) {
@@ -171,7 +168,7 @@ function getNodeArtifactIdForRun(
 }
 
 async function requireProject(projectId: string, userId: string) {
-  const project = await getProjectForUser(projectId, userId);
+  const project = await loadCanvasSnapshotForUser(projectId, userId);
   if (!project) {
     throw new Error("Project not found.");
   }

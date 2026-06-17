@@ -50,12 +50,10 @@ import {
 import {
   claimUnownedProjects,
   createAgentSkillDefinition,
-  createProject,
   createSession,
   createUser,
   deleteSession,
   getAgentSkillDefinition,
-  getProjectForUser,
   getAgentArtifactForUser,
   getSessionUser,
   getUserByUsername,
@@ -67,13 +65,25 @@ import {
   softDeleteAgentSkillDefinition,
   softDeleteProject,
   updateAgentSkillDefinition,
-  updateProjectForUser,
   upsertAgentSkillDefinitionByName,
-  ProjectVersionConflictError,
   type AgentSkillDefinition,
-  type AgentProject,
   type AppUser,
 } from "./supabase.ts";
+import {
+  applyCanvasPatchForUser,
+  createProjectForUser,
+  getProjectMetaForUser,
+  loadCanvasSnapshotForUser,
+  updateProjectMetaForUser,
+  ProjectVersionConflictError,
+  type CanvasProject,
+} from "./canvas-store.ts";
+import {
+  ArtifactVersionConflictError,
+  createTextArtifactContentForUser,
+  getTextArtifactContentForUser,
+  upsertTextArtifactContentForUser,
+} from "./artifact-content-store.ts";
 import {
   createSignedAssetUpload,
   completeSignedAssetUpload,
@@ -118,22 +128,25 @@ const projectCreateSchema = z.object({
 const projectPatchSchema = z
   .object({
     title: z.string().trim().min(1).max(120).optional(),
-    nodes: z.array(z.unknown()).optional(),
-    edges: z.array(z.unknown()).optional(),
-    canvasPatch: z
-      .object({
-        nodeUpserts: z.array(z.unknown()).optional(),
-        nodeDeletes: z.array(z.string()).optional(),
-        edgeUpserts: z.array(z.unknown()).optional(),
-        edgeDeletes: z.array(z.string()).optional(),
-      })
-      .optional(),
     selectedNodeId: z.string().nullable().optional(),
     lastRunId: z.string().nullable().optional(),
-    expectedVersion: z.number().int().nonnegative().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "No project updates provided.",
+  });
+
+const canvasPatchSaveSchema = z
+  .object({
+    expectedVersion: z.number().int().nonnegative().optional(),
+    nodeUpserts: z.array(z.unknown()).optional(),
+    nodeDeletes: z.array(z.string()).optional(),
+    edgeUpserts: z.array(z.unknown()).optional(),
+    edgeDeletes: z.array(z.string()).optional(),
+    selectedNodeId: z.string().nullable().optional(),
+    lastRunId: z.string().nullable().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "No canvas updates provided.",
   });
 
 const uploadAssetKindSchema = z.enum([
@@ -171,6 +184,60 @@ const imageUpscaleSchema = z.object({
   resolution: z.enum(["4k", "8k"]).default("4k"),
   scale: z.number().int().min(0).max(100).default(50),
   sourceNodeId: z.string().trim().min(1).max(260),
+});
+
+const textArtifactTypeSchema = z.enum([
+  "doc",
+  "code",
+  "webpage",
+  "tool_result",
+  "decision",
+  "memory",
+]);
+
+const artifactContentFormatSchema = z.enum([
+  "markdown-json",
+  "markdown",
+  "code",
+  "html",
+  "text",
+  "tool-result-json",
+]);
+
+const artifactPreviewKindSchema = z.enum([
+  "image",
+  "markdown",
+  "code",
+  "document",
+  "webpage",
+  "dataset",
+  "file",
+  "decision",
+  "memory",
+  "toolResult",
+]);
+
+const textArtifactCreateSchema = z.object({
+  contentFormat: artifactContentFormatSchema,
+  contentJson: z.unknown().optional(),
+  contentText: z.string().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  mimeType: z.string().trim().min(1).max(200),
+  plainText: z.string().optional(),
+  previewKind: artifactPreviewKindSchema.optional(),
+  previewText: z.string().max(5000).optional(),
+  summary: z.string().max(1000).optional(),
+  title: z.string().trim().min(1).max(260),
+  type: textArtifactTypeSchema,
+});
+
+const textArtifactUpdateSchema = textArtifactCreateSchema.partial({
+  title: true,
+  type: true,
+}).extend({
+  contentFormat: artifactContentFormatSchema,
+  expectedVersion: z.number().int().nonnegative().optional(),
+  mimeType: z.string().trim().min(1).max(200),
 });
 
 const skillDefinitionScopeSchema = z.string().trim().min(1).max(80);
@@ -523,7 +590,7 @@ app.post("/api/projects", async (c) => {
   }
 
   const input = projectCreateSchema.parse(await c.req.json());
-  const project = await createProject(user.id, input.title);
+  const project = await createProjectForUser(user.id, input.title);
   return c.json({ project });
 });
 
@@ -534,13 +601,14 @@ app.get("/api/projects/:projectId", async (c) => {
   }
 
   const projectId = z.string().uuid().parse(c.req.param("projectId"));
-  const project = await getProjectForUser(projectId, user.id);
-  if (!project) {
+  const result = await loadCanvasSnapshotForUser(projectId, user.id);
+  if (!result) {
     return notFound(c);
   }
   scheduleAgentRunPrewarm();
 
-  return c.json({ project });
+  const { edges, nodes, ...project } = result;
+  return c.json({ edges, nodes, project });
 });
 
 app.patch("/api/projects/:projectId", async (c) => {
@@ -552,18 +620,41 @@ app.patch("/api/projects/:projectId", async (c) => {
   const projectId = z.string().uuid().parse(c.req.param("projectId"));
   const input = projectPatchSchema.parse(await c.req.json());
 
+  const project = await updateProjectMetaForUser({
+    projectId,
+    userId: user.id,
+    title: input.title,
+    selectedNodeId: input.selectedNodeId,
+    lastRunId: input.lastRunId,
+  });
+
+  if (!project) {
+    return notFound(c);
+  }
+
+  return c.json({ project });
+});
+
+app.patch("/api/projects/:projectId/canvas", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const projectId = z.string().uuid().parse(c.req.param("projectId"));
+  const input = canvasPatchSaveSchema.parse(await c.req.json());
+
   try {
-    const project = await updateProjectForUser({
+    const project = await applyCanvasPatchForUser({
       projectId,
       userId: user.id,
-      title: input.title,
-      nodes: input.nodes as Parameters<typeof updateProjectForUser>[0]["nodes"],
-      edges: input.edges as Parameters<typeof updateProjectForUser>[0]["edges"],
-      canvasPatch:
-        input.canvasPatch as Parameters<typeof updateProjectForUser>[0]["canvasPatch"],
+      expectedVersion: input.expectedVersion,
+      nodeUpserts: input.nodeUpserts as AgentCanvasNode[] | undefined,
+      nodeDeletes: input.nodeDeletes,
+      edgeUpserts: input.edgeUpserts as AgentCanvasEdge[] | undefined,
+      edgeDeletes: input.edgeDeletes,
       selectedNodeId: input.selectedNodeId,
       lastRunId: input.lastRunId,
-      expectedVersion: input.expectedVersion,
     });
 
     if (!project) {
@@ -625,7 +716,7 @@ app.post("/api/projects/:projectId/uploads/sign", async (c) => {
   }
 
   const projectId = z.string().uuid().parse(c.req.param("projectId"));
-  const project = await getProjectForUser(projectId, user.id);
+  const project = await getProjectMetaForUser(projectId, user.id);
   if (!project) {
     return notFound(c);
   }
@@ -648,7 +739,7 @@ app.post("/api/projects/:projectId/uploads/:uploadId/complete", async (c) => {
 
   const projectId = z.string().uuid().parse(c.req.param("projectId"));
   const uploadId = z.string().uuid().parse(c.req.param("uploadId"));
-  const project = await getProjectForUser(projectId, user.id);
+  const project = await getProjectMetaForUser(projectId, user.id);
   if (!project) {
     return notFound(c);
   }
@@ -689,7 +780,7 @@ app.post("/api/projects/:projectId/images/upscale", async (c) => {
 
   const projectId = z.string().uuid().parse(c.req.param("projectId"));
   const input = imageUpscaleSchema.parse(await c.req.json());
-  const project = await getProjectForUser(projectId, user.id);
+  const project = await loadCanvasSnapshotForUser(projectId, user.id);
   if (!project) {
     return notFound(c);
   }
@@ -771,9 +862,10 @@ app.post("/api/projects/:projectId/images/upscale", async (c) => {
   });
 
   try {
-    const updatedProject = await updateProjectForUser({
-      canvasPatch,
+    const updatedProject = await applyCanvasPatchForUser({
+      edgeUpserts: canvasPatch.edgeUpserts,
       expectedVersion: input.expectedVersion,
+      nodeUpserts: canvasPatch.nodeUpserts,
       projectId,
       selectedNodeId: node.id,
       userId: user.id,
@@ -791,9 +883,10 @@ app.post("/api/projects/:projectId/images/upscale", async (c) => {
     });
   } catch (error) {
     if (error instanceof ProjectVersionConflictError) {
-      const updatedProject = await updateProjectForUser({
-        canvasPatch,
+      const updatedProject = await applyCanvasPatchForUser({
+        edgeUpserts: canvasPatch.edgeUpserts,
         expectedVersion: error.project.version,
+        nodeUpserts: canvasPatch.nodeUpserts,
         projectId,
         selectedNodeId: node.id,
         userId: user.id,
@@ -813,6 +906,86 @@ app.post("/api/projects/:projectId/images/upscale", async (c) => {
   }
 });
 
+app.post("/api/projects/:projectId/artifacts/text", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const projectId = z.string().uuid().parse(c.req.param("projectId"));
+  const input = textArtifactCreateSchema.parse(await c.req.json());
+  const artifact = await createTextArtifactContentForUser({
+    contentFormat: input.contentFormat,
+    contentJson: input.contentJson,
+    contentText: input.contentText,
+    metadata: input.metadata,
+    mimeType: input.mimeType,
+    plainText: input.plainText,
+    previewKind: input.previewKind,
+    previewText: input.previewText,
+    projectId,
+    summary: input.summary,
+    title: input.title,
+    type: input.type,
+    userId: user.id,
+  });
+
+  if (!artifact) {
+    return notFound(c);
+  }
+
+  return c.json({ artifact });
+});
+
+app.put("/api/projects/:projectId/artifacts/:artifactId/content", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const projectId = z.string().uuid().parse(c.req.param("projectId"));
+  const artifactId = z.string().min(1).max(260).parse(c.req.param("artifactId"));
+  const input = textArtifactUpdateSchema.parse(await c.req.json());
+
+  try {
+    const artifact = await upsertTextArtifactContentForUser({
+      artifactId,
+      contentFormat: input.contentFormat,
+      contentJson: input.contentJson,
+      contentText: input.contentText,
+      expectedVersion: input.expectedVersion,
+      metadata: input.metadata,
+      mimeType: input.mimeType,
+      plainText: input.plainText,
+      previewKind: input.previewKind,
+      previewText: input.previewText,
+      projectId,
+      summary: input.summary,
+      title: input.title,
+      type: input.type,
+      userId: user.id,
+    });
+
+    if (!artifact) {
+      return notFound(c);
+    }
+
+    return c.json({ artifact });
+  } catch (error) {
+    if (error instanceof ArtifactVersionConflictError) {
+      return c.json(
+        {
+          artifact: error.artifact,
+          code: "artifact_version_conflict",
+          error: error.message,
+        },
+        409
+      );
+    }
+    throw error;
+  }
+});
+
 app.get("/api/projects/:projectId/artifacts/:artifactId/content", async (c) => {
   const user = await requireUser(c);
   if (!user) {
@@ -821,6 +994,16 @@ app.get("/api/projects/:projectId/artifacts/:artifactId/content", async (c) => {
 
   const projectId = z.string().uuid().parse(c.req.param("projectId"));
   const artifactId = z.string().min(1).max(260).parse(c.req.param("artifactId"));
+  const textContent = await getTextArtifactContentForUser({
+    artifactId,
+    projectId,
+    userId: user.id,
+  });
+
+  if (textContent) {
+    return c.json(textContent);
+  }
+
   const artifact = await getAgentArtifactForUser({
     artifactId,
     projectId,
@@ -848,7 +1031,7 @@ app.delete("/api/agent-run", async (c) => {
 
   const projectId = z.string().uuid().parse(c.req.query("projectId"));
   const runNodeId = z.string().min(1).parse(c.req.query("runNodeId"));
-  const project = await getProjectForUser(projectId, user.id);
+  const project = await getProjectMetaForUser(projectId, user.id);
   if (!project) {
     return notFound(c);
   }
@@ -908,13 +1091,15 @@ app.post("/api/agent-run", async (c) => {
     retryFrom,
   };
 
-  void updateProjectForUser({
-    projectId,
-    userId: user.id,
-    lastRunId: runNodeId,
-  }).catch((error: unknown) => {
-    console.error("[agent-run:last-run]", error);
-  });
+  if (project.lastRunId !== runNodeId) {
+    void updateProjectMetaForUser({
+      projectId,
+      userId: user.id,
+      lastRunId: runNodeId,
+    }).catch((error: unknown) => {
+      console.error("[agent-run:last-run]", error);
+    });
+  }
 
   const activeRunKey = getActiveAgentRunKey(user.id, projectId, runNodeId);
   const controller = new AbortController();
@@ -961,10 +1146,10 @@ async function waitForProjectSnapshotForRun({
   userId: string;
 }) {
   const deadline = Date.now() + 8_000;
-  let latestProject: AgentProject | null = null;
+  let latestProject: CanvasProject | null = null;
 
   while (!signal?.aborted) {
-    const project = await getProjectForUser(projectId, userId);
+    const project = await loadCanvasSnapshotForUser(projectId, userId);
     if (!project) {
       return null;
     }
@@ -982,7 +1167,7 @@ async function waitForProjectSnapshotForRun({
 }
 
 function hasAgentRunSnapshot(
-  project: AgentProject,
+  project: CanvasProject,
   {
     promptNodeId,
     runNodeId,
@@ -1040,7 +1225,7 @@ async function resolveRetryContext({
   retryFrom,
   userId,
 }: {
-  project: NonNullable<Awaited<ReturnType<typeof getProjectForUser>>>;
+  project: CanvasProject;
   retryFrom?: { failedRunNodeId: string; stepId?: string } | null;
   userId: string;
 }) {

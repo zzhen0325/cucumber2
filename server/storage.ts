@@ -8,9 +8,11 @@ import type {
 } from "../src/types/canvas.ts";
 import {
   getSupabaseClient,
+  getAgentArtifactForUser,
   registerAgentArtifact,
   type AgentArtifactRecord,
 } from "./supabase.ts";
+import { upsertTextArtifactContentForUser } from "./artifact-content-store.ts";
 import {
   indexArtifactForKnowledge,
   readKnowledgeTextFromBytes,
@@ -303,30 +305,14 @@ export async function storeTextArtifactContent(
   const artifactId = `text-${input.runNodeId}-${randomUUID()}`;
   const artifactType = input.type ?? "doc";
   const mimeType = getMimeTypeForTextArtifact(artifactType);
-  const extension = getExtensionForTextArtifact(artifactType);
-  const path = `projects/${input.projectId}/runs/${sanitizePathSegment(
-    input.runNodeId
-  )}/artifacts/${sanitizePathSegment(artifactId)}.${extension}`;
-
-  const { error } = await getSupabaseClient()
-    .storage
-    .from(AGENT_ASSETS_BUCKET)
-    .upload(path, bytes, {
-      cacheControl: "31536000",
-      contentType: mimeType,
-      upsert: false,
-    });
-
-  if (error) {
-    throw error;
-  }
+  const format = getTextArtifactContentFormat(artifactType);
 
   const metadata = compactRecord({
     ...input.metadata,
     byteSize: bytes.byteLength,
     createdBy: input.userId,
     digest: createSha256Digest(bytes),
-    format: extension === "md" ? "markdown" : extension,
+    format,
     mimeType,
     origin: "runtime_materialized",
     preview: summarizeTextPreview(input.content, 4_000),
@@ -335,39 +321,42 @@ export async function storeTextArtifactContent(
     size: bytes.byteLength,
     sourceRunNodeId: input.runNodeId,
     sourceToolName: input.sourceToolName,
-    storageBucket: AGENT_ASSETS_BUCKET,
-    storagePath: path,
     summary: summarizeTextPreview(input.content, 240),
   });
 
-  const record = await registerAgentArtifact({
-    bucketId: AGENT_ASSETS_BUCKET,
-    contentRef: getStorageContentRef(AGENT_ASSETS_BUCKET, path),
-    createdBy: input.userId,
-    id: artifactId,
+  const artifact = await upsertTextArtifactContentForUser({
+    artifactId,
+    contentFormat: format,
+    contentText: input.content,
     metadata,
     mimeType,
-    origin: "seedream_generated",
+    plainText: input.content,
+    previewKind: getPreviewKindForArtifactType(artifactType),
+    previewText: summarizeTextPreview(input.content, 4_000),
     projectId: input.projectId,
-    runNodeId: input.runNodeId,
-    sizeBytes: bytes.byteLength,
-    storagePath: path,
+    summary: summarizeTextPreview(input.content, 240),
     title: input.title,
     type: artifactType,
-    uri: null,
     userId: input.userId,
   });
 
-  if (!record) {
+  if (!artifact) {
     throw new Error("Project not found.");
   }
 
-  await indexArtifactForKnowledge({
-    artifact: record,
-    contentText: input.content,
+  const record = await getAgentArtifactForUser({
+    artifactId,
+    projectId: input.projectId,
+    userId: input.userId,
   });
+  if (record) {
+    await indexArtifactForKnowledge({
+      artifact: record,
+      contentText: input.content,
+    });
+  }
 
-  return toArtifactRef(record);
+  return artifact;
 }
 
 export async function storeAgentSkillPackage(input: StoreAgentSkillPackageInput) {
@@ -557,9 +546,15 @@ function toArtifactRef(record: AgentArtifactRecord): ArtifactRef {
       previewKind: record.metadata.previewKind ?? getPreviewKindForArtifactType(record.type),
       sourceRunNodeId: record.metadata.sourceRunNodeId ?? record.runNodeId,
     }),
+    mimeType: record.mimeType ?? undefined,
+    preview: record.previewText ?? undefined,
+    previewKind: record.previewKind ?? undefined,
+    sizeBytes: record.sizeBytes ?? undefined,
+    summary: record.summary ?? undefined,
     title: record.title ?? undefined,
     type: record.type,
     uri: record.uri ?? undefined,
+    version: record.version ?? undefined,
   };
 }
 
@@ -683,14 +678,17 @@ function getMimeTypeForTextArtifact(type: ArtifactType) {
   return "text/markdown";
 }
 
-function getExtensionForTextArtifact(type: ArtifactType) {
-  if (type === "code" || type === "tool_result") {
-    return "json";
+function getTextArtifactContentFormat(type: ArtifactType) {
+  if (type === "tool_result") {
+    return "tool-result-json";
+  }
+  if (type === "code") {
+    return "code";
   }
   if (type === "webpage") {
     return "html";
   }
-  return "md";
+  return "markdown";
 }
 
 function summarizeTextPreview(content: string, limit: number) {

@@ -1,4 +1,4 @@
-export function LoadingScreen() {
+export function LoadingScreen({ label = "连接中" }: { label?: string }) {
   return (
     <main className="app-state-screen" aria-busy="true" aria-live="polite">
       <img
@@ -9,7 +9,7 @@ export function LoadingScreen() {
         alt=""
         aria-hidden="true"
       />
-      <span>连接中</span>
+      <span>{label}</span>
     </main>
   );
 }

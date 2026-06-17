@@ -130,6 +130,9 @@ type NormalizeInput = {
   message: string;
   selectedNodeId: string | null;
   upstreamContext: Array<{
+    content?: string;
+    contentFormat?: string;
+    mimeType?: string;
     nodeId: string;
     type: string;
     prompt?: string;
@@ -313,7 +316,10 @@ export function normalizeImageRequestSlots(
 
 function buildNormalizerPrompt(input: NormalizeInput, maxOutputImages: number) {
   const upstreamSummary = input.upstreamContext
-    .map(({ nodeId, prompt, summary, title, type }) => ({
+    .map(({ content, contentFormat, mimeType, nodeId, prompt, summary, title, type }) => ({
+      content,
+      contentFormat,
+      mimeType,
       nodeId,
       prompt,
       summary,

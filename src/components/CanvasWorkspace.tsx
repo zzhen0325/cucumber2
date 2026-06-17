@@ -1,4 +1,5 @@
 import {
+  applyEdgeChanges,
   applyNodeChanges,
   Controls,
   MiniMap,
@@ -8,6 +9,7 @@ import {
   useReactFlow,
   useEdgesState,
   useNodesState,
+  type EdgeChange,
   type Node as FlowNode,
   type NodeChange,
   type NodeMouseHandler,
@@ -69,6 +71,7 @@ import {
 } from "@/components/ai-elements/code-block";
 import { Edge } from "@/components/ai-elements/edge";
 import { FileUploadOverlay } from "@/components/FileUploadOverlay";
+import { LoadingScreen } from "@/components/LoadingScreen";
 import { Node, NodeContent } from "@/components/ai-elements/node";
 import { ReplayBanner, RunTracePanel } from "@/components/RunTracePanel";
 import { RunNodeView } from "@/components/RunNodeView";
@@ -101,15 +104,17 @@ import {
 import {
   loadProject,
   loadRunTrace,
+  saveProjectCanvasPatch,
+  updateTextArtifactContent,
   upscaleProjectImage,
-  updateProject,
   ProjectVersionConflictError,
-  type PersistedProject,
 } from "@/lib/project-storage";
 import {
   hasNodeContentChanged,
+  toPersistableEdges,
   toPersistableNodes,
 } from "@/lib/canvas-persistence";
+import type { CanvasLocalMutation } from "@/lib/canvas-mutation";
 import {
   collectUpstreamContext,
   createRunDraft,
@@ -118,6 +123,7 @@ import {
 } from "@/lib/graph";
 import { getPromptNodeDimensions } from "@/lib/canvas-node-dimensions";
 import {
+  applyCanvasPatch,
   diffCanvasPatch,
   hasCanvasPatchChanges,
   mergeCanvasUpserts,
@@ -267,6 +273,16 @@ type CreationPreview = {
     width: number;
   };
 };
+type PendingMarkdownArtifactContentSave = {
+  artifactId: string;
+  blocks: unknown[];
+  content: string;
+  expectedVersion?: number;
+  nodeId: string;
+  projectId: string;
+  summary: string;
+  title: string;
+};
 
 const LEFT_MOUSE_BUTTON = 0;
 const MIDDLE_MOUSE_BUTTON = 1;
@@ -278,6 +294,22 @@ const TRACE_RECONCILE_DELAYS_MS = [0, 1500, 4000, 8000] as const;
 
 function getSelectedNodeIds(nodes: AgentCanvasNode[]) {
   return nodes.filter((node) => node.selected).map((node) => node.id);
+}
+
+function hasPersistableNodeChanges(changes: NodeChange<AgentCanvasNode>[]) {
+  return changes.some((change) => {
+    if (change.type === "select") {
+      return false;
+    }
+    if (
+      change.type === "dimensions" &&
+      !change.resizing &&
+      !change.setAttributes
+    ) {
+      return false;
+    }
+    return true;
+  });
 }
 
 const manualNodeTemplates: ManualNodeTemplate[] = [
@@ -306,7 +338,7 @@ const manualNodeTemplates: ManualNodeTemplate[] = [
 
 export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const [nodes, setNodes] = useNodesState<AgentCanvasNode>(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<AgentCanvasEdge>(initialEdges);
+  const [edges, setEdges] = useEdgesState<AgentCanvasEdge>(initialEdges);
   const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
   const [projectTitle, setProjectTitle] = useState("Untitled");
   const [prompt, setPrompt] = useState("");
@@ -337,16 +369,24 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
   const selectionBeforeNodeChangeRef = useRef<string[]>([]);
-  const projectTitleRef = useRef(projectTitle);
   const persistedSelectedNodeIdRef = useRef<string | null>(null);
   const isReplayModeRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const artifactContentSaveTimersRef = useRef(
+    new Map<string, ReturnType<typeof window.setTimeout>>()
+  );
+  const artifactContentSavePayloadsRef = useRef(
+    new Map<string, PendingMarkdownArtifactContentSave>()
+  );
   const projectVersionRef = useRef(0);
   const isSavingRef = useRef(false);
   const pendingSaveRef = useRef(false);
   const saveWaitersRef = useRef<Array<(saved: boolean) => void>>([]);
-  const lastSavedSnapshotDigestRef = useRef<string | null>(null);
-  const lastSavedSnapshotRef = useRef<PersistableProjectSnapshot | null>(null);
+  const dirtyNodeIdsRef = useRef(new Set<string>());
+  const dirtyEdgeIdsRef = useRef(new Set<string>());
+  const deletedNodeIdsRef = useRef(new Set<string>());
+  const deletedEdgeIdsRef = useRef(new Set<string>());
+  const dirtyProjectMetaRef = useRef(false);
   const prevSaveClassifyNodesRef = useRef<AgentCanvasNode[]>([]);
   const prevSaveClassifyTitleRef = useRef(projectTitle);
   const autoLayoutFrame = useRef<number | null>(null);
@@ -381,28 +421,8 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   }, [edges]);
 
   useEffect(() => {
-    projectTitleRef.current = projectTitle;
-  }, [projectTitle]);
-
-  useEffect(() => {
     isReplayModeRef.current = isReplayMode;
   }, [isReplayMode]);
-
-  const handleAutoLayout = useCallback(() => {
-    if (isReplayModeRef.current || !nodesRef.current.length) {
-      return;
-    }
-
-    setNodes((current) => {
-      const layoutedNodes = layoutAgentCanvasGraph(current, edgesRef.current);
-      autoLayoutSignatureRef.current = getCanvasLayoutSignature(
-        layoutedNodes,
-        edgesRef.current
-      );
-      return layoutedNodes;
-    });
-    setLayoutFitRequest((current) => current + 1);
-  }, [setNodes]);
 
   useEffect(() => {
     loadedProjectIdRef.current = loadedProjectId;
@@ -411,6 +431,80 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   useEffect(() => {
     traceRunIdRef.current = traceRunId;
   }, [traceRunId]);
+
+  const recordDirtyFromPatch = useCallback((patch: CanvasLocalMutation["patch"]) => {
+    for (const node of patch.nodeUpserts ?? []) {
+      dirtyNodeIdsRef.current.add(node.id);
+      deletedNodeIdsRef.current.delete(node.id);
+    }
+    for (const nodeId of patch.nodeDeletes ?? []) {
+      deletedNodeIdsRef.current.add(nodeId);
+      dirtyNodeIdsRef.current.delete(nodeId);
+    }
+    for (const edge of patch.edgeUpserts ?? []) {
+      dirtyEdgeIdsRef.current.add(edge.id);
+      deletedEdgeIdsRef.current.delete(edge.id);
+    }
+    for (const edgeId of patch.edgeDeletes ?? []) {
+      deletedEdgeIdsRef.current.add(edgeId);
+      dirtyEdgeIdsRef.current.delete(edgeId);
+    }
+  }, []);
+
+  const commitCanvasMutation = useCallback(
+    (mutation: CanvasLocalMutation) => {
+      const patch = mutation.patch;
+      const next = applyCanvasPatch(
+        { edges: edgesRef.current, nodes: nodesRef.current },
+        patch
+      );
+
+      nodesRef.current = next.nodes;
+      edgesRef.current = next.edges;
+      setNodes(next.nodes);
+      setEdges(next.edges);
+
+      if (mutation.selectedNodeId !== undefined) {
+        persistedSelectedNodeIdRef.current = mutation.selectedNodeId;
+        dirtyProjectMetaRef.current = true;
+      }
+      if (mutation.lastRunId !== undefined) {
+        activeRunId.current = mutation.lastRunId;
+        dirtyProjectMetaRef.current = true;
+      }
+
+      if (mutation.persist ?? true) {
+        recordDirtyFromPatch(patch);
+        if (hasCanvasPatchChanges(patch) || dirtyProjectMetaRef.current) {
+          setStorageStatus("saving");
+        }
+      }
+    },
+    [recordDirtyFromPatch, setEdges, setNodes]
+  );
+
+  const handleAutoLayout = useCallback(() => {
+    if (isReplayModeRef.current || !nodesRef.current.length) {
+      return;
+    }
+
+    const layoutedNodes = layoutAgentCanvasGraph(
+      nodesRef.current,
+      edgesRef.current
+    );
+    autoLayoutSignatureRef.current = getCanvasLayoutSignature(
+      layoutedNodes,
+      edgesRef.current
+    );
+    commitCanvasMutation({
+      reason: "auto-layout",
+      patch: {
+        nodeUpserts: layoutedNodes,
+      },
+      persist: true,
+    });
+    setLayoutFitRequest((current) => current + 1);
+  }, [commitCanvasMutation]);
 
   const clearTraceReconcileTimers = useCallback(() => {
     for (const timer of traceReconcileTimers.current) {
@@ -852,6 +946,13 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   );
   const persistedSelectedNodeId = referenceNodeId ?? null;
   useEffect(() => {
+    if (
+      hasLoadedProject.current &&
+      persistedSelectedNodeIdRef.current !== persistedSelectedNodeId
+    ) {
+      dirtyProjectMetaRef.current = true;
+      setStorageStatus("saving");
+    }
     persistedSelectedNodeIdRef.current = persistedSelectedNodeId;
   }, [persistedSelectedNodeId]);
 
@@ -869,6 +970,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     !isReplayMode;
   const fileDrop = useCanvasFileDrop({
     canUploadFiles,
+    commitCanvasMutation,
     nodes,
     projectId: loadedProjectId,
     setEdges,
@@ -886,21 +988,45 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
   const handleNodesChange = useCallback(
     (changes: NodeChange<AgentCanvasNode>[]) => {
-      setNodes((current) => {
-        const next = applyLinkedNodeDragChanges(
-          changes,
-          current,
-          edgesRef.current
-        );
+      const previous = nodesRef.current;
+      const next = applyLinkedNodeDragChanges(
+        changes,
+        previous,
+        edgesRef.current
+      );
 
-        if (changes.some((change) => change.type === "select")) {
-          selectionBeforeNodeChangeRef.current = getSelectedNodeIds(current);
-        }
+      if (changes.some((change) => change.type === "select")) {
+        selectionBeforeNodeChangeRef.current = getSelectedNodeIds(previous);
+      }
 
-        return next;
+      const patch = diffCanvasPatch(
+        { edges: edgesRef.current, nodes: previous },
+        { edges: edgesRef.current, nodes: next }
+      );
+      commitCanvasMutation({
+        reason: "reactflow-node-change",
+        patch,
+        persist: hasPersistableNodeChanges(changes),
       });
     },
-    [setNodes]
+    [commitCanvasMutation]
+  );
+
+  const handleEdgesChange = useCallback(
+    (changes: EdgeChange<AgentCanvasEdge>[]) => {
+      const previous = edgesRef.current;
+      const next = applyEdgeChanges(changes, previous);
+      const patch = diffCanvasPatch(
+        { edges: previous, nodes: nodesRef.current },
+        { edges: next, nodes: nodesRef.current }
+      );
+      commitCanvasMutation({
+        reason: "reactflow-edge-change",
+        patch,
+        persist: changes.some((change) => change.type !== "select"),
+      });
+    },
+    [commitCanvasMutation]
   );
 
   const handleNodeClick = useCallback<NodeMouseHandler<AgentCanvasNode>>(
@@ -951,13 +1077,16 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     activeRunMessageStartIndex.current = 0;
     streamedRuntimeEvents.current = [];
     streamedAgentTextByRunId.current.clear();
-    lastSavedSnapshotDigestRef.current = null;
-    lastSavedSnapshotRef.current = null;
+    dirtyNodeIdsRef.current.clear();
+    dirtyEdgeIdsRef.current.clear();
+    deletedNodeIdsRef.current.clear();
+    deletedEdgeIdsRef.current.clear();
+    dirtyProjectMetaRef.current = false;
 
     const loadStartedAt = performance.now();
 
     loadProject(projectId)
-      .then(({ project }) => {
+      .then(({ edges, nodes, project }) => {
         if (ignore) {
           return;
         }
@@ -971,26 +1100,26 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         setTraceLoading(false);
         setReplaySnapshot(null);
         const nextSelectedNodeIds = getInitialSelectedNodeIds(
-          project.nodes,
+          nodes,
           project.selectedNodeId
         );
         autoLayoutSignatureRef.current = getCanvasLayoutSignature(
-          project.nodes,
-          project.edges
+          nodes,
+          edges
         );
-        setNodes(applySelectedNodeIds(project.nodes, nextSelectedNodeIds));
-        setEdges(project.edges);
+        const selectedNodes = applySelectedNodeIds(nodes, nextSelectedNodeIds);
+        nodesRef.current = selectedNodes;
+        edgesRef.current = edges;
+        setNodes(selectedNodes);
+        setEdges(edges);
         activeRunId.current = project.lastRunId;
         projectVersionRef.current = project.version;
-        const loadedSnapshot = getCurrentPersistableProjectSnapshot({
-          edges: project.edges,
-          lastRunId: project.lastRunId,
-          nodes: project.nodes,
-          selectedNodeId: project.selectedNodeId,
-          title: project.title,
-        });
-        lastSavedSnapshotDigestRef.current = loadedSnapshot.digest;
-        lastSavedSnapshotRef.current = loadedSnapshot;
+        persistedSelectedNodeIdRef.current = project.selectedNodeId;
+        dirtyNodeIdsRef.current.clear();
+        dirtyEdgeIdsRef.current.clear();
+        deletedNodeIdsRef.current.clear();
+        deletedEdgeIdsRef.current.clear();
+        dirtyProjectMetaRef.current = false;
         hasLoadedProject.current = true;
         setStorageStatus("saved");
         setStorageError(null);
@@ -999,32 +1128,13 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           // Diagnostics for the slow-load investigation (DEV only, never ships).
           console.info("[canvas-load]", {
             projectId: project.id,
-            nodeCount: project.nodes.length,
-            edgeCount: project.edges.length,
-            payloadBytes: JSON.stringify(project).length,
+            nodeCount: nodes.length,
+            edgeCount: edges.length,
+            payloadBytes: JSON.stringify({ edges, nodes, project }).length,
             fetchMs: Math.round(projectLoadedAt - loadStartedAt),
             totalMs: Math.round(performance.now() - loadStartedAt),
           });
         }
-
-        hydrateProjectSnapshotFromLastRun(project).then((hydratedSnapshot) => {
-          if (ignore || !hydratedSnapshot) {
-            return;
-          }
-
-          setNodes((current) =>
-            mergeCanvasUpserts(
-              { edges: edgesRef.current, nodes: current },
-              hydratedSnapshot
-            ).nodes
-          );
-          setEdges((current) =>
-            mergeCanvasUpserts(
-              { edges: current, nodes: nodesRef.current },
-              hydratedSnapshot
-            ).edges
-          );
-        });
       })
       .catch((nextError: unknown) => {
         if (ignore) {
@@ -1074,6 +1184,108 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     };
   }, [loadedProjectId, traceRunId]);
 
+  const savePendingArtifactContent = useCallback(
+    async (artifactId: string) => {
+      const payload = artifactContentSavePayloadsRef.current.get(artifactId);
+      if (!payload) {
+        return true;
+      }
+
+      const existingTimer = artifactContentSaveTimersRef.current.get(artifactId);
+      if (existingTimer) {
+        window.clearTimeout(existingTimer);
+        artifactContentSaveTimersRef.current.delete(artifactId);
+      }
+      artifactContentSavePayloadsRef.current.delete(artifactId);
+
+      const currentMarkdownNode = nodesRef.current.find(
+        (node) => node.id === payload.nodeId && node.data.kind === "markdown"
+      );
+      const expectedVersion =
+        currentMarkdownNode?.data.kind === "markdown"
+          ? currentMarkdownNode.data.artifact.version
+          : payload.expectedVersion;
+
+      try {
+        const { artifact } = await updateTextArtifactContent({
+          artifactId: payload.artifactId,
+          contentFormat: "markdown-json",
+          contentJson: {
+            blockNoteBlocks: payload.blocks,
+            format: "markdown-json",
+            markdown: payload.content,
+            plainText: payload.content,
+            version: 1,
+          },
+          contentText: payload.content,
+          expectedVersion,
+          mimeType: "application/vnd.cucumber.markdown+json",
+          plainText: payload.content,
+          previewKind: "markdown",
+          previewText: payload.summary,
+          projectId: payload.projectId,
+          summary: payload.summary,
+          title: payload.title,
+          type: "doc",
+        });
+
+        const previous = {
+          edges: edgesRef.current,
+          nodes: nodesRef.current,
+        };
+        const nextNodes = nodesRef.current.map((node) =>
+          node.id === payload.nodeId && node.data.kind === "markdown"
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  artifact: {
+                    ...node.data.artifact,
+                    ...artifact,
+                    metadata: undefined,
+                  },
+                  summary: artifact.summary ?? payload.summary,
+                },
+              }
+            : node
+        );
+        commitCanvasMutation({
+          reason: "markdown-edit",
+          patch: diffCanvasPatch(previous, {
+            edges: edgesRef.current,
+            nodes: nextNodes,
+          }),
+          persist: true,
+        });
+        return true;
+      } catch (nextError: unknown) {
+        if (!artifactContentSavePayloadsRef.current.has(artifactId)) {
+          setStorageStatus("error");
+          setStorageError(`Markdown 保存失败：${getClientError(nextError)}`);
+        }
+        return false;
+      }
+    },
+    [commitCanvasMutation]
+  );
+
+  const flushPendingArtifactContentSaves = useCallback(() => {
+    const artifactIds = [...artifactContentSavePayloadsRef.current.keys()];
+    return Promise.all(
+      artifactIds.map((artifactId) => savePendingArtifactContent(artifactId))
+    );
+  }, [savePendingArtifactContent]);
+
+  const hasPendingCanvasSave = useCallback(
+    () =>
+      dirtyProjectMetaRef.current ||
+      dirtyNodeIdsRef.current.size > 0 ||
+      dirtyEdgeIdsRef.current.size > 0 ||
+      deletedNodeIdsRef.current.size > 0 ||
+      deletedEdgeIdsRef.current.size > 0,
+    []
+  );
+
   const saveProjectSnapshot = useCallback(
     async (
       options: { keepalive?: boolean; reportStatus?: boolean } = {}
@@ -1089,14 +1301,12 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         return false;
       }
 
-      const initialSnapshot = getCurrentPersistableProjectSnapshot({
-        edges: edgesRef.current,
-        lastRunId: activeRunId.current,
-        nodes: nodesRef.current,
-        selectedNodeId: persistedSelectedNodeIdRef.current,
-        title: projectTitleRef.current,
-      });
-      if (initialSnapshot.digest === lastSavedSnapshotDigestRef.current) {
+      const artifactSaveResults = await flushPendingArtifactContentSaves();
+      if (artifactSaveResults.some((saved) => !saved)) {
+        return false;
+      }
+
+      if (!hasPendingCanvasSave()) {
         if (shouldReportStatus) {
           setStorageStatus("saved");
           setStorageError(null);
@@ -1125,14 +1335,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       try {
         do {
           pendingSaveRef.current = false;
-          const snapshot = getCurrentPersistableProjectSnapshot({
-            edges: edgesRef.current,
-            lastRunId: activeRunId.current,
-            nodes: nodesRef.current,
-            selectedNodeId: persistedSelectedNodeIdRef.current,
-            title: projectTitleRef.current,
-          });
-          if (snapshot.digest === lastSavedSnapshotDigestRef.current) {
+          if (!hasPendingCanvasSave()) {
             if (shouldReportStatus) {
               setStorageStatus("saved");
               setStorageError(null);
@@ -1142,40 +1345,47 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
           for (let attempt = 0; ; attempt += 1) {
             try {
-              const previousSnapshot = lastSavedSnapshotRef.current ?? {
-                edges: [],
-                lastRunId: null,
-                nodes: [],
-                selectedNodeId: null,
-                title: "",
-              };
-              const canvasPatch = diffCanvasPatch(previousSnapshot, snapshot);
-              const { project } = await updateProject(
+              const nodeUpserts = toPersistableNodes(
+                nodesRef.current.filter((node) =>
+                  dirtyNodeIdsRef.current.has(node.id)
+                )
+              );
+              const persistedNodeIds = new Set(
+                nodesRef.current
+                  .filter((node) => !deletedNodeIdsRef.current.has(node.id))
+                  .map((node) => node.id)
+              );
+              const edgeUpserts = toPersistableEdges(
+                edgesRef.current.filter(
+                  (edge) =>
+                    dirtyEdgeIdsRef.current.has(edge.id) &&
+                    persistedNodeIds.has(edge.source) &&
+                    persistedNodeIds.has(edge.target)
+                )
+              );
+              const nodeDeletes = [...deletedNodeIdsRef.current];
+              const edgeDeletes = [...deletedEdgeIdsRef.current];
+
+              const { project } = await saveProjectCanvasPatch(
                 {
                   projectId: currentProjectId,
-                  title:
-                    snapshot.title === previousSnapshot.title
-                      ? undefined
-                      : snapshot.title,
-                  canvasPatch: hasCanvasPatchChanges(canvasPatch)
-                    ? canvasPatch
-                    : undefined,
-                  selectedNodeId:
-                    snapshot.selectedNodeId === previousSnapshot.selectedNodeId
-                      ? undefined
-                      : snapshot.selectedNodeId,
-                  lastRunId:
-                    snapshot.lastRunId === previousSnapshot.lastRunId
-                      ? undefined
-                      : snapshot.lastRunId,
+                  nodeUpserts,
+                  nodeDeletes,
+                  edgeUpserts,
+                  edgeDeletes,
+                  selectedNodeId: persistedSelectedNodeIdRef.current,
+                  lastRunId: activeRunId.current,
                   expectedVersion: projectVersionRef.current,
                 },
                 options.keepalive ? { keepalive: true } : undefined
               );
 
               projectVersionRef.current = project.version;
-              lastSavedSnapshotDigestRef.current = snapshot.digest;
-              lastSavedSnapshotRef.current = snapshot;
+              dirtyNodeIdsRef.current.clear();
+              dirtyEdgeIdsRef.current.clear();
+              deletedNodeIdsRef.current.clear();
+              deletedEdgeIdsRef.current.clear();
+              dirtyProjectMetaRef.current = false;
               if (shouldReportStatus) {
                 setLoadedProjectId(project.id);
                 setStorageStatus("saved");
@@ -1210,7 +1420,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       }
       return saved;
     },
-    []
+    [flushPendingArtifactContentSaves, hasPendingCanvasSave]
   );
 
   const setImageProvider = useCallback((provider: ImageProviderSelection) => {
@@ -1279,10 +1489,16 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         withRunClientStep(draft.runNode, "client.connect", "连接 Agent"),
       ];
       const nextEdges = [...currentEdges, ...draft.edges];
-      nodesRef.current = nextNodes;
-      edgesRef.current = nextEdges;
-      setNodes(nextNodes);
-      setEdges(nextEdges);
+      const draftPatch = diffCanvasPatch(
+        { edges: currentEdges, nodes: currentNodes },
+        { edges: nextEdges, nodes: nextNodes }
+      );
+      commitCanvasMutation({
+        reason: "manual-create",
+        patch: draftPatch,
+        persist: true,
+        lastRunId: draft.runNode.id,
+      });
 
       void saveProjectSnapshot()
         .then((saved) => {
@@ -1316,14 +1532,13 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     },
     [
       clearTraceReconcileTimers,
+      commitCanvasMutation,
       hasLocalUploadNodes,
       imageProvider,
       isBusy,
       markRunError,
       saveProjectSnapshot,
       sendMessage,
-      setEdges,
-      setNodes,
       showUploadError,
       storageError,
       stop,
@@ -1431,6 +1646,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     if (!hasLoadedProject.current || !loadedProjectId || isReplayMode) {
       return;
     }
+    if (!hasPendingCanvasSave()) {
+      return;
+    }
 
     // Classify the change to pick a debounce window. Rapid content edits (typing
     // in a markdown node, renaming the project) create fresh `data` objects, so we
@@ -1465,6 +1683,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     };
   }, [
     edges,
+    hasPendingCanvasSave,
     isReplayMode,
     loadedProjectId,
     nodes,
@@ -1506,6 +1725,16 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       reconcileRunFromPersistedTrace(activeRunId.current, error.message);
     }
   }, [error, reconcileRunFromPersistedTrace]);
+
+  useEffect(
+    () => () => {
+      for (const timer of artifactContentSaveTimersRef.current.values()) {
+        window.clearTimeout(timer);
+      }
+      artifactContentSaveTimersRef.current.clear();
+    },
+    []
+  );
 
   useEffect(() => {
     const runId = activeRunId.current;
@@ -1595,10 +1824,22 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         },
         instance
       );
-      setNodes((current) => [
-        ...applySelectedNodeIds(current, []),
-        { ...node, selected: true },
-      ]);
+      const previous = {
+        edges: edgesRef.current,
+        nodes: nodesRef.current,
+      };
+      const next = {
+        edges: edgesRef.current,
+        nodes: [
+          ...applySelectedNodeIds(nodesRef.current, []),
+          { ...node, selected: true },
+        ],
+      };
+      commitCanvasMutation({
+        reason: "manual-create",
+        patch: diffCanvasPatch(previous, next),
+        persist: true,
+      });
       setCanvasTool("select");
     };
 
@@ -1609,7 +1850,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("mouseup", handleUp);
     };
-  }, [creationPreview, setNodes]);
+  }, [commitCanvasMutation, creationPreview]);
 
   const handleCopySelection = useCallback(() => {
     if (isReplayModeRef.current) {
@@ -1672,11 +1913,17 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       };
     });
 
-    setNodes((current) => [...applySelectedNodeIds(current, []), ...pastedNodes]);
-    if (pastedEdges.length) {
-      setEdges((current) => [...current, ...pastedEdges]);
-    }
-  }, [setEdges, setNodes]);
+    const previous = { edges: edgesRef.current, nodes: nodesRef.current };
+    const next = {
+      edges: [...edgesRef.current, ...pastedEdges],
+      nodes: [...applySelectedNodeIds(nodesRef.current, []), ...pastedNodes],
+    };
+    commitCanvasMutation({
+      reason: "paste",
+      patch: diffCanvasPatch(previous, next),
+      persist: true,
+    });
+  }, [commitCanvasMutation]);
 
   useEffect(() => {
     const handlePointerMove = (event: MouseEvent) => {
@@ -1765,10 +2012,14 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         { ...pendingNode, selected: true },
       ];
       const withPendingEdges = [...edgesRef.current, pendingEdge];
-      nodesRef.current = withPendingNodes;
-      edgesRef.current = withPendingEdges;
-      setNodes(withPendingNodes);
-      setEdges(withPendingEdges);
+      commitCanvasMutation({
+        reason: "upscale-pending",
+        patch: diffCanvasPatch(
+          { edges: edgesRef.current, nodes: nodesRef.current },
+          { edges: withPendingEdges, nodes: withPendingNodes }
+        ),
+        persist: false,
+      });
       setStorageStatus("saving");
       setStorageError(null);
 
@@ -1780,16 +2031,6 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         });
         projectVersionRef.current = result.project.version;
         persistedSelectedNodeIdRef.current = result.node.id;
-
-        const savedSnapshot = getCurrentPersistableProjectSnapshot({
-          edges: result.project.edges,
-          lastRunId: result.project.lastRunId,
-          nodes: result.project.nodes,
-          selectedNodeId: result.project.selectedNodeId,
-          title: result.project.title,
-        });
-        lastSavedSnapshotDigestRef.current = savedSnapshot.digest;
-        lastSavedSnapshotRef.current = savedSnapshot;
 
         setNodes((current) => {
           const withoutPending = current.filter((node) => node.id !== pendingId);
@@ -1843,7 +2084,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         setStorageError(`高清放大失败：${getClientError(nextError)}`);
       }
     },
-    [loadedProjectId, saveProjectSnapshot, setEdges, setNodes]
+    [commitCanvasMutation, loadedProjectId, saveProjectSnapshot, setEdges, setNodes]
   );
   const imageNodeActions = useMemo(
     () => ({
@@ -1898,6 +2139,55 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     setTraceError(null);
   }, []);
 
+  const scheduleMarkdownArtifactContentSave = useCallback(
+    ({
+      artifactId,
+      blocks,
+      content,
+      expectedVersion,
+      nodeId,
+      summary,
+      title,
+    }: {
+      artifactId: string;
+      blocks: unknown[];
+      content: string;
+      expectedVersion?: number;
+      nodeId: string;
+      summary: string;
+      title: string;
+    }) => {
+      const projectId = loadedProjectIdRef.current;
+      if (!projectId) {
+        return;
+      }
+
+      const existingTimer = artifactContentSaveTimersRef.current.get(artifactId);
+      if (existingTimer) {
+        window.clearTimeout(existingTimer);
+      }
+      artifactContentSavePayloadsRef.current.set(artifactId, {
+        artifactId,
+        blocks,
+        content,
+        expectedVersion,
+        nodeId,
+        projectId,
+        summary,
+        title,
+      });
+      setStorageStatus("saving");
+      setStorageError(null);
+
+      const timer = window.setTimeout(() => {
+        void savePendingArtifactContent(artifactId);
+      }, 700);
+
+      artifactContentSaveTimersRef.current.set(artifactId, timer);
+    },
+    [savePendingArtifactContent]
+  );
+
   const handleMarkdownNodeChange = useCallback(
     (nodeId: string, content: string, blocks: unknown[]) => {
       if (isReplayMode) {
@@ -1906,48 +2196,63 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
       const normalizedContent = content.trim();
       const nextBlocksJson = JSON.stringify(blocks);
-      setNodes((current) =>
-        current.map((node) => {
-          if (node.id !== nodeId || node.data.kind !== "markdown") {
-            return node;
-          }
-
-          const currentBlocks =
-            node.data.blockNoteBlocks ??
-            node.data.artifact.metadata?.blockNoteBlocks;
-          const currentBlocksJson = currentBlocks
-            ? JSON.stringify(currentBlocks)
-            : "";
-          if (
-            node.data.content === normalizedContent &&
-            currentBlocksJson === nextBlocksJson
-          ) {
-            return node;
-          }
-
-          const summary = summarizeMarkdownForCanvasNode(normalizedContent);
-          return {
-            ...node,
-            data: {
-              ...node.data,
-              artifact: {
-                ...node.data.artifact,
-                metadata: {
-                  ...node.data.artifact.metadata,
-                  blockNoteBlocks: blocks,
-                  markdown: normalizedContent,
-                  preview: summary,
-                },
-              },
-              blockNoteBlocks: blocks,
-              content: normalizedContent,
-              summary,
-            },
-          };
-        })
+      const currentMarkdownNode = nodesRef.current.find(
+        (node) => node.id === nodeId && node.data.kind === "markdown"
       );
+      const nextNodes = nodesRef.current.map((node) => {
+        if (node.id !== nodeId || node.data.kind !== "markdown") {
+          return node;
+        }
+
+        const currentBlocks =
+          node.data.blockNoteBlocks ??
+          node.data.artifact.metadata?.blockNoteBlocks;
+        const currentBlocksJson = currentBlocks
+          ? JSON.stringify(currentBlocks)
+          : "";
+        if (
+          node.data.content === normalizedContent &&
+          currentBlocksJson === nextBlocksJson
+        ) {
+          return node;
+        }
+
+        const summary = summarizeMarkdownForCanvasNode(normalizedContent);
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            artifact: {
+              ...node.data.artifact,
+              metadata: {
+                ...node.data.artifact.metadata,
+                blockNoteBlocks: blocks,
+                markdown: normalizedContent,
+                preview: summary,
+              },
+            },
+            blockNoteBlocks: blocks,
+            content: normalizedContent,
+            summary,
+          },
+        };
+      });
+      nodesRef.current = nextNodes;
+      setNodes(nextNodes);
+
+      if (currentMarkdownNode?.data.kind === "markdown") {
+        scheduleMarkdownArtifactContentSave({
+          artifactId: currentMarkdownNode.data.artifact.id,
+          blocks,
+          content: normalizedContent,
+          expectedVersion: currentMarkdownNode.data.artifact.version,
+          nodeId,
+          summary: summarizeMarkdownForCanvasNode(normalizedContent),
+          title: currentMarkdownNode.data.title,
+        });
+      }
     },
-    [isReplayMode, setNodes]
+    [isReplayMode, scheduleMarkdownArtifactContentSave, setNodes]
   );
 
   const handleStickyTextChange = useCallback(
@@ -1956,15 +2261,22 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         return;
       }
 
-      setNodes((current) =>
-        current.map((node) =>
-          node.id === nodeId && node.data.kind === "stickyNote"
-            ? { ...node, data: { ...node.data, text } }
-            : node
-        )
+      const previous = { edges: edgesRef.current, nodes: nodesRef.current };
+      const nextNodes = nodesRef.current.map((node) =>
+        node.id === nodeId && node.data.kind === "stickyNote"
+          ? { ...node, data: { ...node.data, text } }
+          : node
       );
+      commitCanvasMutation({
+        reason: "text-edit",
+        patch: diffCanvasPatch(previous, {
+          edges: edgesRef.current,
+          nodes: nextNodes,
+        }),
+        persist: true,
+      });
     },
-    [isReplayMode, setNodes]
+    [commitCanvasMutation, isReplayMode]
   );
 
   const handleShapeLabelChange = useCallback(
@@ -1973,15 +2285,22 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         return;
       }
 
-      setNodes((current) =>
-        current.map((node) =>
-          node.id === nodeId && node.data.kind === "shape"
-            ? { ...node, data: { ...node.data, label } }
-            : node
-        )
+      const previous = { edges: edgesRef.current, nodes: nodesRef.current };
+      const nextNodes = nodesRef.current.map((node) =>
+        node.id === nodeId && node.data.kind === "shape"
+          ? { ...node, data: { ...node.data, label } }
+          : node
       );
+      commitCanvasMutation({
+        reason: "shape-edit",
+        patch: diffCanvasPatch(previous, {
+          edges: edgesRef.current,
+          nodes: nextNodes,
+        }),
+        persist: true,
+      });
     },
-    [isReplayMode, setNodes]
+    [commitCanvasMutation, isReplayMode]
   );
 
   const handlePromptTextChange = useCallback(
@@ -1990,28 +2309,39 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         return;
       }
 
-      setNodes((current) =>
-        current.map((node) => {
-          if (
-            node.id !== nodeId ||
-            node.data.kind !== "prompt" ||
-            !node.data.manual
-          ) {
-            return node;
-          }
+      const previous = { edges: edgesRef.current, nodes: nodesRef.current };
+      const nextNodes = nodesRef.current.map((node) => {
+        if (
+          node.id !== nodeId ||
+          node.data.kind !== "prompt" ||
+          !node.data.manual
+        ) {
+          return node;
+        }
 
-          return {
-            ...node,
-            data: {
-              ...node.data,
-              prompt,
-            },
-          };
-        })
-      );
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            prompt,
+          },
+        };
+      });
+      commitCanvasMutation({
+        reason: "text-edit",
+        patch: diffCanvasPatch(previous, {
+          edges: edgesRef.current,
+          nodes: nextNodes,
+        }),
+        persist: true,
+      });
     },
-    [isReplayMode, setNodes]
+    [commitCanvasMutation, isReplayMode]
   );
+
+  if (storageStatus === "loading" && !loadedProjectId) {
+    return <LoadingScreen label="加载画布中" />;
+  }
 
   return (
     <main
@@ -2049,7 +2379,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
               nodes={canvasNodes}
               edges={canvasEdges}
               onInit={handleCanvasInit}
-              onEdgesChange={isReplayMode ? undefined : onEdgesChange}
+              onEdgesChange={isReplayMode ? undefined : handleEdgesChange}
               onNodeClick={handleNodeClick}
               onNodesChange={isReplayMode ? undefined : handleNodesChange}
               onMouseDown={handleCreationMouseDown}
@@ -2656,137 +2986,6 @@ function getDefaultShapeDimensions(shape: ShapeVariant) {
   }
 
   return { width: 200, height: 140 };
-}
-
-function getCurrentPersistableProjectSnapshot({
-  edges,
-  lastRunId,
-  nodes,
-  selectedNodeId,
-  title,
-}: {
-  edges: AgentCanvasEdge[];
-  lastRunId: string | null;
-  nodes: AgentCanvasNode[];
-  selectedNodeId: string | null;
-  title: string;
-}) {
-  const persistableNodes = toPersistableNodes(nodes);
-  const persistableNodeIds = new Set(persistableNodes.map((node) => node.id));
-  const persistableEdges = edges.filter(
-    (edge) =>
-      persistableNodeIds.has(edge.source) && persistableNodeIds.has(edge.target)
-  );
-
-  return {
-    digest: getProjectSnapshotDigest({
-      edges: persistableEdges,
-      lastRunId,
-      nodes: persistableNodes,
-      selectedNodeId,
-      title,
-    }),
-    edges: persistableEdges,
-    lastRunId,
-    nodes: persistableNodes,
-    selectedNodeId,
-    title,
-  };
-}
-
-type PersistableProjectSnapshot = ReturnType<
-  typeof getCurrentPersistableProjectSnapshot
->;
-
-function getProjectSnapshotDigest({
-  edges,
-  lastRunId,
-  nodes,
-  selectedNodeId,
-  title,
-}: {
-  edges: AgentCanvasEdge[];
-  lastRunId: string | null;
-  nodes: AgentCanvasNode[];
-  selectedNodeId: string | null;
-  title: string;
-}) {
-  return JSON.stringify({ edges, lastRunId, nodes, selectedNodeId, title });
-}
-
-async function hydrateProjectSnapshotFromLastRun(
-  project: PersistedProject
-): Promise<{ nodes: AgentCanvasNode[]; edges: AgentCanvasEdge[] } | null> {
-  const snapshot = {
-    nodes: project.nodes,
-    edges: project.edges,
-  };
-
-  if (!project.lastRunId) {
-    return null;
-  }
-
-  try {
-    const { events } = await loadRunTrace(project.id, project.lastRunId);
-    if (!events.length) {
-      return null;
-    }
-
-    const projection = projectRuntimeEventsToCanvas({
-      projectId: project.id,
-      runNodeId: project.lastRunId,
-      events,
-      existingSnapshot: snapshot,
-    });
-
-    if (
-      !shouldMergeHydratedSnapshot({
-        currentEdges: project.edges,
-        currentNodes: project.nodes,
-        projectedEdges: projection.edges,
-        projectedNodes: projection.nodes,
-      })
-    ) {
-      return null;
-    }
-
-    return {
-      nodes: projection.nodes,
-      edges: projection.edges,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function shouldMergeHydratedSnapshot({
-  currentEdges,
-  currentNodes,
-  projectedEdges,
-  projectedNodes,
-}: {
-  currentEdges: AgentCanvasEdge[];
-  currentNodes: AgentCanvasNode[];
-  projectedEdges: AgentCanvasEdge[];
-  projectedNodes: AgentCanvasNode[];
-}) {
-  const nodesById = new Map(currentNodes.map((node) => [node.id, node]));
-  for (const projectedNode of projectedNodes) {
-    const currentNode = nodesById.get(projectedNode.id);
-    if (!currentNode || JSON.stringify(currentNode) !== JSON.stringify(projectedNode)) {
-      return true;
-    }
-  }
-
-  const edgesById = new Map(currentEdges.map((edge) => [edge.id, edge]));
-  for (const projectedEdge of projectedEdges) {
-    const currentEdge = edgesById.get(projectedEdge.id);
-    if (!currentEdge || JSON.stringify(currentEdge) !== JSON.stringify(projectedEdge)) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 function TopBar({
@@ -3468,18 +3667,9 @@ function CodeNode({
   const contentUrl = getArtifactContentUrl(data.artifact);
   const inlinePreview = getInlineArtifactPreview(data);
   const [isPreviewOpen, setPreviewOpen] = useState(false);
-  const loadedPreview = useTextArtifactContent(
-    contentUrl,
-    Boolean(contentUrl && isTextualArtifact(data))
-  );
   const metaLine = getArtifactMetaLine(data);
-  const codeText =
-    (loadedPreview && loadedPreview.url === contentUrl ? loadedPreview.text : null) ??
-    inlinePreview ??
-    "";
-  const displayCode =
-    codeText ||
-    (loadedPreview?.status === "error" ? "无法读取代码预览" : "读取代码...");
+  const codeText = inlinePreview ?? "";
+  const displayCode = codeText || "打开预览读取代码";
   const language = getCodeBlockLanguage(data);
   const canPreview = Boolean(codeText || contentUrl);
 
@@ -3811,6 +4001,17 @@ function useTextArtifactContent(
           throw new Error(`HTTP ${response.status}`);
         }
         const contentType = response.headers.get("Content-Type") ?? "";
+        if (contentType.includes("application/json")) {
+          const payload = await response.json();
+          if (!ignore) {
+            setLoadedPreview({
+              status: "ready",
+              text: readArtifactContentTextPayload(payload)?.slice(0, maxLength) ?? null,
+              url: contentUrl,
+            });
+          }
+          return;
+        }
         if (!isTextContentType(contentType)) {
           if (!ignore) {
             setLoadedPreview({ status: "ready", text: null, url: contentUrl });
@@ -3971,6 +4172,30 @@ function isTextContentType(contentType: string) {
   );
 }
 
+function readArtifactContentTextPayload(payload: unknown) {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+  const content = (payload as { content?: Record<string, unknown> }).content;
+  if (!content) {
+    return undefined;
+  }
+  if (typeof content.contentText === "string") {
+    return content.contentText;
+  }
+  if (typeof content.plainText === "string") {
+    return content.plainText;
+  }
+  const contentJson = content.contentJson;
+  if (contentJson && typeof contentJson === "object") {
+    const markdown = (contentJson as { markdown?: unknown }).markdown;
+    if (typeof markdown === "string") {
+      return markdown;
+    }
+  }
+  return undefined;
+}
+
 function formatArtifactDate(value: string | undefined) {
   if (!value) {
     return undefined;
@@ -4075,7 +4300,12 @@ function MarkdownNode({
     text: string;
     url: string;
   } | null>(null);
-  const shouldLoadFullContent = shouldLoadFullMarkdownContent(data, contentUrl);
+  const [fullContentRequested, setFullContentRequested] = useState(false);
+  const requestFullContent = useCallback(() => {
+    setFullContentRequested(true);
+  }, []);
+  const shouldLoadFullContent =
+    fullContentRequested && shouldLoadFullMarkdownContent(data, contentUrl);
 
   useEffect(() => {
     if (!shouldLoadFullContent || !contentUrl) {
@@ -4089,6 +4319,14 @@ function MarkdownNode({
           throw new Error(`HTTP ${response.status}`);
         }
         const contentType = response.headers.get("Content-Type") ?? "";
+        if (contentType.includes("application/json")) {
+          const payload = await response.json();
+          const text = readArtifactContentTextPayload(payload);
+          if (!ignore && text?.trim()) {
+            setLoadedContent({ text, url: contentUrl });
+          }
+          return;
+        }
         if (contentType && !isTextContentType(contentType)) {
           return;
         }
@@ -4140,7 +4378,11 @@ function MarkdownNode({
             </strong>
           </div>
         </div>
-        <div className="blocknote-body nodrag nopan nowheel">
+        <div
+          className="blocknote-body nodrag nopan nowheel"
+          onFocusCapture={requestFullContent}
+          onPointerDownCapture={requestFullContent}
+        >
           <Suspense
             fallback={
               <pre className="markdown-plain-preview">{editorData.content}</pre>

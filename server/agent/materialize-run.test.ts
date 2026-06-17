@@ -1,10 +1,59 @@
 import { describe, expect, it } from "vitest";
 
-import type { AgentProject } from "../supabase";
+import type { CanvasProject } from "../canvas-store";
 import type { AgentEvent } from "../../src/types/runtime";
-import { materializeSnapshot } from "./materialize-run";
+import {
+  materializeSnapshot,
+  shouldBlockRunForMaterialization,
+  shouldMaterializeRunEvent,
+} from "./materialize-run";
 
 describe("agent run materializer", () => {
+  it("treats normalized artifact input as a materialization trigger", () => {
+    expect(shouldMaterializeRunEvent("input.normalized")).toBe(true);
+  });
+
+  it("does not block the run on non-terminal materialization triggers", () => {
+    expect(shouldBlockRunForMaterialization("input.normalized")).toBe(false);
+    expect(shouldBlockRunForMaterialization("artifact.created")).toBe(false);
+    expect(shouldBlockRunForMaterialization("canvas.operation.applied")).toBe(false);
+    expect(shouldBlockRunForMaterialization("run.completed")).toBe(true);
+    expect(shouldBlockRunForMaterialization("run.failed")).toBe(true);
+  });
+
+  it("writes pending artifact nodes from normalized non-image input", () => {
+    const next = materializeSnapshot(
+      projectSnapshot(),
+      [
+        event("run.created", {
+          prompt: "写一份 PRD",
+          promptNodeId: "prompt-1",
+          selectedNodeId: null,
+        }),
+        event("input.normalized", {
+          normalizedInput: {
+            rawPrompt: "写一份 PRD",
+            operation: "create",
+            artifact: { kind: "document", subtype: "prd", format: "markdown" },
+            intent: "document.create",
+          },
+        }),
+      ],
+      "run-1"
+    );
+
+    expect(next.nodes.find((node) => node.id === "markdown-pending-run-1-1")?.data)
+      .toMatchObject({
+        kind: "markdown",
+        artifact: {
+          id: "pending-run-1-markdown-1",
+          type: "doc",
+        },
+        runId: "run-1",
+        summary: "正在生成，结果会自动写入这个节点。",
+      });
+  });
+
   it("writes artifact result nodes while preserving unrelated canvas nodes", () => {
     const project = projectSnapshot();
     const next = materializeSnapshot(
@@ -293,7 +342,7 @@ describe("agent run materializer", () => {
   });
 });
 
-function projectSnapshot(): Pick<AgentProject, "edges" | "id" | "nodes"> {
+function projectSnapshot(): Pick<CanvasProject, "edges" | "id" | "nodes"> {
   return {
     id: "00000000-0000-4000-8000-000000000001",
     nodes: [

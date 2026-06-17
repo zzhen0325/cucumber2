@@ -12,10 +12,11 @@ import type {
   UpstreamContextItem,
 } from "../../src/types/canvas.ts";
 import type { CanvasOperation } from "../../src/types/runtime.ts";
-import type { AgentProject } from "../supabase.ts";
+import type { CanvasProject } from "../canvas-store.ts";
 import type { ImageProviderSelection } from "../provider-config.ts";
 import type { NormalizedAgentInput } from "./input-normalizer.ts";
 import type { ActivatedAgentSkill, AgentSkillCard } from "./skills/types.ts";
+import { getTextArtifactContentForUser } from "../artifact-content-store.ts";
 
 export type CanvasSnapshot = {
   nodes: AgentCanvasNode[];
@@ -215,7 +216,7 @@ export type ExecuteAgentRunInput = {
   runNodeId: string;
   canvasContext: AgentRunRequestContext;
   writer: UIMessageStreamWriter<UIMessage>;
-  projectSnapshot: Pick<AgentProject, "id" | "nodes" | "edges">;
+  projectSnapshot: Pick<CanvasProject, "id" | "nodes" | "edges">;
   signal?: AbortSignal;
 };
 
@@ -329,6 +330,134 @@ export function buildAgentRunInput({
     contextSummary,
     userId,
   };
+}
+
+const maxHydratedArtifactContentChars = 12_000;
+
+export async function hydrateAgentRunInputArtifacts(
+  input: AgentRunInput
+): Promise<AgentRunInput> {
+  const hydratedContext = await Promise.all(
+    input.upstreamContext.map((item) =>
+      hydrateUpstreamContextItem({
+        item,
+        projectId: input.projectId,
+        userId: input.userId,
+      })
+    )
+  );
+
+  const upstreamContext = hydratedContext.map((result) => result.item);
+  const contentByNodeId = new Map(
+    upstreamContext
+      .filter((item) => item.content)
+      .map((item) => [item.nodeId, item.content as string])
+  );
+
+  return {
+    ...input,
+    upstreamContext,
+    contextSummary: input.contextSummary
+      ? {
+          ...input.contextSummary,
+          upstreamPath: input.contextSummary.upstreamPath.map((item) => {
+            const content = contentByNodeId.get(item.nodeId);
+            return content ? { ...item, summary: content } : item;
+          }),
+        }
+      : input.contextSummary,
+  };
+}
+
+async function hydrateUpstreamContextItem({
+  item,
+  projectId,
+  userId,
+}: {
+  item: UpstreamContextItem;
+  projectId: string;
+  userId: string;
+}): Promise<{ item: UpstreamContextItem }> {
+  if (!shouldHydrateArtifactContent(item)) {
+    return { item };
+  }
+
+  const artifactId = item.artifact?.id;
+  if (!artifactId) {
+    return { item };
+  }
+
+  const result = await getTextArtifactContentForUser({
+    artifactId,
+    projectId,
+    userId,
+  });
+  const content = result ? readArtifactContentText(result.content) : null;
+  if (!content) {
+    return { item };
+  }
+
+  const cappedContent = limitArtifactContentForContext(content);
+  return {
+    item: {
+      ...item,
+      content: cappedContent,
+      contentFormat: result?.content.contentFormat,
+      mimeType: result?.content.mimeType ?? item.artifact?.mimeType,
+    },
+  };
+}
+
+function shouldHydrateArtifactContent(item: UpstreamContextItem) {
+  const artifactType = item.artifact?.type;
+  return Boolean(
+    item.artifact?.id &&
+      (artifactType === "doc" ||
+        artifactType === "code" ||
+        artifactType === "webpage" ||
+        artifactType === "tool_result" ||
+        item.type === "doc" ||
+        item.type === "code" ||
+        item.type === "webpage" ||
+        item.type === "tool_result")
+  );
+}
+
+function readArtifactContentText(
+  content: NonNullable<
+    Awaited<ReturnType<typeof getTextArtifactContentForUser>>
+  >["content"]
+) {
+  const text =
+    readNonEmptyString(content.plainText) ??
+    readNonEmptyString(content.contentText) ??
+    stringifyContentJson(content.contentJson);
+  return text?.trim() || null;
+}
+
+function stringifyContentJson(value: unknown) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === "string") {
+    return value.trim() || null;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return null;
+  }
+}
+
+function readNonEmptyString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function limitArtifactContentForContext(content: string) {
+  if (content.length <= maxHydratedArtifactContentChars) {
+    return content;
+  }
+  return `${content.slice(0, maxHydratedArtifactContentChars)}\n...[artifact content truncated]`;
 }
 
 export function buildCucumberAgentContext(input: AgentRunInput): CucumberAgentContext {
