@@ -1,0 +1,16 @@
+src/App.css
+  h_49a1fcd5ff42d1 1421,1430,1436,1442,1448,1474,2862
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "b45bb628650a2651bcfd128a94cc668f356e7a4a",
+  "prompts": {},
+  "humans": {
+    "h_49a1fcd5ff42d1": {
+      "author": "zzhen0325 <26629213+zzhen0325@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
