@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 
 import type {
   ArtifactPreviewKind,
@@ -15,6 +16,7 @@ import {
 import { upsertTextArtifactContentForUser } from "./artifact-content-store.ts";
 import {
   indexArtifactForKnowledge,
+  isLikelyTextualAsset,
   readKnowledgeTextFromBytes,
 } from "./agent/knowledge/knowledge-index.ts";
 
@@ -149,20 +151,32 @@ export async function createSignedAssetUpload({
 export async function completeSignedAssetUpload(
   input: CompleteSignedAssetUploadInput
 ): Promise<ArtifactRef> {
+  const totalStartedAt = performance.now();
   assertExpectedUploadPath(input);
   assertAllowedAssetSize(input.sizeBytes);
 
-  const objectInfo = await getStoredObjectInfo(input.bucket, input.path);
-  const objectBytes = await readStoredObjectBytes(input.bucket, input.path);
   const artifactId = `upload-${input.uploadId}`;
   const artifactType = getArtifactTypeForUploadKind(input.kind);
-  const mimeType = input.mimeType || objectInfo.mimeType || "application/octet-stream";
-  const sizeBytes = objectInfo.sizeBytes ?? objectBytes.byteLength ?? input.sizeBytes;
+  const inputMimeType = normalizeMimeType(input.mimeType);
+  const shouldReadObjectBytes = isLikelyTextualAsset(inputMimeType, input.path);
+  const infoStartedAt = performance.now();
+  const objectInfo = shouldReadObjectBytes
+    ? await getStoredObjectInfo(input.bucket, input.path)
+    : null;
+  const infoMs = objectInfo ? elapsedStorageMs(infoStartedAt) : 0;
+  const mimeType =
+    objectInfo?.mimeType || inputMimeType || "application/octet-stream";
+  const downloadStartedAt = performance.now();
+  const objectBytes = shouldReadObjectBytes
+    ? await readStoredObjectBytes(input.bucket, input.path)
+    : null;
+  const downloadMs = objectBytes ? elapsedStorageMs(downloadStartedAt) : 0;
+  const sizeBytes = objectInfo?.sizeBytes ?? objectBytes?.byteLength ?? input.sizeBytes;
   const previewKind = getPreviewKindForUploadKind(input.kind);
   const metadata = compactRecord({
     byteSize: sizeBytes,
     createdBy: input.userId,
-    digest: createSha256Digest(objectBytes),
+    digest: objectBytes ? createSha256Digest(objectBytes) : undefined,
     fileName: input.fileName,
     format: getUploadFormat(input.kind),
     height: input.height,
@@ -181,6 +195,7 @@ export async function completeSignedAssetUpload(
     width: input.width,
   });
 
+  const registerStartedAt = performance.now();
   const record = await registerAgentArtifact({
     bucketId: input.bucket,
     contentRef: getStorageContentRef(input.bucket, input.path),
@@ -191,6 +206,7 @@ export async function completeSignedAssetUpload(
     origin: "user_upload",
     projectId: input.projectId,
     sizeBytes,
+    skipProjectAccessCheck: true,
     storagePath: input.path,
     title: input.title ?? input.fileName,
     type: artifactType,
@@ -200,18 +216,39 @@ export async function completeSignedAssetUpload(
         : null,
     userId: input.userId,
   });
+  const registerMs = elapsedStorageMs(registerStartedAt);
 
   if (!record) {
     throw new Error("Project not found.");
   }
 
+  const indexStartedAt = performance.now();
   await indexArtifactForKnowledge({
     artifact: record,
-    contentText: readKnowledgeTextFromBytes({
-      bytes: objectBytes,
-      mimeType,
-      path: input.path,
-    }),
+    contentText: objectBytes
+      ? readKnowledgeTextFromBytes({
+          bytes: objectBytes,
+          mimeType,
+          path: input.path,
+        })
+      : undefined,
+  });
+  const indexMs = elapsedStorageMs(indexStartedAt);
+
+  console.info("[upload:complete]", {
+    artifactId,
+    downloadMs,
+    fileName: input.fileName,
+    infoMs,
+    kind: input.kind,
+    mimeType,
+    readObjectInfo: Boolean(objectInfo),
+    readObjectBytes: Boolean(objectBytes),
+    registerMs,
+    sizeBytes,
+    indexMs,
+    totalMs: elapsedStorageMs(totalStartedAt),
+    uploadId: input.uploadId,
   });
 
   return toArtifactRef(record);
@@ -587,8 +624,10 @@ function assertExpectedUploadPath(input: CompleteSignedAssetUploadInput) {
     throw new Error("Upload bucket does not match the project asset bucket.");
   }
 
-  const expectedPrefix = `projects/${input.projectId}/uploads/${input.uploadId}/`;
-  if (!input.path.startsWith(expectedPrefix)) {
+  const expectedPath = `projects/${input.projectId}/uploads/${
+    input.uploadId
+  }/${sanitizeFileName(input.fileName)}`;
+  if (input.path !== expectedPath) {
     throw new Error("Upload path does not match the signed upload.");
   }
 }
@@ -654,6 +693,10 @@ function getPreviewKindForArtifactType(type: ArtifactType): ArtifactPreviewKind 
 
 function createSha256Digest(bytes: Uint8Array) {
   return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+}
+
+function elapsedStorageMs(startedAt: number) {
+  return Math.round(performance.now() - startedAt);
 }
 
 function sanitizeFileName(fileName: string) {

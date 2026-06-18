@@ -110,7 +110,7 @@ describe("rembg matting provider", () => {
         healthCheckTimeoutMs: 50,
       })
     ).toBe(true);
-    expect(spawnSync).toHaveBeenCalledWith("rembg-test", ["--help"], {
+    expect(spawnSync).toHaveBeenCalledWith("rembg-test", ["--version"], {
       stdio: "ignore",
       timeout: 50,
     });

@@ -334,7 +334,10 @@ function isKnowledgeChunkVisible(
   return visibleSourceArtifactIds?.has(chunk.sourceArtifactId) ?? false;
 }
 
-function isLikelyTextualAsset(mimeType?: string | null, path?: string | null) {
+export function isLikelyTextualAsset(
+  mimeType?: string | null,
+  path?: string | null
+) {
   const normalizedMimeType = mimeType?.toLowerCase() ?? "";
   if (
     normalizedMimeType.startsWith("text/") ||

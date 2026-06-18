@@ -395,6 +395,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const dirtyProjectMetaRef = useRef(false);
   const prevSaveClassifyNodesRef = useRef<AgentCanvasNode[]>([]);
   const prevSaveClassifyTitleRef = useRef(projectTitle);
+  const imageProcessingInFlightRef = useRef(new Set<string>());
   const autoLayoutFrame = useRef<number | null>(null);
   const autoLayoutSignatureRef = useRef<string | null>(null);
   const flowInstance = useRef<ReactFlowInstance<
@@ -1686,9 +1687,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       window.clearTimeout(saveTimer.current);
     }
 
-    setStorageStatus("saving");
     saveTimer.current = window.setTimeout(() => {
       saveTimer.current = null;
+      setStorageStatus("saving");
       void saveProjectSnapshot();
     }, delay);
 
@@ -2107,97 +2108,107 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         return;
       }
 
-      const saved = await saveProjectSnapshot();
-      if (!saved) {
-        setStorageStatus("error");
-        setStorageError("项目快照保存失败，无法高清放大。");
+      const operationKey = `upscale:${sourceNodeId}`;
+      if (imageProcessingInFlightRef.current.has(operationKey)) {
         return;
       }
-
-      const pendingId = `image-upscale-pending-${Date.now().toString(36)}`;
-      const pendingEdgeId = `edge-${sourceNodeId}-${pendingId}`;
-      const pendingNode = createPendingUpscaleImageNode(sourceNode, pendingId);
-      const pendingEdge: AgentCanvasEdge = {
-        id: pendingEdgeId,
-        source: sourceNodeId,
-        target: pendingId,
-        type: "animated",
-      };
-      const withPendingNodes = [
-        ...applySelectedNodeIds(nodesRef.current, []),
-        { ...pendingNode, selected: true },
-      ];
-      const withPendingEdges = [...edgesRef.current, pendingEdge];
-      commitCanvasMutation({
-        reason: "upscale-pending",
-        patch: diffCanvasPatch(
-          { edges: edgesRef.current, nodes: nodesRef.current },
-          { edges: withPendingEdges, nodes: withPendingNodes }
-        ),
-        persist: false,
-      });
-      setStorageStatus("saving");
-      setStorageError(null);
+      imageProcessingInFlightRef.current.add(operationKey);
 
       try {
-        const result = await upscaleProjectImage({
-          expectedVersion: projectVersionRef.current,
-          projectId: loadedProjectId,
-          sourceNodeId,
-        });
-        projectVersionRef.current = result.project.version;
-        persistedSelectedNodeIdRef.current = result.node.id;
-
-        setNodes((current) => {
-          const withoutPending = current.filter((node) => node.id !== pendingId);
-          const merged = mergeCanvasUpserts(
-            { edges: edgesRef.current, nodes: withoutPending },
-            { edges: [result.edge], nodes: [result.node] }
-          ).nodes;
-          const next = applySelectedNodeIds(merged, [result.node.id]);
-          nodesRef.current = next;
-          return next;
-        });
-        setEdges((current) => {
-          const withoutPending = current.filter((edge) => edge.id !== pendingEdgeId);
-          const next = mergeCanvasUpserts(
-            { edges: withoutPending, nodes: nodesRef.current },
-            { edges: [result.edge], nodes: [result.node] }
-          ).edges;
-          edgesRef.current = next;
-          return next;
-        });
-        setStorageStatus("saved");
-        setStorageError(null);
-      } catch (nextError: unknown) {
-        if (nextError instanceof ProjectVersionConflictError) {
-          projectVersionRef.current = nextError.project.version;
+        const saved = await saveProjectSnapshot();
+        if (!saved) {
+          setStorageStatus("error");
+          setStorageError("项目快照保存失败，无法高清放大。");
+          return;
         }
-        setNodes((current) => {
-          const next = current.map((node) =>
-            node.id === pendingId && node.data.kind === "imageResult"
-              ? {
-                  ...node,
-                  data: {
-                    ...node.data,
-                    image: {
-                      ...node.data.image,
-                      title: "高清放大失败",
-                    },
-                    status: "error" as const,
-                    upload: {
-                      status: "error" as const,
-                      error: getClientError(nextError),
-                    },
-                  },
-                }
-              : node
-          );
-          nodesRef.current = next;
-          return next;
+
+        const pendingId = `image-upscale-pending-${Date.now().toString(36)}`;
+        const pendingEdgeId = `edge-${sourceNodeId}-${pendingId}`;
+        const pendingNode = createPendingUpscaleImageNode(sourceNode, pendingId);
+        const pendingEdge: AgentCanvasEdge = {
+          id: pendingEdgeId,
+          source: sourceNodeId,
+          target: pendingId,
+          type: "animated",
+        };
+        const withPendingNodes = [
+          ...applySelectedNodeIds(nodesRef.current, []),
+          { ...pendingNode, selected: true },
+        ];
+        const withPendingEdges = [...edgesRef.current, pendingEdge];
+        commitCanvasMutation({
+          reason: "upscale-pending",
+          patch: diffCanvasPatch(
+            { edges: edgesRef.current, nodes: nodesRef.current },
+            { edges: withPendingEdges, nodes: withPendingNodes }
+          ),
+          persist: false,
         });
-        setStorageStatus("error");
-        setStorageError(`高清放大失败：${getClientError(nextError)}`);
+        setStorageStatus("saving");
+        setStorageError(null);
+
+        try {
+          const result = await upscaleProjectImage({
+            expectedVersion: projectVersionRef.current,
+            projectId: loadedProjectId,
+            sourceNodeId,
+          });
+          projectVersionRef.current = result.project.version;
+          persistedSelectedNodeIdRef.current = result.node.id;
+
+          setNodes((current) => {
+            const withoutPending = current.filter((node) => node.id !== pendingId);
+            const merged = mergeCanvasUpserts(
+              { edges: edgesRef.current, nodes: withoutPending },
+              { edges: [result.edge], nodes: [result.node] }
+            ).nodes;
+            const next = applySelectedNodeIds(merged, [result.node.id]);
+            nodesRef.current = next;
+            return next;
+          });
+          setEdges((current) => {
+            const withoutPending = current.filter((edge) => edge.id !== pendingEdgeId);
+            const next = mergeCanvasUpserts(
+              { edges: withoutPending, nodes: nodesRef.current },
+              { edges: [result.edge], nodes: [result.node] }
+            ).edges;
+            edgesRef.current = next;
+            return next;
+          });
+          setStorageStatus("saved");
+          setStorageError(null);
+        } catch (nextError: unknown) {
+          if (nextError instanceof ProjectVersionConflictError) {
+            projectVersionRef.current = nextError.project.version;
+          }
+          setNodes((current) => {
+            const next = current.map((node) =>
+              node.id === pendingId && node.data.kind === "imageResult"
+                ? {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      image: {
+                        ...node.data.image,
+                        title: "高清放大失败",
+                      },
+                      status: "error" as const,
+                      upload: {
+                        status: "error" as const,
+                        error: getClientError(nextError),
+                      },
+                    },
+                  }
+                : node
+            );
+            nodesRef.current = next;
+            return next;
+          });
+          setStorageStatus("error");
+          setStorageError(`高清放大失败：${getClientError(nextError)}`);
+        }
+      } finally {
+        imageProcessingInFlightRef.current.delete(operationKey);
       }
     },
     [commitCanvasMutation, loadedProjectId, saveProjectSnapshot, setEdges, setNodes]
@@ -2228,97 +2239,107 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         return;
       }
 
-      const saved = await saveProjectSnapshot();
-      if (!saved) {
-        setStorageStatus("error");
-        setStorageError("项目快照保存失败，无法抠图。");
+      const operationKey = `matting:${sourceNodeId}`;
+      if (imageProcessingInFlightRef.current.has(operationKey)) {
         return;
       }
-
-      const pendingId = `image-matting-pending-${Date.now().toString(36)}`;
-      const pendingEdgeId = `edge-${sourceNodeId}-${pendingId}`;
-      const pendingNode = createPendingMattingImageNode(sourceNode, pendingId);
-      const pendingEdge: AgentCanvasEdge = {
-        id: pendingEdgeId,
-        source: sourceNodeId,
-        target: pendingId,
-        type: "animated",
-      };
-      const withPendingNodes = [
-        ...applySelectedNodeIds(nodesRef.current, []),
-        { ...pendingNode, selected: true },
-      ];
-      const withPendingEdges = [...edgesRef.current, pendingEdge];
-      commitCanvasMutation({
-        reason: "matting-pending",
-        patch: diffCanvasPatch(
-          { edges: edgesRef.current, nodes: nodesRef.current },
-          { edges: withPendingEdges, nodes: withPendingNodes }
-        ),
-        persist: false,
-      });
-      setStorageStatus("saving");
-      setStorageError(null);
+      imageProcessingInFlightRef.current.add(operationKey);
 
       try {
-        const result = await mattingProjectImage({
-          expectedVersion: projectVersionRef.current,
-          projectId: loadedProjectId,
-          sourceNodeId,
-        });
-        projectVersionRef.current = result.project.version;
-        persistedSelectedNodeIdRef.current = result.node.id;
-
-        setNodes((current) => {
-          const withoutPending = current.filter((node) => node.id !== pendingId);
-          const merged = mergeCanvasUpserts(
-            { edges: edgesRef.current, nodes: withoutPending },
-            { edges: [result.edge], nodes: [result.node] }
-          ).nodes;
-          const next = applySelectedNodeIds(merged, [result.node.id]);
-          nodesRef.current = next;
-          return next;
-        });
-        setEdges((current) => {
-          const withoutPending = current.filter((edge) => edge.id !== pendingEdgeId);
-          const next = mergeCanvasUpserts(
-            { edges: withoutPending, nodes: nodesRef.current },
-            { edges: [result.edge], nodes: [result.node] }
-          ).edges;
-          edgesRef.current = next;
-          return next;
-        });
-        setStorageStatus("saved");
-        setStorageError(null);
-      } catch (nextError: unknown) {
-        if (nextError instanceof ProjectVersionConflictError) {
-          projectVersionRef.current = nextError.project.version;
+        const saved = await saveProjectSnapshot();
+        if (!saved) {
+          setStorageStatus("error");
+          setStorageError("项目快照保存失败，无法抠图。");
+          return;
         }
-        setNodes((current) => {
-          const next = current.map((node) =>
-            node.id === pendingId && node.data.kind === "imageResult"
-              ? {
-                  ...node,
-                  data: {
-                    ...node.data,
-                    image: {
-                      ...node.data.image,
-                      title: "抠图失败",
-                    },
-                    status: "error" as const,
-                    upload: {
-                      status: "error" as const,
-                      error: getClientError(nextError),
-                    },
-                  },
-                }
-              : node
-          );
-          nodesRef.current = next;
-          return next;
+
+        const pendingId = `image-matting-pending-${Date.now().toString(36)}`;
+        const pendingEdgeId = `edge-${sourceNodeId}-${pendingId}`;
+        const pendingNode = createPendingMattingImageNode(sourceNode, pendingId);
+        const pendingEdge: AgentCanvasEdge = {
+          id: pendingEdgeId,
+          source: sourceNodeId,
+          target: pendingId,
+          type: "animated",
+        };
+        const withPendingNodes = [
+          ...applySelectedNodeIds(nodesRef.current, []),
+          { ...pendingNode, selected: true },
+        ];
+        const withPendingEdges = [...edgesRef.current, pendingEdge];
+        commitCanvasMutation({
+          reason: "matting-pending",
+          patch: diffCanvasPatch(
+            { edges: edgesRef.current, nodes: nodesRef.current },
+            { edges: withPendingEdges, nodes: withPendingNodes }
+          ),
+          persist: false,
         });
-        setStorageStatus("error");
-        setStorageError(`抠图失败：${getClientError(nextError)}`);
+        setStorageStatus("saving");
+        setStorageError(null);
+
+        try {
+          const result = await mattingProjectImage({
+            expectedVersion: projectVersionRef.current,
+            projectId: loadedProjectId,
+            sourceNodeId,
+          });
+          projectVersionRef.current = result.project.version;
+          persistedSelectedNodeIdRef.current = result.node.id;
+
+          setNodes((current) => {
+            const withoutPending = current.filter((node) => node.id !== pendingId);
+            const merged = mergeCanvasUpserts(
+              { edges: edgesRef.current, nodes: withoutPending },
+              { edges: [result.edge], nodes: [result.node] }
+            ).nodes;
+            const next = applySelectedNodeIds(merged, [result.node.id]);
+            nodesRef.current = next;
+            return next;
+          });
+          setEdges((current) => {
+            const withoutPending = current.filter((edge) => edge.id !== pendingEdgeId);
+            const next = mergeCanvasUpserts(
+              { edges: withoutPending, nodes: nodesRef.current },
+              { edges: [result.edge], nodes: [result.node] }
+            ).edges;
+            edgesRef.current = next;
+            return next;
+          });
+          setStorageStatus("saved");
+          setStorageError(null);
+        } catch (nextError: unknown) {
+          if (nextError instanceof ProjectVersionConflictError) {
+            projectVersionRef.current = nextError.project.version;
+          }
+          setNodes((current) => {
+            const next = current.map((node) =>
+              node.id === pendingId && node.data.kind === "imageResult"
+                ? {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      image: {
+                        ...node.data.image,
+                        title: "抠图失败",
+                      },
+                      status: "error" as const,
+                      upload: {
+                        status: "error" as const,
+                        error: getClientError(nextError),
+                      },
+                    },
+                  }
+                : node
+            );
+            nodesRef.current = next;
+            return next;
+          });
+          setStorageStatus("error");
+          setStorageError(`抠图失败：${getClientError(nextError)}`);
+        }
+      } finally {
+        imageProcessingInFlightRef.current.delete(operationKey);
       }
     },
     [commitCanvasMutation, loadedProjectId, saveProjectSnapshot, setEdges, setNodes]

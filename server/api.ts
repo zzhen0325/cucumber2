@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
+import { performance } from "node:perf_hooks";
 import { loadEnvFile } from "node:process";
 import { serve } from "@hono/node-server";
 import {
@@ -77,6 +78,7 @@ import {
   updateProjectMetaForUser,
   ProjectVersionConflictError,
   type CanvasProject,
+  type ProjectMeta,
 } from "./canvas-store.ts";
 import {
   ArtifactVersionConflictError,
@@ -105,6 +107,23 @@ loadServerEnv();
 const app = new Hono();
 const activeAgentRuns = new Map<string, AbortController>();
 const sessionCookieName = "cucumber_session";
+const SESSION_USER_CACHE_TTL_MS = 60 * 1000;
+const UPLOAD_PROJECT_CACHE_TTL_MS = 15 * 1000;
+
+const sessionUserCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    user: AppUser;
+  }
+>();
+const uploadProjectCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    project: ProjectMeta;
+  }
+>();
 
 const authInputSchema = z.object({
   username: z.string().trim().min(1).max(80),
@@ -355,7 +374,9 @@ app.post("/api/auth/login", async (c) => {
 app.post("/api/auth/logout", async (c) => {
   const token = getCookie(c, sessionCookieName);
   if (token) {
-    await deleteSession(hashSessionToken(token));
+    const tokenHash = hashSessionToken(token);
+    await deleteSession(tokenHash);
+    sessionUserCache.delete(tokenHash);
   }
 
   clearSessionCookie(c);
@@ -605,6 +626,7 @@ app.post("/api/projects", async (c) => {
 
   const input = projectCreateSchema.parse(await c.req.json());
   const project = await createProjectForUser(user.id, input.title);
+  cacheUploadProjectMeta(user.id, project);
   return c.json({ project });
 });
 
@@ -622,6 +644,7 @@ app.get("/api/projects/:projectId", async (c) => {
   scheduleAgentRunPrewarm();
 
   const { edges, nodes, ...project } = result;
+  cacheUploadProjectMeta(user.id, project);
   return c.json({ edges, nodes, project });
 });
 
@@ -646,6 +669,7 @@ app.patch("/api/projects/:projectId", async (c) => {
     return notFound(c);
   }
 
+  cacheUploadProjectMeta(user.id, project);
   return c.json({ project });
 });
 
@@ -675,6 +699,7 @@ app.patch("/api/projects/:projectId/canvas", async (c) => {
       return notFound(c);
     }
 
+    cacheUploadProjectMeta(user.id, project);
     return c.json({ project });
   } catch (error) {
     if (error instanceof ProjectVersionConflictError) {
@@ -699,6 +724,7 @@ app.delete("/api/projects/:projectId", async (c) => {
     return notFound(c);
   }
 
+  deleteCachedUploadProjectMeta(user.id, projectId);
   return c.json({ ok: true });
 });
 
@@ -724,41 +750,72 @@ app.get("/api/projects/:projectId/runs/:runNodeId/trace", async (c) => {
 });
 
 app.post("/api/projects/:projectId/uploads/sign", async (c) => {
+  const totalStartedAt = performance.now();
+  const authStartedAt = performance.now();
   const user = await requireUser(c);
+  const authMs = elapsedApiMs(authStartedAt);
   if (!user) {
     return unauthorized(c);
   }
 
   const projectId = z.string().uuid().parse(c.req.param("projectId"));
-  const project = await getProjectMetaForUser(projectId, user.id);
+  const projectStartedAt = performance.now();
+  const { cacheHit: projectCacheHit, project } =
+    await getCachedUploadProjectMetaForUser(projectId, user.id);
+  const projectMs = elapsedApiMs(projectStartedAt);
   if (!project) {
     return notFound(c);
   }
 
+  const parseStartedAt = performance.now();
   const input = uploadSignSchema.parse(await c.req.json());
+  const parseMs = elapsedApiMs(parseStartedAt);
+  const signUrlStartedAt = performance.now();
   const upload = await createSignedAssetUpload({
     fileName: input.fileName,
     projectId,
     sizeBytes: input.sizeBytes,
+  });
+  const signUrlMs = elapsedApiMs(signUrlStartedAt);
+
+  console.info("[upload:sign-route]", {
+    authMs,
+    fileName: input.fileName,
+    parseMs,
+    projectCacheHit,
+    projectMs,
+    signUrlMs,
+    sizeBytes: input.sizeBytes,
+    totalMs: elapsedApiMs(totalStartedAt),
+    uploadId: upload.uploadId,
   });
 
   return c.json({ upload });
 });
 
 app.post("/api/projects/:projectId/uploads/:uploadId/complete", async (c) => {
+  const totalStartedAt = performance.now();
+  const authStartedAt = performance.now();
   const user = await requireUser(c);
+  const authMs = elapsedApiMs(authStartedAt);
   if (!user) {
     return unauthorized(c);
   }
 
   const projectId = z.string().uuid().parse(c.req.param("projectId"));
   const uploadId = z.string().uuid().parse(c.req.param("uploadId"));
-  const project = await getProjectMetaForUser(projectId, user.id);
+  const projectStartedAt = performance.now();
+  const { cacheHit: projectCacheHit, project } =
+    await getCachedUploadProjectMetaForUser(projectId, user.id);
+  const projectMs = elapsedApiMs(projectStartedAt);
   if (!project) {
     return notFound(c);
   }
 
+  const parseStartedAt = performance.now();
   const input = uploadCompleteSchema.parse(await c.req.json());
+  const parseMs = elapsedApiMs(parseStartedAt);
+  const completeStartedAt = performance.now();
   const artifact = await completeSignedAssetUpload({
     bucket: input.bucket,
     fileName: input.fileName,
@@ -774,6 +831,21 @@ app.post("/api/projects/:projectId/uploads/:uploadId/complete", async (c) => {
     uploadId,
     userId: user.id,
     width: input.width,
+  });
+  const completeCoreMs = elapsedApiMs(completeStartedAt);
+
+  console.info("[upload:complete-route]", {
+    artifactId: artifact.id,
+    authMs,
+    completeCoreMs,
+    fileName: input.fileName,
+    kind: input.kind,
+    parseMs,
+    projectCacheHit,
+    projectMs,
+    sizeBytes: input.sizeBytes,
+    totalMs: elapsedApiMs(totalStartedAt),
+    uploadId,
   });
 
   return c.json({
@@ -1657,6 +1729,7 @@ async function startSession(c: Context, user: AppUser) {
     sameSite: "Lax",
     secure: process.env.NODE_ENV === "production",
   });
+  cacheSessionUser(session.tokenHash, user);
 }
 
 async function getOptionalUser(c: Context) {
@@ -1665,11 +1738,20 @@ async function getOptionalUser(c: Context) {
     return null;
   }
 
-  const user = await getSessionUser(hashSessionToken(token));
-  if (!user) {
-    clearSessionCookie(c);
+  const tokenHash = hashSessionToken(token);
+  const cached = getCachedSessionUser(tokenHash);
+  if (cached) {
+    return cached;
   }
 
+  const user = await getSessionUser(tokenHash);
+  if (!user) {
+    sessionUserCache.delete(tokenHash);
+    clearSessionCookie(c);
+    return null;
+  }
+
+  cacheSessionUser(tokenHash, user);
   return user;
 }
 
@@ -1679,6 +1761,61 @@ async function requireUser(c: Context) {
 
 function clearSessionCookie(c: Context) {
   deleteCookie(c, sessionCookieName, { path: "/" });
+}
+
+function cacheSessionUser(tokenHash: string, user: AppUser) {
+  sessionUserCache.set(tokenHash, {
+    expiresAt: Date.now() + SESSION_USER_CACHE_TTL_MS,
+    user,
+  });
+}
+
+function getCachedSessionUser(tokenHash: string) {
+  const cached = sessionUserCache.get(tokenHash);
+  if (!cached) {
+    return null;
+  }
+  if (cached.expiresAt <= Date.now()) {
+    sessionUserCache.delete(tokenHash);
+    return null;
+  }
+  return cached.user;
+}
+
+async function getCachedUploadProjectMetaForUser(
+  projectId: string,
+  userId: string
+) {
+  const key = `${userId}:${projectId}`;
+  const cached = uploadProjectCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { cacheHit: true, project: cached.project };
+  }
+  if (cached) {
+    uploadProjectCache.delete(key);
+  }
+
+  const project = await getProjectMetaForUser(projectId, userId);
+  if (project) {
+    cacheUploadProjectMeta(userId, project);
+  }
+
+  return { cacheHit: false, project };
+}
+
+function cacheUploadProjectMeta(userId: string, project: ProjectMeta) {
+  uploadProjectCache.set(`${userId}:${project.id}`, {
+    expiresAt: Date.now() + UPLOAD_PROJECT_CACHE_TTL_MS,
+    project,
+  });
+}
+
+function deleteCachedUploadProjectMeta(userId: string, projectId: string) {
+  uploadProjectCache.delete(`${userId}:${projectId}`);
+}
+
+function elapsedApiMs(startedAt: number) {
+  return Math.round(performance.now() - startedAt);
 }
 
 function unauthorized(c: Context) {

@@ -172,7 +172,7 @@ type SessionRow = {
   token_hash: string;
   expires_at: string;
   created_at: string;
-  last_seen_at: string;
+  last_seen_at: string | null;
 };
 
 type ProjectAccessRow = {
@@ -273,6 +273,7 @@ export type RegisterAgentArtifactInput = {
   id: string;
   projectId: string;
   userId?: string;
+  skipProjectAccessCheck?: boolean;
   runNodeId?: string | null;
   type: ArtifactType;
   uri?: string | null;
@@ -302,6 +303,7 @@ export type UpsertAgentKnowledgeChunkInput = {
 };
 
 let cachedClient: SupabaseClient | null = null;
+const SESSION_LAST_SEEN_TOUCH_INTERVAL_MS = 10 * 60 * 1000;
 
 export function isSupabaseConfigured() {
   return isInMemoryDbEnabled() || Boolean(getSupabaseUrl() && getSupabaseSecretKey());
@@ -408,13 +410,15 @@ export async function getSessionUser(tokenHash: string) {
     return null;
   }
 
-  const { error: touchError } = await client
-    .from("app_sessions")
-    .update({ last_seen_at: new Date().toISOString() })
-    .eq("id", session.id);
+  if (shouldTouchSessionLastSeen(session.last_seen_at)) {
+    const { error: touchError } = await client
+      .from("app_sessions")
+      .update({ last_seen_at: new Date().toISOString() })
+      .eq("id", session.id);
 
-  if (touchError) {
-    throw touchError;
+    if (touchError) {
+      throw touchError;
+    }
   }
 
   return mapUserRow(user);
@@ -693,7 +697,7 @@ export async function listAgentEventsForUser({
 }
 
 export async function registerAgentArtifact(input: RegisterAgentArtifactInput) {
-  if (input.userId) {
+  if (input.userId && !input.skipProjectAccessCheck) {
     const existing = await getProjectRow(input.projectId);
     if (!canAccessProject(input.userId, mapProjectAccess(existing))) {
       return null;
@@ -732,6 +736,19 @@ export async function registerAgentArtifact(input: RegisterAgentArtifactInput) {
   }
 
   return mapAgentArtifactRow(data);
+}
+
+function shouldTouchSessionLastSeen(lastSeenAt: string | null) {
+  if (!lastSeenAt) {
+    return true;
+  }
+
+  const lastSeenMs = Date.parse(lastSeenAt);
+  if (!Number.isFinite(lastSeenMs)) {
+    return true;
+  }
+
+  return Date.now() - lastSeenMs > SESSION_LAST_SEEN_TOUCH_INTERVAL_MS;
 }
 
 export async function getAgentArtifactForUser({

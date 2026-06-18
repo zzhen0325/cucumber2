@@ -22,7 +22,7 @@ export type RembgMattingConfig = {
 };
 
 const defaultTimeoutMs = 120_000;
-const defaultHealthCheckTimeoutMs = 3_000;
+const defaultHealthCheckTimeoutMs = 10_000;
 
 export function readRembgMattingConfigFromEnv(
   env: NodeJS.ProcessEnv = process.env
@@ -47,7 +47,7 @@ export function readRembgMattingConfigFromEnv(
 }
 
 export function isRembgCliConfigured(config = readRembgMattingConfigFromEnv()) {
-  const result = spawnSync(config.bin, ["--help"], {
+  const result = spawnSync(config.bin, ["--version"], {
     stdio: "ignore",
     timeout: config.healthCheckTimeoutMs,
   });

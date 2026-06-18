@@ -95,7 +95,7 @@ pnpm dev
 - 生成图片路径：`projects/{projectId}/runs/{runNodeId}/artifacts/{artifactId}.{ext}`
 - 技能包路径：`skills/{skillName}/{sha256}.zip`
 - 画布只保存 `/api/projects/:projectId/artifacts/:artifactId/content` 和 `supabase://agent-assets/...` 稳定引用；实际读取由服务端校验权限后签发短期 URL。
-- Artifact metadata 公共字段包括 `mimeType`、`byteSize`、`digest`、`sourceRunNodeId`、`sourceToolName`、`createdBy` 和 `previewKind`；文本类节点默认给 Agent 上下文摘要和 content ref，不把全文塞进 prompt。
+- Artifact metadata 公共字段包括 `mimeType`、`byteSize`、`sourceRunNodeId`、`sourceToolName`、`createdBy` 和 `previewKind`；当写入路径已经持有对象字节时会附带 `digest`。上传完成阶段只同步读取文本类对象的 storage info 和正文用于索引，图片和其他二进制对象不阻塞等待 `storage.info` 或整文件回读。
 - 画布保存使用 `canvasPatch` 增量写入 `nodes/edges` JSON；打开项目仍读取完整快照。
 
 `supabase/migrations/20260611000000_agent_v2_cutover.sql` 会删除 Agent v1 Trace、Skill 和旧 runtime 表，只保留 `run.created.payload.runtime = 'openai-agents-sdk'` 的 Trace，并保留所有项目画布 nodes/edges。该迁移不可逆。

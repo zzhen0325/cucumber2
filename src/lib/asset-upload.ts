@@ -26,19 +26,62 @@ export async function uploadProjectFileAsset(
   projectId: string,
   upload: UploadedFileForStorage
 ) {
-  const signed = await signProjectUpload(projectId, upload);
-  const { error } = await getBrowserStorageClient()
-    .storage
-    .from(signed.bucket)
-    .uploadToSignedUrl(signed.path, signed.token, upload.file, {
-      contentType: getFileMimeType(upload.file),
+  const totalStartedAt = nowMs();
+  let uploadId: string | undefined;
+  let signMs: number | undefined;
+  let storageUploadMs: number | undefined;
+  let completeMs: number | undefined;
+
+  try {
+    const signStartedAt = nowMs();
+    const signed = await signProjectUpload(projectId, upload);
+    signMs = elapsedMs(signStartedAt);
+    uploadId = signed.uploadId;
+
+    const storageUploadStartedAt = nowMs();
+    const { error } = await getBrowserStorageClient()
+      .storage
+      .from(signed.bucket)
+      .uploadToSignedUrl(signed.path, signed.token, upload.file, {
+        contentType: getFileMimeType(upload.file),
+      });
+    storageUploadMs = elapsedMs(storageUploadStartedAt);
+
+    if (error) {
+      throw error;
+    }
+
+    const completeStartedAt = nowMs();
+    const artifact = await completeProjectUpload(projectId, upload, signed);
+    completeMs = elapsedMs(completeStartedAt);
+
+    logUploadTiming("completed", {
+      artifactId: artifact.id,
+      completeMs,
+      fileName: upload.title,
+      kind: upload.kind,
+      signMs,
+      sizeBytes: upload.file.size,
+      storageUploadMs,
+      totalMs: elapsedMs(totalStartedAt),
+      uploadId,
     });
 
-  if (error) {
+    return artifact;
+  } catch (error) {
+    logUploadTiming("failed", {
+      completeMs,
+      error: getLogError(error),
+      fileName: upload.title,
+      kind: upload.kind,
+      signMs,
+      sizeBytes: upload.file.size,
+      storageUploadMs,
+      totalMs: elapsedMs(totalStartedAt),
+      uploadId,
+    });
     throw error;
   }
-
-  return completeProjectUpload(projectId, upload, signed);
 }
 
 async function signProjectUpload(
@@ -130,4 +173,29 @@ function getBrowserStorageClient() {
 
 function getFileMimeType(file: File) {
   return file.type || "application/octet-stream";
+}
+
+function nowMs() {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+function elapsedMs(startedAt: number) {
+  return Math.round(nowMs() - startedAt);
+}
+
+function logUploadTiming(
+  status: "completed" | "failed",
+  details: Record<string, unknown>
+) {
+  console.info("[upload:asset]", {
+    status,
+    ...details,
+  });
+}
+
+function getLogError(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
 }
