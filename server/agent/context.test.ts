@@ -43,7 +43,7 @@ describe("agent context", () => {
       "image-1",
     ]);
     expect(input.upstreamContext[1]).toMatchObject({
-      contentRef: "supabase://agent-assets/projects/project-1/runs/run-1/artifacts/artifact-1.png",
+      contentRef: "r2://agent-assets/projects/project-1/runs/run-1/artifacts/artifact-1.png",
       type: "image",
       imageUrl: "/api/projects/project-1/artifacts/artifact-1/content",
     });
@@ -343,7 +343,7 @@ function snapshot() {
         image: { id: "image-1", url: "https://trusted.example/image.png" },
         artifact: {
           contentRef:
-            "supabase://agent-assets/projects/project-1/runs/run-1/artifacts/artifact-1.png",
+            "r2://agent-assets/projects/project-1/runs/run-1/artifacts/artifact-1.png",
           id: "artifact-1",
           metadata: {
             storageBucket: "agent-assets",

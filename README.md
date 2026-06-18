@@ -58,7 +58,7 @@ pnpm dev
 
 `image_matting` 使用独立 provider 接口，当前实现为本地 rembg 2.x CLI：`IMAGE_MATTING_PROVIDER=rembg`、`REMBG_BIN=rembg`、`REMBG_MODEL=u2net`、`REMBG_TIMEOUT_MS=120000`。安装示例：`python3 -m pip install "rembg[cpu,cli]>=2,<3"`。可选参数包括 `REMBG_ALPHA_MATTING`、`REMBG_ALPHA_FOREGROUND_THRESHOLD`、`REMBG_ALPHA_BACKGROUND_THRESHOLD`、`REMBG_ALPHA_ERODE_SIZE` 和 `REMBG_POST_PROCESS_MASK`。
 
-项目、Trace 和对象存储 metadata 持久化需要 `SUPABASE_URL` 与 `SUPABASE_SECRET_KEY`。
+项目、Auth/session、Trace 和 artifact metadata 仍使用 Supabase，需要 `SUPABASE_URL` 与 `SUPABASE_SECRET_KEY`。对象字节存储使用 Cloudflare R2，需要 `R2_ACCOUNT_ID`、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`，并默认使用 private bucket `agent-assets` 与 `agent-skill-packages`。浏览器直传依赖 R2 presigned `PUT` URL，`agent-assets` bucket 需要允许前端 origin 的 CORS，至少包含 `PUT`、`GET`、`HEAD`、`Content-Type` 和 `ETag`。
 
 视频 provider 配置预留：
 
@@ -67,14 +67,9 @@ pnpm dev
 
 智能超清默认使用 `SEEDREAM_UPSCALE_REQ_KEY=jimeng_i2i_seed3_tilesr_cvtob`、`SEEDREAM_UPSCALE_RESOLUTION=4k` 和 `SEEDREAM_UPSCALE_SCALE=50`；toolbar 直连放大不创建 Agent Run，但会保存新的图片 artifact、节点和原图连线。
 
-浏览器直传 Supabase Storage 还需要公开环境变量：
+不要把 `SUPABASE_SECRET_KEY`、R2 access key 或 R2 secret 暴露到前端。
 
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_PUBLISHABLE_KEY`，或兼容旧命名的 `VITE_SUPABASE_ANON_KEY`
-
-不要把 `SUPABASE_SECRET_KEY` / service role key 暴露到前端。
-
-`GET /api/health` 返回 `agentConfigured`、`agentProvider`、`agentModel`、`imageConfigured`、`imageProvider`、`imageModel`、`imageMattingConfigured`、`imageMattingProvider`、`imageMattingModel`、`seedreamConfigured`、`cozeImageConfigured`、`videoConfigured`、`videoProvider`、`videoModel` 和 `supabaseConfigured`。
+`GET /api/health` 返回 `agentConfigured`、`agentProvider`、`agentModel`、`imageConfigured`、`imageProvider`、`imageModel`、`imageMattingConfigured`、`imageMattingProvider`、`imageMattingModel`、`seedreamConfigured`、`cozeImageConfigured`、`videoConfigured`、`videoProvider`、`videoModel`、`objectStorageConfigured`、`objectStorageProvider` 和 `supabaseConfigured`。
 
 ## Persistence
 
@@ -87,16 +82,27 @@ pnpm dev
 - `agent_skill_definitions`：全局技能定义、`SKILL.md` 和启用状态
 - `app_users`、`app_sessions`：本地账号和会话
 
-对象存储：
+对象存储（Cloudflare R2）：
 
 - bucket：`agent-assets`，private，单文件上限 50MB
 - bucket：`agent-skill-packages`，private，单包上限 100MB，存储导入的完整技能 zip 包
 - 用户上传路径：`projects/{projectId}/uploads/{uploadId}/{fileName}`
 - 生成图片路径：`projects/{projectId}/runs/{runNodeId}/artifacts/{artifactId}.{ext}`
 - 技能包路径：`skills/{skillName}/{sha256}.zip`
-- 画布只保存 `/api/projects/:projectId/artifacts/:artifactId/content` 和 `supabase://agent-assets/...` 稳定引用；实际读取由服务端校验权限后签发短期 URL。
-- Artifact metadata 公共字段包括 `mimeType`、`byteSize`、`sourceRunNodeId`、`sourceToolName`、`createdBy` 和 `previewKind`；当写入路径已经持有对象字节时会附带 `digest`。上传完成阶段只同步读取文本类对象的 storage info 和正文用于索引，图片和其他二进制对象不阻塞等待 `storage.info` 或整文件回读。
+- 画布只保存 `/api/projects/:projectId/artifacts/:artifactId/content` 和 `r2://agent-assets/...` 稳定引用；实际读取由服务端校验权限后从 R2 读取，图片 provider 引用在调用前签发短期 R2 read URL。
+- `POST /api/projects/:projectId/uploads/sign` 返回 R2 通用上传合同：`bucket`、`path`、`contentRef`、`signedUrl`、`method: "PUT"`、`headers`、`expiresIn` 和 `uploadId`。前端直接 `fetch` 到 presigned URL，再调用 `/complete` 注册 artifact。
+- Artifact metadata 公共字段包括 `mimeType`、`byteSize`、`sourceRunNodeId`、`sourceToolName`、`createdBy` 和 `previewKind`；当写入路径已经持有对象字节时会附带 `digest`。上传完成阶段会先 HEAD 验证对象和大小，文本类对象会继续读取正文用于索引，图片和其他二进制对象不整文件回读。
 - 画布保存使用 `canvasPatch` 增量写入 `nodes/edges` JSON；打开项目仍读取完整快照。
+
+Supabase Storage 到 R2 的一次性迁移脚本：
+
+```bash
+pnpm migrate:storage:r2 -- --dry-run --report out/r2-migration-report.json
+pnpm migrate:storage:r2 -- --resume --report out/r2-migration-report.json
+SUPABASE_DB_URL=postgres://... pnpm migrate:storage:r2 -- --resume --rewrite-db --report out/r2-migration-report.json
+```
+
+`--dry-run` 只下载并校验 Supabase Storage 源对象，不写 R2 和 DB；`--resume` 会跳过已经通过 R2 HEAD/read-back 校验的对象；`--rewrite-db` 在 copy/verify 全部通过后使用 `psql` 单事务把 `agent_artifacts.content_ref`、artifact metadata、`agent_canvas_nodes.node_json`、`agent_canvas_edges.edge_json` 和 `agent_run_events.payload` 中的 `supabase://...` 改为 `r2://...`。
 
 `supabase/migrations/20260611000000_agent_v2_cutover.sql` 会删除 Agent v1 Trace、Skill 和旧 runtime 表，只保留 `run.created.payload.runtime = 'openai-agents-sdk'` 的 Trace，并保留所有项目画布 nodes/edges。该迁移不可逆。
 

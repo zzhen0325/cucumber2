@@ -253,7 +253,7 @@ async function resolveTestUpload(
   };
 
   return {
-    contentRef: `supabase://agent-assets/projects/project-1/uploads/test/${upload.title}`,
+    contentRef: `r2://agent-assets/projects/project-1/uploads/test/${upload.title}`,
     id,
     metadata,
     title: upload.title,

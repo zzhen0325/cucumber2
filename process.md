@@ -10,6 +10,14 @@
 - 输入归一化新增 `image.matting`、`image.decompose` 和 `media.analyze` intent 兼容摘要，实际路由仍以 `operation + artifact + requiredCapabilities + negativeCapabilities` 为准；`image-decompose` / `media-analysis` 的 Markdown 产物也路由到 Image Agent。
 - Tool Registry 新增 `tool.image.matting`、`tool.image.decompose` 和 `tool.media.analyze` scope；Run plan、Run 节点工具摘要、错误来源摘要和 artifact 投影路径同步识别 `image_matting`、`decompose_image`、`analyze_media`。
 
+## 2026-06-18 R2 Object Storage
+
+- 对象字节存储从 Supabase Storage 切换到 Cloudflare R2；Supabase 继续负责数据库、Auth/session 和 Trace。
+- `server/storage.ts` 保持 artifact 领域边界，底层通过 R2 S3-compatible API 执行 `putObject`、`getObject`、`headObject`、presigned upload/read URL；运行时只生成和接受 `r2://{bucket}/{path}` content ref。
+- 浏览器上传不再使用 Supabase browser client；`/uploads/sign` 返回 R2 presigned `PUT` 合同，前端直接 `fetch` 上传后调用 `/complete` 注册 artifact。
+- `/api/health` 新增 `objectStorageProvider: "r2"` 和 `objectStorageConfigured`；`supabaseConfigured` 只表示 Supabase 数据库/session/Trace 配置。
+- 新增 `pnpm migrate:storage:r2` 一次性迁移脚本：从 Supabase DB 读取 `agent_artifacts` 和 `agent_skill_definitions` 清单，从旧 Storage 下载对象，上传到 R2，同步校验大小和 SHA-256；`--rewrite-db` 使用 `psql` 单事务改写 DB/canvas/Trace 里的旧 content ref。
+
 ## 2026-06-17 Canvas Row Storage
 
 - 破坏性 Supabase migration `20260617125844_canvas_rows_storage.sql` 将画布从 `agent_projects.nodes/edges` 切到 `agent_canvas_nodes`、`agent_canvas_edges` 和 `agent_artifact_contents`；旧项目测试数据会被清空，不做 backfill/dual-write。
@@ -17,7 +25,7 @@
 - `GET /api/projects/:id` 返回 `project` meta + lightweight `nodes`/`edges`；`PATCH /api/projects/:id` 只更新 meta，canvas 保存改走 `PATCH /api/projects/:id/canvas` 且响应不返回完整画布。
 - `CanvasWorkspace` 改为 dirty node/edge id 集合保存，不再用整图 JSON digest。React Flow change、run draft、手动创建、粘贴、上传完成、Markdown/shape/text 编辑和 auto layout 都进入 `commitCanvasMutation`。
 - `toPersistableNode` 会清理 selected/dragging/measured 等运行时字段、跳过本地 upload 节点、移除 markdown/code/document/tool/webpage 正文类字段，并在 node_json 超过 64KB 时拒绝保存。
-- 文本类 artifact 内容新增 create/update/read API；Markdown 正文 debounce 保存到 `agent_artifact_contents`，节点只保存 artifact ref、summary/preview/version 等轻量信息。`saveProjectSnapshot` 会先 flush 待保存正文再写 canvas patch，避免用户编辑后立刻启动 Agent 时服务端读到旧正文；图片和二进制内容仍走私有 Supabase Storage。
+- 文本类 artifact 内容新增 create/update/read API；Markdown 正文 debounce 保存到 `agent_artifact_contents`，节点只保存 artifact ref、summary/preview/version 等轻量信息。`saveProjectSnapshot` 会先 flush 待保存正文再写 canvas patch，避免用户编辑后立刻启动 Agent 时服务端读到旧正文；图片和二进制内容走私有对象存储。
 - Agent Run 启动与 materialize 都从新的 node/edge 表读取/写入；上游 markdown/code/document/tool result/webpage 节点只从 `node_json` 读取 artifactId，再由服务端读取 `agent_artifacts` / `agent_artifact_contents` 注入受限长度正文；materialize 只在 `input.normalized`、artifact/canvas operation/run terminal/tool error 等关键事件后落盘，非终态事件后台排队，终态事件等待队列收敛。
 - 打开项目不再自动 hydrate last run trace，也不自动拉取 artifact full content；Trace 面板、artifact 预览和 Markdown 编辑器聚焦时才按需请求详情。
 - `input.normalized` 中已经确定会产出 artifact 时会立即投影并后台物化 pending 结果节点；该机制覆盖 image、markdown/document/diagram、code、webpage 和 data，不把“节点创建”绑到最终 artifact 生成完成之后，也不让中间落库阻塞后续 Agent 执行。真实 `artifact.created` 到达后复用同一个 pending 节点更新为 ready。
@@ -165,14 +173,14 @@
 
 ## 2026-06-12 Object Storage
 
-- Supabase Storage private bucket `agent-assets` 成为用户上传和 Seedream 生成图片的对象存储边界；画布快照只保存稳定 `ArtifactRef`、`contentRef` 和同源 content API URL。
-- 用户拖拽或粘贴文件会先插入本地预览节点并后台上传；浏览器使用 Supabase signed upload token 直传，再调用 `/complete` 写入 `agent_artifacts`，成功后用真实 artifact 节点替换本地节点。
+- Cloudflare R2 private bucket `agent-assets` 成为用户上传和图片生成结果的对象存储边界；画布快照只保存稳定 `ArtifactRef`、`contentRef` 和同源 content API URL。
+- 用户拖拽或粘贴文件会先插入本地预览节点并后台上传；浏览器通过 `/api/projects/:projectId/uploads/sign` 获取 R2 presigned `PUT` URL 后直传，再调用 `/complete` 写入 `agent_artifacts`，成功后用真实 artifact 节点替换本地节点。
 - 本地上传中/失败的节点不会进入项目持久化或 Agent upstream context；上传失败会留在画布上展示错误状态。
 - `generate_image` 和 `upscale_image` 收到 Seedream URL 后由服务端下载并上传到 `agent-assets`，随后才发 `artifact.created`；转存失败会走 `tool.error`/`run.failed`，不会生成假成功结果节点。toolbar 高清放大和抠图同样先转存再把真实节点写回项目。
-- 上游图片引用对 Manager prompt 仍隐藏真实 URL；调用 Seedream 前，服务端仅根据 `supabase://agent-assets/...` 临时签发 provider 可读 URL。
+- 上游图片引用对 Manager prompt 仍隐藏真实 URL；调用 Seedream/Coze 前，服务端仅根据 `r2://agent-assets/...` 临时签发 provider 可读 URL。
 - Agent 模型 provider 改为 Agents SDK 官方 `ModelProvider` + `Runner({ model, modelProvider })` 写法；Manager、specialist、input normalizer 和 prompt expansion 共用同一 Runner provider 配置。
 - 媒体 provider 独立暴露：图片生成 provider 和图片抠图 provider 已接入配置检查；视频 provider 仅进入 `/api/health` 配置面，尚未启用 `generate_video`、video artifact 或画布投影。
-- 私有预览统一走 `/api/projects/:projectId/artifacts/:artifactId/content`，服务端校验项目权限后 302 到短期 signed read URL。
+- 私有预览统一走 `/api/projects/:projectId/artifacts/:artifactId/content`，服务端校验项目权限后从 R2 读取对象内容。
 - P1 typed artifact shell：非图片 artifact 节点统一展示标题、摘要、来源工具/Run、创建时间、大小、预览/打开/下载入口；短文本最终回复保留在 Run 节点，只有 Document/Web/Research 等工具真实创建 artifact 时才物化为 Markdown/document/webpage 节点。
 - 上下文收集默认使用 token 估算 budget，按图结构和 priority 保留选中节点，省略项写入 `contextSummary.omittedNodes` 和 Trace。
 

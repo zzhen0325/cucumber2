@@ -17,7 +17,7 @@ describe("create_text_artifact tool", () => {
   it("stores a text artifact and emits an artifact event", async () => {
     mocks.storeTextArtifactContent.mockResolvedValue({
       contentRef:
-        "supabase://agent-assets/projects/project-1/runs/run-1/artifacts/text-1.md",
+        "r2://agent-assets/projects/project-1/runs/run-1/artifacts/text-1.md",
       id: "text-1",
       metadata: {
         format: "markdown",
@@ -69,7 +69,7 @@ describe("create_text_artifact tool", () => {
   it("stores generated HTML as a webpage artifact", async () => {
     mocks.storeTextArtifactContent.mockResolvedValue({
       contentRef:
-        "supabase://agent-assets/projects/project-1/runs/run-1/artifacts/text-1.html",
+        "r2://agent-assets/projects/project-1/runs/run-1/artifacts/text-1.html",
       id: "text-1",
       metadata: {
         format: "html",

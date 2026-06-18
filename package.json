@@ -9,12 +9,15 @@
     "dev:web": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "migrate:storage:r2": "tsx scripts/migrate-supabase-storage-to-r2.ts",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.199",
+    "@aws-sdk/client-s3": "^3.1071.0",
+    "@aws-sdk/s3-request-presigner": "^3.1071.0",
     "@blocknote/core": "^0.51.4",
     "@blocknote/react": "^0.51.4",
     "@blocknote/shadcn": "^0.51.4",

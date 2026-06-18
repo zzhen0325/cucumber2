@@ -1,0 +1,317 @@
+{
+  "artifacts": 21,
+  "dbRewrite": null,
+  "dryRun": false,
+  "failures": [],
+  "generatedAt": "2026-06-18T10:18:11.296Z",
+  "objects": [
+    {
+      "digest": "03f987a0d2065908764ec270712c2963c0df66c9f06e25163e3fd5e463d9e327",
+      "sizeBytes": 747452,
+      "status": "uploaded",
+      "expectedDigest": "03f987a0d2065908764ec270712c2963c0df66c9f06e25163e3fd5e463d9e327",
+      "expectedSizeBytes": 747452,
+      "kind": "artifact",
+      "path": "projects/f8a540ab-8050-40ce-81f0-f9111a7bfcd3/runs/run-realimg-mqi7nh6i-lsy80/artifacts/seedream-1781709213813-1.png",
+      "references": [
+        "seedream-1781709213813-1"
+      ],
+      "sourceBucket": "agent-assets",
+      "targetBucket": "agent-assets"
+    },
+    {
+      "digest": "835606e4641894fd804efd08ef5b286e4e15022cba913e1c72253d157bf20896",
+      "sizeBytes": 8305,
+      "status": "uploaded",
+      "expectedDigest": "835606e4641894fd804efd08ef5b286e4e15022cba913e1c72253d157bf20896",
+      "expectedSizeBytes": 8305,
+      "kind": "artifact",
+      "path": "projects/5474db9e-57d6-4824-9956-3622b06fde08/uploads/4116e35b-d361-473d-adad-afb6506925da/cucumber-matting-e2e-source.png",
+      "references": [
+        "upload-4116e35b-d361-473d-adad-afb6506925da"
+      ],
+      "sourceBucket": "agent-assets",
+      "targetBucket": "agent-assets"
+    },
+    {
+      "digest": "7e6af9e94ffd0f527304efef8255b1eab02e85782f6d30c48edc2208d2a242a3",
+      "sizeBytes": 14686,
+      "status": "uploaded",
+      "expectedDigest": "7e6af9e94ffd0f527304efef8255b1eab02e85782f6d30c48edc2208d2a242a3",
+      "expectedSizeBytes": 14686,
+      "kind": "artifact",
+      "path": "projects/5474db9e-57d6-4824-9956-3622b06fde08/runs/run-mqicnd3y-qx9mn5/artifacts/rembg-matting-e6f4bd98-c8e.png",
+      "references": [
+        "rembg-matting-e6f4bd98-c8e"
+      ],
+      "sourceBucket": "agent-assets",
+      "targetBucket": "agent-assets"
+    },
+    {
+      "digest": "881ffbcaafc212e49addad08846a5b82761355fa20624253af3477ba33262c5c",
+      "sizeBytes": 13057,
+      "status": "uploaded",
+      "expectedDigest": "881ffbcaafc212e49addad08846a5b82761355fa20624253af3477ba33262c5c",
+      "expectedSizeBytes": 13057,
+      "kind": "artifact",
+      "path": "projects/84847915-c6ce-4b27-8849-2593623d0c4c/uploads/7651baa8-5daf-4edd-8409-db6992f4b048/hero.png",
+      "references": [
+        "upload-7651baa8-5daf-4edd-8409-db6992f4b048"
+      ],
+      "sourceBucket": "agent-assets",
+      "targetBucket": "agent-assets"
+    },
+    {
+      "digest": "c4b403956a45592bc83abef32aa924d56d4f10a544c27a54ba11e0e25b479eaf",
+      "sizeBytes": 39060,
+      "status": "uploaded",
+      "expectedDigest": "c4b403956a45592bc83abef32aa924d56d4f10a544c27a54ba11e0e25b479eaf",
+      "expectedSizeBytes": 39060,
+      "kind": "artifact",
+      "path": "projects/84847915-c6ce-4b27-8849-2593623d0c4c/operations/image-source-mqid73c5/artifacts/rembg-matting-2492202c-c52.png",
+      "references": [
+        "rembg-matting-2492202c-c52"
+      ],
+      "sourceBucket": "agent-assets",
+      "targetBucket": "agent-assets"
+    },
+    {
+      "digest": "b286887d54f17503acf94c16c8d423b8a4f44c16daddd78c009a580809a2fd53",
+      "sizeBytes": 997835,
+      "status": "uploaded",
+      "expectedDigest": "b286887d54f17503acf94c16c8d423b8a4f44c16daddd78c009a580809a2fd53",
+      "expectedSizeBytes": 997835,
+      "kind": "artifact",
+      "path": "projects/b10bf1c2-4ba7-47f3-b0bf-5d7271fb9f76/uploads/bfa3668b-0a75-4063-a5df-3e95c24cf22f/Frame 18.png",
+      "references": [
+        "upload-bfa3668b-0a75-4063-a5df-3e95c24cf22f"
+      ],
+      "sourceBucket": "agent-assets",
+      "targetBucket": "agent-assets"
+    },
+    {
+      "digest": "2322231f4472482f541e6c5dc2b16fb9641b5bdcfaf3b343e64e29f234828f56",
+      "sizeBytes": 1076123,
+      "status": "uploaded",
+      "expectedDigest": "2322231f4472482f541e6c5dc2b16fb9641b5bdcfaf3b343e64e29f234828f56",
+      "expectedSizeBytes": 1076123,
+      "kind": "artifact",
+      "path": "projects/b10bf1c2-4ba7-47f3-b0bf-5d7271fb9f76/runs/run-mqiz1npj-qs2k5z/artifacts/seedream-1781755275484-1.png",
+      "references": [
+        "seedream-1781755275484-1"
+      ],
+      "sourceBucket": "agent-assets",
+      "targetBucket": "agent-assets"
+    },
+    {
+      "digest": "5499542daec285a9a3043e5cdf2fb2fc8ba891df5f3a4c1765a17ec0a2ed7b7b",
+      "sizeBytes": 9515260,
+      "status": "uploaded",
+      "expectedDigest": "5499542daec285a9a3043e5cdf2fb2fc8ba891df5f3a4c1765a17ec0a2ed7b7b",
+      "expectedSizeBytes": 9515260,
+      "kind": "artifact",
+      "path": "projects/b10bf1c2-4ba7-47f3-b0bf-5d7271fb9f76/operations/image-upload-47ddcfe2-7d66-4df0-a3dc-81f4f9f986bf/artifacts/seedream-upscale-1781764419518.png",
+      "references": [
+        "seedream-upscale-1781764419518"
+      ],
+      "sourceBucket": "agent-assets",
+      "targetBucket": "agent-assets"
+    },
+    {
+      "digest": "409e3d79595d17f31803096af8391d8c5d85df8d3c1c8be4b936aa1a8cf01ba6",
+      "sizeBytes": 1123639,
+      "status": "uploaded",
+      "expectedDigest": "409e3d79595d17f31803096af8391d8c5d85df8d3c1c8be4b936aa1a8cf01ba6",
+      "expectedSizeBytes": 1123639,
+      "kind": "artifact",
+      "path": "projects/b10bf1c2-4ba7-47f3-b0bf-5d7271fb9f76/runs/run-mqiz1npj-qs2k5z/artifacts/seedream-1781755316715-2.png",
+      "references": [
+        "seedream-1781755316715-2"
+      ],
+      "sourceBucket": "agent-assets",
+      "targetBucket": "agent-assets"
+    },
+    {
+      "digest": "c28595ffdb0cb236b0ac0953f9ea51ea852690aec2682b59f5851e37a6d33eab",
+      "sizeBytes": 1120497,
+      "status": "uploaded",
+      "expectedDigest": "c28595ffdb0cb236b0ac0953f9ea51ea852690aec2682b59f5851e37a6d33eab",
+      "expectedSizeBytes": 1120497,
+      "kind": "artifact",
+      "path": "projects/b10bf1c2-4ba7-47f3-b0bf-5d7271fb9f76/runs/run-mqiz1npj-qs2k5z/artifacts/seedream-1781755353027-3.png",
+      "references": [
+        "seedream-1781755353027-3"
+      ],
+      "sourceBucket": "agent-assets",
+      "targetBucket": "agent-assets"
+    },
+    {
+      "digest": "8924e4f5529041c52e3ae096498e08ad64a2ee34e0d8510b851bdb40233c3ac8",
+      "sizeBytes": 1093754,
+      "status": "uploaded",
+      "expectedDigest": "8924e4f5529041c52e3ae096498e08ad64a2ee34e0d8510b851bdb40233c3ac8",
+      "expectedSizeBytes": 1093754,
+      "kind": "artifact",
+      "path": "projects/b10bf1c2-4ba7-47f3-b0bf-5d7271fb9f76/runs/run-mqiz1npj-qs2k5z/artifacts/seedream-1781755399252-4.png",
+      "references": [
+        "seedream-1781755399252-4"
+      ],
+      "sourceBucket": "agent-assets",
+      "targetBucket": "agent-assets"
+    },
+    {
+      "digest": "77de886948867509f5dfa6d19bf1ce773244300d2fca5c9c8dff93a3f3c31b14",
+      "sizeBytes": 1020415,
+      "status": "uploaded",
+      "expectedDigest": "77de886948867509f5dfa6d19bf1ce773244300d2fca5c9c8dff93a3f3c31b14",
+      "expectedSizeBytes": 1020415,
+      "kind": "artifact",
+      "path": "projects/b10bf1c2-4ba7-47f3-b0bf-5d7271fb9f76/uploads/47ddcfe2-7d66-4df0-a3dc-81f4f9f986bf/image-gen-1781764141322-hwl3wd80tcq.png",
+      "references": [
+        "upload-47ddcfe2-7d66-4df0-a3dc-81f4f9f986bf"
+      ],
+      "sourceBucket": "agent-assets",
+      "targetBucket": "agent-assets"
+    },
+    {
+      "digest": "76588dc59ce26b003f22231cdab09c8b11c8ea5db7e40e83dc6e3b8e3325dcae",
+      "sizeBytes": 9549951,
+      "status": "uploaded",
+      "expectedDigest": "76588dc59ce26b003f22231cdab09c8b11c8ea5db7e40e83dc6e3b8e3325dcae",
+      "expectedSizeBytes": 9549951,
+      "kind": "artifact",
+      "path": "projects/b10bf1c2-4ba7-47f3-b0bf-5d7271fb9f76/operations/image-upload-47ddcfe2-7d66-4df0-a3dc-81f4f9f986bf/artifacts/seedream-upscale-1781764347992.png",
+      "references": [
+        "seedream-upscale-1781764347992"
+      ],
+      "sourceBucket": "agent-assets",
+      "targetBucket": "agent-assets"
+    },
+    {
+      "digest": "4b5c5c92cec3b23e6a294fc0eea43234ef5126c5a64f4c6c531ac8430ab0b844",
+      "sizeBytes": 68,
+      "status": "uploaded",
+      "expectedDigest": "4b5c5c92cec3b23e6a294fc0eea43234ef5126c5a64f4c6c531ac8430ab0b844",
+      "expectedSizeBytes": 68,
+      "kind": "artifact",
+      "path": "projects/f12f1f06-04f3-47b2-bd9c-0e6654541b7d/uploads/0668c1fb-4dc2-4623-854c-eeed3e9debe8/clipboard.png",
+      "references": [
+        "upload-0668c1fb-4dc2-4623-854c-eeed3e9debe8"
+      ],
+      "sourceBucket": "agent-assets",
+      "targetBucket": "agent-assets"
+    },
+    {
+      "digest": "e3af1eff2409109892cf728319e61f92bc1c25ef0c822bbd517eb583ac7d0fe8",
+      "sizeBytes": 16400094,
+      "status": "uploaded",
+      "expectedDigest": "e3af1eff2409109892cf728319e61f92bc1c25ef0c822bbd517eb583ac7d0fe8",
+      "expectedSizeBytes": 16400094,
+      "kind": "artifact",
+      "path": "projects/2eedf749-0691-49fd-b001-52e56eb6fa90/uploads/4f027243-83d3-4adf-ad03-2749b72a5cd4/image.png",
+      "references": [
+        "upload-4f027243-83d3-4adf-ad03-2749b72a5cd4"
+      ],
+      "sourceBucket": "agent-assets",
+      "targetBucket": "agent-assets"
+    },
+    {
+      "digest": "e3af1eff2409109892cf728319e61f92bc1c25ef0c822bbd517eb583ac7d0fe8",
+      "sizeBytes": 16400094,
+      "status": "uploaded",
+      "expectedDigest": "e3af1eff2409109892cf728319e61f92bc1c25ef0c822bbd517eb583ac7d0fe8",
+      "expectedSizeBytes": 16400094,
+      "kind": "artifact",
+      "path": "projects/2eedf749-0691-49fd-b001-52e56eb6fa90/uploads/194c1e87-5fdd-4416-8410-6088aacc0c95/image.png",
+      "references": [
+        "upload-194c1e87-5fdd-4416-8410-6088aacc0c95"
+      ],
+      "sourceBucket": "agent-assets",
+      "targetBucket": "agent-assets"
+    },
+    {
+      "digest": "f1a73d327d23111cf9687b68f8344aef3114fec363fe7d6f0fe07313a7046410",
+      "sizeBytes": 2086778,
+      "status": "uploaded",
+      "expectedDigest": "f1a73d327d23111cf9687b68f8344aef3114fec363fe7d6f0fe07313a7046410",
+      "expectedSizeBytes": 2086778,
+      "kind": "artifact",
+      "path": "projects/2eedf749-0691-49fd-b001-52e56eb6fa90/uploads/98da08b5-3c63-423b-a2ba-ab30ac27c932/ChatGPT Image 2026-6-18- 17_06_27.png",
+      "references": [
+        "upload-98da08b5-3c63-423b-a2ba-ab30ac27c932"
+      ],
+      "sourceBucket": "agent-assets",
+      "targetBucket": "agent-assets"
+    },
+    {
+      "digest": "c4b403956a45592bc83abef32aa924d56d4f10a544c27a54ba11e0e25b479eaf",
+      "sizeBytes": 39060,
+      "status": "uploaded",
+      "expectedDigest": "c4b403956a45592bc83abef32aa924d56d4f10a544c27a54ba11e0e25b479eaf",
+      "expectedSizeBytes": 39060,
+      "kind": "artifact",
+      "path": "projects/84847915-c6ce-4b27-8849-2593623d0c4c/operations/image-source-mqid73c5/artifacts/rembg-matting-df2fa4df-37f.png",
+      "references": [
+        "rembg-matting-df2fa4df-37f"
+      ],
+      "sourceBucket": "agent-assets",
+      "targetBucket": "agent-assets"
+    },
+    {
+      "digest": "ece47d71718e8d47a8470532acc6e9f2081a64a962a37cd516a35580c846c757",
+      "sizeBytes": 1975774,
+      "status": "uploaded",
+      "expectedDigest": "ece47d71718e8d47a8470532acc6e9f2081a64a962a37cd516a35580c846c757",
+      "expectedSizeBytes": 1975774,
+      "kind": "artifact",
+      "path": "projects/2eedf749-0691-49fd-b001-52e56eb6fa90/uploads/cd165b28-4aae-46d4-b949-c50921f4fc27/ChatGPT Image 2026-6-18- 14_05_37.png",
+      "references": [
+        "upload-cd165b28-4aae-46d4-b949-c50921f4fc27"
+      ],
+      "sourceBucket": "agent-assets",
+      "targetBucket": "agent-assets"
+    },
+    {
+      "digest": "8cbb3b2b7f191d5c2ca7850d2d10ab737b2d9eaad07c21f0d75a9475842c94b1",
+      "sizeBytes": 1417630,
+      "status": "uploaded",
+      "expectedSizeBytes": 1417630,
+      "kind": "artifact",
+      "path": "projects/2eedf749-0691-49fd-b001-52e56eb6fa90/uploads/bad87a9d-0690-48bd-8a46-565f64f4eed1/ChatGPT Image 2026-6-17- 16_51_46.png",
+      "references": [
+        "upload-bad87a9d-0690-48bd-8a46-565f64f4eed1"
+      ],
+      "sourceBucket": "agent-assets",
+      "targetBucket": "agent-assets"
+    },
+    {
+      "digest": "2035da3c45342a5020447cdd76543157eca6c64081a032e90f2ea51a21aa41e4",
+      "sizeBytes": 2175971,
+      "status": "uploaded",
+      "expectedSizeBytes": 2175971,
+      "kind": "artifact",
+      "path": "projects/2eedf749-0691-49fd-b001-52e56eb6fa90/uploads/59c207ea-a38b-479c-92f8-0612be05bcb8/ChatGPT Image 2026-6-16- 19_33_13.png",
+      "references": [
+        "upload-59c207ea-a38b-479c-92f8-0612be05bcb8"
+      ],
+      "sourceBucket": "agent-assets",
+      "targetBucket": "agent-assets"
+    },
+    {
+      "digest": "2ea11b82c1192678190180927a041531c1b769ce3e51b474ffab1031e776f49d",
+      "sizeBytes": 31679920,
+      "status": "uploaded",
+      "expectedDigest": "2ea11b82c1192678190180927a041531c1b769ce3e51b474ffab1031e776f49d",
+      "expectedSizeBytes": 31679920,
+      "kind": "skill_package",
+      "path": "skills/huashu-design/2ea11b82c1192678190180927a041531c1b769ce3e51b474ffab1031e776f49d.zip",
+      "references": [
+        "d9b9defd-1408-418d-ba5b-f82e73ab58b7"
+      ],
+      "sourceBucket": "agent-skill-packages",
+      "targetBucket": "agent-skill-packages"
+    }
+  ],
+  "resume": true,
+  "skillPackages": 1
+}

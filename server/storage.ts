@@ -8,11 +8,22 @@ import type {
   UpstreamContextItem,
 } from "../src/types/canvas.ts";
 import {
-  getSupabaseClient,
   getAgentArtifactForUser,
   registerAgentArtifact,
   type AgentArtifactRecord,
 } from "./supabase.ts";
+import {
+  createPresignedReadUrl,
+  createPresignedUploadUrl,
+  getObject,
+  getR2AssetsBucket,
+  getR2SignedReadTtlSeconds,
+  getR2SignedUploadTtlSeconds,
+  getR2SkillPackagesBucket,
+  headObject,
+  isR2Configured,
+  putObject,
+} from "./r2-storage.ts";
 import { upsertTextArtifactContentForUser } from "./artifact-content-store.ts";
 import {
   indexArtifactForKnowledge,
@@ -38,6 +49,7 @@ export type UploadAssetKind =
 type CreateSignedAssetUploadInput = {
   projectId: string;
   fileName: string;
+  mimeType?: string;
   sizeBytes: number;
 };
 
@@ -94,11 +106,11 @@ type StoreAgentSkillPackageInput = {
 };
 
 export function getStorageContentRef(bucket: string, path: string) {
-  return `supabase://${bucket}/${path}`;
+  return `r2://${bucket}/${path}`;
 }
 
 export function parseStorageContentRef(contentRef: string) {
-  const match = contentRef.match(/^supabase:\/\/([^/]+)\/(.+)$/);
+  const match = contentRef.match(/^r2:\/\/([^/]+)\/(.+)$/);
   if (!match) {
     return null;
   }
@@ -114,36 +126,39 @@ export function getArtifactContentUrl(projectId: string, artifactId: string) {
   )}/content`;
 }
 
+export function isObjectStorageConfigured() {
+  return isR2Configured();
+}
+
 export async function createSignedAssetUpload({
   fileName,
+  mimeType,
   projectId,
   sizeBytes,
 }: CreateSignedAssetUploadInput) {
   assertAllowedAssetSize(sizeBytes);
 
   const uploadId = randomUUID();
+  const bucket = getR2AssetsBucket();
+  const contentType = normalizeMimeType(mimeType ?? null);
   const path = `projects/${projectId}/uploads/${uploadId}/${sanitizeFileName(
     fileName
   )}`;
-  const { data, error } = await getSupabaseClient()
-    .storage
-    .from(AGENT_ASSETS_BUCKET)
-    .createSignedUploadUrl(path);
-
-  if (error) {
-    throw error;
-  }
-  if (!data?.token) {
-    throw new Error("Supabase did not return a signed upload token.");
-  }
+  const signed = await createPresignedUploadUrl({
+    bucket,
+    contentType,
+    expiresIn: getR2SignedUploadTtlSeconds(),
+    path,
+  });
 
   return {
-    bucket: AGENT_ASSETS_BUCKET,
-    contentRef: getStorageContentRef(AGENT_ASSETS_BUCKET, path),
-    expiresIn: 2 * 60 * 60,
+    bucket,
+    contentRef: getStorageContentRef(bucket, path),
+    expiresIn: signed.expiresIn,
+    headers: signed.headers,
+    method: signed.method,
     path,
-    signedUrl: data.signedUrl,
-    token: data.token,
+    signedUrl: signed.signedUrl,
     uploadId,
   };
 }
@@ -158,20 +173,24 @@ export async function completeSignedAssetUpload(
   const artifactId = `upload-${input.uploadId}`;
   const artifactType = getArtifactTypeForUploadKind(input.kind);
   const inputMimeType = normalizeMimeType(input.mimeType);
-  const shouldReadObjectBytes = isLikelyTextualAsset(inputMimeType, input.path);
   const infoStartedAt = performance.now();
-  const objectInfo = shouldReadObjectBytes
-    ? await getStoredObjectInfo(input.bucket, input.path)
-    : null;
-  const infoMs = objectInfo ? elapsedStorageMs(infoStartedAt) : 0;
+  const objectInfo = await getStoredObjectInfo(input.bucket, input.path);
+  const infoMs = elapsedStorageMs(infoStartedAt);
+  if (
+    objectInfo.sizeBytes !== null &&
+    objectInfo.sizeBytes !== input.sizeBytes
+  ) {
+    throw new Error("Uploaded asset size does not match the signed upload.");
+  }
   const mimeType =
     objectInfo?.mimeType || inputMimeType || "application/octet-stream";
+  const shouldReadObjectBytes = isLikelyTextualAsset(mimeType, input.path);
   const downloadStartedAt = performance.now();
   const objectBytes = shouldReadObjectBytes
     ? await readStoredObjectBytes(input.bucket, input.path)
     : null;
   const downloadMs = objectBytes ? elapsedStorageMs(downloadStartedAt) : 0;
-  const sizeBytes = objectInfo?.sizeBytes ?? objectBytes?.byteLength ?? input.sizeBytes;
+  const sizeBytes = objectInfo.sizeBytes ?? objectBytes?.byteLength ?? input.sizeBytes;
   const previewKind = getPreviewKindForUploadKind(input.kind);
   const metadata = compactRecord({
     byteSize: sizeBytes,
@@ -289,18 +308,14 @@ export async function storeGeneratedImageFromBytes(
   const path = `${getGeneratedImageStoragePrefix(input)}/${sanitizePathSegment(
     input.artifactId
   )}.${getExtensionForMimeType(mimeType)}`;
-  const { error } = await getSupabaseClient()
-    .storage
-    .from(AGENT_ASSETS_BUCKET)
-    .upload(path, input.bytes, {
-      cacheControl: "31536000",
-      contentType: mimeType,
-      upsert: false,
-    });
-
-  if (error) {
-    throw error;
-  }
+  const bucket = getR2AssetsBucket();
+  await putObject({
+    bucket,
+    bytes: input.bytes,
+    cacheControl: "31536000",
+    contentType: mimeType,
+    path,
+  });
 
   const provider =
     typeof input.metadata?.provider === "string"
@@ -321,12 +336,12 @@ export async function storeGeneratedImageFromBytes(
     sourceToolName:
       input.sourceToolName ??
       (input.metadata?.operation === "upscale" ? "upscale_image" : "generate_image"),
-    storageBucket: AGENT_ASSETS_BUCKET,
+    storageBucket: bucket,
     storagePath: path,
   });
   const record = await registerAgentArtifact({
-    bucketId: AGENT_ASSETS_BUCKET,
-    contentRef: getStorageContentRef(AGENT_ASSETS_BUCKET, path),
+    bucketId: bucket,
+    contentRef: getStorageContentRef(bucket, path),
     createdBy: input.userId,
     id: input.artifactId,
     metadata,
@@ -418,21 +433,17 @@ export async function storeTextArtifactContent(
 export async function storeAgentSkillPackage(input: StoreAgentSkillPackageInput) {
   assertAllowedSkillPackageSize(input.bytes.byteLength);
   const path = `skills/${sanitizePathSegment(input.skillName)}/${input.packageSha256}.zip`;
-  const { error } = await getSupabaseClient()
-    .storage
-    .from(AGENT_SKILL_PACKAGES_BUCKET)
-    .upload(path, input.bytes, {
-      cacheControl: "31536000",
-      contentType: "application/zip",
-      upsert: true,
-    });
-
-  if (error) {
-    throw error;
-  }
+  const bucket = getR2SkillPackagesBucket();
+  await putObject({
+    bucket,
+    bytes: input.bytes,
+    cacheControl: "31536000",
+    contentType: "application/zip",
+    path,
+  });
 
   return {
-    bucket: AGENT_SKILL_PACKAGES_BUCKET,
+    bucket,
     path,
   };
 }
@@ -444,24 +455,11 @@ export async function downloadAgentSkillPackage({
   bucket: string;
   path: string;
 }) {
-  if (bucket !== AGENT_SKILL_PACKAGES_BUCKET) {
+  if (bucket !== getR2SkillPackagesBucket()) {
     throw new Error("Skill package bucket is not allowed.");
   }
 
-  const { data, error } = await getSupabaseClient()
-    .storage
-    .from(bucket)
-    .download(path);
-
-  if (error) {
-    throw error;
-  }
-  if (!data) {
-    throw new Error("Supabase did not return skill package bytes.");
-  }
-
-  const arrayBuffer = await data.arrayBuffer();
-  const bytes = new Uint8Array(arrayBuffer);
+  const { bytes } = await getObject(bucket, path);
   assertAllowedSkillPackageSize(bytes.byteLength);
   return bytes;
 }
@@ -503,23 +501,12 @@ export async function readArtifactContent(
     throw new Error("Artifact is not backed by object storage.");
   }
 
-  const { data, error } = await getSupabaseClient()
-    .storage
-    .from(artifact.bucketId)
-    .download(artifact.storagePath);
-
-  if (error) {
-    throw error;
-  }
-  if (!data) {
-    throw new Error("Artifact content was not found in object storage.");
-  }
-
-  const bytes = await data.arrayBuffer();
+  const object = await getObject(artifact.bucketId, artifact.storagePath);
   return {
-    bytes,
-    mimeType: artifact.mimeType ?? data.type ?? "application/octet-stream",
-    sizeBytes: artifact.sizeBytes ?? bytes.byteLength,
+    bytes: object.bytes,
+    mimeType:
+      artifact.mimeType ?? object.mimeType ?? "application/octet-stream",
+    sizeBytes: artifact.sizeBytes ?? object.sizeBytes,
   };
 }
 
@@ -547,51 +534,25 @@ export async function resolveStorageBackedImageContext(
 }
 
 async function createSignedStorageReadUrl(bucket: string, path: string) {
-  const { data, error } = await getSupabaseClient()
-    .storage
-    .from(bucket)
-    .createSignedUrl(path, SIGNED_ASSET_READ_TTL_SECONDS);
-
-  if (error) {
-    throw error;
-  }
-  if (!data?.signedUrl) {
-    throw new Error("Supabase did not return a signed read URL.");
-  }
-
-  return data.signedUrl;
+  return createPresignedReadUrl({
+    bucket,
+    expiresIn: getR2SignedReadTtlSeconds(),
+    path,
+  });
 }
 
 async function getStoredObjectInfo(bucket: string, path: string) {
-  const { data, error } = await getSupabaseClient()
-    .storage
-    .from(bucket)
-    .info(path);
-
-  if (error) {
-    throw error;
-  }
+  const data = await headObject(bucket, path);
 
   return {
-    mimeType: readString(data?.metadata?.mimetype ?? data?.metadata?.mimeType),
-    sizeBytes: readNumber(data?.metadata?.size),
+    mimeType: readString(data.mimeType),
+    sizeBytes: readNumber(data.sizeBytes),
   };
 }
 
 async function readStoredObjectBytes(bucket: string, path: string) {
-  const { data, error } = await getSupabaseClient()
-    .storage
-    .from(bucket)
-    .download(path);
-
-  if (error) {
-    throw error;
-  }
-  if (!data) {
-    throw new Error("Artifact content was not found in object storage.");
-  }
-
-  return new Uint8Array(await data.arrayBuffer());
+  const { bytes } = await getObject(bucket, path);
+  return bytes;
 }
 
 function toArtifactRef(record: AgentArtifactRecord): ArtifactRef {
@@ -620,7 +581,7 @@ function toArtifactRef(record: AgentArtifactRecord): ArtifactRef {
 }
 
 function assertExpectedUploadPath(input: CompleteSignedAssetUploadInput) {
-  if (input.bucket !== AGENT_ASSETS_BUCKET) {
+  if (input.bucket !== getR2AssetsBucket()) {
     throw new Error("Upload bucket does not match the project asset bucket.");
   }
 

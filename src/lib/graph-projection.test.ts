@@ -18,7 +18,7 @@ describe("agent event graph projection", () => {
         event("artifact.created", "generate_image", {
           artifact: {
             contentRef:
-              "supabase://agent-assets/projects/project-1/runs/run-1/artifacts/artifact-1.png",
+              "r2://agent-assets/projects/project-1/runs/run-1/artifacts/artifact-1.png",
             id: "artifact-1",
             type: "image",
             uri: "/api/projects/project-1/artifacts/artifact-1/content",
@@ -674,7 +674,7 @@ describe("agent event graph projection", () => {
         event("artifact.created", "create_text_artifact", {
           artifact: {
             contentRef:
-              "supabase://agent-assets/projects/project-1/runs/run-1/artifacts/text-1.md",
+              "r2://agent-assets/projects/project-1/runs/run-1/artifacts/text-1.md",
             id: "text-1",
             metadata: {
               byteSize: 42,

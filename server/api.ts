@@ -90,6 +90,7 @@ import {
   createSignedAssetUpload,
   completeSignedAssetUpload,
   downloadAgentSkillPackage,
+  isObjectStorageConfigured,
   MAX_AGENT_ASSET_BYTES,
   readArtifactContent,
   resolveStorageBackedImageContext,
@@ -325,6 +326,8 @@ app.get("/api/health", (c) => {
     videoConfigured: providers.video.configured,
     videoProvider: providers.video.provider,
     videoModel: providers.video.model,
+    objectStorageConfigured: isObjectStorageConfigured(),
+    objectStorageProvider: "r2",
     supabaseConfigured: isSupabaseConfigured(),
   });
 });
@@ -773,6 +776,7 @@ app.post("/api/projects/:projectId/uploads/sign", async (c) => {
   const signUrlStartedAt = performance.now();
   const upload = await createSignedAssetUpload({
     fileName: input.fileName,
+    mimeType: input.mimeType,
     projectId,
     sizeBytes: input.sizeBytes,
   });

@@ -62,7 +62,7 @@ describe("research tools", () => {
   it("creates a research artifact with citation metadata", async () => {
     mocks.storeTextArtifactContent.mockResolvedValue({
       contentRef:
-        "supabase://agent-assets/projects/project-1/runs/run-1/artifacts/research-1.md",
+        "r2://agent-assets/projects/project-1/runs/run-1/artifacts/research-1.md",
       id: "research-1",
       metadata: {
         citations: [{ title: "Example", url: "https://example.com" }],

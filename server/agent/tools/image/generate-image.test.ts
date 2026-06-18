@@ -13,7 +13,7 @@ const runImageMatting = vi.fn();
 const createImageMattingArtifactId = vi.fn();
 const resolveStorageBackedImageContext = vi.fn(async (items: UpstreamContextItem[]) =>
   items.map((item) =>
-    item.artifact?.contentRef?.startsWith("supabase://")
+    item.artifact?.contentRef?.startsWith("r2://")
       ? { ...item, imageUrl: "https://signed.example/ref.png" }
       : item
   )
@@ -27,7 +27,7 @@ const storeGeneratedImageFromUrl = vi.fn(
     sourceUrl: string;
     title?: string;
   }) => ({
-    contentRef: `supabase://agent-assets/projects/${input.projectId}/runs/${input.runNodeId}/artifacts/${input.artifactId}.png`,
+    contentRef: `r2://agent-assets/projects/${input.projectId}/runs/${input.runNodeId}/artifacts/${input.artifactId}.png`,
     id: input.artifactId,
     metadata: {
       ...input.metadata,
@@ -49,7 +49,7 @@ const storeGeneratedImageFromBytes = vi.fn(
     runNodeId: string;
     title?: string;
   }) => ({
-    contentRef: `supabase://agent-assets/projects/${input.projectId}/runs/${input.runNodeId}/artifacts/${input.artifactId}.png`,
+    contentRef: `r2://agent-assets/projects/${input.projectId}/runs/${input.runNodeId}/artifacts/${input.artifactId}.png`,
     id: input.artifactId,
     metadata: {
       ...input.metadata,
@@ -71,7 +71,7 @@ const storeTextArtifactContent = vi.fn(
     title: string;
     type: "doc";
   }) => ({
-    contentRef: `supabase://agent-assets/projects/${input.projectId}/runs/${input.runNodeId}/artifacts/text-1.md`,
+    contentRef: `r2://agent-assets/projects/${input.projectId}/runs/${input.runNodeId}/artifacts/text-1.md`,
     id: `text-${input.sourceToolName}`,
     metadata: {
       sourceToolName: input.sourceToolName,
@@ -245,7 +245,7 @@ describe("generate_image tool", () => {
     expect(context.producedArtifacts).toHaveLength(1);
     expect(context.producedArtifacts[0]).toMatchObject({
       contentRef:
-        "supabase://agent-assets/projects/project-1/runs/run-1/artifacts/seedream-1.png",
+        "r2://agent-assets/projects/project-1/runs/run-1/artifacts/seedream-1.png",
       id: "seedream-1",
       type: "image",
       uri: "/api/projects/project-1/artifacts/seedream-1/content",
@@ -454,12 +454,12 @@ describe("generate_image tool", () => {
       upstreamContext: [
         {
           artifact: {
-            contentRef: "supabase://agent-assets/projects/project-1/uploads/ref.png",
+            contentRef: "r2://agent-assets/projects/project-1/uploads/ref.png",
             id: "ref",
             type: "image",
             uri: "/api/projects/project-1/artifacts/ref/content",
           },
-          contentRef: "supabase://agent-assets/projects/project-1/uploads/ref.png",
+          contentRef: "r2://agent-assets/projects/project-1/uploads/ref.png",
           imageUrl: "/api/projects/project-1/artifacts/ref/content",
           nodeId: "image-1",
           type: "image",
@@ -495,12 +495,12 @@ describe("generate_image tool", () => {
       upstreamContext: [
         {
           artifact: {
-            contentRef: "supabase://agent-assets/projects/project-1/uploads/ref.png",
+            contentRef: "r2://agent-assets/projects/project-1/uploads/ref.png",
             id: "ref",
             type: "image",
             uri: "/api/projects/project-1/artifacts/ref/content",
           },
-          contentRef: "supabase://agent-assets/projects/project-1/uploads/ref.png",
+          contentRef: "r2://agent-assets/projects/project-1/uploads/ref.png",
           imageUrl: "/api/projects/project-1/artifacts/ref/content",
           nodeId: "image-1",
           type: "image",
@@ -558,12 +558,12 @@ describe("generate_image tool", () => {
       upstreamContext: [
         {
           artifact: {
-            contentRef: "supabase://agent-assets/projects/project-1/uploads/ref.png",
+            contentRef: "r2://agent-assets/projects/project-1/uploads/ref.png",
             id: "ref",
             type: "image",
             uri: "/api/projects/project-1/artifacts/ref/content",
           },
-          contentRef: "supabase://agent-assets/projects/project-1/uploads/ref.png",
+          contentRef: "r2://agent-assets/projects/project-1/uploads/ref.png",
           imageUrl: "/api/projects/project-1/artifacts/ref/content",
           nodeId: "image-1",
           type: "image",
@@ -631,12 +631,12 @@ describe("generate_image tool", () => {
       upstreamContext: [
         {
           artifact: {
-            contentRef: "supabase://agent-assets/projects/project-1/uploads/ref.png",
+            contentRef: "r2://agent-assets/projects/project-1/uploads/ref.png",
             id: "ref",
             type: "image",
             uri: "/api/projects/project-1/artifacts/ref/content",
           },
-          contentRef: "supabase://agent-assets/projects/project-1/uploads/ref.png",
+          contentRef: "r2://agent-assets/projects/project-1/uploads/ref.png",
           imageUrl: "/api/projects/project-1/artifacts/ref/content",
           nodeId: "image-1",
           summary: "一张商品图",

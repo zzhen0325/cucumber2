@@ -35,7 +35,7 @@ describe("fetch_webpage tool", () => {
   it("fetches a public webpage, stores a webpage artifact, and emits an artifact event", async () => {
     mocks.storeTextArtifactContent.mockResolvedValue({
       contentRef:
-        "supabase://agent-assets/projects/project-1/runs/run-1/artifacts/web-1.html",
+        "r2://agent-assets/projects/project-1/runs/run-1/artifacts/web-1.html",
       id: "web-1",
       metadata: {
         mimeType: "text/html",

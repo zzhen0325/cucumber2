@@ -1,5 +1,3 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-
 import { getResponseError } from "@/lib/api-client";
 import type { UploadedFileForStorage } from "@/lib/file-upload";
 import type { ArtifactRef } from "@/types/canvas";
@@ -9,9 +7,10 @@ type SignedUploadResponse = {
     bucket: string;
     contentRef: string;
     expiresIn: number;
+    headers: Record<string, string>;
+    method: "PUT";
     path: string;
     signedUrl: string;
-    token: string;
     uploadId: string;
   };
 };
@@ -19,8 +18,6 @@ type SignedUploadResponse = {
 type CompleteUploadResponse = {
   artifact: ArtifactRef;
 };
-
-let cachedStorageClient: SupabaseClient | null = null;
 
 export async function uploadProjectFileAsset(
   projectId: string,
@@ -39,16 +36,17 @@ export async function uploadProjectFileAsset(
     uploadId = signed.uploadId;
 
     const storageUploadStartedAt = nowMs();
-    const { error } = await getBrowserStorageClient()
-      .storage
-      .from(signed.bucket)
-      .uploadToSignedUrl(signed.path, signed.token, upload.file, {
-        contentType: getFileMimeType(upload.file),
-      });
+    const storageResponse = await fetch(signed.signedUrl, {
+      body: upload.file,
+      headers: signed.headers,
+      method: signed.method,
+    });
     storageUploadMs = elapsedMs(storageUploadStartedAt);
 
-    if (error) {
-      throw error;
+    if (!storageResponse.ok) {
+      throw new Error(
+        `R2 upload failed (${storageResponse.status} ${storageResponse.statusText}).`
+      );
     }
 
     const completeStartedAt = nowMs();
@@ -142,33 +140,6 @@ async function completeProjectUpload(
   }
 
   return ((await response.json()) as CompleteUploadResponse).artifact;
-}
-
-function getBrowserStorageClient() {
-  if (cachedStorageClient) {
-    return cachedStorageClient;
-  }
-
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
-  const publishableKey = (
-    import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ??
-    import.meta.env.VITE_SUPABASE_ANON_KEY
-  )?.trim();
-
-  if (!supabaseUrl || !publishableKey) {
-    throw new Error(
-      "Supabase browser upload is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY."
-    );
-  }
-
-  cachedStorageClient = createClient(supabaseUrl, publishableKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
-
-  return cachedStorageClient;
 }
 
 function getFileMimeType(file: File) {

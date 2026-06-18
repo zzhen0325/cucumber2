@@ -1,12 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const storageMocks = vi.hoisted(() => {
-  const createSignedUrl = vi.fn(async () => ({
-    data: { signedUrl: "https://signed.example/object.png" },
-    error: null,
+  const createPresignedReadUrl = vi.fn(async () => "https://signed.example/object.png");
+  const createPresignedUploadUrl = vi.fn(async () => ({
+    expiresIn: 7200,
+    headers: { "Content-Type": "image/png" },
+    method: "PUT" as const,
+    signedUrl: "https://upload.example/object.png",
   }));
-  const download = vi.fn();
-  const info = vi.fn();
+  const getObject = vi.fn();
+  const headObject = vi.fn();
+  const putObject = vi.fn(async () => undefined);
   const registerAgentArtifact = vi.fn(async (input: Record<string, unknown>) => ({
     bucketId: input.bucketId ?? null,
     contentRef: input.contentRef ?? null,
@@ -34,30 +38,37 @@ const storageMocks = vi.hoisted(() => {
   const replaceAgentKnowledgeChunksForArtifact = vi.fn(async () => undefined);
 
   return {
-    createSignedUrl,
-    download,
-    info,
+    createPresignedReadUrl,
+    createPresignedUploadUrl,
+    getObject,
+    headObject,
+    putObject,
     registerAgentArtifact,
     replaceAgentKnowledgeChunksForArtifact,
   };
 });
 
+vi.mock("./r2-storage.ts", () => ({
+  createPresignedReadUrl: storageMocks.createPresignedReadUrl,
+  createPresignedUploadUrl: storageMocks.createPresignedUploadUrl,
+  getObject: storageMocks.getObject,
+  getR2AssetsBucket: () => "agent-assets",
+  getR2SignedReadTtlSeconds: () => 600,
+  getR2SignedUploadTtlSeconds: () => 7200,
+  getR2SkillPackagesBucket: () => "agent-skill-packages",
+  headObject: storageMocks.headObject,
+  isR2Configured: () => true,
+  putObject: storageMocks.putObject,
+}));
+
 vi.mock("./supabase.ts", () => ({
-  getSupabaseClient: () => ({
-    storage: {
-      from: () => ({
-        createSignedUrl: storageMocks.createSignedUrl,
-        download: storageMocks.download,
-        info: storageMocks.info,
-      }),
-    },
-  }),
   registerAgentArtifact: storageMocks.registerAgentArtifact,
   replaceAgentKnowledgeChunksForArtifact:
     storageMocks.replaceAgentKnowledgeChunksForArtifact,
 }));
 
 const {
+  createSignedAssetUpload,
   completeSignedAssetUpload,
   getArtifactContentUrl,
   getStorageContentRef,
@@ -67,9 +78,11 @@ const {
 
 describe("agent asset storage helpers", () => {
   beforeEach(() => {
-    storageMocks.createSignedUrl.mockClear();
-    storageMocks.download.mockReset();
-    storageMocks.info.mockReset();
+    storageMocks.createPresignedReadUrl.mockClear();
+    storageMocks.createPresignedUploadUrl.mockClear();
+    storageMocks.getObject.mockReset();
+    storageMocks.headObject.mockReset();
+    storageMocks.putObject.mockClear();
     storageMocks.registerAgentArtifact.mockClear();
     storageMocks.replaceAgentKnowledgeChunksForArtifact.mockClear();
   });
@@ -81,11 +94,11 @@ describe("agent asset storage helpers", () => {
         "projects/project-1/uploads/upload-1/reference.png"
       )
     ).toBe(
-      "supabase://agent-assets/projects/project-1/uploads/upload-1/reference.png"
+      "r2://agent-assets/projects/project-1/uploads/upload-1/reference.png"
     );
     expect(
       parseStorageContentRef(
-        "supabase://agent-assets/projects/project-1/uploads/upload-1/reference.png"
+        "r2://agent-assets/projects/project-1/uploads/upload-1/reference.png"
       )
     ).toEqual({
       bucket: "agent-assets",
@@ -101,13 +114,13 @@ describe("agent asset storage helpers", () => {
       {
         artifact: {
           contentRef:
-            "supabase://agent-assets/projects/project-1/uploads/upload-1/reference.png",
+            "r2://agent-assets/projects/project-1/uploads/upload-1/reference.png",
           id: "artifact-1",
           type: "image",
           uri: "/api/projects/project-1/artifacts/artifact-1/content",
         },
         contentRef:
-          "supabase://agent-assets/projects/project-1/uploads/upload-1/reference.png",
+          "r2://agent-assets/projects/project-1/uploads/upload-1/reference.png",
         imageUrl: "/api/projects/project-1/artifacts/artifact-1/content",
         nodeId: "image-1",
         type: "image",
@@ -115,13 +128,47 @@ describe("agent asset storage helpers", () => {
     ]);
 
     expect(context[0].imageUrl).toBe("https://signed.example/object.png");
-    expect(storageMocks.createSignedUrl).toHaveBeenCalledWith(
-      "projects/project-1/uploads/upload-1/reference.png",
-      600
+    expect(storageMocks.createPresignedReadUrl).toHaveBeenCalledWith({
+      bucket: "agent-assets",
+      expiresIn: 600,
+      path: "projects/project-1/uploads/upload-1/reference.png",
+    });
+  });
+
+  it("creates R2 presigned upload contracts", async () => {
+    const upload = await createSignedAssetUpload({
+      fileName: "reference.png",
+      mimeType: "image/png",
+      projectId: "project-1",
+      sizeBytes: 2048,
+    });
+
+    expect(upload).toMatchObject({
+      bucket: "agent-assets",
+      contentRef: expect.stringContaining(
+        "r2://agent-assets/projects/project-1/uploads/"
+      ),
+      expiresIn: 7200,
+      headers: { "Content-Type": "image/png" },
+      method: "PUT",
+      signedUrl: "https://upload.example/object.png",
+    });
+    expect(upload.contentRef).toContain("/reference.png");
+    expect(storageMocks.createPresignedUploadUrl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bucket: "agent-assets",
+        contentType: "image/png",
+        expiresIn: 7200,
+      })
     );
   });
 
-  it("completes image uploads without downloading the stored object", async () => {
+  it("completes image uploads after verifying the stored object", async () => {
+    storageMocks.headObject.mockResolvedValueOnce({
+      mimeType: "image/png",
+      sizeBytes: 2048,
+    });
+
     const artifact = await completeSignedAssetUpload({
       bucket: "agent-assets",
       fileName: "reference.png",
@@ -138,8 +185,11 @@ describe("agent asset storage helpers", () => {
       width: 1600,
     });
 
-    expect(storageMocks.info).not.toHaveBeenCalled();
-    expect(storageMocks.download).not.toHaveBeenCalled();
+    expect(storageMocks.headObject).toHaveBeenCalledWith(
+      "agent-assets",
+      "projects/project-1/uploads/upload-1/reference.png"
+    );
+    expect(storageMocks.getObject).not.toHaveBeenCalled();
     expect(artifact).toMatchObject({
       id: "upload-upload-1",
       mimeType: "image/png",
@@ -159,22 +209,14 @@ describe("agent asset storage helpers", () => {
   });
 
   it("still downloads textual uploads for body indexing and digest metadata", async () => {
-    storageMocks.info.mockResolvedValueOnce({
-      data: {
-        metadata: {
-          mimetype: "text/markdown",
-          size: 15,
-        },
-      },
-      error: null,
+    storageMocks.headObject.mockResolvedValueOnce({
+      mimeType: "text/markdown",
+      sizeBytes: 15,
     });
-    storageMocks.download.mockResolvedValueOnce({
-      data: {
-        async arrayBuffer() {
-          return new TextEncoder().encode("# Brief\n\nHello").buffer;
-        },
-      },
-      error: null,
+    storageMocks.getObject.mockResolvedValueOnce({
+      bytes: new TextEncoder().encode("# Brief\n\nHello"),
+      mimeType: "text/markdown",
+      sizeBytes: 15,
     });
 
     const artifact = await completeSignedAssetUpload({
@@ -191,7 +233,8 @@ describe("agent asset storage helpers", () => {
       userId: "user-1",
     });
 
-    expect(storageMocks.download).toHaveBeenCalledWith(
+    expect(storageMocks.getObject).toHaveBeenCalledWith(
+      "agent-assets",
       "projects/project-1/uploads/upload-2/brief.md"
     );
     expect(artifact.metadata?.digest).toMatch(/^sha256:/);
