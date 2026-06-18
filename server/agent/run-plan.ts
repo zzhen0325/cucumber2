@@ -181,7 +181,10 @@ function isPromptTextEditRun(input: AgentRunInput) {
 
 function hasComplexitySignal(input: AgentRunInput) {
   const prompt = normalizeText(input.message);
-  const imageCount = input.normalizedInput?.image?.resultCount ?? 1;
+  const imageCount =
+    input.normalizedInput?.image?.variants?.length ??
+    input.normalizedInput?.image?.resultCount ??
+    1;
   if (imageCount > 1) {
     return true;
   }
@@ -208,7 +211,10 @@ function retryPlan(input: AgentRunInput): RuntimeRunPlanItem[] {
 }
 
 function getImageCountLabel(input: AgentRunInput) {
-  const count = input.normalizedInput?.image?.resultCount ?? 1;
+  const count =
+    input.normalizedInput?.image?.variants?.length ??
+    input.normalizedInput?.image?.resultCount ??
+    1;
   return count > 1 ? ` ${count} 张` : "";
 }
 

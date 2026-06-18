@@ -263,6 +263,19 @@ export const toolRegistry = {
         height: { type: "integer" },
         prompt: { type: "string" },
         resultCount: { type: "integer" },
+        variants: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              height: { type: "integer" },
+              label: { type: "string" },
+              width: { type: "integer" },
+            },
+            required: ["width", "height"],
+          },
+        },
         width: { type: "integer" },
       },
     },

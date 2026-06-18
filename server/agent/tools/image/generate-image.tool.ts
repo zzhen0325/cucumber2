@@ -24,11 +24,18 @@ import {
   toSeedreamUpstreamContext,
 } from "./generate-image.request.ts";
 
+const imageVariantInputSchema = z.object({
+  height: z.number().int().positive(),
+  label: z.string().min(1).optional(),
+  width: z.number().int().positive(),
+});
+
 const generateImageInputSchema = z.object({
   aspectRatio: z.string().min(1).optional(),
   height: z.number().int().positive().optional(),
   prompt: z.string().min(1).optional(),
   resultCount: z.number().int().positive().optional(),
+  variants: z.array(imageVariantInputSchema).optional(),
   width: z.number().int().positive().optional(),
 });
 
@@ -66,6 +73,21 @@ export const generateImageJsonSchema = {
       minimum: 1,
       description:
         "How many images to generate. Match the number the user asked for; defaults to what the prompt implies (usually 1).",
+    },
+    variants: {
+      type: "array",
+      description:
+        "Optional list of output size variants. Use one item per requested output dimension when normalized input provides multiple dimensions; do not also pass width/height for the batch.",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          width: { type: "integer", minimum: 1 },
+          height: { type: "integer", minimum: 1 },
+          label: { type: "string", minLength: 1 },
+        },
+        required: ["width", "height"],
+      },
     },
   },
 } as const;
@@ -122,6 +144,7 @@ export async function executeGenerateImageTool({
   if (!prompt) {
     return { error: "empty_prompt: no image prompt was provided." };
   }
+  const variants = normalizeImageToolVariants(parsed.data.variants);
 
   const artifacts: ArtifactRef[] = [];
   const emitArtifact = async (image: {
@@ -167,24 +190,45 @@ export async function executeGenerateImageTool({
 
   if (imageProvider.provider === "coze") {
     const config = readCozeImageConfigFromEnv();
-    await generateCozeImage(
-      {
-        prompt,
-        resultCount: resolveImageResultCount(
-          parsed.data.resultCount,
-          [prompt],
-          config.maxOutputImages
-        ),
-        width: parsed.data.width,
-        height: parsed.data.height,
-        imageUrls: toSeedreamUpstreamContext(upstreamContext)
-          .flatMap((item) => item.type === "image" && item.imageUrl ? [item.imageUrl] : [])
-          .slice(0, config.maxInputImages),
-        onImage: emitArtifact,
-        signal: signal ?? context.signal,
-      },
-      config
-    );
+    const imageUrls = toSeedreamUpstreamContext(upstreamContext)
+      .flatMap((item) => item.type === "image" && item.imageUrl ? [item.imageUrl] : [])
+      .slice(0, config.maxInputImages);
+    if (variants.length > config.maxOutputImages) {
+      throw new Error(`一次最多生成 ${config.maxOutputImages} 张图片。`);
+    }
+    if (variants.length) {
+      for (const variant of variants) {
+        await generateCozeImage(
+          {
+            prompt,
+            resultCount: 1,
+            width: variant.width,
+            height: variant.height,
+            imageUrls,
+            onImage: emitArtifact,
+            signal: signal ?? context.signal,
+          },
+          config
+        );
+      }
+    } else {
+      await generateCozeImage(
+        {
+          prompt,
+          resultCount: resolveImageResultCount(
+            parsed.data.resultCount,
+            [prompt],
+            config.maxOutputImages
+          ),
+          width: parsed.data.width,
+          height: parsed.data.height,
+          imageUrls,
+          onImage: emitArtifact,
+          signal: signal ?? context.signal,
+        },
+        config
+      );
+    }
   } else {
     const config = readSeedreamConfigFromEnv();
     await generateSeedreamImage(
@@ -193,6 +237,7 @@ export async function executeGenerateImageTool({
           prompt,
           requestedResultCount: parsed.data.resultCount,
           aspectRatio: parsed.data.aspectRatio,
+          variants,
           width: parsed.data.width,
           height: parsed.data.height,
           upstreamContext,
@@ -218,4 +263,26 @@ function requireCucumberContext(context: unknown): CucumberAgentContext {
     throw new Error("Cucumber agent context is missing.");
   }
   return context as CucumberAgentContext;
+}
+
+function normalizeImageToolVariants(
+  variants: GenerateImageToolArgs["variants"]
+) {
+  if (!variants?.length) {
+    return [];
+  }
+  const seen = new Set<string>();
+  return variants.flatMap((variant) => {
+    const width = Math.floor(variant.width);
+    const height = Math.floor(variant.height);
+    const key = `${width}x${height}`;
+    if (seen.has(key)) {
+      return [];
+    }
+    seen.add(key);
+    return [{
+      height,
+      width,
+    }];
+  });
 }

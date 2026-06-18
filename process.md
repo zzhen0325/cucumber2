@@ -132,7 +132,7 @@
 ## 2026-06-13 Input Normalization
 
 - Agent Run 在 Manager 启动前通过 `server/agent/input-normalizer.ts` 生成结构化 `normalizedInput`，并写入 `input.normalized` Trace。
-- 图片生成请求会单独抽取 `contentPrompt`、`resultCount`、`aspectRatio` 或 `dimensions`；`generate_image` 接收这些结构化参数，prompt 文本推断仅作为旧调用兼容。
+- 图片生成请求会单独抽取 `contentPrompt`、`resultCount`、`aspectRatio`、`dimensions` 或 `variants`；`variants` 表示同一参考图/同一 prompt 输出多组目标尺寸，`generate_image` 会按尺寸拆成 provider request 并由投影层创建对应 pending 图片结果节点。扩图、扩画布、拓展尺寸和 outpaint 归一化为 `image.generate + image-outpaint`，不是 `image.upscale`；只有纯高清、超清、4K/8K 或提升清晰度才进入 `upscale_image`。
 - 分析、评估或给建议类视觉 brief（如图片、海报、banner、KV 需求）默认归一化为 `text.answer`；只有用户明确要求生成、创建或渲染图片时才进入 `image.generate`。如果请求明确指向选中/上游实际图片，风格拆解归一化为 `image.decompose`，内容理解/信息提取归一化为 `media.analyze`，抠图/去背景归一化为 `image.matting`。
 
 ## 2026-06-13 Multi Node References

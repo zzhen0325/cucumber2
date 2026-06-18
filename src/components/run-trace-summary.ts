@@ -146,7 +146,7 @@ export function summarizeTraceEvent(event: RunStepTraceEvent) {
   if (event.type === "tool.error") {
     const toolName = readString(event.payload.toolName) ?? event.stepId;
     const error = event.errorText ?? readString(event.payload.errorText);
-    return error ? `${toolName}: ${truncate(error, 150)}` : `${toolName} 调用失败`;
+    return error ? `${toolName}: ${error}` : `${toolName} 调用失败`;
   }
 
   if (event.type === "canvas.operation.rejected") {
@@ -161,7 +161,7 @@ export function summarizeTraceEvent(event: RunStepTraceEvent) {
     const source = readString(event.payload.errorSource);
     const error = readString(event.payload.errorText) ?? event.errorText;
     const sourceLabel = source ? getErrorSourceLabel(source) : "运行失败";
-    return error ? `${sourceLabel}: ${truncate(error, 150)}` : sourceLabel;
+    return error ? `${sourceLabel}: ${error}` : sourceLabel;
   }
 
   if (event.type === "run.plan.created") {
@@ -173,7 +173,7 @@ export function summarizeTraceEvent(event: RunStepTraceEvent) {
     const label = readString(event.payload.label) ?? event.stepId;
     const duration = formatDurationMs(readNumber(event.payload.durationMs));
     const error = event.errorText ?? readString(event.payload.errorText);
-    return [label, duration, error ? truncate(error, 120) : undefined]
+    return [label, duration, error]
       .filter(Boolean)
       .join(" · ");
   }
@@ -315,13 +315,25 @@ function summarizeNormalizedInput(event: RunStepTraceEvent | undefined) {
   const count = readNumber(image?.resultCount);
   const aspectRatio = readString(image?.aspectRatio);
   const dimensions = readRecord(image?.dimensions);
+  const variants = readArray(image?.variants)
+    .map(readRecord)
+    .filter(Boolean);
   const width = readNumber(dimensions?.width);
   const height = readNumber(dimensions?.height);
   const parts = [intent];
   if (count) {
     parts.push(`${count} 张`);
   }
-  if (width && height) {
+  if (variants.length) {
+    const firstVariant = variants[0];
+    const firstWidth = readNumber(firstVariant?.width);
+    const firstHeight = readNumber(firstVariant?.height);
+    parts.push(
+      firstWidth && firstHeight
+        ? `${variants.length} 个尺寸 · ${firstWidth}x${firstHeight}…`
+        : `${variants.length} 个尺寸`
+    );
+  } else if (width && height) {
     parts.push(`${width}x${height}`);
   } else if (aspectRatio) {
     parts.push(aspectRatio);

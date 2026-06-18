@@ -948,6 +948,14 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     () => nodes.some(hasLocalUploadState),
     [nodes]
   );
+  const hasUploadingLocalNodes = useMemo(
+    () => nodes.some(hasUploadingLocalNode),
+    [nodes]
+  );
+  const hasFailedLocalUploadNodes = useMemo(
+    () => nodes.some(hasFailedLocalUploadNode),
+    [nodes]
+  );
   const persistedSelectedNodeId = referenceNodeId ?? null;
   useEffect(() => {
     if (
@@ -961,11 +969,13 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   }, [persistedSelectedNodeId]);
 
   const isBusy = status === "submitted" || status === "streaming";
-  const canSubmit =
+  const canEditComposer =
     Boolean(loadedProjectId) &&
     storageStatus !== "loading" &&
     !storageError &&
-    !isReplayMode &&
+    !isReplayMode;
+  const canSubmit =
+    canEditComposer &&
     !hasLocalUploadNodes;
   const canUploadFiles =
     Boolean(loadedProjectId) &&
@@ -975,6 +985,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const fileDrop = useCanvasFileDrop({
     canUploadFiles,
     commitCanvasMutation,
+    edges,
     nodes,
     projectId: loadedProjectId,
     setEdges,
@@ -2578,8 +2589,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
       <Composer
         busy={isBusy}
+        canEdit={canEditComposer}
         canSubmit={canSubmit}
         contextCount={contextCount}
+        hasFailedUpload={hasFailedLocalUploadNodes}
+        hasUploading={hasUploadingLocalNodes}
         imageProvider={imageProvider}
         prompt={prompt}
         referenceContextCount={referenceContextCount}
@@ -3250,8 +3264,11 @@ function EmptyState({ visible }: { visible: boolean }) {
 
 function Composer({
   busy,
+  canEdit,
   canSubmit,
   contextCount,
+  hasFailedUpload,
+  hasUploading,
   imageProvider,
   prompt,
   referenceContextCount,
@@ -3265,8 +3282,11 @@ function Composer({
   onSubmit,
 }: {
   busy: boolean;
+  canEdit: boolean;
   canSubmit: boolean;
   contextCount: number;
+  hasFailedUpload: boolean;
+  hasUploading: boolean;
   imageProvider: ImageProviderSelection;
   prompt: string;
   referenceContextCount: number;
@@ -3285,6 +3305,11 @@ function Composer({
   const hasReference = Boolean(referenceNode);
   const hasMultiSelection = selectionCount > 1;
   const hasMultipleReferences = referenceNodeCount > 1;
+  const submitBlockedLabel = hasFailedUpload
+    ? "请先移除上传失败文件"
+    : hasUploading
+      ? "文件上传中，可继续输入，完成后提交"
+      : "项目连接失败，无法提交";
   const footerContextLabel = hasReference
     ? hasMultipleReferences
       ? `${referenceNodeCount} 个引用节点 · ${referenceContextCount} upstream items`
@@ -3311,12 +3336,14 @@ function Composer({
       >
         <PromptInputBody>
           <PromptInputTextarea
-            disabled={!canSubmit && !busy}
+            disabled={!canEdit && !busy}
             placeholder={
               replayActive
                 ? "Run 回放模式为只读..."
+                : !canEdit
+                ? "项目连接失败，无法输入..."
                 : !canSubmit
-                ? "项目连接失败，无法提交..."
+                ? submitBlockedLabel
                 : hasReference
                   ? "基于引用节点继续生成..."
                   : "输入需求，让 Agent 生成图片..."
@@ -3329,7 +3356,9 @@ function Composer({
           <div className="composer-footer-tools">
             <ComposerFooterStatus
               label={
-                hasReference
+                !canSubmit && canEdit
+                  ? submitBlockedLabel
+                  : hasReference
                   ? hasMultipleReferences
                     ? `继续基于 ${referenceNodeCount} 个引用节点生成分支`
                     : "继续基于引用节点生成分支"
@@ -4950,6 +4979,22 @@ function getImageDownloadName(image: GeneratedImage) {
 
 function hasLocalUploadState(node: AgentCanvasNode) {
   return "upload" in node.data && Boolean(node.data.upload);
+}
+
+function hasUploadingLocalNode(node: AgentCanvasNode) {
+  return (
+    "upload" in node.data &&
+    Boolean(node.data.upload) &&
+    node.data.upload?.status === "uploading"
+  );
+}
+
+function hasFailedLocalUploadNode(node: AgentCanvasNode) {
+  return (
+    "upload" in node.data &&
+    Boolean(node.data.upload) &&
+    node.data.upload?.status === "error"
+  );
 }
 
 function getResizableNodeStyle(

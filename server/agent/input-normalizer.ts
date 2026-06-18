@@ -80,11 +80,18 @@ const normalizedDimensionsSchema = z.object({
   height: z.number().int().positive(),
 });
 
+const normalizedImageVariantSchema = z.object({
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  label: z.string().trim().min(1).nullable().optional(),
+});
+
 const normalizedImageInputSchema = z.object({
   contentPrompt: z.string().trim().min(1).nullable().optional(),
   resultCount: z.number().int().positive().nullable().optional(),
   aspectRatio: z.string().trim().min(1).nullable().optional(),
   dimensions: normalizedDimensionsSchema.nullable().optional(),
+  variants: z.array(normalizedImageVariantSchema).nullable().optional(),
   usage: z.string().trim().min(1).nullable().optional(),
   style: z.string().trim().min(1).nullable().optional(),
   subject: z.string().trim().min(1).nullable().optional(),
@@ -196,10 +203,12 @@ export function createInputNormalizerAgent() {
       "Classify requests to analyze, evaluate, critique, summarize, or give suggestions for a visual/image/banner/poster/KV brief as operation=analyze or answer with no image artifact unless the user explicitly asks to generate/create/render the image now; include negativeCapabilities image-generation.",
       "Classify explicit long-form output requests such as detailed explanation, complete plan, roadmap, proposal, research analysis, report, 文档, 详细说明, 完整规划, 调研分析, or 长文 as operation=create or analyze with artifact.kind=document or markdown. Short QA remains artifact=null.",
       "Classify image creation as artifact.kind=image with png format, and image upscaling/enhancement of an existing image as operation=transform, artifact.kind=image.",
+      "Classify image canvas extension, outpainting, resizing to new pixel dimensions, expanding a reference image to new aspect ratios, 扩图, 扩画布, 拓展尺寸, 延展画面 as operation=create, artifact.kind=image, requiredCapabilities including image-generation and image-outpaint. This is not upscale unless the user asks for 高清/超清/提升清晰度 only.",
       "Classify background removal, matting, transparent-background cutout, sticker/material extraction, or keep-only-subject requests as operation=transform, artifact.kind=image, artifact.format=png, requiredCapabilities including image-matting.",
       "Classify requests to decompose an actual selected/upstream image's style, composition, light, color, layout, or prompt clues as operation=analyze, artifact.kind=markdown, artifact.format=markdown, requiredCapabilities including image-decompose and markdown-artifact, negativeCapabilities including image-generation unless the user also explicitly asks to generate a new image.",
       "Classify requests to understand, describe, identify, summarize, judge, or extract information from an actual selected/upstream image as operation=analyze, artifact.kind=markdown, artifact.format=markdown, requiredCapabilities including media-analysis and markdown-artifact, negativeCapabilities including image-generation unless the user also explicitly asks to generate a new image.",
       "For image artifacts, separate visual content from production controls such as count, aspect ratio, pixel dimensions, and usage.",
+      "When the user lists multiple output dimensions, put them in image.variants as width/height pairs and set resultCount to the number of variants.",
       "contentPrompt must be a clean renderable image description. Remove batch-count phrases such as four images, 四张, 一组4张.",
       "Keep reference image URLs out of the output. Canvas image references are handled by runtime, not by the model.",
       "Default image resultCount to 1 when the user does not request a count.",
@@ -228,6 +237,7 @@ export function finalizeNormalizedAgentInput(
   const raw = normalizeText(rawPrompt);
   const ruleBased = inferTaskProtocol(raw);
   const promptTextEdit = isPromptTextEditRequest(raw);
+  const imageCanvasExpansion = isImageCanvasExpansionRequest(raw);
   const artifact = promptTextEdit
     ? null
     : normalizeArtifact(raw, parsed.artifact ?? ruleBased.artifact);
@@ -242,9 +252,12 @@ export function finalizeNormalizedAgentInput(
     ...(parsed.requiredCapabilities ?? []),
   ]).filter(
     (capability) =>
-      isImageArtifact(artifact) ||
-      isImageInspectionCapability(capability) ||
-      !isImageTaskCapability(capability)
+      (!imageCanvasExpansion || capability !== "image-upscale") &&
+      (!(isImageArtifact(artifact) && operation === "transform") ||
+        capability !== "image-generation") &&
+      (isImageArtifact(artifact) ||
+        isImageInspectionCapability(capability) ||
+        !isImageTaskCapability(capability))
   );
   const negativeCapabilities = uniqueCapabilityList([
     ...(ruleBased.negativeCapabilities ?? []),
@@ -292,20 +305,40 @@ export function normalizeImageRequestSlots(
 ): NormalizedImageInput {
   const maxOutputImages = options.maxOutputImages ?? readMaxOutputImages();
   const raw = normalizeText(rawPrompt);
-  const resultCount = candidate?.resultCount ?? inferImageResultCount(raw) ?? 1;
+  const variants = normalizeImageVariants(candidate?.variants, raw);
+  const resultCount =
+    variants.length > 0
+      ? variants.length
+      : candidate?.resultCount ?? inferImageResultCount(raw) ?? 1;
   if (resultCount > maxOutputImages) {
     throw new Error(`一次最多生成 ${maxOutputImages} 张图片。`);
   }
 
-  const dimensions = candidate?.dimensions ?? findExplicitDimensions(raw) ?? undefined;
+  const dimensions =
+    candidate?.dimensions ??
+    (variants.length === 1
+      ? { width: variants[0].width, height: variants[0].height }
+      : findExplicitDimensions(raw) ?? undefined);
   const aspectRatio =
     normalizeAspectRatio(candidate?.aspectRatio) ??
-    (dimensions ? simplifyAspectRatio(dimensions.width, dimensions.height) : undefined) ??
+    (dimensions && variants.length <= 1
+      ? simplifyAspectRatio(dimensions.width, dimensions.height)
+      : undefined) ??
     findExplicitAspectRatio(raw) ??
     undefined;
-  const contentPrompt =
+  let contentPrompt =
     normalizeContentPrompt(candidate?.contentPrompt ?? raw) ||
-    normalizeContentPrompt(raw);
+    normalizeContentPrompt(raw) ||
+    (isImageCanvasExpansionRequest(raw)
+      ? "基于参考图扩展画布，保持原图主体、文字、风格、光影和构图一致，补全新增区域。"
+      : "");
+  if (
+    isImageCanvasExpansionRequest(raw) &&
+    isGenericImageReferencePrompt(contentPrompt)
+  ) {
+    contentPrompt =
+      "基于参考图扩展画布，保持原图主体、文字、风格、光影和构图一致，补全新增区域。";
+  }
 
   if (!contentPrompt) {
     throw new Error("Input normalization did not produce an image content prompt.");
@@ -316,6 +349,7 @@ export function normalizeImageRequestSlots(
     resultCount,
     aspectRatio,
     dimensions,
+    variants: variants.length ? variants : undefined,
     usage: normalizeNullableText(candidate?.usage) ?? inferUsage(raw) ?? undefined,
     style: normalizeNullableText(candidate?.style) ?? undefined,
     subject: normalizeNullableText(candidate?.subject) ?? undefined,
@@ -598,6 +632,20 @@ function inferTaskProtocol(prompt: string): Pick<
     };
   }
 
+  if (isImageCanvasExpansionRequest(prompt)) {
+    return {
+      artifact: {
+        kind: "image",
+        subtype: inferImageSubtype(prompt),
+        format: "png",
+      },
+      domain: domain === "general" ? "visual-design" : domain,
+      negativeCapabilities: [],
+      operation: "create",
+      requiredCapabilities: ["image-generation", "image-outpaint"],
+    };
+  }
+
   if (/(流程\s*时序图|时序图|sequence\s*diagram)/i.test(prompt)) {
     return {
       artifact: {
@@ -796,6 +844,9 @@ function normalizeArtifact(
   if (isVisualBriefAnalysisRequest(rawPrompt) && artifact.kind === "image") {
     return null;
   }
+  if (isImageCanvasExpansionRequest(rawPrompt)) {
+    return inferred ?? { kind: "image", format: "png" };
+  }
   if (/(流程\s*时序图|时序图|sequence\s*diagram)/i.test(rawPrompt)) {
     return { kind: "diagram", subtype: "sequenceDiagram", format: "mermaid" };
   }
@@ -835,6 +886,9 @@ function normalizeOperation(
   }
   if (isVisualBriefAnalysisRequest(rawPrompt)) {
     return "analyze";
+  }
+  if (isImageArtifact(artifact) && isImageCanvasExpansionRequest(rawPrompt)) {
+    return "create";
   }
   if (isImageArtifact(artifact) && /(放大|高清|超清|提升清晰|upscale|enhance)/i.test(rawPrompt)) {
     return "transform";
@@ -962,7 +1016,7 @@ function inferHtmlArtifactCapabilities(prompt: string) {
 }
 
 function isImageTaskCapability(capability: string) {
-  return /image|图片|图像|upscale|视觉风格|prompt[-_ ]?expansion/i.test(capability);
+  return /image|图片|图像|upscale|outpaint|视觉风格|prompt[-_ ]?expansion/i.test(capability);
 }
 
 function isImageInspectionCapability(capability: string) {
@@ -1084,6 +1138,28 @@ function hasActualImageCue(prompt: string) {
   );
 }
 
+function isGenericImageReferencePrompt(prompt: string) {
+  return /^(?:把|将|给我|帮我)?\s*(?:这个|这张|当前|选中|参考)?\s*(?:图|图片|图像|画布|image|picture)\s*$/i.test(
+    prompt
+  );
+}
+
+function isImageCanvasExpansionRequest(prompt: string) {
+  const hasExpansionCue =
+    /(扩图|扩画布|扩边|补边|外扩|外延|延展|拓展|扩展|拓宽|扩充|outpaint|outpainting|extend(?:\s+the)?\s+canvas|canvas\s+extension|expand(?:\s+the)?\s+image)/i.test(
+      prompt
+    );
+  const hasDimensionResizeCue =
+    /(拓展|扩展|扩图|调整|改成|转成|resize|尺寸|版位|比例|aspect\s*ratio).{0,24}(尺寸|画布|比例|版位|\d{3,5}\s*(?:x|×|\*|-|–|—)\s*\d{3,5})/i.test(
+      prompt
+    );
+  const hasDimensionList = findDimensionVariants(prompt).length > 0;
+  return (
+    (hasExpansionCue || hasDimensionResizeCue) &&
+    (hasActualImageCue(prompt) || hasDimensionList)
+  );
+}
+
 function hasExplicitImageCreationRequest(prompt: string) {
   return /((生成|创建|画|出图|渲染|产出|输出|制作).{0,16}(图片|图像|图|海报|banner|kv|主视觉)|(图片|图像|海报|banner|kv|主视觉).{0,16}(生成|创建|渲染|产出|输出|制作)|\b(generate|create|render|make)\b.{0,48}\b(image|poster|banner|key visual)\b)/i.test(
     prompt
@@ -1091,6 +1167,11 @@ function hasExplicitImageCreationRequest(prompt: string) {
 }
 
 function inferImageResultCount(prompt: string) {
+  const dimensionVariants = findDimensionVariants(prompt);
+  if (dimensionVariants.length > 1) {
+    return dimensionVariants.length;
+  }
+
   const groupedArabicMatch = prompt.match(
     /(?:一|1)\s*组\s*(\d{1,2})\s*(?:张|幅|个|款|版|images?|imgs?|pictures?|results?)/i
   );
@@ -1125,7 +1206,9 @@ function inferImageResultCount(prompt: string) {
 function normalizeContentPrompt(prompt: string) {
   return normalizeText(prompt)
     .replace(/\b\d{1,2}\s*[:：]\s*\d{1,2}\b/g, " ")
-    .replace(/\b\d{3,5}\s*(?:x|×|\*)\s*\d{3,5}\b/gi, " ")
+    .replace(/\b\d{3,5}\s*(?:x|×|\*|-|–|—)\s*\d{3,5}\b/gi, " ")
+    .replace(/(?:拓展|扩展|扩图|调整|改成|转成)?\s*\d{1,2}\s*个\s*尺寸/gi, " ")
+    .replace(/(?:拓展|扩展|扩图|扩画布|延展|外扩|outpaint|resize)(?:这张|这个|当前|选中)?(?:图|图片|画布)?/gi, " ")
     .replace(
       /(?:一次\s*)?(?:生成|出|要|做|给我|create|generate|make)?\s*(?:一|1)\s*组\s*(?:\d{1,2}|[一二两三四五六七八九十])\s*(?:张|幅|个|款|版|images?|imgs?|pictures?|results?)(?:\s*(?:图片|图像|图|照片))?\s*(?:of\s+)?/gi,
       " "
@@ -1147,16 +1230,70 @@ function normalizeContentPrompt(prompt: string) {
 }
 
 function findExplicitDimensions(prompt: string) {
-  const dimensionMatch = prompt.match(
-    /\b(\d{3,5})\s*(?:x|×|\*)\s*(\d{3,5})\b/i
-  );
+  const dimensionMatch = findDimensionVariants(prompt)[0];
   if (!dimensionMatch) {
     return null;
   }
   return {
-    width: Number(dimensionMatch[1]),
-    height: Number(dimensionMatch[2]),
+    width: dimensionMatch.width,
+    height: dimensionMatch.height,
   };
+}
+
+function normalizeImageVariants(
+  candidateVariants: NormalizedImageInput["variants"],
+  prompt: string
+) {
+  const promptVariants = findDimensionVariants(prompt);
+  const candidates =
+    candidateVariants && candidateVariants.length
+      ? candidateVariants
+      : isImageCanvasExpansionRequest(prompt) || promptVariants.length > 1
+        ? promptVariants
+        : [];
+  const seen = new Set<string>();
+  return candidates.flatMap((variant) => {
+    const width = Math.floor(Number(variant.width));
+    const height = Math.floor(Number(variant.height));
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+      return [];
+    }
+    const key = `${width}x${height}`;
+    if (seen.has(key)) {
+      return [];
+    }
+    seen.add(key);
+    return [{
+      width,
+      height,
+      label: normalizeNullableText(variant.label) ?? undefined,
+    }];
+  });
+}
+
+function findDimensionVariants(prompt: string) {
+  const variants: Array<{ width: number; height: number; label?: string }> = [];
+  const seen = new Set<string>();
+  const dimensionPattern =
+    /(^|[^\d])(\d{3,5})\s*(?:x|×|\*|-|–|—)\s*(\d{3,5})(?=$|[^\d])/gi;
+  for (const match of prompt.matchAll(dimensionPattern)) {
+    const width = Number(match[2]);
+    const height = Number(match[3]);
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+      continue;
+    }
+    const key = `${width}x${height}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    variants.push({
+      width,
+      height,
+      label: `${width}x${height}`,
+    });
+  }
+  return variants;
 }
 
 function findExplicitAspectRatio(prompt: string) {

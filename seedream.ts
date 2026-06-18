@@ -11,6 +11,8 @@ export type SeedreamImageRequest = {
   imageUrls: string[];
   resultCount: number;
   promptIndex: number;
+  targetHeight?: number;
+  targetWidth?: number;
 };
 
 export type SeedreamGenerateInput = {
@@ -402,6 +404,8 @@ function buildSeedreamGeneratedImage({
   const outputWidth = readPositiveNumber(request.body.width);
   const outputHeight = readPositiveNumber(request.body.height);
   const outputSize = readPositiveNumber(request.body.size);
+  const targetWidth = readPositiveNumber(request.targetWidth);
+  const targetHeight = readPositiveNumber(request.targetHeight);
   return {
     id: `seedream-${Date.now()}-${index}`,
     url,
@@ -414,6 +418,9 @@ function buildSeedreamGeneratedImage({
       reqKey: config.reqKey,
       width: outputWidth,
       height: outputHeight,
+      ...(targetWidth !== undefined && targetHeight !== undefined
+        ? { targetWidth, targetHeight }
+        : {}),
       size: outputSize,
       inputImageCount: request.imageUrls.length,
       requestedImageCount: request.resultCount,

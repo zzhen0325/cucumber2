@@ -177,6 +177,45 @@ describe("agent event graph projection", () => {
     });
   });
 
+  it("projects pending image nodes with per-variant request metadata", () => {
+    const projection = projectRunTraceToCanvas({
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", {
+          prompt: "把这个图拓展两个尺寸",
+          promptNodeId: "prompt-1",
+        }),
+        event("input.normalized", "input", {
+          normalizedInput: {
+            rawPrompt: "把这个图拓展两个尺寸",
+            operation: "create",
+            artifact: { kind: "image", format: "png" },
+            requiredCapabilities: ["image-generation", "image-outpaint"],
+            intent: "image.generate",
+            image: {
+              contentPrompt: "基于参考图扩展画布",
+              resultCount: 2,
+              variants: [
+                { width: 1125, height: 450 },
+                { width: 900, height: 1200 },
+              ],
+            },
+          },
+        }),
+      ],
+    });
+
+    const imageNodes = projection.nodes.filter(
+      (node) => node.data.kind === "imageResult"
+    );
+    expect(imageNodes).toHaveLength(2);
+    expect(imageNodes.map((node) => node.data.kind === "imageResult" && node.data.request))
+      .toEqual([
+        { index: 1, count: 2, width: 1125, height: 450, aspectRatio: "5:2" },
+        { index: 2, count: 2, width: 900, height: 1200, aspectRatio: "3:4" },
+      ]);
+  });
+
   it("projects pending artifact nodes from normalized non-image input", () => {
     const projection = projectRunTraceToCanvas({
       runNodeId: "run-1",
@@ -563,7 +602,7 @@ describe("agent event graph projection", () => {
     expect(run?.data).toMatchObject({
       kind: "run",
       status: "error",
-      error: "Seedream 调用失败。",
+      error: "Seedream 调用失败：Seedream missing",
       toolParts: [expect.objectContaining({ state: "output-error" })],
     });
   });

@@ -247,12 +247,12 @@
   object-fit: contain;
   transform-origin: center;
   animation: app-state-logo-breathe 3.8s ease-in-out infinite;
-  filter: drop-shadow(0 5px 14px rgba(41, 191, 78, 0.18));
+ 
 }
 
 .app-state-mark.error {
   background: #e5484d;
-  box-shadow: 0 4px 16px rgba(229, 72, 77, 0.16);
+  
 }
 
 @keyframes app-state-logo-breathe {
@@ -1394,10 +1394,10 @@
 }
 
 .canvas-node.selected {
-  border-color: rgba(0, 0, 0, 0.78);
+  border-color: rgba(41, 191, 78, 0.86);
   box-shadow:
-    0 0 0 3px rgba(0, 0, 0, 0.14),
-    0 4px 20px rgba(0, 0, 0, 0.05);
+    0 0 0 3px rgba(41, 191, 78, 0.16),
+    0 4px 20px rgba(41, 191, 78, 0.08);
 }
 
 .canvas-node .copyable-text,
@@ -1448,6 +1448,11 @@
   border-bottom-right-radius: 8px !important;
 }
 
+.result-card .canvas-node-resizer-line,
+.result-card .canvas-node-resizer-handle {
+  display: none !important;
+}
+
 .prompt-card {
   height: 78px;
   min-height: 78px;
@@ -1457,21 +1462,21 @@
   display: grid;
   height: 100%;
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
   place-items: center;
   padding: var(--canvas-node-padding) 26px;
 }
 
 .prompt-card p {
-  display: -webkit-box;
-  overflow: hidden;
+  display: block;
+  overflow: visible;
   margin: 0;
   color: #000000;
   font-size: var(--canvas-node-body-size);
   line-height: var(--canvas-node-body-line);
   text-align: left;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .prompt-node-input {
@@ -2765,6 +2770,7 @@
   width: 100%;
   height: 100%;
   min-height: 24px;
+  background: transparent;
   overflow: visible;
 }
 
@@ -2859,7 +2865,7 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: inherit;
   background: #ffffff;
 }
 

@@ -318,12 +318,13 @@ export function projectRunTraceToCanvas({
     ? createPendingImageResultNodes(
         runNode,
         expectedImageRequest.count,
-        existingNodes,
-        {
-          request: expectedImageRequest.preview,
-          status: runStatus === "error" ? "error" : "loading",
-        }
-      )
+      existingNodes,
+      {
+        request: expectedImageRequest.preview,
+        requests: expectedImageRequest.previews,
+        status: runStatus === "error" ? "error" : "loading",
+      }
+    )
     : { resultNodes: [], resultEdges: [] };
   const pendingImageNodes = [...pendingImageProjection.resultNodes];
   const pendingArtifactProjection = !runWasAborted
@@ -972,7 +973,11 @@ function buildRunSummaryItems(events: RunStepTraceEvent[]): RunSummaryItem[] {
 function readExpectedImageRequest(
   events: RunStepTraceEvent[],
   prompt: string
-): { count: number; preview: Omit<ImageRequestPreview, "index" | "count"> } | null {
+): {
+  count: number;
+  preview: Omit<ImageRequestPreview, "index" | "count">;
+  previews?: Array<Omit<ImageRequestPreview, "index" | "count">>;
+} | null {
   const generateInput = events
     .filter((event) => event.type === "tool.input")
     .findLast((event) => readToolName(event.payload.toolName) === "generate_image");
@@ -990,6 +995,14 @@ function readExpectedImageRequest(
   const input = readRecord(generateInput.payload.input);
   const requestedCount = readNumber(input?.resultCount);
   const imagePrompt = readString(input?.prompt) ?? prompt;
+  const variantPreviews = readImageVariantPreviews(input?.variants);
+  if (variantPreviews.length) {
+    return {
+      count: variantPreviews.length,
+      preview: variantPreviews[0],
+      previews: variantPreviews,
+    };
+  }
   const explicitWidth = readNumber(input?.width);
   const explicitHeight = readNumber(input?.height);
   const explicitAspectRatio = readString(input?.aspectRatio);
@@ -1127,7 +1140,11 @@ function getPendingArtifactTitle({
 
 function readNormalizedImageRequest(
   events: RunStepTraceEvent[]
-): { count: number; preview: Omit<ImageRequestPreview, "index" | "count"> } | null {
+): {
+  count: number;
+  preview: Omit<ImageRequestPreview, "index" | "count">;
+  previews?: Array<Omit<ImageRequestPreview, "index" | "count">>;
+} | null {
   const inputEvent = events.findLast((event) => event.type === "input.normalized");
   const normalizedInput = readRecord(inputEvent?.payload.normalizedInput);
   const artifact = readRecord(normalizedInput?.artifact);
@@ -1140,7 +1157,18 @@ function readNormalizedImageRequest(
   const height = readNumber(dimensions?.height);
   const aspectRatio = readString(image?.aspectRatio);
   const prompt = readString(image?.contentPrompt) ?? readString(normalizedInput?.rawPrompt) ?? "";
-  const count = Math.max(1, Math.floor(readNumber(image?.resultCount) ?? 1));
+  const variantPreviews = readImageVariantPreviews(image?.variants);
+  const count = Math.max(
+    1,
+    Math.floor(variantPreviews.length || readNumber(image?.resultCount) || 1)
+  );
+  if (variantPreviews.length) {
+    return {
+      count: variantPreviews.length,
+      preview: variantPreviews[0],
+      previews: variantPreviews,
+    };
+  }
 
   return {
     count,
@@ -1160,7 +1188,7 @@ function readNormalizedImageRequest(
 function readImageRequestPreview(
   prompt: string
 ): Omit<ImageRequestPreview, "index" | "count"> {
-  const dimensions = prompt.match(/\b(\d{3,5})\s*(?:x|×|\*)\s*(\d{3,5})\b/i);
+  const dimensions = prompt.match(/\b(\d{3,5})\s*(?:x|×|\*|-|–|—)\s*(\d{3,5})\b/i);
   if (dimensions) {
     return {
       width: Number(dimensions[1]),
@@ -1193,6 +1221,22 @@ function readImageRequestPreview(
     aspectRatio: orientationRatio,
     size: inferImageAreaFromPrompt(prompt),
   };
+}
+
+function readImageVariantPreviews(value: unknown) {
+  return readArray(value).flatMap((item) => {
+    const variant = readRecord(item);
+    const width = readNumber(variant?.width);
+    const height = readNumber(variant?.height);
+    if (!width || !height) {
+      return [];
+    }
+    return [{
+      width,
+      height,
+      aspectRatio: simplifyAspectRatio(width, height),
+    }];
+  });
 }
 
 function inferImageAreaFromPrompt(prompt: string) {
@@ -1925,24 +1969,35 @@ function summarizeRunError(
   if (errorSource === "skill_script" || errorCode === "skill_script_failed") {
     return "技能脚本失败。";
   }
+  const safeDetail = sanitizeRunErrorDetail(detail);
   if (errorSource === "seedream" || /seedream/i.test(detail ?? "")) {
-    return "Seedream 调用失败。";
+    return safeDetail ? `Seedream 调用失败：${safeDetail}` : "Seedream 调用失败。";
   }
   if (errorSource === "coze" || /coze/i.test(detail ?? "")) {
-    return "Coze 调用失败。";
+    return safeDetail ? `Coze 调用失败：${safeDetail}` : "Coze 调用失败。";
   }
   if (errorSource === "tool" || toolName) {
-    return toolName ? `${humanizeRuntimeLabel(toolName) ?? "工具"} 调用失败。` : "工具调用失败。";
+    const label = toolName ? humanizeRuntimeLabel(toolName) ?? "工具" : "工具";
+    return safeDetail ? `${label} 调用失败：${safeDetail}` : `${label} 调用失败。`;
   }
   if (errorSource === "model") {
-    return "模型调用失败。";
+    return safeDetail ? `模型调用失败：${safeDetail}` : "模型调用失败。";
   }
 
   return truncateRunError(detail ?? "运行失败。");
 }
 
 function truncateRunError(text: string) {
-  return text.length > 72 ? `${text.slice(0, 69)}...` : text;
+  return text.length > 160 ? `${text.slice(0, 157)}...` : text;
+}
+
+function sanitizeRunErrorDetail(text: string | undefined) {
+  const cleaned = text
+    ?.replace(/data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, "[image]")
+    .replace(/https?:\/\/\S+/gi, "[url]")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned ? truncateRunError(cleaned) : "";
 }
 
 function readToolName(value: unknown) {

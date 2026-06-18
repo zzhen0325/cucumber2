@@ -7,7 +7,6 @@ import {
   shortId,
   summarizeRunTrace,
   summarizeTraceEvent,
-  summarizeUnknown,
 } from "./run-trace-summary";
 
 type RunTracePanelProps = {
@@ -209,7 +208,7 @@ function TraceEventRow({ event }: { event: RunStepTraceEvent }) {
         <strong>{getEventLabel(event)}</strong>
         <span>{event.stepId}</span>
       </div>
-      <small title={summarizeUnknown(event.payload)}>{summary}</small>
+      <small title={summary}>{summary}</small>
     </div>
   );
 }

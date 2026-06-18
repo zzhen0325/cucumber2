@@ -351,6 +351,7 @@ export function createPendingImageResultNodes(
   existingNodes: AgentCanvasNode[],
   options: {
     request?: Omit<ImageRequestPreview, "index" | "count">;
+    requests?: Array<Omit<ImageRequestPreview, "index" | "count">>;
     status?: ImageResultStatus;
   } = {}
 ) {
@@ -359,7 +360,7 @@ export function createPendingImageResultNodes(
   const pendingImages = Array.from({ length: safeCount }, (_, index) => {
     const imageId = `pending-${runNode.id}-${index + 1}`;
     const request = {
-      ...options.request,
+      ...(options.requests?.[index] ?? options.request),
       index: index + 1,
       count: safeCount,
     };

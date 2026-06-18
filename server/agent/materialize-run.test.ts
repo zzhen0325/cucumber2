@@ -121,7 +121,7 @@ describe("agent run materializer", () => {
     ).toMatchObject({
       kind: "run",
       status: "error",
-      error: "Seedream 调用失败。",
+      error: "Seedream 调用失败：Seedream image generation is not configured.",
     });
     expect(next.nodes.some((node) => node.id === "manual-note")).toBe(true);
   });

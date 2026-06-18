@@ -130,6 +130,27 @@ describe("run trace summary", () => {
       "createNode · op-1 · invalid_node_kind"
     );
   });
+
+  it("keeps full error details in trace summaries", () => {
+    const longError =
+      "Seedream width and height must produce a 1K to 4K image within the supported aspect ratio " +
+      "(received 1125x450, area 506250). Please scale the requested output before calling the provider.";
+    const toolError = event(
+      "tool.error",
+      {
+        toolName: "generate_image",
+        errorText: longError,
+      },
+      "generate_image"
+    );
+    const runFailed = event("run.failed", {
+      errorSource: "tool",
+      errorText: longError,
+    });
+
+    expect(summarizeTraceEvent(toolError)).toBe(`generate_image: ${longError}`);
+    expect(summarizeTraceEvent(runFailed)).toBe(`工具: ${longError}`);
+  });
 });
 
 function event(

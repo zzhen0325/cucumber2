@@ -16,6 +16,7 @@ import type { AgentCanvasEdge, AgentCanvasNode } from "@/types/canvas";
 
 type UseCanvasFileDropOptions = {
   canUploadFiles: boolean;
+  edges: AgentCanvasEdge[];
   nodes: AgentCanvasNode[];
   projectId: string | null;
   commitCanvasMutation?: (mutation: CanvasLocalMutation) => void;
@@ -26,6 +27,7 @@ type UseCanvasFileDropOptions = {
 export function useCanvasFileDrop({
   canUploadFiles,
   commitCanvasMutation,
+  edges,
   nodes,
   projectId,
   setEdges,
@@ -38,6 +40,11 @@ export function useCanvasFileDrop({
     AgentCanvasEdge
   > | null>(null);
   const fileDragDepth = useRef(0);
+  const edgesRef = useRef(edges);
+
+  useEffect(() => {
+    edgesRef.current = edges;
+  }, [edges]);
 
   useEffect(() => {
     const clearFileDrag = () => {
@@ -169,10 +176,20 @@ export function useCanvasFileDrop({
                 item.localNode.id,
                 createCanvasNodeFromUploadedFile(item.upload, artifact)
               )[0];
+              const currentEdges = edgesRef.current;
+              const replacedEdges = replaceLocalUploadEdges(
+                currentEdges,
+                item.localNode.id,
+                finalNode.id
+              );
+              const edgeUpserts = replacedEdges.filter(
+                (edge, index) => edge !== currentEdges[index]
+              );
               if (commitCanvasMutation) {
                 commitCanvasMutation({
                   reason: "upload-complete",
                   patch: {
+                    edgeUpserts,
                     nodeDeletes: [item.localNode.id],
                     nodeUpserts: [finalNode],
                   },

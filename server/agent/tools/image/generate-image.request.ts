@@ -19,6 +19,7 @@ export type GenerateImageSeedreamRequestInput = {
   height?: number;
   prompt: string;
   requestedResultCount?: number;
+  variants?: SeedreamGeometryInput[];
   width?: number;
   upstreamContext?: UpstreamContextItem[];
   onImage?: SeedreamGenerateInput["onImage"];
@@ -28,12 +29,19 @@ export type GenerateImageSeedreamRequestInput = {
 type SeedreamRequestBuildInput = {
   prompts: string[];
   geometry?: SeedreamGeometryInput;
+  variants?: SeedreamGeometryInput[];
   upstreamContext?: SeedreamUpstreamContext[];
   resultCount: number;
   promptBatchMode: SeedreamPromptBatchMode;
 };
 
-type SeedreamGeometryInput = {
+type SeedreamResolvedGeometry = {
+  fields: Record<string, number>;
+  targetHeight?: number;
+  targetWidth?: number;
+};
+
+export type SeedreamGeometryInput = {
   aspectRatio?: string;
   height?: number;
   width?: number;
@@ -51,11 +59,17 @@ export function buildGenerateImageSeedreamInput(
     throw new Error("Seedream image prompt is empty.");
   }
 
-  const resultCount = resolveImageResultCount(
-    input.requestedResultCount,
-    [normalizedPrompt],
+  const variants = normalizeSeedreamVariants(
+    input.variants,
     config.maxOutputImages
   );
+  const resultCount = variants.length
+    ? variants.length
+    : resolveImageResultCount(
+        input.requestedResultCount,
+        [normalizedPrompt],
+        config.maxOutputImages
+      );
 
   return {
     requests: buildSeedreamRequestBodies(
@@ -66,6 +80,7 @@ export function buildGenerateImageSeedreamInput(
           height: input.height,
           width: input.width,
         },
+        variants,
         resultCount,
         promptBatchMode: "single_prompt",
         upstreamContext: toSeedreamUpstreamContext(input.upstreamContext ?? []),
@@ -87,6 +102,46 @@ export function buildSeedreamRequestBodies(
     input.upstreamContext ?? [],
     config.maxInputImages
   );
+  if (input.variants?.length) {
+    if (input.variants.length > config.maxOutputImages) {
+      throw new Error(`一次最多生成 ${config.maxOutputImages} 张图片。`);
+    }
+    if (input.prompts.length !== 1) {
+      throw new Error("Seedream variant batch must include exactly one prompt.");
+    }
+    const variantPrompt = normalizeSeedreamProviderPrompt(
+      normalizeSingleImagePrompt(input.prompts[0])
+    );
+    if (!variantPrompt) {
+      throw new Error("Seedream image prompt is empty.");
+    }
+
+    return input.variants.map((variant, index) => {
+      const geometry = resolveSeedreamGeometry(variantPrompt, config, variant);
+      const body: Record<string, unknown> = {
+        prompt: variantPrompt,
+        force_single: config.forceSingle,
+        ...geometry.fields,
+      };
+
+      if (imageUrls.length) {
+        body.image_urls = imageUrls;
+      }
+      if (config.scale !== undefined) {
+        body.scale = config.scale;
+      }
+
+      return {
+        prompt: variantPrompt,
+        promptIndex: index + 1,
+        resultCount: 1,
+        body,
+        imageUrls,
+        ...getSeedreamTargetGeometry(geometry),
+      };
+    });
+  }
+
   return resolveSeedreamPromptRequests(input, config.maxOutputImages).map(
     (request) => {
       const geometry = resolveSeedreamGeometry(
@@ -99,7 +154,7 @@ export function buildSeedreamRequestBodies(
         prompt,
         force_single:
           request.resultCount === 1 ? config.forceSingle : false,
-        ...geometry,
+        ...geometry.fields,
       };
 
       if (imageUrls.length) {
@@ -109,7 +164,13 @@ export function buildSeedreamRequestBodies(
         body.scale = config.scale;
       }
 
-      return { ...request, prompt, body, imageUrls };
+      return {
+        ...request,
+        prompt,
+        body,
+        imageUrls,
+        ...getSeedreamTargetGeometry(geometry),
+      };
     }
   );
 }
@@ -237,13 +298,12 @@ function resolveSeedreamGeometry(
   prompt: string,
   config: SeedreamConfig,
   geometry?: SeedreamGeometryInput
-) {
+): SeedreamResolvedGeometry {
   if (geometry?.width !== undefined || geometry?.height !== undefined) {
     if (geometry.width === undefined || geometry.height === undefined) {
       throw new Error("Seedream explicit dimensions require both width and height.");
     }
-    validateSeedreamDimensions(geometry.width, geometry.height);
-    return { width: geometry.width, height: geometry.height };
+    return normalizeExplicitSeedreamDimensions(geometry.width, geometry.height);
   }
 
   const requestedAspectRatio = parseAspectRatio(geometry?.aspectRatio);
@@ -264,10 +324,10 @@ function resolveSeedreamGeometry(
   }
 
   if (findExplicitOutputArea(prompt)) {
-    return { size: area };
+    return { fields: { size: area } };
   }
 
-  return { width: config.width, height: config.height };
+  return normalizeExplicitSeedreamDimensions(config.width, config.height);
 }
 
 function findExplicitDimensions(prompt: string) {
@@ -280,8 +340,7 @@ function findExplicitDimensions(prompt: string) {
 
   const width = Number(dimensionMatch[1]);
   const height = Number(dimensionMatch[2]);
-  validateSeedreamDimensions(width, height);
-  return { width, height };
+  return normalizeExplicitSeedreamDimensions(width, height);
 }
 
 function findExplicitOutputArea(prompt: string) {
@@ -337,6 +396,40 @@ function parseAspectRatio(value: string | undefined) {
   return aspectRatio;
 }
 
+function normalizeSeedreamVariants(
+  variants: SeedreamGeometryInput[] | undefined,
+  maxOutputImages: number
+) {
+  if (!variants?.length) {
+    return [];
+  }
+  if (variants.length > maxOutputImages) {
+    throw new Error(`一次最多生成 ${maxOutputImages} 张图片。`);
+  }
+
+  const seen = new Set<string>();
+  return variants.flatMap((variant) => {
+    const width = variant.width === undefined ? undefined : Math.floor(variant.width);
+    const height = variant.height === undefined ? undefined : Math.floor(variant.height);
+    const aspectRatio = variant.aspectRatio?.trim();
+    const key =
+      width && height
+        ? `${width}x${height}`
+        : aspectRatio
+          ? `ratio:${aspectRatio}`
+          : "";
+    if (!key || seen.has(key)) {
+      return [];
+    }
+    seen.add(key);
+    return [{
+      aspectRatio,
+      height,
+      width,
+    }];
+  });
+}
+
 function dimensionsFromAspectRatio(aspectRatio: number, targetArea: number) {
   const boundedArea = Math.min(
     Math.max(Math.round(targetArea), 1024 * 1024),
@@ -358,7 +451,50 @@ function dimensionsFromAspectRatio(aspectRatio: number, targetArea: number) {
   }
 
   validateSeedreamDimensions(width, roundedHeight);
-  return { width, height: roundedHeight };
+  return { fields: { width, height: roundedHeight } };
+}
+
+function normalizeExplicitSeedreamDimensions(
+  width: number,
+  height: number
+): SeedreamResolvedGeometry {
+  const area = width * height;
+  const aspectRatio = width / height;
+  if (
+    !Number.isInteger(width) ||
+    !Number.isInteger(height) ||
+    width <= 0 ||
+    height <= 0 ||
+    aspectRatio < 1 / 16 ||
+    aspectRatio > 16
+  ) {
+    throw new Error(
+      `Seedream width and height must produce a 1K to 4K image within the supported aspect ratio (received ${width}x${height}, area ${area}).`
+    );
+  }
+
+  if (area >= 1024 * 1024 && area <= 4096 * 4096) {
+    return { fields: { width, height } };
+  }
+
+  const normalized = dimensionsFromAspectRatio(
+    aspectRatio,
+    Math.min(Math.max(area, 1024 * 1024), 4096 * 4096)
+  );
+  return {
+    fields: normalized.fields,
+    targetHeight: height,
+    targetWidth: width,
+  };
+}
+
+function getSeedreamTargetGeometry(geometry: SeedreamResolvedGeometry) {
+  return geometry.targetWidth !== undefined && geometry.targetHeight !== undefined
+    ? {
+        targetHeight: geometry.targetHeight,
+        targetWidth: geometry.targetWidth,
+      }
+    : {};
 }
 
 function validateSeedreamDimensions(width: number, height: number) {
@@ -375,7 +511,7 @@ function validateSeedreamDimensions(width: number, height: number) {
     aspectRatio > 16
   ) {
     throw new Error(
-      "Seedream width and height must produce a 1K to 4K image within the supported aspect ratio."
+      `Seedream width and height must produce a 1K to 4K image within the supported aspect ratio (received ${width}x${height}, area ${area}).`
     );
   }
 }

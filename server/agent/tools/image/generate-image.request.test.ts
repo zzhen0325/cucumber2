@@ -263,6 +263,87 @@ describe("generate image request normalization", () => {
     ).toMatchObject({ size: 4096 * 4096 });
   });
 
+  it("builds one Seedream request per output variant", () => {
+    const requests = buildGenerateImageSeedreamInput(
+      {
+        prompt: "基于参考图扩展画布",
+        upstreamContext: [
+          {
+            nodeId: "image-1",
+            type: "image",
+            imageUrl: "https://cdn.example/ref.png",
+          },
+        ],
+        variants: [
+          { width: 2048, height: 1024 },
+          { width: 1536, height: 1536 },
+        ],
+      },
+      testSeedreamConfig
+    ).requests;
+
+    expect(requests).toHaveLength(2);
+    expect(requests.map((request) => request.body)).toEqual([
+      expect.objectContaining({
+        prompt: "基于参考图扩展画布",
+        width: 2048,
+        height: 1024,
+        image_urls: ["https://cdn.example/ref.png"],
+      }),
+      expect.objectContaining({
+        prompt: "基于参考图扩展画布",
+        width: 1536,
+        height: 1536,
+        image_urls: ["https://cdn.example/ref.png"],
+      }),
+    ]);
+  });
+
+  it("scales small explicit variants into Seedream's supported 1K to 4K range", () => {
+    const requests = buildGenerateImageSeedreamInput(
+      {
+        prompt: "基于参考图扩展画布",
+        variants: [
+          { width: 1125, height: 450 },
+          { width: 1125, height: 672 },
+          { width: 1080, height: 1440 },
+          { width: 1029, height: 540 },
+        ],
+      },
+      testSeedreamConfig
+    ).requests;
+
+    expect(requests).toHaveLength(4);
+    expect(requests[0]).toMatchObject({
+      targetWidth: 1125,
+      targetHeight: 450,
+    });
+    expect(requests[1]).toMatchObject({
+      targetWidth: 1125,
+      targetHeight: 672,
+    });
+    expect(requests[2].targetWidth).toBeUndefined();
+    expect(requests[2].targetHeight).toBeUndefined();
+    expect(requests[3]).toMatchObject({
+      targetWidth: 1029,
+      targetHeight: 540,
+    });
+
+    for (const request of requests) {
+      const width = request.body.width as number;
+      const height = request.body.height as number;
+      expect(width * height).toBeGreaterThanOrEqual(1024 * 1024);
+      expect(width * height).toBeLessThanOrEqual(4096 * 4096);
+    }
+    expect((requests[0].body.width as number) / (requests[0].body.height as number))
+      .toBeCloseTo(1125 / 450, 2);
+    expect((requests[1].body.width as number) / (requests[1].body.height as number))
+      .toBeCloseTo(1125 / 672, 2);
+    expect(requests[2].body).toMatchObject({ width: 1080, height: 1440 });
+    expect((requests[3].body.width as number) / (requests[3].body.height as number))
+      .toBeCloseTo(1029 / 540, 2);
+  });
+
   it("builds Coze request bodies with prompt, reference image file dicts, and scalar options", () => {
     expect(
       buildCozeImageRequestBody({

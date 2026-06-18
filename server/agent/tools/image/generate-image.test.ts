@@ -383,6 +383,29 @@ describe("generate_image tool", () => {
     ).toBeCloseTo(16 / 9, 2);
   });
 
+  it("forwards output size variants to Seedream requests", async () => {
+    isSeedreamConfigured.mockReturnValue(true);
+    generateSeedreamImage.mockResolvedValue({ images: [] });
+
+    const context = buildContext();
+    await invokeTool(context, {
+      prompt: "基于参考图扩展画布",
+      resultCount: 2,
+      variants: [
+        { width: 2048, height: 1024 },
+        { width: 1536, height: 1536 },
+      ],
+    });
+
+    const callArg = generateSeedreamImage.mock.calls[0][0];
+    expect(callArg.totalRequestedImageCount).toBe(2);
+    expect(callArg.requests.map((request: { body: Record<string, unknown> }) => request.body))
+      .toEqual([
+        expect.objectContaining({ width: 2048, height: 1024 }),
+        expect.objectContaining({ width: 1536, height: 1536 }),
+      ]);
+  });
+
   it("throws when seedream is not configured (no silent fallback)", async () => {
     isSeedreamConfigured.mockReturnValue(false);
     const context = buildContext();

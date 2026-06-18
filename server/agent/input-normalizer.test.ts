@@ -53,6 +53,72 @@ describe("input normalizer", () => {
     });
   });
 
+  it("routes image dimension expansion as outpaint generation instead of upscale", () => {
+    const raw =
+      "帮我把这个图拓展4个尺寸：1125-450 / 1125-600 / 900-1200 / 800-800";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "transform",
+        artifact: { kind: "image", format: "png" },
+        requiredCapabilities: ["image-upscale"],
+        intent: "image.upscale",
+        image: {
+          contentPrompt: "把这个图",
+          resultCount: 1,
+        },
+      },
+      raw,
+      { maxOutputImages: 4 }
+    );
+
+    expect(normalized).toMatchObject({
+      rawPrompt:
+        "帮我把这个图拓展4 个尺寸：1125-450 / 1125-600 / 900-1200 / 800-800",
+      operation: "create",
+      artifact: { kind: "image", format: "png" },
+      domain: "visual-design",
+      requiredCapabilities: ["image-generation", "image-outpaint"],
+      intent: "image.generate",
+      image: {
+        resultCount: 4,
+        contentPrompt:
+          "基于参考图扩展画布，保持原图主体、文字、风格、光影和构图一致，补全新增区域。",
+        variants: [
+          { width: 1125, height: 450, label: "1125x450" },
+          { width: 1125, height: 600, label: "1125x600" },
+          { width: 900, height: 1200, label: "900x1200" },
+          { width: 800, height: 800, label: "800x800" },
+        ],
+      },
+    });
+    expect(selectAgentRoute(normalized)).toBe("image");
+  });
+
+  it("keeps pure image clarity enhancement as upscale", () => {
+    const raw = "把这张图高清放大到 4K";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "create",
+        artifact: { kind: "image", format: "png" },
+        requiredCapabilities: ["image-generation"],
+        intent: "image.generate",
+        image: { contentPrompt: raw },
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "transform",
+      artifact: { kind: "image", format: "png" },
+      requiredCapabilities: ["image-upscale"],
+      intent: "image.upscale",
+    });
+  });
+
   it("rejects requested image counts above the configured limit", () => {
     expect(() =>
       normalizeImageRequestSlots("生成五张小狗图片", undefined, {

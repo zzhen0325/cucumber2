@@ -56,6 +56,19 @@ function createInternalMcpServer() {
             height: { type: "integer", minimum: 1 },
             prompt: { type: "string", minLength: 1 },
             resultCount: { type: "integer", minimum: 1 },
+            variants: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  height: { type: "integer", minimum: 1 },
+                  label: { type: "string", minLength: 1 },
+                  width: { type: "integer", minimum: 1 },
+                },
+                required: ["width", "height"],
+              },
+            },
             width: { type: "integer", minimum: 1 },
           },
         },

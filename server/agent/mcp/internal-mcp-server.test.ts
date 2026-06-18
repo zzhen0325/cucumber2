@@ -43,6 +43,7 @@ describe("internal MCP server", () => {
               properties: expect.objectContaining({
                 prompt: expect.objectContaining({ type: "string" }),
                 resultCount: expect.objectContaining({ type: "integer" }),
+                variants: expect.objectContaining({ type: "array" }),
               }),
             }),
           }),
