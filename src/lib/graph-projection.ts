@@ -591,7 +591,7 @@ function buildToolParts(
         errorText: summarizeRunError(rawErrorText, {
           errorSource: /coze/i.test(rawErrorText ?? "")
             ? "coze"
-            : /generate_image|upscale_image/.test(toolName)
+            : /generate_image|image_matting|upscale_image/.test(toolName)
             ? "seedream"
             : "tool",
           toolName,

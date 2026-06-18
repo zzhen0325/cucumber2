@@ -91,9 +91,14 @@ import {
   MAX_AGENT_ASSET_BYTES,
   readArtifactContent,
   resolveStorageBackedImageContext,
+  storeGeneratedImageFromBytes,
   storeAgentSkillPackage,
   storeGeneratedImageFromUrl,
 } from "./storage.ts";
+import {
+  createImageMattingArtifactId,
+  runImageMatting,
+} from "./agent/tools/image/image-matting-provider.ts";
 
 loadServerEnv();
 
@@ -183,6 +188,12 @@ const imageUpscaleSchema = z.object({
   expectedVersion: z.number().int().nonnegative().optional(),
   resolution: z.enum(["4k", "8k"]).default("4k"),
   scale: z.number().int().min(0).max(100).default(50),
+  sourceNodeId: z.string().trim().min(1).max(260),
+});
+
+const imageMattingSchema = z.object({
+  background: z.enum(["transparent", "white", "neutral"]).default("transparent"),
+  expectedVersion: z.number().int().nonnegative().optional(),
   sourceNodeId: z.string().trim().min(1).max(260),
 });
 
@@ -287,6 +298,9 @@ app.get("/api/health", (c) => {
     imageConfigured: providers.image.configured,
     imageProvider: providers.image.provider,
     imageModel: providers.image.model,
+    imageMattingConfigured: providers.imageMatting.configured,
+    imageMattingProvider: providers.imageMatting.provider,
+    imageMattingModel: providers.imageMatting.model,
     seedreamConfigured: isSeedreamConfigured(),
     cozeImageConfigured: isCozeImageConfigured(),
     videoConfigured: providers.video.configured,
@@ -906,6 +920,133 @@ app.post("/api/projects/:projectId/images/upscale", async (c) => {
   }
 });
 
+app.post("/api/projects/:projectId/images/matting", async (c) => {
+  const user = await requireUser(c);
+  if (!user) {
+    return unauthorized(c);
+  }
+
+  const projectId = z.string().uuid().parse(c.req.param("projectId"));
+  const input = imageMattingSchema.parse(await c.req.json());
+  const project = await loadCanvasSnapshotForUser(projectId, user.id);
+  if (!project) {
+    return notFound(c);
+  }
+
+  try {
+    assertImageProviderConfigured("matting");
+  } catch (error) {
+    return c.json(
+      {
+        error: getErrorMessage(error),
+      },
+      503
+    );
+  }
+
+  const sourceNode = project.nodes.find((node) => node.id === input.sourceNodeId);
+  const sourceCheck = getImageProcessingSourceImage(sourceNode, "matting");
+  if (!sourceCheck.ok) {
+    return c.json({ error: sourceCheck.error }, 400);
+  }
+
+  const sourceNodeId = sourceCheck.node.id;
+  const [{ imageUrl }] = await resolveStorageBackedImageContext([
+    {
+      artifact: sourceCheck.artifact,
+      contentRef: sourceCheck.artifact.contentRef,
+      imageUrl: sourceCheck.artifact.uri ?? sourceCheck.image.url,
+      nodeId: sourceNodeId,
+      prompt: sourceCheck.prompt,
+      type: "image",
+    },
+  ]);
+
+  if (!imageUrl) {
+    return c.json({ error: "无法为选中图片生成服务端可读 URL。" }, 400);
+  }
+
+  const mattingResult = await runImageMatting({
+    background: input.background,
+    signal: c.req.raw.signal,
+    sourceUrl: imageUrl,
+  });
+  const artifact = await storeGeneratedImageFromBytes({
+    artifactId: createImageMattingArtifactId(),
+    bytes: mattingResult.bytes,
+    metadata: {
+      ...mattingResult.metadata,
+      background: input.background,
+      engine: mattingResult.engine,
+      operation: "matting",
+      provider: mattingResult.provider,
+      sourceArtifactId: sourceCheck.artifact.id,
+      sourceNodeId,
+    },
+    mimeType: mattingResult.mimeType,
+    projectId,
+    signal: c.req.raw.signal,
+    sourceNodeId,
+    sourceToolName: "image_matting",
+    title: input.background === "transparent" ? "透明底抠图" : "抠图结果",
+    userId: user.id,
+  });
+  if (!artifact.uri) {
+    throw new Error("Image matting did not produce a stored image artifact.");
+  }
+  const storedArtifact = { ...artifact, uri: artifact.uri };
+
+  const { node, edge, canvasPatch } = createMattingCanvasPatch({
+    artifact: storedArtifact,
+    background: input.background,
+    sourceNode: sourceCheck.node,
+  });
+
+  try {
+    const updatedProject = await applyCanvasPatchForUser({
+      edgeUpserts: canvasPatch.edgeUpserts,
+      expectedVersion: input.expectedVersion,
+      nodeUpserts: canvasPatch.nodeUpserts,
+      projectId,
+      selectedNodeId: node.id,
+      userId: user.id,
+    });
+    if (!updatedProject) {
+      return notFound(c);
+    }
+
+    return c.json({
+      artifact,
+      canvasPatch,
+      edge,
+      node,
+      project: updatedProject,
+    });
+  } catch (error) {
+    if (error instanceof ProjectVersionConflictError) {
+      const updatedProject = await applyCanvasPatchForUser({
+        edgeUpserts: canvasPatch.edgeUpserts,
+        expectedVersion: error.project.version,
+        nodeUpserts: canvasPatch.nodeUpserts,
+        projectId,
+        selectedNodeId: node.id,
+        userId: user.id,
+      });
+      if (!updatedProject) {
+        return notFound(c);
+      }
+      return c.json({
+        artifact,
+        canvasPatch,
+        edge,
+        node,
+        project: updatedProject,
+      });
+    }
+    throw error;
+  }
+});
+
 app.post("/api/projects/:projectId/artifacts/text", async (c) => {
   const user = await requireUser(c);
   if (!user) {
@@ -1293,7 +1434,12 @@ function getActiveAgentRunKey(
   return `${userId}:${projectId}:${runNodeId}`;
 }
 
-function getUpscaleSourceImage(node: AgentCanvasNode | undefined):
+type ImageProcessingOperation = "matting" | "upscale";
+
+function getImageProcessingSourceImage(
+  node: AgentCanvasNode | undefined,
+  operation: ImageProcessingOperation
+):
   | {
       ok: true;
       artifact: ArtifactRef;
@@ -1305,18 +1451,19 @@ function getUpscaleSourceImage(node: AgentCanvasNode | undefined):
   if (!node) {
     return { ok: false, error: "图片节点不存在。" };
   }
+  const operationLabel = operation === "upscale" ? "高清放大" : "抠图";
   if (node.data.kind !== "imageResult") {
-    return { ok: false, error: "只能对图片节点执行高清放大。" };
+    return { ok: false, error: `只能对图片节点执行${operationLabel}。` };
   }
   if ((node.data.status ?? "ready") !== "ready" || !node.data.image.url) {
-    return { ok: false, error: "图片尚未准备完成，无法高清放大。" };
+    return { ok: false, error: `图片尚未准备完成，无法${operationLabel}。` };
   }
 
   const artifact = node.data.artifact ?? node.data.image.artifact;
   if (!artifact || artifact.type !== "image" || !artifact.contentRef) {
     return {
       ok: false,
-      error: "图片未保存到对象存储，无法由服务端安全放大。",
+      error: `图片未保存到对象存储，无法由服务端安全${operationLabel}。`,
     };
   }
 
@@ -1327,6 +1474,10 @@ function getUpscaleSourceImage(node: AgentCanvasNode | undefined):
     node: node as AgentCanvasNode & { data: ImageResultNodeData },
     prompt: node.data.prompt,
   };
+}
+
+function getUpscaleSourceImage(node: AgentCanvasNode | undefined) {
+  return getImageProcessingSourceImage(node, "upscale");
 }
 
 function createUpscaleCanvasPatch({
@@ -1390,6 +1541,68 @@ function createUpscaleCanvasPatch({
   };
 
   return { canvasPatch, edge, node, scale };
+}
+
+function createMattingCanvasPatch({
+  artifact,
+  background,
+  sourceNode,
+}: {
+  artifact: ArtifactRef & { uri: string };
+  background: "transparent" | "white" | "neutral";
+  sourceNode: AgentCanvasNode & { data: ImageResultNodeData };
+}) {
+  const resultNodeId = `image-${artifact.id}`;
+  const outgoingIndex = 0;
+  const width = getNodeNumericDimension(sourceNode, "width") ?? 240;
+  const height = getNodeNumericDimension(sourceNode, "height") ?? 240;
+  const title = background === "transparent" ? "透明底抠图" : "抠图结果";
+  const image: GeneratedImage = {
+    artifact,
+    id: artifact.id,
+    metadata: artifact.metadata,
+    title: artifact.title ?? title,
+    url: artifact.uri,
+  };
+  const node: AgentCanvasNode = {
+    height,
+    id: resultNodeId,
+    position: {
+      x: sourceNode.position.x + outgoingIndex * 262,
+      y: sourceNode.position.y + 310,
+    },
+    selected: true,
+    style: {
+      width,
+      height,
+    },
+    type: "imageResultNode",
+    width,
+    data: {
+      artifact,
+      image,
+      kind: "imageResult",
+      operation: "matting",
+      prompt: sourceNode.data.prompt,
+      request: {
+        aspectRatio: getImageAspectRatioLabel(sourceNode),
+      },
+      sourceNodeId: sourceNode.id,
+      status: "ready",
+    },
+  };
+  const edge: AgentCanvasEdge = {
+    id: `edge-${sourceNode.id}-${resultNodeId}`,
+    source: sourceNode.id,
+    target: resultNodeId,
+    type: "animated",
+  };
+  const canvasPatch = {
+    edgeUpserts: [edge],
+    nodeUpserts: [node],
+  };
+
+  return { canvasPatch, edge, node };
 }
 
 function getNodeNumericDimension(

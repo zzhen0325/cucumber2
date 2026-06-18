@@ -16,7 +16,8 @@ export function assertImageToolAllowed(
 
   if (
     hasNegativeCapability(normalizedInput, "image-generation") &&
-    toolName !== "upscale_image"
+    toolName !== "upscale_image" &&
+    toolName !== "image_matting"
   ) {
     throw new Error(
       `tool_policy_rejected: ${toolName} is blocked because this task forbids image-generation.`
@@ -39,6 +40,30 @@ export function assertTextArtifactToolAllowed(context: CucumberAgentContext) {
   if (!isTextArtifactTask(normalizedInput)) {
     throw new Error(
       "tool_policy_rejected: create_text_artifact can only run for markdown, document, diagram, code, or webpage artifact tasks."
+    );
+  }
+}
+
+export function assertImageInspectionToolAllowed(
+  context: CucumberAgentContext,
+  toolName: string,
+  requiredCapability: "image-decompose" | "media-analysis"
+) {
+  const normalizedInput = context.normalizedInput;
+  if (!normalizedInput) {
+    return;
+  }
+
+  if (!(normalizedInput.requiredCapabilities ?? []).includes(requiredCapability)) {
+    throw new Error(
+      `tool_policy_rejected: ${toolName} requires ${requiredCapability}.`
+    );
+  }
+
+  const kind = normalizedInput.artifact?.kind;
+  if (kind && !["image", "markdown", "document"].includes(kind)) {
+    throw new Error(
+      `tool_policy_rejected: ${toolName} can only run for image, markdown, or document artifact tasks.`
     );
   }
 }

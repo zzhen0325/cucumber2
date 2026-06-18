@@ -72,6 +72,20 @@ export type UpscaleProjectImageResult = {
   project: ProjectMeta;
 };
 
+export type MattingProjectImageInput = {
+  background?: "transparent" | "white" | "neutral";
+  expectedVersion?: number;
+  projectId: string;
+  sourceNodeId: string;
+};
+
+export type MattingProjectImageResult = {
+  canvasPatch: CanvasPatch;
+  edge: AgentCanvasEdge;
+  node: AgentCanvasNode;
+  project: ProjectMeta;
+};
+
 export type TextArtifactContentFormat =
   | "markdown-json"
   | "markdown"
@@ -263,6 +277,33 @@ export async function upscaleProjectImage(input: UpscaleProjectImageInput) {
   }
 
   return (await response.json()) as UpscaleProjectImageResult;
+}
+
+export async function mattingProjectImage(input: MattingProjectImageInput) {
+  const { projectId, ...body } = input;
+  const response = await fetch(`/api/projects/${projectId}/images/matting`, {
+    body: JSON.stringify(body),
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+
+  if (response.status === 409) {
+    const payload = (await response.json()) as {
+      error: string;
+      code?: string;
+      project: ProjectMeta;
+    };
+    throw new ProjectVersionConflictError(payload.project);
+  }
+
+  if (!response.ok) {
+    throw new Error(await getResponseError(response));
+  }
+
+  return (await response.json()) as MattingProjectImageResult;
 }
 
 export async function createTextArtifact(input: TextArtifactInput) {

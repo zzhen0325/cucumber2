@@ -31,6 +31,7 @@ import {
   DatabaseIcon as Database,
   DiamondIcon as Diamond,
   ArrowDownloadIcon as Download,
+  EraserSparkleIcon as EraserSparkle,
   FileTextIcon as FileText,
   SquareMarginsIcon as Frame,
   BranchIcon as Workflow,
@@ -104,6 +105,7 @@ import {
 import {
   loadProject,
   loadRunTrace,
+  mattingProjectImage,
   saveProjectCanvasPatch,
   updateTextArtifactContent,
   upscaleProjectImage,
@@ -198,8 +200,10 @@ const ManualNodeEditingContext = createContext<{
   onStickyTextChange: () => undefined,
 });
 const ImageNodeActionContext = createContext<{
+  onMatting: (nodeId: string) => void;
   onUpscale: (nodeId: string) => void;
 }>({
+  onMatting: () => undefined,
   onUpscale: () => undefined,
 });
 
@@ -2086,11 +2090,134 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     },
     [commitCanvasMutation, loadedProjectId, saveProjectSnapshot, setEdges, setNodes]
   );
+
+  const handleMattingImageNode = useCallback(
+    async (sourceNodeId: string) => {
+      if (isReplayModeRef.current) {
+        return;
+      }
+      if (!loadedProjectId) {
+        setStorageStatus("error");
+        setStorageError("项目尚未加载完成");
+        return;
+      }
+
+      const sourceNode = nodesRef.current.find(
+        (node) => node.id === sourceNodeId
+      );
+      if (!sourceNode || sourceNode.data.kind !== "imageResult") {
+        setStorageStatus("error");
+        setStorageError("只能对图片节点执行抠图。");
+        return;
+      }
+      if ((sourceNode.data.status ?? "ready") !== "ready" || !sourceNode.data.image.url) {
+        setStorageStatus("error");
+        setStorageError("图片尚未准备完成，无法抠图。");
+        return;
+      }
+
+      const saved = await saveProjectSnapshot();
+      if (!saved) {
+        setStorageStatus("error");
+        setStorageError("项目快照保存失败，无法抠图。");
+        return;
+      }
+
+      const pendingId = `image-matting-pending-${Date.now().toString(36)}`;
+      const pendingEdgeId = `edge-${sourceNodeId}-${pendingId}`;
+      const pendingNode = createPendingMattingImageNode(sourceNode, pendingId);
+      const pendingEdge: AgentCanvasEdge = {
+        id: pendingEdgeId,
+        source: sourceNodeId,
+        target: pendingId,
+        type: "animated",
+      };
+      const withPendingNodes = [
+        ...applySelectedNodeIds(nodesRef.current, []),
+        { ...pendingNode, selected: true },
+      ];
+      const withPendingEdges = [...edgesRef.current, pendingEdge];
+      commitCanvasMutation({
+        reason: "matting-pending",
+        patch: diffCanvasPatch(
+          { edges: edgesRef.current, nodes: nodesRef.current },
+          { edges: withPendingEdges, nodes: withPendingNodes }
+        ),
+        persist: false,
+      });
+      setStorageStatus("saving");
+      setStorageError(null);
+
+      try {
+        const result = await mattingProjectImage({
+          expectedVersion: projectVersionRef.current,
+          projectId: loadedProjectId,
+          sourceNodeId,
+        });
+        projectVersionRef.current = result.project.version;
+        persistedSelectedNodeIdRef.current = result.node.id;
+
+        setNodes((current) => {
+          const withoutPending = current.filter((node) => node.id !== pendingId);
+          const merged = mergeCanvasUpserts(
+            { edges: edgesRef.current, nodes: withoutPending },
+            { edges: [result.edge], nodes: [result.node] }
+          ).nodes;
+          const next = applySelectedNodeIds(merged, [result.node.id]);
+          nodesRef.current = next;
+          return next;
+        });
+        setEdges((current) => {
+          const withoutPending = current.filter((edge) => edge.id !== pendingEdgeId);
+          const next = mergeCanvasUpserts(
+            { edges: withoutPending, nodes: nodesRef.current },
+            { edges: [result.edge], nodes: [result.node] }
+          ).edges;
+          edgesRef.current = next;
+          return next;
+        });
+        setStorageStatus("saved");
+        setStorageError(null);
+      } catch (nextError: unknown) {
+        if (nextError instanceof ProjectVersionConflictError) {
+          projectVersionRef.current = nextError.project.version;
+        }
+        setNodes((current) => {
+          const next = current.map((node) =>
+            node.id === pendingId && node.data.kind === "imageResult"
+              ? {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    image: {
+                      ...node.data.image,
+                      title: "抠图失败",
+                    },
+                    status: "error" as const,
+                    upload: {
+                      status: "error" as const,
+                      error: getClientError(nextError),
+                    },
+                  },
+                }
+              : node
+          );
+          nodesRef.current = next;
+          return next;
+        });
+        setStorageStatus("error");
+        setStorageError(`抠图失败：${getClientError(nextError)}`);
+      }
+    },
+    [commitCanvasMutation, loadedProjectId, saveProjectSnapshot, setEdges, setNodes]
+  );
+
   const imageNodeActions = useMemo(
     () => ({
+      onMatting: handleMattingImageNode,
       onUpscale: handleUpscaleImageNode,
     }),
-    [handleUpscaleImageNode]
+    [handleMattingImageNode, handleUpscaleImageNode]
   );
 
   const handleSubmit = useCallback(
@@ -4432,7 +4559,7 @@ function ImageResultNode({
   width,
   height,
 }: NodeProps<FlowNode<ImageResultNodeData, "imageResultNode">>) {
-  const { onUpscale } = useContext(ImageNodeActionContext);
+  const { onMatting, onUpscale } = useContext(ImageNodeActionContext);
   const status = data.status ?? (data.image.url ? "ready" : "loading");
   const requestLabel = formatImageRequestLabel(data.request);
   const [isPreviewOpen, setPreviewOpen] = useState(false);
@@ -4516,6 +4643,19 @@ function ImageResultNode({
             <Sparkles size={14} />
           </button>
           <button
+            aria-label="抠图图片"
+            onClick={(event) => {
+              stopNodeToolbarEvent(event);
+              onMatting(id);
+            }}
+            onMouseDown={stopNodeToolbarEvent}
+            onPointerDown={stopNodeToolbarEvent}
+            title="抠图"
+            type="button"
+          >
+            <EraserSparkle size={14} />
+          </button>
+          <button
             aria-label="下载图片"
             onClick={(event) => {
               stopNodeToolbarEvent(event);
@@ -4579,6 +4719,10 @@ function ImageResultNode({
               ? data.upload.status === "error"
                 ? "放大失败"
                 : "放大中"
+              : data.operation === "matting"
+                ? data.upload.status === "error"
+                  ? "抠图失败"
+                  : "抠图中"
               : data.upload.status === "error"
                 ? "上传失败"
                 : "上传中"}
@@ -4635,6 +4779,47 @@ function createPendingUpscaleImageNode(
       },
       kind: "imageResult",
       operation: "upscale",
+      prompt:
+        sourceNode.data.kind === "imageResult" ? sourceNode.data.prompt : "",
+      sourceNodeId: sourceNode.id,
+      status: "loading",
+      upload: {
+        status: "uploading",
+      },
+    },
+  };
+}
+
+function createPendingMattingImageNode(
+  sourceNode: AgentCanvasNode,
+  pendingId: string
+): AgentCanvasNode {
+  const width = getNodeDimension(sourceNode, "width") ?? 240;
+  const height = getNodeDimension(sourceNode, "height") ?? 240;
+  return {
+    height,
+    id: pendingId,
+    position: {
+      x: sourceNode.position.x,
+      y: sourceNode.position.y + 310,
+    },
+    style: {
+      width,
+      height,
+    },
+    type: "imageResultNode",
+    width,
+    data: {
+      image: {
+        id: pendingId,
+        metadata: {
+          operation: "matting",
+        },
+        title: "抠图中",
+        url: "",
+      },
+      kind: "imageResult",
+      operation: "matting",
       prompt:
         sourceNode.data.kind === "imageResult" ? sourceNode.data.prompt : "",
       sourceNodeId: sourceNode.id,

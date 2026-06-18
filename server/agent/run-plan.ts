@@ -21,6 +21,10 @@ const ALWAYS_PLAN_INTENTS = new Set<NormalizedIntent>([
   "web.fetch",
   "webpage.create",
   "workflow.plan",
+  "image.decompose",
+  "image.matting",
+  "image.upscale",
+  "media.analyze",
 ]);
 
 export function buildRunPlan(input: AgentRunInput): RuntimeRunPlanItem[] {
@@ -77,12 +81,33 @@ export function buildRunPlan(input: AgentRunInput): RuntimeRunPlanItem[] {
         step("image-generate", `生成${getImageCountLabel(input)}图片 artifact`, "execute"),
         step("image-materialize", "投影图片结果节点", "materialize"),
       ];
+    case "image.matting":
+      return [
+        step("matting-source", "确认要抠图的图片", "prepare"),
+        step("image-agent", "委派 Image Agent", "route"),
+        step("image-matting", "生成主体抠图 artifact", "execute"),
+        step("matting-materialize", "投影抠图结果节点", "materialize"),
+      ];
+    case "image.decompose":
+      return [
+        step("decompose-source", "确认要拆解的图片", "prepare"),
+        step("image-agent", "委派 Image Agent", "route"),
+        step("image-decompose", "生成图像拆解 artifact", "execute"),
+        step("decompose-materialize", "投影拆解文档节点", "materialize"),
+      ];
     case "image.upscale":
       return [
         step("upscale-source", "确认要高清放大的图片", "prepare"),
         step("image-agent", "委派 Image Agent", "route"),
         step("image-upscale", "生成高清放大 artifact", "execute"),
         step("upscale-materialize", "投影高清图片结果", "materialize"),
+      ];
+    case "media.analyze":
+      return [
+        step("media-source", "确认要理解的图片", "prepare"),
+        step("image-agent", "委派 Image Agent", "route"),
+        step("media-analyze", "生成图片理解 artifact", "execute"),
+        step("media-materialize", "投影理解结果节点", "materialize"),
       ];
     case "canvas.operation":
       return [

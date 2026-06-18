@@ -9,6 +9,8 @@ const generateCozeImage = vi.fn();
 const upscaleSeedreamImage = vi.fn();
 const isSeedreamConfigured = vi.fn();
 const isCozeImageConfigured = vi.fn();
+const runImageMatting = vi.fn();
+const createImageMattingArtifactId = vi.fn();
 const resolveStorageBackedImageContext = vi.fn(async (items: UpstreamContextItem[]) =>
   items.map((item) =>
     item.artifact?.contentRef?.startsWith("supabase://")
@@ -35,6 +37,50 @@ const storeGeneratedImageFromUrl = vi.fn(
     title: input.title,
     type: "image" as const,
     uri: `/api/projects/${input.projectId}/artifacts/${input.artifactId}/content`,
+  })
+);
+const storeGeneratedImageFromBytes = vi.fn(
+  async (input: {
+    artifactId: string;
+    bytes: Uint8Array;
+    metadata?: Record<string, unknown>;
+    mimeType: string;
+    projectId: string;
+    runNodeId: string;
+    title?: string;
+  }) => ({
+    contentRef: `supabase://agent-assets/projects/${input.projectId}/runs/${input.runNodeId}/artifacts/${input.artifactId}.png`,
+    id: input.artifactId,
+    metadata: {
+      ...input.metadata,
+      mimeType: input.mimeType,
+      storageBucket: "agent-assets",
+      storagePath: `projects/${input.projectId}/runs/${input.runNodeId}/artifacts/${input.artifactId}.png`,
+    },
+    title: input.title,
+    type: "image" as const,
+    uri: `/api/projects/${input.projectId}/artifacts/${input.artifactId}/content`,
+  })
+);
+const storeTextArtifactContent = vi.fn(
+  async (input: {
+    content: string;
+    projectId: string;
+    runNodeId: string;
+    sourceToolName: string;
+    title: string;
+    type: "doc";
+  }) => ({
+    contentRef: `supabase://agent-assets/projects/${input.projectId}/runs/${input.runNodeId}/artifacts/text-1.md`,
+    id: `text-${input.sourceToolName}`,
+    metadata: {
+      sourceToolName: input.sourceToolName,
+    },
+    preview: input.content.slice(0, 120),
+    previewKind: "markdown" as const,
+    title: input.title,
+    type: input.type,
+    uri: `/api/projects/${input.projectId}/artifacts/text-${input.sourceToolName}/content`,
   })
 );
 const testSeedreamConfig = {
@@ -93,16 +139,31 @@ vi.mock("../../../../coze.ts", async () => {
   };
 });
 
+vi.mock("./image-matting-provider.ts", () => ({
+  createImageMattingArtifactId: () => createImageMattingArtifactId(),
+  runImageMatting: (...args: unknown[]) => runImageMatting(...args),
+}));
+
 vi.mock("../../../storage.ts", () => ({
   resolveStorageBackedImageContext: (items: UpstreamContextItem[]) =>
     resolveStorageBackedImageContext(items),
+  storeGeneratedImageFromBytes: (
+    input: Parameters<typeof storeGeneratedImageFromBytes>[0]
+  ) => storeGeneratedImageFromBytes(input),
   storeGeneratedImageFromUrl: (
     input: Parameters<typeof storeGeneratedImageFromUrl>[0]
   ) => storeGeneratedImageFromUrl(input),
+  storeTextArtifactContent: (
+    input: Parameters<typeof storeTextArtifactContent>[0]
+  ) => storeTextArtifactContent(input),
 }));
 
 // Imported after the mock is registered.
 const { generateImageTool } = await import("./generate-image.tool.ts");
+const { imageMattingTool } = await import("./image-matting.tool.ts");
+const { analyzeMediaTool, decomposeImageTool } = await import(
+  "./image-inspection.tool.ts"
+);
 const { upscaleImageTool } = await import("./upscale-image.tool.ts");
 const { SEEDREAM_PROMPT_MAX_LENGTH, toSeedreamUpstreamContext } = await import(
   "./generate-image.request.ts"
@@ -151,8 +212,13 @@ describe("generate_image tool", () => {
     upscaleSeedreamImage.mockReset();
     isSeedreamConfigured.mockReset();
     isCozeImageConfigured.mockReset();
+    runImageMatting.mockReset();
+    createImageMattingArtifactId.mockReset();
+    createImageMattingArtifactId.mockReturnValue("rembg-matting-1");
     resolveStorageBackedImageContext.mockClear();
+    storeGeneratedImageFromBytes.mockClear();
     storeGeneratedImageFromUrl.mockClear();
+    storeTextArtifactContent.mockClear();
   });
 
   it("generates images and emits artifact_created events without leaking urls", async () => {
@@ -520,10 +586,186 @@ describe("generate_image tool", () => {
     );
     expect(upscaleSeedreamImage).not.toHaveBeenCalled();
   });
+
+  it("mats the selected image through the matting provider and emits an image artifact", async () => {
+    runImageMatting.mockResolvedValue({
+      bytes: new Uint8Array([1, 2, 3]),
+      engine: "rembg",
+      metadata: { model: "u2net", provider: "rembg-cli" },
+      mimeType: "image/png",
+      provider: "rembg-cli",
+    });
+    const context = buildContext({
+      normalizedInput: {
+        rawPrompt: "给这张图去背景",
+        userGoal: "给这张图去背景",
+        operation: "transform",
+        artifact: { kind: "image", format: "png" },
+        requiredCapabilities: ["image-matting"],
+        negativeCapabilities: [],
+      },
+      selectedNodeId: "image-1",
+      upstreamContext: [
+        {
+          artifact: {
+            contentRef: "supabase://agent-assets/projects/project-1/uploads/ref.png",
+            id: "ref",
+            type: "image",
+            uri: "/api/projects/project-1/artifacts/ref/content",
+          },
+          contentRef: "supabase://agent-assets/projects/project-1/uploads/ref.png",
+          imageUrl: "/api/projects/project-1/artifacts/ref/content",
+          nodeId: "image-1",
+          summary: "一张商品图",
+          type: "image",
+        },
+      ],
+    });
+
+    const result = await invokeMattingTool(context, { subject: "商品" });
+
+    expect(result.matted).toBe(1);
+    expect(runImageMatting).toHaveBeenCalledWith(
+      expect.objectContaining({
+        background: "transparent",
+        sourceUrl: "https://signed.example/ref.png",
+      })
+    );
+    expect(storeGeneratedImageFromBytes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        artifactId: "rembg-matting-1",
+        bytes: new Uint8Array([1, 2, 3]),
+        metadata: expect.objectContaining({
+          model: "u2net",
+          operation: "matting",
+          provider: "rembg-cli",
+          sourceNodeId: "image-1",
+        }),
+        mimeType: "image/png",
+        sourceNodeId: "image-1",
+        sourceToolName: "image_matting",
+      })
+    );
+    expect(context.pendingEvents).toEqual([
+      {
+        type: "artifact_created",
+        artifact: expect.objectContaining({
+          id: "rembg-matting-1",
+          type: "image",
+        }),
+        toolName: "image_matting",
+      },
+    ]);
+  });
+
+  it("creates a markdown artifact for image decomposition", async () => {
+    const context = buildContext({
+      normalizedInput: {
+        rawPrompt: "分析这张图的风格",
+        userGoal: "分析这张图的风格",
+        operation: "analyze",
+        artifact: { kind: "markdown", format: "markdown" },
+        requiredCapabilities: ["image-decompose", "markdown-artifact"],
+        negativeCapabilities: ["image-generation"],
+      },
+      selectedNodeId: "image-1",
+      upstreamContext: [
+        {
+          imageUrl: "https://cdn.example/ref.png",
+          nodeId: "image-1",
+          summary: "复古海报风格",
+          type: "image",
+        },
+      ],
+    });
+
+    const result = await invokeDecomposeTool(context, {
+      promptStructure: "Subject + layout + color + texture",
+      styleSummary: "复古印刷海报风格",
+    });
+
+    expect(result.artifactId).toBe("text-decompose_image");
+    expect(storeTextArtifactContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("复古印刷海报风格"),
+        sourceToolName: "decompose_image",
+        title: "图像风格拆解",
+        type: "doc",
+      })
+    );
+    expect(context.pendingEvents).toEqual([
+      {
+        type: "artifact_created",
+        artifact: expect.objectContaining({
+          id: "text-decompose_image",
+          type: "doc",
+        }),
+        toolName: "decompose_image",
+      },
+    ]);
+  });
+
+  it("creates a markdown artifact for media analysis", async () => {
+    const context = buildContext({
+      normalizedInput: {
+        rawPrompt: "这张图里有什么",
+        userGoal: "这张图里有什么",
+        operation: "analyze",
+        artifact: { kind: "markdown", format: "markdown" },
+        requiredCapabilities: ["media-analysis", "markdown-artifact"],
+        negativeCapabilities: ["image-generation"],
+      },
+      selectedNodeId: "image-1",
+      upstreamContext: [
+        {
+          imageUrl: "https://cdn.example/ref.png",
+          nodeId: "image-1",
+          summary: "一张家居场景图片",
+          type: "image",
+        },
+      ],
+    });
+
+    const result = await invokeAnalyzeMediaTool(context, {
+      answer: "这是一张家居场景图片。",
+      observations: ["上游摘要提供了家居场景信息。"],
+    });
+
+    expect(result.artifactId).toBe("text-analyze_media");
+    expect(storeTextArtifactContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("这是一张家居场景图片。"),
+        sourceToolName: "analyze_media",
+        title: "图片理解结果",
+        type: "doc",
+      })
+    );
+  });
 });
 
 async function invokeUpscaleTool(context: CucumberAgentContext, input: unknown) {
   const runContext = new RunContext(context);
   const raw = await upscaleImageTool.invoke(runContext, JSON.stringify(input));
+  return typeof raw === "string" ? JSON.parse(raw) : raw;
+}
+
+async function invokeMattingTool(context: CucumberAgentContext, input: unknown) {
+  const runContext = new RunContext(context);
+  const raw = await imageMattingTool.invoke(runContext, JSON.stringify(input));
+  return typeof raw === "string" ? JSON.parse(raw) : raw;
+}
+
+async function invokeDecomposeTool(context: CucumberAgentContext, input: unknown) {
+  const runContext = new RunContext(context);
+  const raw = await decomposeImageTool.invoke(runContext, JSON.stringify(input));
+  return typeof raw === "string" ? JSON.parse(raw) : raw;
+}
+
+async function invokeAnalyzeMediaTool(
+  context: CucumberAgentContext,
+  input: unknown
+) {
+  const runContext = new RunContext(context);
+  const raw = await analyzeMediaTool.invoke(runContext, JSON.stringify(input));
   return typeof raw === "string" ? JSON.parse(raw) : raw;
 }

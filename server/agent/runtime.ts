@@ -1069,7 +1069,7 @@ function classifyRunFailure({
     };
   }
 
-  if (/seedream/i.test(message) || /generate_image|upscale_image/.test(toolName)) {
+  if (/seedream/i.test(message) || /generate_image|image_matting|upscale_image/.test(toolName)) {
     return {
       errorCode: "seedream_failed",
       errorSource: "seedream",

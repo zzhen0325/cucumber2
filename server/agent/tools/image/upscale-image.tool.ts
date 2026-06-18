@@ -6,14 +6,14 @@ import {
   upscaleSeedreamImage,
   type SeedreamUpscaleResolution,
 } from "../../../../seedream.ts";
-import type { ArtifactRef, UpstreamContextItem } from "../../../../src/types/canvas.ts";
-import {
-  resolveStorageBackedImageContext,
-  storeGeneratedImageFromUrl,
-} from "../../../storage.ts";
+import type { ArtifactRef } from "../../../../src/types/canvas.ts";
 import { assertImageProviderConfigured } from "../../../provider-config.ts";
 import type { CucumberAgentContext } from "../../context.ts";
 import { assertImageToolAllowed } from "../../policy/task-artifact-policy.ts";
+import {
+  resolveSingleSourceImage,
+  storeImageToolArtifact,
+} from "./image-source.ts";
 
 const upscaleImageInputSchema = z.object({
   resolution: z.enum(["4k", "8k"]).optional(),
@@ -69,34 +69,18 @@ export const upscaleImageTool = tool({
       title?: string;
       metadata?: Record<string, unknown>;
     }) => {
-      const artifact = await storeGeneratedImageFromUrl({
-        artifactId: image.id,
+      const artifact = await storeImageToolArtifact({
+        context,
+        image,
         metadata: {
-          ...image.metadata,
           sourceNodeId: source.nodeId,
           operation: "upscale",
         },
-        projectId: context.projectId,
-        runNodeId: context.runNodeId,
         signal: details?.signal,
-        sourceToolName: "upscale_image",
         sourceNodeId: source.nodeId,
-        sourceUrl: image.url,
-        title: image.title,
-        userId: context.userId,
-      });
-      context.producedArtifacts.push(artifact);
-      artifacts.push(artifact);
-      const event = {
-        type: "artifact_created" as const,
-        artifact,
         toolName: "upscale_image",
-      };
-      if (context.pushLiveEvent) {
-        context.pushLiveEvent(event);
-      } else {
-        context.pendingEvents.push(event);
-      }
+      });
+      artifacts.push(artifact);
     };
 
     const config = readSeedreamUpscaleConfigFromEnv();
@@ -120,27 +104,7 @@ export const upscaleImageTool = tool({
 });
 
 async function resolveUpscaleSourceImage(context: CucumberAgentContext) {
-  const imageItems = context.upstreamContext.filter(
-    (item): item is UpstreamContextItem & { type: "image" } =>
-      item.type === "image"
-  );
-  const selectedImage = imageItems.find(
-    (item) => item.nodeId === context.selectedNodeId
-  );
-  const source = selectedImage ?? (imageItems.length === 1 ? imageItems[0] : null);
-  if (!source) {
-    throw new Error("请选择一张图片后再执行高清放大。");
-  }
-
-  const [resolved] = await resolveStorageBackedImageContext([source]);
-  if (resolved.type !== "image" || !resolved.imageUrl) {
-    throw new Error("Selected image cannot be resolved for Seedream upscale.");
-  }
-
-  return {
-    imageUrl: resolved.imageUrl,
-    nodeId: resolved.nodeId,
-  };
+  return resolveSingleSourceImage(context, "请选择一张图片后再执行高清放大。");
 }
 
 function requireCucumberContext(context: unknown): CucumberAgentContext {

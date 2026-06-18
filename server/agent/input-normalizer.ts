@@ -66,7 +66,10 @@ const normalizedIntentSchema = z.enum([
   "data.analyze",
   "workflow.plan",
   "image.generate",
+  "image.matting",
+  "image.decompose",
   "image.upscale",
+  "media.analyze",
   "text.answer",
   "canvas.operation",
   "unsupported",
@@ -193,6 +196,9 @@ export function createInputNormalizerAgent() {
       "Classify requests to analyze, evaluate, critique, summarize, or give suggestions for a visual/image/banner/poster/KV brief as operation=analyze or answer with no image artifact unless the user explicitly asks to generate/create/render the image now; include negativeCapabilities image-generation.",
       "Classify explicit long-form output requests such as detailed explanation, complete plan, roadmap, proposal, research analysis, report, 文档, 详细说明, 完整规划, 调研分析, or 长文 as operation=create or analyze with artifact.kind=document or markdown. Short QA remains artifact=null.",
       "Classify image creation as artifact.kind=image with png format, and image upscaling/enhancement of an existing image as operation=transform, artifact.kind=image.",
+      "Classify background removal, matting, transparent-background cutout, sticker/material extraction, or keep-only-subject requests as operation=transform, artifact.kind=image, artifact.format=png, requiredCapabilities including image-matting.",
+      "Classify requests to decompose an actual selected/upstream image's style, composition, light, color, layout, or prompt clues as operation=analyze, artifact.kind=markdown, artifact.format=markdown, requiredCapabilities including image-decompose and markdown-artifact, negativeCapabilities including image-generation unless the user also explicitly asks to generate a new image.",
+      "Classify requests to understand, describe, identify, summarize, judge, or extract information from an actual selected/upstream image as operation=analyze, artifact.kind=markdown, artifact.format=markdown, requiredCapabilities including media-analysis and markdown-artifact, negativeCapabilities including image-generation unless the user also explicitly asks to generate a new image.",
       "For image artifacts, separate visual content from production controls such as count, aspect ratio, pixel dimensions, and usage.",
       "contentPrompt must be a clean renderable image description. Remove batch-count phrases such as four images, 四张, 一组4张.",
       "Keep reference image URLs out of the output. Canvas image references are handled by runtime, not by the model.",
@@ -235,7 +241,10 @@ export function finalizeNormalizedAgentInput(
     ...(ruleBased.requiredCapabilities ?? []),
     ...(parsed.requiredCapabilities ?? []),
   ]).filter(
-    (capability) => isImageArtifact(artifact) || !isImageTaskCapability(capability)
+    (capability) =>
+      isImageArtifact(artifact) ||
+      isImageInspectionCapability(capability) ||
+      !isImageTaskCapability(capability)
   );
   const negativeCapabilities = uniqueCapabilityList([
     ...(ruleBased.negativeCapabilities ?? []),
@@ -246,6 +255,7 @@ export function finalizeNormalizedAgentInput(
     artifact,
     operation,
     rawPrompt: raw,
+    requiredCapabilities,
   });
   const base: Omit<NormalizedAgentInput, "image"> = {
     rawPrompt: raw,
@@ -376,6 +386,14 @@ export function hasNegativeCapability(
   return (input?.negativeCapabilities ?? []).includes(capability);
 }
 
+function hasAnyCapability(
+  input: NormalizedAgentInput | null | undefined,
+  capabilities: string[]
+) {
+  const present = new Set(input?.requiredCapabilities ?? []);
+  return capabilities.some((capability) => present.has(capability));
+}
+
 export function selectAgentRoute(
   input?: NormalizedAgentInput | null
 ): SpecialistRoute {
@@ -390,6 +408,10 @@ export function selectAgentRoutesForTask(
     return [];
   }
   const routes: Exclude<SpecialistRoute, "manager">[] = [];
+  if (hasAnyCapability(input, ["image-decompose", "media-analysis"])) {
+    routes.push("image");
+    return routes;
+  }
   if (isImageArtifactTask(input)) {
     routes.push("image");
     return routes;
@@ -442,11 +464,23 @@ export function inferIntentFromProtocol({
   artifact,
   operation,
   rawPrompt,
+  requiredCapabilities,
 }: {
   artifact?: NormalizedAgentInput["artifact"];
   operation: TaskOperation;
   rawPrompt: string;
+  requiredCapabilities?: string[];
 }): NormalizedIntent {
+  const capabilities = new Set(requiredCapabilities ?? []);
+  if (capabilities.has("image-matting")) {
+    return "image.matting";
+  }
+  if (capabilities.has("image-decompose") && !capabilities.has("image-generation")) {
+    return "image.decompose";
+  }
+  if (capabilities.has("media-analysis") && !capabilities.has("image-generation")) {
+    return "media.analyze";
+  }
   if (isImageArtifact(artifact)) {
     return operation === "transform" ? "image.upscale" : "image.generate";
   }
@@ -493,6 +527,64 @@ function inferTaskProtocol(prompt: string): Pick<
       negativeCapabilities: ["image-generation"],
       operation: "edit",
       requiredCapabilities: [],
+    };
+  }
+
+  if (isImageMattingRequest(prompt)) {
+    return {
+      artifact: { kind: "image", format: "png" },
+      domain,
+      negativeCapabilities: [],
+      operation: "transform",
+      requiredCapabilities: ["image-matting"],
+    };
+  }
+
+  if (isImageDecomposeThenGenerateRequest(prompt)) {
+    return {
+      artifact: {
+        kind: "image",
+        subtype: inferImageSubtype(prompt),
+        format: "png",
+      },
+      domain,
+      negativeCapabilities: [],
+      operation: "create",
+      requiredCapabilities: ["image-decompose", "image-generation"],
+    };
+  }
+
+  if (isAnalyzeThenGenerateRequest(prompt)) {
+    return {
+      artifact: {
+        kind: "image",
+        subtype: inferImageSubtype(prompt),
+        format: "png",
+      },
+      domain,
+      negativeCapabilities: [],
+      operation: "create",
+      requiredCapabilities: ["media-analysis", "image-generation"],
+    };
+  }
+
+  if (isImageDecomposeRequest(prompt)) {
+    return {
+      artifact: { kind: "markdown", format: "markdown" },
+      domain: "visual-design",
+      negativeCapabilities: ["image-generation"],
+      operation: "analyze",
+      requiredCapabilities: ["image-decompose", "markdown-artifact"],
+    };
+  }
+
+  if (isMediaAnalyzeRequest(prompt)) {
+    return {
+      artifact: { kind: "markdown", format: "markdown" },
+      domain,
+      negativeCapabilities: ["image-generation"],
+      operation: "analyze",
+      requiredCapabilities: ["media-analysis", "markdown-artifact"],
     };
   }
 
@@ -692,6 +784,15 @@ function normalizeArtifact(
   if (!artifact) {
     return inferred ?? null;
   }
+  if (
+    isImageMattingRequest(rawPrompt) ||
+    isImageDecomposeThenGenerateRequest(rawPrompt) ||
+    isAnalyzeThenGenerateRequest(rawPrompt) ||
+    isImageDecomposeRequest(rawPrompt) ||
+    isMediaAnalyzeRequest(rawPrompt)
+  ) {
+    return inferred ?? null;
+  }
   if (isVisualBriefAnalysisRequest(rawPrompt) && artifact.kind === "image") {
     return null;
   }
@@ -725,6 +826,12 @@ function normalizeOperation(
 ): TaskOperation {
   if (isPromptTextEditRequest(rawPrompt)) {
     return "edit";
+  }
+  if (isImageMattingRequest(rawPrompt)) {
+    return "transform";
+  }
+  if (isImageDecomposeRequest(rawPrompt) || isMediaAnalyzeRequest(rawPrompt)) {
+    return "analyze";
   }
   if (isVisualBriefAnalysisRequest(rawPrompt)) {
     return "analyze";
@@ -858,6 +965,10 @@ function isImageTaskCapability(capability: string) {
   return /image|图片|图像|upscale|视觉风格|prompt[-_ ]?expansion/i.test(capability);
 }
 
+function isImageInspectionCapability(capability: string) {
+  return capability === "image-decompose" || capability === "media-analysis";
+}
+
 export function isPromptTextEditRequest(prompt: string) {
   if (
     hasExplicitImageCreationRequest(prompt) ||
@@ -925,6 +1036,52 @@ function isVisualBriefAnalysisRequest(prompt: string) {
   }
 
   return !hasExplicitImageCreationRequest(prompt);
+}
+
+function isImageMattingRequest(prompt: string) {
+  return /(抠图|去背景|去除背景|移除背景|删除背景|透明底|透明背景|只要人物|只要主体|提取主体|主体提取|做贴纸|贴纸素材|素材提取|remove\s+background|transparent\s+background|cutout|matting)/i.test(
+    prompt
+  );
+}
+
+function isImageDecomposeThenGenerateRequest(prompt: string) {
+  return hasImageDecomposeSignal(prompt) && hasExplicitImageCreationRequest(prompt);
+}
+
+function isAnalyzeThenGenerateRequest(prompt: string) {
+  return hasMediaAnalyzeSignal(prompt) && hasExplicitImageCreationRequest(prompt);
+}
+
+function isImageDecomposeRequest(prompt: string) {
+  return hasImageDecomposeSignal(prompt) && !hasExplicitImageCreationRequest(prompt);
+}
+
+function isMediaAnalyzeRequest(prompt: string) {
+  return hasMediaAnalyzeSignal(prompt) && !hasExplicitImageCreationRequest(prompt);
+}
+
+function hasImageDecomposeSignal(prompt: string) {
+  if (!hasActualImageCue(prompt)) {
+    return false;
+  }
+  return /(拆|拆解|分析|提取|总结).{0,24}(风格|构图|光影|配色|色彩|镜头|版式|布局|prompt|提示词|视觉线索)|(风格|构图|光影|配色|色彩|镜头|版式|布局|prompt|提示词|视觉线索).{0,24}(拆|拆解|分析|提取|总结)/i.test(
+    prompt
+  );
+}
+
+function hasMediaAnalyzeSignal(prompt: string) {
+  if (!hasActualImageCue(prompt)) {
+    return false;
+  }
+  return /(看懂|识别|描述|总结|提取|判断|理解|解释|图里有什么|图中有什么|图片里有什么|表达了什么|关键信息|内容|元素|describe|identify|summari[sz]e|extract|understand)/i.test(
+    prompt
+  );
+}
+
+function hasActualImageCue(prompt: string) {
+  return /(这张图|这张图片|这张照片|此图|图里|图中|图片里|图片中|照片里|照片中|选中的图|选中图片|参考图|reference image|selected image|this image|this picture|photo)/i.test(
+    prompt
+  );
 }
 
 function hasExplicitImageCreationRequest(prompt: string) {

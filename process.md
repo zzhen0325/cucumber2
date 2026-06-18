@@ -2,6 +2,14 @@
 
 本文记录 2026-06-11 Agent v2 正式切换后的变更。
 
+## 2026-06-18 Image Agent Matting And Inspection
+
+- Image Agent 扩展为图片生成、抠图、拆解、理解和高清处理的统一 specialist；Manager 继续只做编排，工具只创建 artifact 和事件，不直接写画布节点。
+- 新增 `image_matting` 本地工具，通过统一 matting provider 接口和可信上游图片解析生成抠图/透明底优先素材；当前 provider 为 rembg 2.x CLI，后续可替换实现；`image-generation` negative capability 仍阻止新图生成，但不阻止抠图和高清这类图片处理。
+- 新增 `decompose_image` 和 `analyze_media` 本地工具，把图片风格拆解、prompt 线索、内容理解和信息提取保存为 Markdown/doc artifact；没有像素级可见信息时必须在 artifact 限制里说明，不能伪造看见的细节。
+- 输入归一化新增 `image.matting`、`image.decompose` 和 `media.analyze` intent 兼容摘要，实际路由仍以 `operation + artifact + requiredCapabilities + negativeCapabilities` 为准；`image-decompose` / `media-analysis` 的 Markdown 产物也路由到 Image Agent。
+- Tool Registry 新增 `tool.image.matting`、`tool.image.decompose` 和 `tool.media.analyze` scope；Run plan、Run 节点工具摘要、错误来源摘要和 artifact 投影路径同步识别 `image_matting`、`decompose_image`、`analyze_media`。
+
 ## 2026-06-17 Canvas Row Storage
 
 - 破坏性 Supabase migration `20260617125844_canvas_rows_storage.sql` 将画布从 `agent_projects.nodes/edges` 切到 `agent_canvas_nodes`、`agent_canvas_edges` 和 `agent_artifact_contents`；旧项目测试数据会被清空，不做 backfill/dual-write。
@@ -18,7 +26,7 @@
 
 - `/api/agent-run` 入口保持 AI SDK HTTP stream 不变；新增 `Quick Router` 在本地规则层先判定 `smalltalk`、`simple_chat`、`simple_canvas`、`image_task` 和 `complex_agent_task`，并在 `run.created` / `input.normalized` payload 中写入 route、routerSource、skippedSteps 和 cache 状态。
 - `smalltalk` 直接写 Trace、流式文本和 `run.completed`；`simple_chat` 使用缓存的轻量 chat Agent/Runner，不加载 skills、MCP、handoff 或动态计划；`simple_canvas` 只处理确定性的安全画布操作，并继续通过 canvas policy 写 `canvas.operation.*`。
-- `image_task` 可在 `input.normalized` 后由投影层先创建 loading 图片结果节点；完整 artifact 仍由 `generate_image` 产生并按 artifact id 幂等物化，不重复生成结果节点。
+- `image_task` 可在 `input.normalized` 后由投影层先创建 loading 图片结果节点；完整图片 artifact 由 `generate_image`、`image_matting` 或 `upscale_image` 产生并按 artifact id 幂等物化，不重复生成结果节点；图片拆解/理解则由 `decompose_image` / `analyze_media` 创建 Markdown artifact 节点。
 - `complex_agent_task` 才进入完整 Agent Runner；compact context、skill retrieval 和 MCP/tool prepare 在依赖允许时并行。`plan.build` 只在复杂、图片或非空动态计划时写 Trace，简单任务不再写空计划步骤。
 - Agent world 进程级缓存 Manager、Document/Web/Research/Image agents、handoff registry、normalizer Agent、Runner 和 simple chat Runner；per-run instructions/context 仍从 `runContext` 注入，不写入单例。
 - 内部 MCP 使用全局 Streamable HTTP 连接池，共享连接 promise，失败后重置；非图片 Fast Path 不连接 MCP。技能 registry 增加 60s 内存缓存，应用内 create/update/import/delete skill 后立即 invalidation。
@@ -34,7 +42,7 @@
 - Manager 作为通用对话默认处理者：短问答、概念解释、轻量分析和简短总结保持 `artifact=null`，由 Manager 直接回复；明确要求详细说明、完整规划、长篇方案、调研分析、报告或文档时归一化为 document/markdown artifact，交由 Document Agent 创建可沉淀的长文本产物。
 - Skill frontmatter 新增可选 `capabilities`、`produces`、`uses` 和 `notFor`；skill retrieval 先按 artifact/capability 打分，再看关键词、canvas kind 和 token overlap，并会按 `negativeCapabilities` 抑制不应出现的 image skill。
 - 新增 seed skill `sequence-diagram`，声明 `diagram/sequenceDiagram/mermaid` 能力，Document Agent 可激活后用 `create_text_artifact` 创建包含 Mermaid fenced block 的 Markdown artifact。
-- 工具入口新增 task artifact policy：图片 prompt/generation 工具只允许 image artifact task，`image-generation` negative capability 会阻止新图生成；`create_text_artifact` 只允许 markdown/document/diagram/code/webpage 文本类 artifact task，Mermaid diagram 必须包含 mermaid fenced block，webpage artifact 必须是完整 HTML document。
+- 工具入口新增 task artifact policy：图片 prompt/generation 工具只允许 image artifact task，`image-generation` negative capability 会阻止新图生成；`image_matting` 仍要求 image artifact task 但不视为新图生成；`decompose_image` / `analyze_media` 要求对应 image inspection capability，可产出 markdown/document 分析 artifact；`create_text_artifact` 只允许 markdown/document/diagram/code/webpage 文本类 artifact task，Mermaid diagram 必须包含 mermaid fenced block，webpage artifact 必须是完整 HTML document。
 
 ## 2026-06-16 Dynamic Run Plan
 
@@ -97,7 +105,7 @@
 - `knownNodeIds` 不再信任客户端 upstream IDs 或 edge 端点。
 - SDK stream 投影 Agent、handoff、tool、artifact、canvas operation、final output 和 error；等待 `stream.completed`。
 - 工具失败先写 `tool.error` 再写 `run.failed`；`run.completed` 写真实 finalOutput 和 artifact IDs。
-- 删除 `create_artifact`、`attach_artifact`，图片生成 artifact 由 `generate_image` 产生；高清放大 artifact 由 `upscale_image` 或图片 toolbar 直连接口产生。
+- 删除 `create_artifact`、`attach_artifact`，图片生成 artifact 由 `generate_image` 产生；抠图 artifact 由 `image_matting` 产生；高清放大 artifact 由 `upscale_image` 或图片 toolbar 直连接口产生。
 - Canvas policy 只允许完整便签/形状、位置更新、合法连边和当前 Run 状态；内容节点与 artifact 不可由通用 operation 伪造。
 - 删除 Agent v1 runtime、router、kernel、capabilities、旧 prompts/provider、Skill parser/API/UI、审批、Evaluator、附件提交和 legacy event adapter。
 - 前端模型选择器删除；模型按 Ark、DeepSeek、OpenAI 的服务端环境优先级选择。
@@ -116,7 +124,7 @@
 ## 2026-06-12 Image Request Boundary
 
 - 新增 `server/agent/tools/image/generate-image.request.ts`，集中负责图片数量、尺寸/比例和 upstream 引用图归一化。
-- `generate_image` 工具只做 Agent tool 边界、artifact 事件和图片 provider 调用编排；图片生成 provider 支持 `IMAGE_PROVIDER=seedream` 或 `IMAGE_PROVIDER=coze`，其中 Coze 请求体为 `prompt`、`reference_images`、`size`、`watermark`、`model`；`reference_images` 是由上游图片 URL 生成的 `{ url }` file dict 数组，`size/model` 是字符串，`watermark` 是布尔值，空配置不发送占位字段。
+- `generate_image` 工具只做 Agent tool 边界、artifact 事件和图片 provider 调用编排；`image_matting` 工具只依赖 `runImageMatting` 统一接口，当前实现用 `IMAGE_MATTING_PROVIDER=rembg` 调用 rembg 2.x CLI；图片生成 provider 支持 `IMAGE_PROVIDER=seedream` 或 `IMAGE_PROVIDER=coze`，其中 Coze 请求体为 `prompt`、`reference_images`、`size`、`watermark`、`model`；`reference_images` 是由上游图片 URL 生成的 `{ url }` file dict 数组，`size/model` 是字符串，`watermark` 是布尔值，空配置不发送占位字段。
 - 底部输入器可选择本轮图片 provider；客户端只提交白名单 `imageProvider`，服务端写入 agent context 后由 `generate_image` 选择 provider，`upscale_image` 仍只走 Seedream。
 - `seedream.ts` 收敛为 Seedream provider 执行层，保留配置读取、签名、提交/轮询、并发/重试、取消和 provider metadata。
 - 多张图片生成按 `SEEDREAM_MAX_CONCURRENCY` 限制完整 submit+poll 生命周期的并发数，并按 `SEEDREAM_STAGGER_MS` 间隔启动新任务；默认 `SEEDREAM_MAX_CONCURRENCY=1` 会等上一张完整出图或失败后再提交下一张，避免触发 Seedream 账号级并发限制。
@@ -125,7 +133,7 @@
 
 - Agent Run 在 Manager 启动前通过 `server/agent/input-normalizer.ts` 生成结构化 `normalizedInput`，并写入 `input.normalized` Trace。
 - 图片生成请求会单独抽取 `contentPrompt`、`resultCount`、`aspectRatio` 或 `dimensions`；`generate_image` 接收这些结构化参数，prompt 文本推断仅作为旧调用兼容。
-- 分析、评估或给建议类视觉 brief（如图片、海报、banner、KV 需求）默认归一化为 `text.answer`；只有用户明确要求生成、创建或渲染图片时才进入 `image.generate`。
+- 分析、评估或给建议类视觉 brief（如图片、海报、banner、KV 需求）默认归一化为 `text.answer`；只有用户明确要求生成、创建或渲染图片时才进入 `image.generate`。如果请求明确指向选中/上游实际图片，风格拆解归一化为 `image.decompose`，内容理解/信息提取归一化为 `media.analyze`，抠图/去背景归一化为 `image.matting`。
 
 ## 2026-06-13 Multi Node References
 
@@ -142,9 +150,10 @@
 
 ## 2026-06-12 Image Node Toolbar
 
-- 图片结果节点选中后显示浮动 toolbar，当前提供放大查看、高清放大、下载和复制四个用户动作。
+- 图片结果节点选中后显示浮动 toolbar，当前提供放大查看、高清放大、抠图、下载和复制五个用户动作。
 - 放大查看使用轻量图片预览弹窗，不改变画布节点和 Agent Trace。
 - 高清放大 toolbar 动作不创建 Agent Run；它调用 `POST /api/projects/:projectId/images/upscale`，服务端从已保存项目中校验 `sourceNodeId`、签发图片读取 URL、调用 Seedream 智能超清并将新图片节点直接连到原图。
+- 抠图 toolbar 动作不创建 Agent Run；它调用 `POST /api/projects/:projectId/images/matting`，服务端复用 `runImageMatting` provider 接口、当前 rembg 2.x 实现和同一套可信源图解析，将透明底抠图结果节点直接连到原图。
 - 复制优先尝试图片二进制；浏览器权限、跨域或读取超时时降级复制稳定图片链接，并在按钮 title 中反馈结果。
 
 ## 2026-06-12 Project Persistence
@@ -159,10 +168,10 @@
 - Supabase Storage private bucket `agent-assets` 成为用户上传和 Seedream 生成图片的对象存储边界；画布快照只保存稳定 `ArtifactRef`、`contentRef` 和同源 content API URL。
 - 用户拖拽文件会先插入本地预览节点并后台上传；浏览器使用 Supabase signed upload token 直传，再调用 `/complete` 写入 `agent_artifacts`，成功后用真实 artifact 节点替换本地节点。
 - 本地上传中/失败的节点不会进入项目持久化或 Agent upstream context；上传失败会留在画布上展示错误状态。
-- `generate_image` 和 `upscale_image` 收到 Seedream URL 后由服务端下载并上传到 `agent-assets`，随后才发 `artifact.created`；转存失败会走 `tool.error`/`run.failed`，不会生成假成功结果节点。toolbar 高清放大同样先转存再把真实节点写回项目。
+- `generate_image` 和 `upscale_image` 收到 Seedream URL 后由服务端下载并上传到 `agent-assets`，随后才发 `artifact.created`；转存失败会走 `tool.error`/`run.failed`，不会生成假成功结果节点。toolbar 高清放大和抠图同样先转存再把真实节点写回项目。
 - 上游图片引用对 Manager prompt 仍隐藏真实 URL；调用 Seedream 前，服务端仅根据 `supabase://agent-assets/...` 临时签发 provider 可读 URL。
 - Agent 模型 provider 改为 Agents SDK 官方 `ModelProvider` + `Runner({ model, modelProvider })` 写法；Manager、specialist、input normalizer 和 prompt expansion 共用同一 Runner provider 配置。
-- 媒体 provider 独立暴露：图片 provider 已接入工具配置检查；视频 provider 仅进入 `/api/health` 配置面，尚未启用 `generate_video`、video artifact 或画布投影。
+- 媒体 provider 独立暴露：图片生成 provider 和图片抠图 provider 已接入配置检查；视频 provider 仅进入 `/api/health` 配置面，尚未启用 `generate_video`、video artifact 或画布投影。
 - 私有预览统一走 `/api/projects/:projectId/artifacts/:artifactId/content`，服务端校验项目权限后 302 到短期 signed read URL。
 - P1 typed artifact shell：非图片 artifact 节点统一展示标题、摘要、来源工具/Run、创建时间、大小、预览/打开/下载入口；短文本最终回复保留在 Run 节点，只有 Document/Web/Research 等工具真实创建 artifact 时才物化为 Markdown/document/webpage 节点。
 - 上下文收集默认使用 token 估算 budget，按图结构和 priority 保留选中节点，省略项写入 `contextSummary.omittedNodes` 和 Trace。

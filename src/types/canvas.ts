@@ -186,7 +186,7 @@ export type ImageResultNodeData = {
   prompt: string;
   runId?: string;
   sourceNodeId?: string;
-  operation?: "upscale";
+  operation?: "matting" | "upscale";
   request?: ImageRequestPreview;
   status?: ImageResultStatus;
   upload?: LocalUploadState;

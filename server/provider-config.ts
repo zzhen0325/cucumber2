@@ -1,6 +1,7 @@
 import { isSeedreamConfigured } from "../seedream.ts";
 import { isCozeImageConfigured } from "../coze.ts";
 import { getAgentModelConfiguration } from "./agent/model-config.ts";
+import { getImageMattingProviderConfiguration } from "./agent/tools/image/image-matting-provider.ts";
 
 export type RuntimeProviderConfiguration = {
   configured: boolean;
@@ -14,6 +15,7 @@ export function getRuntimeProviderConfiguration() {
   return {
     agent: getAgentModelConfiguration(),
     image: getImageProviderConfiguration(),
+    imageMatting: getImageMattingProviderConfiguration(),
     video: getVideoProviderConfiguration(),
   };
 }
@@ -52,9 +54,19 @@ export function getImageProviderConfiguration(
 }
 
 export function assertImageProviderConfigured(
-  action: "generation" | "upscale",
+  action: "generation" | "matting" | "upscale",
   providerOverride?: ImageProviderSelection | null
 ) {
+  if (action === "matting") {
+    const matting = getImageMattingProviderConfiguration();
+    if (!matting.configured) {
+      throw new Error(
+        `Image matting provider "${matting.provider ?? "none"}" is not configured. Set IMAGE_MATTING_PROVIDER=rembg and REMBG_BIN.`
+      );
+    }
+    return matting;
+  }
+
   const image = getImageProviderConfiguration(providerOverride);
   if (image.provider === "coze" && action === "generation") {
     if (!image.configured) {

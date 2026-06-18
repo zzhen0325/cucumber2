@@ -13,6 +13,8 @@ export type CanvasMutationReason =
   | "markdown-edit"
   | "shape-edit"
   | "upload-complete"
+  | "matting-pending"
+  | "matting-complete"
   | "upscale-pending"
   | "upscale-complete"
   | "agent-stream-projection"

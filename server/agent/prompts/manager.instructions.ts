@@ -25,7 +25,8 @@ const baseManagerInstructions = `你是 Cucumber Manager，是无限智能体画
 
 当前功能范围：
 - 你是统筹管理智能体。路由优先依据 normalized_input.operation、normalized_input.artifact 和 capabilities，不依据关键词猜测。
-- artifact.kind=image 的图片生成、图片创建、基于参考图继续生成、图片高清/超清/4K/8K 放大或提升清晰度请求，必须转交给 Cucumber Image Agent；Cucumber Image Agent 持有图片生成和高清放大工具，并负责让结果渲染到画布上。你自己不得执行图片生成或图片处理。
+- artifact.kind=image 的图片生成、图片创建、基于参考图继续生成、抠图/去背景/透明底素材、图片高清/超清/4K/8K 放大或提升清晰度请求，必须转交给 Cucumber Image Agent；Cucumber Image Agent 持有图片生成、抠图和高清放大工具，并负责让结果渲染到画布上。你自己不得执行图片生成或图片处理。
+- requiredCapabilities 包含 image-decompose 或 media-analysis 的图片拆解、图片理解、图片信息提取请求，必须转交给 Cucumber Image Agent；这类任务会产出 markdown artifact 或作为后续图片生成的中间步骤。
 - artifact.kind 为 markdown、document、diagram、webpage 或 code 的 Markdown、文档、PRD、方案、brief、说明、会议纪要、邮件草稿、Mermaid 图表、HTML 页面/动画/demo 和结构化文本资产生成/改写请求，必须转交给 Cucumber Document Agent；Document Agent 持有文本 artifact 工具，并负责让结果渲染到画布上。你自己不得创建内容 artifact。
 - “视觉”“H5”“营销”“产品”通常是 domain 或上下文；只有 artifact.kind=image 才代表图片产物。流程图、时序图默认是 diagram/mermaid 文档产物，不是图片生成任务。
 - “HTML 动画”“H5 页面”“交互 demo”“网页原型”默认是 artifact.kind=webpage、format=html，不是图片生成任务。
@@ -53,7 +54,7 @@ function buildNormalizedInputInstructions(context?: CucumberAgentContext) {
     "规格化输入：",
     `normalized_input: ${JSON.stringify(context.normalizedInput)}`,
     "- 路由和执行优先依据 normalized_input.operation、artifact、requiredCapabilities、negativeCapabilities。",
-    "- artifact.kind=image 必须转交给 Cucumber Image Agent；如果 negativeCapabilities 包含 image-generation，禁止图片生成。",
+    "- artifact.kind=image 必须转交给 Cucumber Image Agent；requiredCapabilities 包含 image-decompose/media-analysis 也必须转交给 Cucumber Image Agent；如果 negativeCapabilities 包含 image-generation，禁止图片生成。",
     "- operation=edit 且 artifact=null 的提示词/文本修改任务直接最终回复修改后的文本，不调用工具、不 handoff。",
     "- artifact.kind=diagram/markdown/document/webpage/code 必须转交给 Cucumber Document Agent；webpage/html 生成任务不要转交给 Image Agent。",
     "- 明确要求详细说明、完整规划、长篇方案、调研分析、报告或文档的任务应视为 artifact.kind=document/markdown；由 Cucumber Document Agent 创建长文本 artifact。",
@@ -81,12 +82,12 @@ function buildSkillInstructions(context?: CucumberAgentContext) {
     uses: skill.uses,
     notFor: skill.notFor,
     bindings: skill.bindings,
-      scripts: skill.scripts.map(({ description, name, path, runtime }) => ({
-        description,
-        name,
-        path,
-        runtime,
-      })),
+    scripts: skill.scripts.map(({ description, name, path, runtime }) => ({
+      description,
+      name,
+      path,
+      runtime,
+    })),
     score: skill.score,
     reasons: skill.reasons,
   }));

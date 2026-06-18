@@ -53,8 +53,14 @@ export function createSpecialistAgentRegistry(): SpecialistAgentDefinition[] {
       enabledRoutes: ["image"],
       handoffPolicy: shouldEnableImageHandoff,
       name: "Cucumber Image Agent",
-      producedArtifactTypes: ["image"],
-      requiredTools: ["generate_image", "upscale_image"],
+      producedArtifactTypes: ["image", "doc"],
+      requiredTools: [
+        "analyze_media",
+        "decompose_image",
+        "generate_image",
+        "image_matting",
+        "upscale_image",
+      ],
     },
   ];
   return specialistAgentRegistry;
@@ -118,6 +124,10 @@ function shouldEnableImageHandoff(context: CucumberAgentContext) {
     (skill) =>
       skill.agentScope === "image" ||
       skill.bindings.agents.some((agent) => /image/i.test(agent)) ||
-      skill.bindings.tools.some((toolName) => /generate_image|upscale_image/i.test(toolName))
+      skill.bindings.tools.some((toolName) =>
+        /analyze_media|decompose_image|generate_image|image_matting|upscale_image/i.test(
+          toolName
+        )
+      )
   );
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CucumberAgentContext } from "../context.ts";
 import {
+  assertImageInspectionToolAllowed,
   assertImageToolAllowed,
   assertTextArtifactToolAllowed,
 } from "./task-artifact-policy.ts";
@@ -113,6 +114,45 @@ describe("task artifact policy", () => {
         })
       )
     ).toThrow("tool_policy_rejected");
+  });
+
+  it("allows image matting even when image generation is blocked", () => {
+    expect(() =>
+      assertImageToolAllowed(
+        context({
+          normalizedInput: {
+            rawPrompt: "给这张图去背景",
+            userGoal: "给这张图去背景",
+            operation: "transform",
+            artifact: { kind: "image", format: "png" },
+            domain: "visual-design",
+            requiredCapabilities: ["image-matting"],
+            negativeCapabilities: ["image-generation"],
+          },
+        }),
+        "image_matting"
+      )
+    ).not.toThrow();
+  });
+
+  it("allows image inspection tools for markdown image analysis tasks", () => {
+    expect(() =>
+      assertImageInspectionToolAllowed(
+        context({
+          normalizedInput: {
+            rawPrompt: "分析这张图的风格",
+            userGoal: "分析这张图的风格",
+            operation: "analyze",
+            artifact: { kind: "markdown", format: "markdown" },
+            domain: "visual-design",
+            requiredCapabilities: ["image-decompose", "markdown-artifact"],
+            negativeCapabilities: ["image-generation"],
+          },
+        }),
+        "decompose_image",
+        "image-decompose"
+      )
+    ).not.toThrow();
   });
 });
 

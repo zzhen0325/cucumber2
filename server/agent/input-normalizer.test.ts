@@ -165,7 +165,7 @@ describe("input normalizer", () => {
     expect(selectAgentRoute(normalized)).toBe("document");
   });
 
-  it("keeps image style analysis out of image generation", () => {
+  it("routes actual image style analysis to Image Agent markdown decomposition", () => {
     const raw = "分析这张图的风格";
 
     const normalized = finalizeNormalizedAgentInput(
@@ -179,12 +179,57 @@ describe("input normalizer", () => {
 
     expect(normalized).toMatchObject({
       operation: "analyze",
-      artifact: null,
+      artifact: { kind: "markdown", format: "markdown" },
       domain: "visual-design",
+      requiredCapabilities: ["image-decompose", "markdown-artifact"],
       negativeCapabilities: ["image-generation"],
-      intent: "text.answer",
+      intent: "image.decompose",
     });
     expect(normalized.image).toBeUndefined();
+    expect(selectAgentRoute(normalized)).toBe("image");
+  });
+
+  it("routes media understanding to Image Agent markdown analysis", () => {
+    const raw = "这张图里有什么，帮我提取关键信息";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "answer",
+        artifact: null,
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "analyze",
+      artifact: { kind: "markdown", format: "markdown" },
+      requiredCapabilities: ["media-analysis", "markdown-artifact"],
+      negativeCapabilities: ["image-generation"],
+      intent: "media.analyze",
+    });
+    expect(selectAgentRoute(normalized)).toBe("image");
+  });
+
+  it("routes image matting to image transform", () => {
+    const raw = "给这张图去背景，输出透明底素材";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "answer",
+        artifact: null,
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "transform",
+      artifact: { kind: "image", format: "png" },
+      requiredCapabilities: ["image-matting"],
+      intent: "image.matting",
+    });
+    expect(selectAgentRoute(normalized)).toBe("image");
   });
 
   it("keeps short QA on the manager route", () => {

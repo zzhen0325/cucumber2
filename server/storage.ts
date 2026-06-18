@@ -69,6 +69,11 @@ type StoreGeneratedImageInput = {
   signal?: AbortSignal;
 };
 
+type StoreGeneratedImageBytesInput = Omit<StoreGeneratedImageInput, "sourceUrl"> & {
+  bytes: Uint8Array;
+  mimeType: string;
+};
+
 type StoreTextArtifactInput = {
   content: string;
   metadata?: Record<string, unknown>;
@@ -228,7 +233,21 @@ export async function storeGeneratedImageFromUrl(
   }
 
   const bytes = new Uint8Array(await response.arrayBuffer());
-  assertAllowedAssetSize(bytes.byteLength);
+  return storeGeneratedImageFromBytes({
+    ...input,
+    bytes,
+    mimeType,
+  });
+}
+
+export async function storeGeneratedImageFromBytes(
+  input: StoreGeneratedImageBytesInput
+): Promise<ArtifactRef> {
+  const mimeType = normalizeMimeType(input.mimeType);
+  if (!mimeType.startsWith("image/")) {
+    throw new Error(`Generated asset is not an image (${mimeType}).`);
+  }
+  assertAllowedAssetSize(input.bytes.byteLength);
 
   const path = `${getGeneratedImageStoragePrefix(input)}/${sanitizePathSegment(
     input.artifactId
@@ -236,7 +255,7 @@ export async function storeGeneratedImageFromUrl(
   const { error } = await getSupabaseClient()
     .storage
     .from(AGENT_ASSETS_BUCKET)
-    .upload(path, bytes, {
+    .upload(path, input.bytes, {
       cacheControl: "31536000",
       contentType: mimeType,
       upsert: false,
@@ -253,14 +272,14 @@ export async function storeGeneratedImageFromUrl(
   const origin = provider === "coze" ? "coze_generated" : "seedream_generated";
   const metadata = compactRecord({
     ...input.metadata,
-    byteSize: bytes.byteLength,
+    byteSize: input.bytes.byteLength,
     createdBy: input.userId,
-    digest: createSha256Digest(bytes),
+    digest: createSha256Digest(input.bytes),
     mimeType,
     origin,
     previewKind: "image",
     projectId: input.projectId,
-    size: bytes.byteLength,
+    size: input.bytes.byteLength,
     sourceRunNodeId: input.runNodeId,
     sourceToolName:
       input.sourceToolName ??
@@ -278,7 +297,7 @@ export async function storeGeneratedImageFromUrl(
     origin,
     projectId: input.projectId,
     runNodeId: input.runNodeId,
-    sizeBytes: bytes.byteLength,
+    sizeBytes: input.bytes.byteLength,
     sourceNodeId: input.sourceNodeId,
     storagePath: path,
     title: input.title,
@@ -410,7 +429,12 @@ export async function downloadAgentSkillPackage({
   return bytes;
 }
 
-function getGeneratedImageStoragePrefix(input: StoreGeneratedImageInput) {
+function getGeneratedImageStoragePrefix(
+  input: Pick<
+    StoreGeneratedImageInput,
+    "projectId" | "runNodeId" | "sourceNodeId"
+  >
+) {
   if (input.runNodeId) {
     return `projects/${input.projectId}/runs/${sanitizePathSegment(
       input.runNodeId
