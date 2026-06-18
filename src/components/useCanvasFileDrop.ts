@@ -24,6 +24,11 @@ type UseCanvasFileDropOptions = {
   setNodes: Dispatch<SetStateAction<AgentCanvasNode[]>>;
 };
 
+type CanvasScreenPoint = {
+  x: number;
+  y: number;
+};
+
 export function useCanvasFileDrop({
   canUploadFiles,
   commitCanvasMutation,
@@ -75,6 +80,100 @@ export function useCanvasFileDrop({
   const showUploadError = useCallback((message: string) => {
     setUploadError(message);
   }, []);
+
+  const handleClipboardFiles = useCallback(
+    async (files: readonly File[], screenPoint: CanvasScreenPoint) => {
+      if (!files.length) {
+        return false;
+      }
+
+      if (!canUploadFiles) {
+        setUploadError("当前画布不可上传文件");
+        return false;
+      }
+      if (!projectId) {
+        setUploadError("项目尚未加载完成");
+        return false;
+      }
+
+      const instance = flowInstance.current;
+      if (!instance) {
+        setUploadError("画布尚未就绪，请稍后再试");
+        return false;
+      }
+
+      try {
+        const position = instance.screenToFlowPosition(screenPoint);
+        const preparedUploads = await prepareLocalCanvasUploads(
+          files,
+          position,
+          nodes
+        );
+
+        setNodes((current) => [
+          ...clearSelectedNodes(current),
+          ...preparedUploads.map((item) => ({ ...item.localNode, selected: true })),
+        ]);
+        setUploadError(null);
+
+        for (const item of preparedUploads) {
+          void uploadProjectFileAsset(projectId, item.upload)
+            .then((artifact) => {
+              const finalNode = replaceLocalUploadNode(
+                [item.localNode],
+                item.localNode.id,
+                createCanvasNodeFromUploadedFile(item.upload, artifact)
+              )[0];
+              const currentEdges = edgesRef.current;
+              const replacedEdges = replaceLocalUploadEdges(
+                currentEdges,
+                item.localNode.id,
+                finalNode.id
+              );
+              const edgeUpserts = replacedEdges.filter(
+                (edge, index) => edge !== currentEdges[index]
+              );
+              if (commitCanvasMutation) {
+                commitCanvasMutation({
+                  reason: "upload-complete",
+                  patch: {
+                    edgeUpserts,
+                    nodeDeletes: [item.localNode.id],
+                    nodeUpserts: [finalNode],
+                  },
+                  persist: true,
+                });
+                return;
+              }
+              setNodes((current) =>
+                replaceLocalUploadNode(current, item.localNode.id, finalNode)
+              );
+              setEdges((current) =>
+                replaceLocalUploadEdges(current, item.localNode.id, finalNode.id)
+              );
+            })
+            .catch((nextError: unknown) => {
+              const message = getClientError(nextError);
+              setNodes((current) =>
+                markLocalUploadNodeError(current, item.localNode.id, message)
+              );
+              setUploadError(message);
+            })
+            .finally(() => {
+              if (item.objectUrl) {
+                URL.revokeObjectURL(item.objectUrl);
+              }
+            });
+        }
+
+        return true;
+      } catch (nextError) {
+        setUploadError(getClientError(nextError));
+        return false;
+      }
+    },
+    [canUploadFiles, commitCanvasMutation, nodes, projectId, setEdges, setNodes]
+  );
 
   const handleFileDragEnter = useCallback(
     (event: DragEvent<HTMLElement>) => {
@@ -145,87 +244,17 @@ export function useCanvasFileDrop({
         return;
       }
 
-      const instance = flowInstance.current;
-      if (!instance) {
-        setUploadError("画布尚未就绪，请稍后再试");
-        return;
-      }
-
-      try {
-        const position = instance.screenToFlowPosition({
-          x: event.clientX,
-          y: event.clientY,
-        });
-        const preparedUploads = await prepareLocalCanvasUploads(
-          files,
-          position,
-          nodes
-        );
-
-        setNodes((current) => [
-          ...clearSelectedNodes(current),
-          ...preparedUploads.map((item) => ({ ...item.localNode, selected: true })),
-        ]);
-        setUploadError(null);
-
-        for (const item of preparedUploads) {
-          void uploadProjectFileAsset(projectId, item.upload)
-            .then((artifact) => {
-              const finalNode = replaceLocalUploadNode(
-                [item.localNode],
-                item.localNode.id,
-                createCanvasNodeFromUploadedFile(item.upload, artifact)
-              )[0];
-              const currentEdges = edgesRef.current;
-              const replacedEdges = replaceLocalUploadEdges(
-                currentEdges,
-                item.localNode.id,
-                finalNode.id
-              );
-              const edgeUpserts = replacedEdges.filter(
-                (edge, index) => edge !== currentEdges[index]
-              );
-              if (commitCanvasMutation) {
-                commitCanvasMutation({
-                  reason: "upload-complete",
-                  patch: {
-                    edgeUpserts,
-                    nodeDeletes: [item.localNode.id],
-                    nodeUpserts: [finalNode],
-                  },
-                  persist: true,
-                });
-                return;
-              }
-              setNodes((current) =>
-                replaceLocalUploadNode(current, item.localNode.id, finalNode)
-              );
-              setEdges((current) =>
-                replaceLocalUploadEdges(current, item.localNode.id, finalNode.id)
-              );
-            })
-            .catch((nextError: unknown) => {
-              const message = getClientError(nextError);
-              setNodes((current) =>
-                markLocalUploadNodeError(current, item.localNode.id, message)
-              );
-              setUploadError(message);
-            })
-            .finally(() => {
-              if (item.objectUrl) {
-                URL.revokeObjectURL(item.objectUrl);
-              }
-            });
-        }
-      } catch (nextError) {
-        setUploadError(getClientError(nextError));
-      }
+      await handleClipboardFiles(files, {
+        x: event.clientX,
+        y: event.clientY,
+      });
     },
-    [canUploadFiles, commitCanvasMutation, nodes, projectId, setEdges, setNodes]
+    [canUploadFiles, handleClipboardFiles, projectId]
   );
 
   return {
     clearUploadError,
+    handleClipboardFiles,
     handleCanvasInit,
     handleFileDragEnter,
     handleFileDragLeave,

@@ -16,6 +16,7 @@
 ## Working Rules
 
 - 每个功能域保持清晰、独立、唯一的职责边界。
+- 目标是通用Agent OS，遇到问题不要单独修某一个类型的特例。
 - 保持改动小而完整，不新增平行状态绕开 `AgentCanvasNode`、`AgentCanvasEdge` 和 `RunDraft`。
 - 不做 legacy adapter、降级或静默兜底；错误直接进入 Run 节点和 Trace。
 - Agent 执行必须在画布可见：prompt、run、Agent/handoff、tool、artifact、canvas operation 和 error 都由事件投影。
@@ -29,7 +30,7 @@
 - 流式 UI 改动先查看 AI SDK 官方文档：<https://ai-sdk.dev/docs>。
 - 新增能力同步更新 `README.md` 或 `process.md`；UI 改动先阅读 `design.md`。
 - 文件超过 1500 行时优先按职责拆分。
-- 只运行与改动相关的最小测试集，优先使用codex的Chrome插件进行测试。
+- 优先使用codex的Chrome插件进行测试。
 - 测试用真实数据进行，本地临时 QA 账号：用户名：zz  密码：123456
 - 数据库如果有修改，一定要同步远端数据库
 

@@ -176,6 +176,8 @@ const edgeTypes = {
 
 const initialNodes: AgentCanvasNode[] = [];
 const initialEdges: AgentCanvasEdge[] = [];
+const CANVAS_CLIPBOARD_MIME = "application/x-cucumber2-canvas-nodes";
+const CANVAS_CLIPBOARD_TEXT = "Cucumber canvas nodes";
 const BlockNoteMarkdownEditor = lazy(() =>
   import("@/components/BlockNoteMarkdownEditor").then((module) => ({
     default: module.BlockNoteMarkdownEditor,
@@ -991,7 +993,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     setEdges,
     setNodes,
   });
-  const { showUploadError } = fileDrop;
+  const { handleClipboardFiles, showUploadError } = fileDrop;
 
   const handleCanvasInit = useCallback(
     (instance: ReactFlowInstance<AgentCanvasNode, AgentCanvasEdge>) => {
@@ -1869,11 +1871,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
   const handleCopySelection = useCallback(() => {
     if (isReplayModeRef.current) {
-      return;
+      return false;
     }
     const selected = nodesRef.current.filter((node) => node.selected);
     if (!selected.length) {
-      return;
+      return false;
     }
     const selectedIds = new Set(selected.map((node) => node.id));
     const internalEdges = edgesRef.current.filter(
@@ -1883,6 +1885,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       nodes: structuredClone(selected),
       edges: structuredClone(internalEdges),
     };
+    return true;
   }, []);
 
   const handlePasteClipboard = useCallback(() => {
@@ -1940,6 +1943,43 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     });
   }, [commitCanvasMutation]);
 
+  const handlePasteTextAsPromptNode = useCallback(
+    (rawText: string) => {
+      if (isReplayModeRef.current) {
+        return false;
+      }
+
+      const promptText = normalizePastedPlainText(rawText);
+      const instance = flowInstance.current;
+      if (!promptText || !instance) {
+        return false;
+      }
+
+      const template = createManualPromptTemplate(promptText);
+      const dimensions = getDefaultManualNodeDimensions(template);
+      const position = instance.screenToFlowPosition(
+        getCanvasPasteScreenPoint(pointerScreenRef.current)
+      );
+      const node = createManualCanvasNode(template, position, dimensions);
+      const previous = { edges: edgesRef.current, nodes: nodesRef.current };
+      const next = {
+        edges: edgesRef.current,
+        nodes: [
+          ...applySelectedNodeIds(nodesRef.current, []),
+          { ...node, selected: true },
+        ],
+      };
+      commitCanvasMutation({
+        reason: "paste",
+        patch: diffCanvasPatch(previous, next),
+        persist: true,
+      });
+
+      return true;
+    },
+    [commitCanvasMutation]
+  );
+
   useEffect(() => {
     const handlePointerMove = (event: MouseEvent) => {
       pointerScreenRef.current = { x: event.clientX, y: event.clientY };
@@ -1949,21 +1989,84 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   }, []);
 
   useEffect(() => {
+    const handleCopy = (event: ClipboardEvent) => {
+      if (isEditableTextTarget(event.target)) {
+        return;
+      }
+
+      const selection = window.getSelection();
+      if (selection && selection.toString().length > 0) {
+        return;
+      }
+
+      if (!handleCopySelection()) {
+        return;
+      }
+
+      event.clipboardData?.setData(CANVAS_CLIPBOARD_MIME, "nodes");
+      event.clipboardData?.setData("text/plain", CANVAS_CLIPBOARD_TEXT);
+      event.preventDefault();
+    };
+
+    const handlePaste = (event: ClipboardEvent) => {
+      if (isEditableTextTarget(event.target)) {
+        return;
+      }
+
+      const files = getClipboardFiles(event.clipboardData);
+      if (files.length) {
+        event.preventDefault();
+        void handleClipboardFiles(
+          files,
+          getCanvasPasteScreenPoint(pointerScreenRef.current)
+        );
+        return;
+      }
+
+      if (
+        hasCanvasClipboardPayload(event.clipboardData) &&
+        clipboardRef.current?.nodes.length
+      ) {
+        event.preventDefault();
+        handlePasteClipboard();
+        return;
+      }
+
+      const text = getClipboardPlainText(event.clipboardData);
+      if (text && handlePasteTextAsPromptNode(text)) {
+        event.preventDefault();
+        return;
+      }
+
+      if (clipboardRef.current?.nodes.length) {
+        event.preventDefault();
+        handlePasteClipboard();
+      }
+    };
+
+    window.addEventListener("copy", handleCopy);
+    window.addEventListener("paste", handlePaste);
+    return () => {
+      window.removeEventListener("copy", handleCopy);
+      window.removeEventListener("paste", handlePaste);
+    };
+  }, [
+    handleClipboardFiles,
+    handleCopySelection,
+    handlePasteClipboard,
+    handlePasteTextAsPromptNode,
+  ]);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey) {
         return;
       }
       const key = event.key.toLowerCase();
-      if (key !== "c" && key !== "v") {
+      if (key !== "c") {
         return;
       }
-      const target = event.target as HTMLElement | null;
-      if (
-        target &&
-        (target.isContentEditable ||
-          target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA")
-      ) {
+      if (isEditableTextTarget(event.target)) {
         return;
       }
       const selection = window.getSelection();
@@ -1972,14 +2075,12 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       }
       if (key === "c") {
         handleCopySelection();
-      } else {
-        event.preventDefault();
-        handlePasteClipboard();
+        return;
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleCopySelection, handlePasteClipboard]);
+  }, [handleCopySelection]);
 
   const handleUpscaleImageNode = useCallback(
     async (sourceNodeId: string) => {
@@ -2959,6 +3060,93 @@ function isCanvasPaneEventTarget(target: EventTarget) {
   );
 }
 
+function isEditableTextTarget(target: EventTarget | null) {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+
+  const tagName = target.tagName;
+  return (
+    (target instanceof HTMLElement && target.isContentEditable) ||
+    tagName === "INPUT" ||
+    tagName === "TEXTAREA" ||
+    tagName === "SELECT" ||
+    Boolean(target.closest('[contenteditable="true"], [role="textbox"]'))
+  );
+}
+
+function getClipboardPlainText(clipboardData: DataTransfer | null) {
+  return normalizePastedPlainText(clipboardData?.getData("text/plain") ?? "");
+}
+
+function getClipboardFiles(clipboardData: DataTransfer | null) {
+  if (!clipboardData) {
+    return [];
+  }
+
+  const files = Array.from(clipboardData.files ?? []);
+  if (files.length) {
+    return files;
+  }
+
+  return Array.from(clipboardData.items ?? []).flatMap((item) => {
+    if (item.kind !== "file") {
+      return [];
+    }
+
+    const file = item.getAsFile();
+    return file ? [file] : [];
+  });
+}
+
+function hasCanvasClipboardPayload(clipboardData: DataTransfer | null) {
+  if (!clipboardData) {
+    return false;
+  }
+
+  return (
+    Array.from(clipboardData.types).includes(CANVAS_CLIPBOARD_MIME) ||
+    clipboardData.getData("text/plain") === CANVAS_CLIPBOARD_TEXT
+  );
+}
+
+function normalizePastedPlainText(text: string) {
+  const normalized = text.replace(/\r\n?/g, "\n");
+  return normalized.trim().length > 0 ? normalized : "";
+}
+
+function getCanvasPasteScreenPoint(pointer: CanvasPoint | null) {
+  if (typeof document !== "undefined") {
+    const pane = document.querySelector(".react-flow__pane");
+    const rect = pane?.getBoundingClientRect();
+    if (rect && rect.width > 0 && rect.height > 0) {
+      if (
+        pointer &&
+        pointer.x >= rect.left &&
+        pointer.x <= rect.right &&
+        pointer.y >= rect.top &&
+        pointer.y <= rect.bottom
+      ) {
+        return pointer;
+      }
+
+      return {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+      };
+    }
+  }
+
+  if (pointer) {
+    return pointer;
+  }
+
+  return {
+    x: typeof window === "undefined" ? 0 : window.innerWidth / 2,
+    y: typeof window === "undefined" ? 0 : window.innerHeight / 2,
+  };
+}
+
 function screenRectFromPoints(start: CanvasPoint, end: CanvasPoint) {
   return {
     height: Math.abs(end.y - start.y),
@@ -3046,6 +3234,19 @@ function createManualCanvasNode(
       shape: template.shape,
     },
   };
+}
+
+function createManualPromptTemplate(prompt: string) {
+  const template = manualNodeTemplates.find(
+    (item): item is Extract<ManualNodeTemplate, { kind: "prompt" }> =>
+      item.kind === "prompt"
+  );
+
+  if (!template) {
+    throw new Error("Manual prompt template is missing.");
+  }
+
+  return { ...template, prompt };
 }
 
 function createCanvasNodeId(prefix: string) {
