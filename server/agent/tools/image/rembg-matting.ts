@@ -22,7 +22,7 @@ export type RembgMattingConfig = {
 };
 
 const defaultTimeoutMs = 120_000;
-const defaultHealthCheckTimeoutMs = 10_000;
+const defaultHealthCheckTimeoutMs = 30_000;
 
 export function readRembgMattingConfigFromEnv(
   env: NodeJS.ProcessEnv = process.env

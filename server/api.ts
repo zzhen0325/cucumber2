@@ -93,6 +93,7 @@ import {
   isObjectStorageConfigured,
   MAX_AGENT_ASSET_BYTES,
   readArtifactContent,
+  getArtifactStorageContentRef,
   resolveStorageBackedImageContext,
   storeGeneratedImageFromBytes,
   storeAgentSkillPackage,
@@ -1536,16 +1537,24 @@ function getImageProcessingSourceImage(
   }
 
   const artifact = node.data.artifact ?? node.data.image.artifact;
-  if (!artifact || artifact.type !== "image" || !artifact.contentRef) {
+  const contentRef =
+    artifact && artifact.type === "image"
+      ? getArtifactStorageContentRef(artifact)
+      : null;
+  if (!artifact || artifact.type !== "image" || !contentRef) {
     return {
       ok: false,
       error: `图片未保存到对象存储，无法由服务端安全${operationLabel}。`,
     };
   }
+  const storageBackedArtifact = {
+    ...artifact,
+    contentRef,
+  };
 
   return {
     ok: true,
-    artifact,
+    artifact: storageBackedArtifact,
     image: node.data.image,
     node: node as AgentCanvasNode & { data: ImageResultNodeData },
     prompt: node.data.prompt,

@@ -31,6 +31,16 @@ export type ImageMattingProviderConfiguration = {
   provider: string | null;
 };
 
+const healthyCheckTtlMs = 5 * 60 * 1000;
+const failedCheckTtlMs = 15 * 1000;
+
+let cachedProviderConfiguration:
+  | (ImageMattingProviderConfiguration & {
+      cacheKey: string;
+      expiresAt: number;
+    })
+  | null = null;
+
 export function runImageMatting(
   input: ImageMattingRunInput
 ): Promise<ImageMattingRunResult> {
@@ -52,6 +62,7 @@ export function createImageMattingArtifactId() {
 export function getImageMattingProviderConfiguration(): ImageMattingProviderConfiguration {
   const provider = readImageMattingProviderName();
   if (provider !== "rembg") {
+    cachedProviderConfiguration = null;
     return {
       configured: false,
       model: process.env.REMBG_MODEL?.trim() || null,
@@ -60,8 +71,34 @@ export function getImageMattingProviderConfiguration(): ImageMattingProviderConf
   }
 
   const config = readRembgMattingConfigFromEnv();
+  const cacheKey = JSON.stringify({
+    bin: config.bin,
+    model: config.model,
+    provider,
+  });
+  if (
+    cachedProviderConfiguration &&
+    cachedProviderConfiguration.cacheKey === cacheKey &&
+    cachedProviderConfiguration.expiresAt > Date.now()
+  ) {
+    return {
+      configured: cachedProviderConfiguration.configured,
+      model: cachedProviderConfiguration.model,
+      provider: cachedProviderConfiguration.provider,
+    };
+  }
+
+  const configured = isRembgCliConfigured(config);
+  cachedProviderConfiguration = {
+    cacheKey,
+    configured,
+    expiresAt: Date.now() + (configured ? healthyCheckTtlMs : failedCheckTtlMs),
+    model: config.model,
+    provider,
+  };
+
   return {
-    configured: isRembgCliConfigured(config),
+    configured,
     model: config.model,
     provider,
   };

@@ -120,6 +120,16 @@ export function parseStorageContentRef(contentRef: string) {
   };
 }
 
+export function getArtifactStorageContentRef(artifact: ArtifactRef) {
+  if (artifact.contentRef && parseStorageContentRef(artifact.contentRef)) {
+    return artifact.contentRef;
+  }
+
+  const bucket = readString(artifact.metadata?.storageBucket);
+  const path = readString(artifact.metadata?.storagePath);
+  return bucket && path ? getStorageContentRef(bucket, path) : null;
+}
+
 export function getArtifactContentUrl(projectId: string, artifactId: string) {
   return `/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(
     artifactId
@@ -519,14 +529,23 @@ export async function resolveStorageBackedImageContext(
         return item;
       }
 
-      const contentRef = item.contentRef ?? item.artifact?.contentRef;
+      const contentRef =
+        item.contentRef ??
+        (item.artifact ? getArtifactStorageContentRef(item.artifact) : null);
       const parsed = contentRef ? parseStorageContentRef(contentRef) : null;
-      if (!parsed) {
+      if (!contentRef || !parsed) {
         return item;
       }
 
       return {
         ...item,
+        artifact: item.artifact
+          ? {
+              ...item.artifact,
+              contentRef,
+            }
+          : item.artifact,
+        contentRef,
         imageUrl: await createSignedStorageReadUrl(parsed.bucket, parsed.path),
       };
     })

@@ -71,6 +71,7 @@ const {
   createSignedAssetUpload,
   completeSignedAssetUpload,
   getArtifactContentUrl,
+  getArtifactStorageContentRef,
   getStorageContentRef,
   parseStorageContentRef,
   resolveStorageBackedImageContext,
@@ -128,6 +129,45 @@ describe("agent asset storage helpers", () => {
     ]);
 
     expect(context[0].imageUrl).toBe("https://signed.example/object.png");
+    expect(storageMocks.createPresignedReadUrl).toHaveBeenCalledWith({
+      bucket: "agent-assets",
+      expiresIn: 600,
+      path: "projects/project-1/uploads/upload-1/reference.png",
+    });
+  });
+
+  it("recovers storage refs from artifact metadata for migrated image contexts", async () => {
+    const artifact = {
+      id: "artifact-1",
+      metadata: {
+        storageBucket: "agent-assets",
+        storagePath: "projects/project-1/uploads/upload-1/reference.png",
+      },
+      type: "image" as const,
+      uri: "/api/projects/project-1/artifacts/artifact-1/content",
+    };
+
+    expect(getArtifactStorageContentRef(artifact)).toBe(
+      "r2://agent-assets/projects/project-1/uploads/upload-1/reference.png"
+    );
+
+    const context = await resolveStorageBackedImageContext([
+      {
+        artifact,
+        imageUrl: "/api/projects/project-1/artifacts/artifact-1/content",
+        nodeId: "image-1",
+        type: "image",
+      },
+    ]);
+
+    expect(context[0]).toMatchObject({
+      contentRef:
+        "r2://agent-assets/projects/project-1/uploads/upload-1/reference.png",
+      imageUrl: "https://signed.example/object.png",
+    });
+    expect(context[0].artifact?.contentRef).toBe(
+      "r2://agent-assets/projects/project-1/uploads/upload-1/reference.png"
+    );
     expect(storageMocks.createPresignedReadUrl).toHaveBeenCalledWith({
       bucket: "agent-assets",
       expiresIn: 600,
