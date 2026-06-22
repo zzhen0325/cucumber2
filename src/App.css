@@ -2456,9 +2456,11 @@
   width: 22px;
   height: 22px;
   place-items: center;
+  border: 0;
   border-radius: 50%;
   background: #f6f6f3;
   color: #000000;
+  cursor: pointer;
   text-decoration: none;
   transition:
     background 140ms ease,
@@ -2468,6 +2470,212 @@
 .html-page-open:hover {
   background: rgba(0, 0, 0, 0.12);
   color: #000000;
+}
+
+.html-page-open:disabled {
+  cursor: default;
+  opacity: 0.36;
+}
+
+.html-source-preview {
+  min-width: 0;
+  min-height: 0;
+}
+
+.html-source-preview-code {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  border-color: #efefed;
+  border-radius: 14px;
+  background: #fbfbfa;
+}
+
+.html-source-preview-code > .relative {
+  min-height: 0;
+  overflow: auto;
+}
+
+.html-source-preview-code pre {
+  min-width: max-content;
+}
+
+.html-source-preview-header {
+  min-width: 0;
+  background: #f6f6f3;
+}
+
+.html-source-preview-header > span,
+.html-source-preview-header > div:first-child span {
+  overflow: hidden;
+  color: #737373;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.html-source-preview-title {
+  min-width: 0;
+  overflow: hidden;
+  color: #737373;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.html-source-preview-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.html-source-preview-switch {
+  display: inline-flex;
+  min-width: 0;
+  overflow: hidden;
+  align-items: center;
+  padding: 2px;
+  border: 1px solid #e8e7e4;
+  border-radius: 999px;
+  background: #ffffff;
+}
+
+.html-source-preview-switch button {
+  display: inline-flex;
+  height: 22px;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #737373;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 16px;
+  transition:
+    background 140ms ease,
+    color 140ms ease,
+    opacity 140ms ease;
+  white-space: nowrap;
+}
+
+.html-source-preview-switch button[aria-pressed="true"] {
+  background: #29bf4e;
+  color: #06100a;
+}
+
+.html-source-preview-switch button span {
+  color: inherit;
+}
+
+.html-source-preview-switch button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.html-source-preview-icon-button {
+  width: 26px;
+  height: 26px;
+  color: #555555;
+}
+
+.html-source-preview-frame-card {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid #efefed;
+  border-radius: 14px;
+  background: #fbfbfa;
+}
+
+.html-source-preview-frame-card > .html-source-preview-header {
+  display: flex;
+  min-width: 0;
+  height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px 6px 10px;
+  border-bottom: 1px solid #efefed;
+}
+
+.html-source-preview-frame {
+  min-height: 0;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.html-source-preview-frame iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #ffffff;
+}
+
+.html-source-preview-empty {
+  display: grid;
+  height: 100%;
+  place-items: center;
+  color: #737373;
+  font-size: var(--canvas-node-body-size);
+  line-height: var(--canvas-node-body-line);
+}
+
+.message-html-source-preview {
+  min-height: 260px;
+  margin: 12px 0;
+}
+
+.message-html-source-preview.html-source-preview-code {
+  max-height: 520px;
+}
+
+.message-html-source-preview .html-source-preview-frame {
+  min-height: 360px;
+}
+
+.code-node-html-preview {
+  height: 100%;
+}
+
+.code-node-html-preview .html-source-preview-switch span,
+.html-page-viewer .html-source-preview-switch span {
+  display: none;
+}
+
+.code-node-html-preview .html-source-preview-switch button,
+.html-page-viewer .html-source-preview-switch button {
+  width: 24px;
+  padding: 0;
+}
+
+.code-node-html-preview pre {
+  padding: 8px;
+  font-size: var(--canvas-node-body-size);
+  line-height: var(--canvas-node-body-line);
+}
+
+.code-node-html-preview code {
+  font-size: var(--canvas-node-body-size);
+}
+
+.html-page-viewer {
+  height: 100%;
+}
+
+.artifact-preview-html {
+  min-height: 100%;
+}
+
+.artifact-preview-html .html-source-preview-frame {
+  min-height: 360px;
 }
 
 .html-page-frame {

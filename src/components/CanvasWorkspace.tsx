@@ -72,6 +72,7 @@ import {
 } from "@/components/ai-elements/code-block";
 import { Edge } from "@/components/ai-elements/edge";
 import { FileUploadOverlay } from "@/components/FileUploadOverlay";
+import { HtmlSourcePreview } from "@/components/HtmlSourcePreview";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { Node, NodeContent } from "@/components/ai-elements/node";
 import { ReplayBanner, RunTracePanel } from "@/components/RunTracePanel";
@@ -3996,23 +3997,39 @@ function ArtifactPreviewDialog({
           {loadState === "loading" && <span>读取预览...</span>}
           {loadState === "error" && <span>无法读取预览</span>}
           {loadState === "binary" && <span>此产物可下载或打开查看</span>}
-          {previewText && data.kind === "code" && codeLanguage && (
-            <CodeBlock
-              className="artifact-preview-code"
-              code={previewText}
-              language={codeLanguage}
-              showLineNumbers
-            >
-              <CodeBlockHeader>
-                <CodeBlockTitle>
-                  <CodeBlockFilename>{data.title}</CodeBlockFilename>
-                </CodeBlockTitle>
-                <CodeBlockActions>
-                  <CodeBlockCopyButton aria-label="复制代码" title="复制代码" />
-                </CodeBlockActions>
-              </CodeBlockHeader>
-            </CodeBlock>
-          )}
+          {previewText &&
+            data.kind === "code" &&
+            codeLanguage === "html" && (
+              <HtmlSourcePreview
+                className="artifact-preview-html"
+                defaultMode="preview"
+                filename={data.title}
+                html={previewText}
+                showLineNumbers
+                sourceLabel="html"
+                title={data.title}
+              />
+            )}
+          {previewText &&
+            data.kind === "code" &&
+            codeLanguage &&
+            codeLanguage !== "html" && (
+              <CodeBlock
+                className="artifact-preview-code"
+                code={previewText}
+                language={codeLanguage}
+                showLineNumbers
+              >
+                <CodeBlockHeader>
+                  <CodeBlockTitle>
+                    <CodeBlockFilename>{data.title}</CodeBlockFilename>
+                  </CodeBlockTitle>
+                  <CodeBlockActions>
+                    <CodeBlockCopyButton aria-label="复制代码" title="复制代码" />
+                  </CodeBlockActions>
+                </CodeBlockHeader>
+              </CodeBlock>
+            )}
           {previewText && data.kind !== "code" && (
             <pre className="artifact-preview-text">{previewText}</pre>
           )}
@@ -4046,9 +4063,21 @@ function CodeNode({
   const inlinePreview = getInlineArtifactPreview(data);
   const [isPreviewOpen, setPreviewOpen] = useState(false);
   const metaLine = getArtifactMetaLine(data);
-  const codeText = inlinePreview ?? "";
-  const displayCode = codeText || "打开预览读取代码";
   const language = getCodeBlockLanguage(data);
+  const isHtmlCode = language === "html";
+  const loadedCode = useTextArtifactContent(
+    contentUrl,
+    isHtmlCode && !inlinePreview && Boolean(contentUrl),
+    2_000_000
+  );
+  const fetchedCodeText =
+    loadedCode && loadedCode.url === contentUrl ? loadedCode.text : null;
+  const codeText = inlinePreview ?? fetchedCodeText ?? "";
+  const displayCode =
+    codeText ||
+    (isHtmlCode && loadedCode?.status !== "error"
+      ? "读取 HTML..."
+      : "打开预览读取代码");
   const canPreview = Boolean(codeText || contentUrl);
 
   return (
@@ -4133,21 +4162,34 @@ function CodeNode({
             </div>
           </div>
           <div className="code-node-editor nodrag nopan nowheel">
-            <CodeBlock
-              className="code-node-block"
-              code={displayCode}
-              language={language}
-              showLineNumbers
-            >
-              <CodeBlockHeader className="code-node-block-header">
-                <CodeBlockTitle>
-                  <CodeBlockFilename>{language}</CodeBlockFilename>
-                </CodeBlockTitle>
-                <CodeBlockActions>
-                  <CodeBlockCopyButton aria-label="复制代码" title="复制代码" />
-                </CodeBlockActions>
-              </CodeBlockHeader>
-            </CodeBlock>
+            {isHtmlCode ? (
+              <HtmlSourcePreview
+                className="code-node-block code-node-html-preview"
+                filename={data.title}
+                html={codeText}
+                previewDisabled={!codeText}
+                previewDisabledText={displayCode}
+                showLineNumbers
+                sourceLabel="html"
+                title={data.title}
+              />
+            ) : (
+              <CodeBlock
+                className="code-node-block"
+                code={displayCode}
+                language={language}
+                showLineNumbers
+              >
+                <CodeBlockHeader className="code-node-block-header">
+                  <CodeBlockTitle>
+                    <CodeBlockFilename>{language}</CodeBlockFilename>
+                  </CodeBlockTitle>
+                  <CodeBlockActions>
+                    <CodeBlockCopyButton aria-label="复制代码" title="复制代码" />
+                  </CodeBlockActions>
+                </CodeBlockHeader>
+              </CodeBlock>
+            )}
           </div>
           {metaLine && (
             <small className="artifact-meta copyable-text nodrag nopan">
@@ -4178,8 +4220,30 @@ function HtmlPageNode({
   width,
   height,
 }: NodeProps<FlowNode<WebpageNodeData, "webpageNode">>) {
-  const previewUrl = data.previewUrl ?? data.artifact.contentRef ?? data.artifact.uri;
-  const frameTitle = `${data.title} preview`;
+  const contentUrl = getArtifactContentUrl(data.artifact);
+  const inlineHtml = data.html?.trim() ? data.html : "";
+  const loadedHtml = useTextArtifactContent(
+    contentUrl,
+    !inlineHtml && Boolean(contentUrl),
+    2_000_000
+  );
+  const htmlText =
+    inlineHtml ||
+    (loadedHtml && loadedHtml.url === contentUrl ? loadedHtml.text ?? "" : "");
+  const htmlLoadState =
+    htmlText.trim().length > 0
+      ? "ready"
+      : loadedHtml?.status === "error"
+        ? "error"
+        : contentUrl
+          ? "loading"
+          : "empty";
+  const previewDisabledText =
+    htmlLoadState === "loading"
+      ? "读取 HTML..."
+      : htmlLoadState === "error"
+        ? "无法读取 HTML"
+        : "暂无预览";
 
   return (
     <Node
@@ -4205,31 +4269,33 @@ function HtmlPageNode({
               {data.title}
             </strong>
           </div>
-          {previewUrl && (
-            <a
-              aria-label="打开页面预览"
-              className="html-page-open nodrag nopan"
-              href={previewUrl}
-              rel="noreferrer"
-              target="_blank"
-              title="打开页面预览"
-            >
-              <ArrowUpRight size={13} />
-            </a>
-          )}
+          <button
+            aria-label="打开页面预览"
+            className="html-page-open nodrag nopan"
+            disabled={!htmlText}
+            onClick={(event) => {
+              event.stopPropagation();
+              openHtmlPreviewWindow(data.title, htmlText);
+            }}
+            onMouseDown={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            title="打开页面预览"
+            type="button"
+          >
+            <ArrowUpRight size={13} />
+          </button>
         </div>
-        <div className="html-page-frame nodrag nopan">
-          {data.html || previewUrl ? (
-            <iframe
-              sandbox=""
-              src={data.html ? undefined : previewUrl}
-              srcDoc={data.html}
-              title={frameTitle}
-            />
-          ) : (
-            <div className="html-page-empty">暂无预览</div>
-          )}
-        </div>
+        <HtmlSourcePreview
+          className="html-page-viewer nodrag nopan nowheel"
+          defaultMode="preview"
+          filename={data.title}
+          html={htmlText}
+          previewDisabled={!htmlText}
+          previewDisabledText={previewDisabledText}
+          showLineNumbers
+          sourceLabel="html"
+          title={data.title}
+        />
         {selected && (
           <div className="html-page-footer">
             <span className="copyable-text nodrag nopan">
@@ -4623,6 +4689,28 @@ function stringifyPreviewValue(value: unknown) {
   } catch {
     return String(value);
   }
+}
+
+function openHtmlPreviewWindow(title: string, html: string) {
+  if (!html.trim()) {
+    return;
+  }
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const opened = window.open(url, "_blank");
+  if (!opened) {
+    URL.revokeObjectURL(url);
+    return;
+  }
+  opened.opener = null;
+  opened.addEventListener(
+    "load",
+    () => {
+      opened.document.title = title;
+    },
+    { once: true }
+  );
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 function downloadArtifactAsset(

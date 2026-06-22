@@ -28,7 +28,9 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Streamdown } from "streamdown";
+import { Streamdown, type CustomRendererProps } from "streamdown";
+
+import { HtmlSourcePreview } from "@/components/HtmlSourcePreview";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -321,7 +323,36 @@ export const MessageBranchPage = ({
 
 export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
-const streamdownPlugins = { cjk, code, math, mermaid };
+function HtmlCodeRenderer({
+  code: html,
+  isIncomplete,
+  language,
+}: CustomRendererProps) {
+  return (
+    <HtmlSourcePreview
+      className="message-html-source-preview"
+      html={html}
+      previewDisabled={isIncomplete}
+      previewDisabledText="HTML 生成中"
+      showLineNumbers
+      sourceLabel={language || "html"}
+      title="HTML"
+    />
+  );
+}
+
+const streamdownPlugins = {
+  cjk,
+  code,
+  math,
+  mermaid,
+  renderers: [
+    {
+      component: HtmlCodeRenderer,
+      language: ["html", "htm"],
+    },
+  ],
+};
 
 export const MessageResponse = memo(
   ({ className, ...props }: MessageResponseProps) => (
