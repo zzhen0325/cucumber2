@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  isByteArtistMattingConfigured,
+  readByteArtistMattingConfigFromEnv,
+  readByteArtistMattingModelFromEnv,
+  runByteArtistMatting,
+} from "./byteartist-matting.ts";
+import {
   isRembgCliConfigured,
   readRembgMattingConfigFromEnv,
   runRembgCliMatting,
@@ -13,6 +19,8 @@ export type ImageMattingRunInput = {
   background?: ImageMattingBackground;
   height?: number;
   signal?: AbortSignal;
+  sourceBytes?: Uint8Array;
+  sourceMimeType?: string;
   sourceUrl: string;
   width?: number;
 };
@@ -45,13 +53,15 @@ export function runImageMatting(
   input: ImageMattingRunInput
 ): Promise<ImageMattingRunResult> {
   const provider = readImageMattingProviderName();
-  if (provider !== "rembg") {
-    throw new Error(
-      `Image matting provider "${provider}" is not supported. Set IMAGE_MATTING_PROVIDER=rembg.`
-    );
+  if (provider === "byteartist") {
+    return runByteArtistMatting(input, readByteArtistMattingConfigFromEnv());
   }
-
-  return runRembgCliMatting(input, readRembgMattingConfigFromEnv());
+  if (provider === "rembg") {
+    return runRembgCliMatting(input, readRembgMattingConfigFromEnv());
+  }
+  throw new Error(
+    `Image matting provider "${provider}" is not supported. Set IMAGE_MATTING_PROVIDER=byteartist.`
+  );
 }
 
 export function createImageMattingArtifactId() {
@@ -61,11 +71,20 @@ export function createImageMattingArtifactId() {
 
 export function getImageMattingProviderConfiguration(): ImageMattingProviderConfiguration {
   const provider = readImageMattingProviderName();
+  if (provider === "byteartist") {
+    cachedProviderConfiguration = null;
+    return {
+      configured: isByteArtistMattingConfigured(),
+      model: readByteArtistMattingModelFromEnv(),
+      provider,
+    };
+  }
+
   if (provider !== "rembg") {
     cachedProviderConfiguration = null;
     return {
       configured: false,
-      model: process.env.REMBG_MODEL?.trim() || null,
+      model: null,
       provider,
     };
   }
@@ -105,5 +124,5 @@ export function getImageMattingProviderConfiguration(): ImageMattingProviderConf
 }
 
 function readImageMattingProviderName() {
-  return process.env.IMAGE_MATTING_PROVIDER?.trim() || "rembg";
+  return process.env.IMAGE_MATTING_PROVIDER?.trim() || "byteartist";
 }

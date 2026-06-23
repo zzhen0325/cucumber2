@@ -5,7 +5,7 @@
 ## 2026-06-18 Image Agent Matting And Inspection
 
 - Image Agent 扩展为图片生成、抠图、拆解、理解和高清处理的统一 specialist；Manager 继续只做编排，工具只创建 artifact 和事件，不直接写画布节点。
-- 新增 `image_matting` 本地工具，通过统一 matting provider 接口和可信上游图片解析生成抠图/透明底优先素材；当前 provider 为 rembg 2.x CLI，后续可替换实现；`image-generation` negative capability 仍阻止新图生成，但不阻止抠图和高清这类图片处理。
+- 新增 `image_matting` 本地工具，通过统一 matting provider 接口和可信上游图片解析生成抠图/透明底优先素材；当前默认 provider 为 ByteArtist `image_matting_lemo`，不再依赖本地 rembg CLI；`image-generation` negative capability 仍阻止新图生成，但不阻止抠图和高清这类图片处理。
 - 新增 `decompose_image` 和 `analyze_media` 本地工具，把图片风格拆解、prompt 线索、内容理解和信息提取保存为 Markdown/doc artifact；没有像素级可见信息时必须在 artifact 限制里说明，不能伪造看见的细节。
 - 输入归一化新增 `image.matting`、`image.decompose` 和 `media.analyze` intent 兼容摘要，实际路由仍以 `operation + artifact + requiredCapabilities + negativeCapabilities` 为准；`image-decompose` / `media-analysis` 的 Markdown 产物也路由到 Image Agent。
 - Tool Registry 新增 `tool.image.matting`、`tool.image.decompose` 和 `tool.media.analyze` scope；Run plan、Run 节点工具摘要、错误来源摘要和 artifact 投影路径同步识别 `image_matting`、`decompose_image`、`analyze_media`。
@@ -109,7 +109,7 @@
 - OpenAI Agents SDK 成为唯一 runtime，目录从 `server/agent-v2/` 收口为 `server/agent/`。
 - 唯一入口为 `POST /api/agent-run`；删除 `/api/agent-run-v2`、`VITE_AGENT_V2` 和 localStorage feature flag。
 - `DELETE /api/agent-run` 显式中止当前 SDK/Seedream 执行，前端同步清理未完成图片投影。
-- 客户端提交前强制保存项目；服务端仅接收 prompt、promptNodeId、runNodeId 和 selectedNodeId，并从持久化 nodes/edges 重建上下文。
+- Agent Run 可随请求携带本轮 canvas patch；服务端先原子写入 patch，再从持久化 nodes/edges 重建上下文。客户端仍只提交 prompt、promptNodeId、runNodeId、selectedNodeId/selectedNodeIds 和资源 ID，不提交可信 URL、artifact 内容或 upstream context。
 - `knownNodeIds` 不再信任客户端 upstream IDs 或 edge 端点。
 - SDK stream 投影 Agent、handoff、tool、artifact、canvas operation、final output 和 error；等待 `stream.completed`。
 - 工具失败先写 `tool.error` 再写 `run.failed`；`run.completed` 写真实 finalOutput 和 artifact IDs。
@@ -133,7 +133,8 @@
 ## 2026-06-12 Image Request Boundary
 
 - 新增 `server/agent/tools/image/generate-image.request.ts`，集中负责图片数量、尺寸/比例和 upstream 引用图归一化。
-- `generate_image` 工具只做 Agent tool 边界、artifact 事件和图片 provider 调用编排；`image_matting` 工具只依赖 `runImageMatting` 统一接口，当前实现用 `IMAGE_MATTING_PROVIDER=rembg` 调用 rembg 2.x CLI；图片生成 provider 支持 `IMAGE_PROVIDER=seedream`、`IMAGE_PROVIDER=coze` 或 `IMAGE_PROVIDER=byteartist`，其中 Coze 请求体为 `prompt`、`reference_images`、`size`、`watermark`、`model`；ByteArtist 使用统一签名表单提交 `submit_task_v2` 并轮询 `batch_get_result_v2`，模型差异封装在 provider adapter 中，当前 `seed4_0407_lemo` 使用 `Prompt` 字段；`reference_images` 是由上游图片 URL 生成的 `{ url }` file dict 数组或 ByteArtist 参考图字段，`size/model` 是字符串，`watermark` 是布尔值，空配置不发送占位字段。
+- `generate_image` 工具只做 Agent tool 边界、artifact 事件和图片 provider 调用编排；`image_matting` 工具只依赖 `runImageMatting` 统一接口，默认用 `IMAGE_MATTING_PROVIDER=byteartist` 调用 ByteArtist `image_matting_lemo`，请求参数默认为 `blue=-1`、`green=-1`、`only_mask=0`、`red=-1`、`refine_mask=2`，源图优先由服务端签发 R2 read URL，并通过智创网关标准表单字段 `source` 传入；只有没有 provider 可拉取 URL 但已有服务端 bytes 时才使用 `base64file`；图片生成 provider 支持 `IMAGE_PROVIDER=seedream`、`IMAGE_PROVIDER=coze` 或 `IMAGE_PROVIDER=byteartist`，其中 Coze 请求体为 `prompt`、`reference_images`、`size`、`watermark`、`model`；ByteArtist 使用统一签名表单提交 `submit_task_v2` 并轮询 `batch_get_result_v2`，模型差异封装在 provider adapter 中，当前 `seed4_0407_lemo` 使用 `Prompt` 字段且标记为 text-only；`reference_images` 是由上游图片 URL 生成的 `{ url }` file dict 数组或支持参考图的 ByteArtist 模型参考图字段，`size/model` 是字符串，`watermark` 是布尔值，空配置不发送占位字段。
+- 用户输入提到 `lemo`/`Lemo` 时，图片生成 provider 强制切到 ByteArtist `seed4_0407_lemo`。如果本轮有上游参考图，因为 seed4 不支持参考图，服务端会先用参考图描述模型把签发后的参考图转成文字描述，并和用户需求重写为最终 provider prompt；ByteArtist 请求不携带 `image_url`/`image_data`。
 - 底部输入器可选择本轮图片 provider；客户端只提交白名单 `imageProvider`，服务端写入 agent context 后由 `generate_image` 选择 provider，`upscale_image` 仍只走 Seedream。
 - `seedream.ts` 收敛为 Seedream provider 执行层，保留配置读取、签名、提交/轮询、并发/重试、取消和 provider metadata；`byteartist.ts` 是 ByteArtist provider 执行层，保留配置读取、SHA1 表单签名、submit/poll、模型 adapter、取消和 provider metadata。
 - 多张图片生成按 `SEEDREAM_MAX_CONCURRENCY` 限制完整 submit+poll 生命周期的并发数，并按 `SEEDREAM_STAGGER_MS` 间隔启动新任务；默认 `SEEDREAM_MAX_CONCURRENCY=1` 会等上一张完整出图或失败后再提交下一张，避免触发 Seedream 账号级并发限制。
@@ -148,7 +149,7 @@
 
 - Agent Run 提交支持 `selectedNodeIds`，多选的可引用节点会一起生成到 Prompt 节点的引用边。
 - 画布选择工具支持 Shift 点击追加/取消多选；画布任意工具下都可用鼠标中键拖动平移，手型工具仍保留左键拖动平移。
-- 服务端继续从持久化项目快照重建 upstream context，并过滤不可引用的 Run 节点；简单文本输出 Run 可作为下一轮文本上下文。客户端提供的节点列表只作为待验证 id，不提供可信上下文。
+- 服务端继续从持久化项目快照重建 upstream context，并过滤不可引用的 Run 节点；简单文本输出 Run 可作为下一轮文本上下文。客户端提供的节点列表只作为待验证 id，不提供可信上下文；Agent Run 内联 canvas patch 只用于先落库本轮 prompt/run 草稿。
 
 ## 2026-06-13 Image Tool Boundary
 

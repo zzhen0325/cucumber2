@@ -480,8 +480,10 @@ export async function executeAgentRun({
       stepId: "run",
       type: "run.created",
       payload: buildRedactedPayload({
+        canvasPatchApplied: agentInput.canvasPatchApplied || undefined,
         prompt: agentInput.message,
         promptNodeId: agentInput.promptNodeId,
+        projectVersion: agentInput.projectVersion,
         selectedNodeId: agentInput.selectedNodeId,
         selectedNodeIds: agentInput.selectedNodeIds,
         contextSummary: agentInput.contextSummary,

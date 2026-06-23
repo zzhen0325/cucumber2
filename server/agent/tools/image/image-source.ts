@@ -1,5 +1,8 @@
 import type { ArtifactRef, UpstreamContextItem } from "../../../../src/types/canvas.ts";
 import {
+  getArtifactStorageContentRef,
+  parseStorageContentRef,
+  readArtifactContent,
   resolveStorageBackedImageContext,
   storeGeneratedImageFromBytes,
   storeGeneratedImageFromUrl,
@@ -14,6 +17,31 @@ export type ResolvedImageSource = {
   summary?: string;
   title?: string;
 };
+
+export async function readImageArtifactBytes(artifact: ArtifactRef | undefined) {
+  if (!artifact || artifact.type !== "image") {
+    throw new Error("Selected source artifact is not an image.");
+  }
+  const contentRef = getArtifactStorageContentRef(artifact);
+  const parsed = contentRef ? parseStorageContentRef(contentRef) : null;
+  if (!parsed) {
+    throw new Error("Selected image is not backed by object storage.");
+  }
+  const content = await readArtifactContent({
+    bucketId: parsed.bucket,
+    mimeType: artifact.mimeType ?? readString(artifact.metadata?.mimeType) ?? null,
+    sizeBytes:
+      artifact.sizeBytes ??
+      readNumber(artifact.metadata?.byteSize) ??
+      readNumber(artifact.metadata?.size) ??
+      null,
+    storagePath: parsed.path,
+  });
+  if (!content.mimeType.startsWith("image/")) {
+    throw new Error(`Selected source artifact is not an image (${content.mimeType}).`);
+  }
+  return content;
+}
 
 export async function resolveSingleSourceImage(
   context: CucumberAgentContext,
@@ -143,4 +171,12 @@ export async function storeImageToolArtifactFromBytes({
     context.pendingEvents.push(event);
   }
   return artifact;
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function readNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }

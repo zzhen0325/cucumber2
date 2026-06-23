@@ -111,6 +111,7 @@ import {
   updateTextArtifactContent,
   upscaleProjectImage,
   ProjectVersionConflictError,
+  type SaveProjectCanvasPatchInput,
 } from "@/lib/project-storage";
 import {
   hasNodeContentChanged,
@@ -143,6 +144,7 @@ import type {
   AgentCanvasNode,
   AgentCanvasNodeData,
   AgentRunStatus,
+  CanvasPatch,
   CodeNodeData,
   GeneratedImage,
   ImageResultNodeData,
@@ -215,6 +217,7 @@ type StreamedRuntimeEvents = ReturnType<typeof runtimeEventsFromMessages>;
 type AgentRunRequestBody = {
   projectId: string;
   runNodeId: string;
+  canvasPatch?: Omit<SaveProjectCanvasPatchInput, "projectId">;
   canvasContext: {
     imageProvider?: ImageProviderSelection;
     prompt: string;
@@ -226,6 +229,15 @@ type AgentRunRequestBody = {
     selectedNodeId: string | null;
     selectedNodeIds: string[];
   };
+};
+
+type PendingRunCanvasPatchAck = {
+  dirtyEdgeIds: string[];
+  dirtyNodeIds: string[];
+  edgeDeleteIds: string[];
+  lastRunId?: string | null;
+  nodeDeleteIds: string[];
+  revision: number;
 };
 
 type ImageProviderSelection = "seedream" | "coze" | "byteartist";
@@ -394,6 +406,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const deletedNodeIdsRef = useRef(new Set<string>());
   const deletedEdgeIdsRef = useRef(new Set<string>());
   const dirtyProjectMetaRef = useRef(false);
+  const mutationRevisionRef = useRef(0);
+  const atomicRunSaveRevisionRef = useRef<number | null>(null);
+  const pendingRunCanvasPatchAcksRef = useRef(
+    new Map<string, PendingRunCanvasPatchAck>()
+  );
   const prevSaveClassifyNodesRef = useRef<AgentCanvasNode[]>([]);
   const prevSaveClassifyTitleRef = useRef(projectTitle);
   const imageProcessingInFlightRef = useRef(new Set<string>());
@@ -440,6 +457,16 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     traceRunIdRef.current = traceRunId;
   }, [traceRunId]);
 
+  const hasPendingCanvasSaveNow = useCallback(
+    () =>
+      dirtyProjectMetaRef.current ||
+      dirtyNodeIdsRef.current.size > 0 ||
+      dirtyEdgeIdsRef.current.size > 0 ||
+      deletedNodeIdsRef.current.size > 0 ||
+      deletedEdgeIdsRef.current.size > 0,
+    []
+  );
+
   const recordDirtyFromPatch = useCallback((patch: CanvasLocalMutation["patch"]) => {
     for (const node of patch.nodeUpserts ?? []) {
       dirtyNodeIdsRef.current.add(node.id);
@@ -472,18 +499,22 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       setNodes(next.nodes);
       setEdges(next.edges);
 
+      let hasPersistedChange = hasCanvasPatchChanges(patch);
       if (mutation.selectedNodeId !== undefined) {
         persistedSelectedNodeIdRef.current = mutation.selectedNodeId;
         dirtyProjectMetaRef.current = true;
+        hasPersistedChange = true;
       }
       if (mutation.lastRunId !== undefined) {
         activeRunId.current = mutation.lastRunId;
         dirtyProjectMetaRef.current = true;
+        hasPersistedChange = true;
       }
 
       if (mutation.persist ?? true) {
         recordDirtyFromPatch(patch);
-        if (hasCanvasPatchChanges(patch) || dirtyProjectMetaRef.current) {
+        if (hasPersistedChange) {
+          mutationRevisionRef.current += 1;
           setStorageStatus("saving");
         }
       }
@@ -523,6 +554,73 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
   useEffect(() => clearTraceReconcileTimers, [clearTraceReconcileTimers]);
 
+  const acknowledgeRunCanvasPatchPersistence = useCallback(
+    (events: StreamedRuntimeEvents) => {
+      for (const event of events) {
+        if (
+          event.type !== "run.created" ||
+          event.payload.canvasPatchApplied !== true
+        ) {
+          continue;
+        }
+
+        const pending = pendingRunCanvasPatchAcksRef.current.get(event.runNodeId);
+        if (!pending) {
+          continue;
+        }
+
+        pendingRunCanvasPatchAcksRef.current.delete(event.runNodeId);
+        if (atomicRunSaveRevisionRef.current === pending.revision) {
+          atomicRunSaveRevisionRef.current = null;
+        }
+
+        if (typeof event.payload.projectVersion === "number") {
+          projectVersionRef.current = event.payload.projectVersion;
+        }
+
+        if (mutationRevisionRef.current !== pending.revision) {
+          continue;
+        }
+
+        for (const nodeId of pending.dirtyNodeIds) {
+          dirtyNodeIdsRef.current.delete(nodeId);
+        }
+        for (const nodeId of pending.nodeDeleteIds) {
+          deletedNodeIdsRef.current.delete(nodeId);
+        }
+        for (const edgeId of pending.dirtyEdgeIds) {
+          dirtyEdgeIdsRef.current.delete(edgeId);
+        }
+        for (const edgeId of pending.edgeDeleteIds) {
+          deletedEdgeIdsRef.current.delete(edgeId);
+        }
+        if (activeRunId.current === pending.lastRunId) {
+          dirtyProjectMetaRef.current = false;
+        }
+
+        if (!hasPendingCanvasSaveNow()) {
+          setStorageStatus("saved");
+          setStorageError(null);
+        }
+      }
+    },
+    [hasPendingCanvasSaveNow]
+  );
+
+  const releaseRunCanvasPatchPersistence = useCallback((runId: string | null) => {
+    if (!runId) {
+      return;
+    }
+    const pending = pendingRunCanvasPatchAcksRef.current.get(runId);
+    if (!pending) {
+      return;
+    }
+    pendingRunCanvasPatchAcksRef.current.delete(runId);
+    if (atomicRunSaveRevisionRef.current === pending.revision) {
+      atomicRunSaveRevisionRef.current = null;
+    }
+  }, []);
+
   const projectStreamedRuntimeEvents = useCallback(
     (
       events: StreamedRuntimeEvents,
@@ -534,6 +632,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       }
 
       const nextEvents = events.filter((event) => event.runNodeId === runId);
+      acknowledgeRunCanvasPatchPersistence(nextEvents);
       const streamedAgentText = streamedAgentTextByRunId.current.get(runId);
       if (!nextEvents.length && !streamedAgentText) {
         return;
@@ -614,7 +713,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           )
       );
     },
-    [setEdges, setNodes]
+    [acknowledgeRunCanvasPatchPersistence, setEdges, setNodes]
   );
 
   const markRunError = useCallback(
@@ -663,6 +762,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         return false;
       }
 
+      acknowledgeRunCanvasPatchPersistence(events);
       const projectId = loadedProjectIdRef.current ?? undefined;
       const projection = projectRuntimeEventsToCanvas({
         projectId,
@@ -696,9 +796,14 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         setTraceEvents(events);
       }
 
-      return hasTerminalRunEvent(events);
+      const hasTerminalEvent = hasTerminalRunEvent(events);
+      if (hasTerminalEvent) {
+        releaseRunCanvasPatchPersistence(runId);
+      }
+
+      return hasTerminalEvent;
     },
-    [setEdges, setNodes]
+    [acknowledgeRunCanvasPatchPersistence, releaseRunCanvasPatchPersistence, setEdges, setNodes]
   );
 
   const reconcileRunFromPersistedTrace = useCallback(
@@ -708,6 +813,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       }
       const projectId = loadedProjectIdRef.current;
       if (!projectId) {
+        releaseRunCanvasPatchPersistence(runId);
         markRunError(runId, fallbackError);
         return;
       }
@@ -731,6 +837,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
               !isActiveRunNode(nodesRef.current, runId)
             ) {
               if (!sawPersistedEvents) {
+                releaseRunCanvasPatchPersistence(runId);
                 markRunError(runId, fallbackError);
               }
               return;
@@ -743,6 +850,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
             const nextDelay = TRACE_RECONCILE_DELAYS_MS[attempt + 1];
             if (nextDelay === undefined) {
               if (!sawPersistedEvents) {
+                releaseRunCanvasPatchPersistence(runId);
                 markRunError(runId, fallbackError);
               }
               return;
@@ -758,6 +866,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       clearTraceReconcileTimers,
       markRunError,
       mergePersistedRunTrace,
+      releaseRunCanvasPatchPersistence,
     ]
   );
 
@@ -967,6 +1076,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       persistedSelectedNodeIdRef.current !== persistedSelectedNodeId
     ) {
       dirtyProjectMetaRef.current = true;
+      mutationRevisionRef.current += 1;
       setStorageStatus("saving");
     }
     persistedSelectedNodeIdRef.current = persistedSelectedNodeId;
@@ -1101,6 +1211,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     deletedNodeIdsRef.current.clear();
     deletedEdgeIdsRef.current.clear();
     dirtyProjectMetaRef.current = false;
+    mutationRevisionRef.current = 0;
+    atomicRunSaveRevisionRef.current = null;
+    pendingRunCanvasPatchAcksRef.current.clear();
 
     const loadStartedAt = performance.now();
 
@@ -1139,6 +1252,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         deletedNodeIdsRef.current.clear();
         deletedEdgeIdsRef.current.clear();
         dirtyProjectMetaRef.current = false;
+        mutationRevisionRef.current = 0;
+        atomicRunSaveRevisionRef.current = null;
+        pendingRunCanvasPatchAcksRef.current.clear();
         hasLoadedProject.current = true;
         setStorageStatus("saved");
         setStorageError(null);
@@ -1295,13 +1411,38 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     );
   }, [savePendingArtifactContent]);
 
-  const hasPendingCanvasSave = useCallback(
-    () =>
-      dirtyProjectMetaRef.current ||
-      dirtyNodeIdsRef.current.size > 0 ||
-      dirtyEdgeIdsRef.current.size > 0 ||
-      deletedNodeIdsRef.current.size > 0 ||
-      deletedEdgeIdsRef.current.size > 0,
+  const hasPendingCanvasSave = hasPendingCanvasSaveNow;
+
+  const buildPendingCanvasSaveInput = useCallback(
+    (currentProjectId: string): SaveProjectCanvasPatchInput => {
+      const nodeUpserts = toPersistableNodes(
+        nodesRef.current.filter((node) => dirtyNodeIdsRef.current.has(node.id))
+      );
+      const persistedNodeIds = new Set(
+        nodesRef.current
+          .filter((node) => !deletedNodeIdsRef.current.has(node.id))
+          .map((node) => node.id)
+      );
+      const edgeUpserts = toPersistableEdges(
+        edgesRef.current.filter(
+          (edge) =>
+            dirtyEdgeIdsRef.current.has(edge.id) &&
+            persistedNodeIds.has(edge.source) &&
+            persistedNodeIds.has(edge.target)
+        )
+      );
+
+      return {
+        projectId: currentProjectId,
+        nodeUpserts,
+        nodeDeletes: [...deletedNodeIdsRef.current],
+        edgeUpserts,
+        edgeDeletes: [...deletedEdgeIdsRef.current],
+        selectedNodeId: persistedSelectedNodeIdRef.current,
+        lastRunId: activeRunId.current,
+        expectedVersion: projectVersionRef.current,
+      };
+    },
     []
   );
 
@@ -1364,38 +1505,10 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
           for (let attempt = 0; ; attempt += 1) {
             try {
-              const nodeUpserts = toPersistableNodes(
-                nodesRef.current.filter((node) =>
-                  dirtyNodeIdsRef.current.has(node.id)
-                )
-              );
-              const persistedNodeIds = new Set(
-                nodesRef.current
-                  .filter((node) => !deletedNodeIdsRef.current.has(node.id))
-                  .map((node) => node.id)
-              );
-              const edgeUpserts = toPersistableEdges(
-                edgesRef.current.filter(
-                  (edge) =>
-                    dirtyEdgeIdsRef.current.has(edge.id) &&
-                    persistedNodeIds.has(edge.source) &&
-                    persistedNodeIds.has(edge.target)
-                )
-              );
-              const nodeDeletes = [...deletedNodeIdsRef.current];
-              const edgeDeletes = [...deletedEdgeIdsRef.current];
-
+              const pendingCanvasSaveInput =
+                buildPendingCanvasSaveInput(currentProjectId);
               const { project } = await saveProjectCanvasPatch(
-                {
-                  projectId: currentProjectId,
-                  nodeUpserts,
-                  nodeDeletes,
-                  edgeUpserts,
-                  edgeDeletes,
-                  selectedNodeId: persistedSelectedNodeIdRef.current,
-                  lastRunId: activeRunId.current,
-                  expectedVersion: projectVersionRef.current,
-                },
+                pendingCanvasSaveInput,
                 options.keepalive ? { keepalive: true } : undefined
               );
 
@@ -1439,7 +1552,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       }
       return saved;
     },
-    [flushPendingArtifactContentSaves, hasPendingCanvasSave]
+    [buildPendingCanvasSaveInput, flushPendingArtifactContentSaves, hasPendingCanvasSave]
   );
 
   const setImageProvider = useCallback((provider: ImageProviderSelection) => {
@@ -1519,44 +1632,61 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         lastRunId: draft.runNode.id,
       });
 
-      void saveProjectSnapshot()
-        .then((saved) => {
-          if (saved) {
-            return;
-          }
-          if (!isActiveRunNode(nodesRef.current, draft.runNode.id)) {
-            return;
-          }
-          markRunError(draft.runNode.id, "项目快照保存失败，Agent 未启动。");
-          void stop();
-        })
-        .catch((saveError: unknown) => {
-          if (!isActiveRunNode(nodesRef.current, draft.runNode.id)) {
-            return;
-          }
-          markRunError(draft.runNode.id, `项目快照保存失败：${getClientError(saveError)}`);
-          void stop();
-        });
+      const artifactSaveResults = await flushPendingArtifactContentSaves();
+      if (artifactSaveResults.some((saved) => !saved)) {
+        if (isActiveRunNode(nodesRef.current, draft.runNode.id)) {
+          markRunError(draft.runNode.id, "项目内容保存失败，Agent 未启动。");
+        }
+        void stop();
+        return;
+      }
+
+      if (saveTimer.current) {
+        window.clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+
+      const pendingCanvasSaveInput = buildPendingCanvasSaveInput(projectId);
+      const canvasPatch = toAgentRunCanvasPatch(pendingCanvasSaveInput);
+      const requestRevision = mutationRevisionRef.current;
+      atomicRunSaveRevisionRef.current = requestRevision;
+      pendingRunCanvasPatchAcksRef.current.set(
+        draft.runNode.id,
+        createPendingRunCanvasPatchAck(pendingCanvasSaveInput, requestRevision)
+      );
+      requestBody.canvasPatch = canvasPatch;
 
       if (clearComposer) {
         setPrompt("");
       }
 
-      await sendMessage(
-        { text: value },
-        {
-          body: requestBody,
+      try {
+        await sendMessage(
+          { text: value },
+          {
+            body: requestBody,
+          }
+        );
+      } catch (sendError: unknown) {
+        pendingRunCanvasPatchAcksRef.current.delete(draft.runNode.id);
+        if (atomicRunSaveRevisionRef.current === requestRevision) {
+          atomicRunSaveRevisionRef.current = null;
         }
-      );
+        if (isActiveRunNode(nodesRef.current, draft.runNode.id)) {
+          markRunError(draft.runNode.id, `Agent 启动失败：${getClientError(sendError)}`);
+        }
+        throw sendError;
+      }
     },
     [
+      buildPendingCanvasSaveInput,
       clearTraceReconcileTimers,
       commitCanvasMutation,
+      flushPendingArtifactContentSaves,
       hasLocalUploadNodes,
       imageProvider,
       isBusy,
       markRunError,
-      saveProjectSnapshot,
       sendMessage,
       showUploadError,
       storageError,
@@ -1666,6 +1796,12 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       return;
     }
     if (!hasPendingCanvasSave()) {
+      return;
+    }
+    if (
+      atomicRunSaveRevisionRef.current !== null &&
+      mutationRevisionRef.current <= atomicRunSaveRevisionRef.current
+    ) {
       return;
     }
 
@@ -2817,6 +2953,41 @@ function isActiveRunNode(nodes: AgentCanvasNode[], runId: string) {
       node.data.kind === "run" &&
       isActiveRunStatus(node.data.status)
   );
+}
+
+function toAgentRunCanvasPatch(
+  input: SaveProjectCanvasPatchInput
+): Omit<SaveProjectCanvasPatchInput, "projectId"> {
+  return {
+    expectedVersion: input.expectedVersion,
+    nodeUpserts: input.nodeUpserts,
+    nodeDeletes: input.nodeDeletes,
+    edgeUpserts: input.edgeUpserts,
+    edgeDeletes: input.edgeDeletes,
+    selectedNodeId: input.selectedNodeId,
+    lastRunId: input.lastRunId,
+  };
+}
+
+function createPendingRunCanvasPatchAck(
+  input: SaveProjectCanvasPatchInput,
+  revision: number
+): PendingRunCanvasPatchAck {
+  const patch: CanvasPatch = {
+    nodeUpserts: input.nodeUpserts,
+    nodeDeletes: input.nodeDeletes,
+    edgeUpserts: input.edgeUpserts,
+    edgeDeletes: input.edgeDeletes,
+  };
+
+  return {
+    dirtyEdgeIds: patch.edgeUpserts?.map((edge) => edge.id) ?? [],
+    dirtyNodeIds: patch.nodeUpserts?.map((node) => node.id) ?? [],
+    edgeDeleteIds: patch.edgeDeletes ?? [],
+    lastRunId: input.lastRunId,
+    nodeDeleteIds: patch.nodeDeletes ?? [],
+    revision,
+  };
 }
 
 function hasTerminalRunEvent(events: RunStepTraceEvent[]) {

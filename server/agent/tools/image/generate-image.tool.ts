@@ -6,6 +6,8 @@ import {
   readSeedreamConfigFromEnv,
 } from "../../../../seedream.ts";
 import {
+  BYTEARTIST_LEMO_MODEL,
+  doesByteArtistModelSupportReferenceImages,
   generateByteArtistImage,
   readByteArtistConfigFromEnv,
 } from "../../../../byteartist.ts";
@@ -28,6 +30,10 @@ import {
   resolveImageResultCount,
   toSeedreamUpstreamContext,
 } from "./generate-image.request.ts";
+import {
+  isLemoImagePrompt,
+  rewritePromptWithReferenceImagesForTextOnlyModel,
+} from "./reference-image-prompt.ts";
 
 const imageVariantInputSchema = z.object({
   height: z.number().int().positive(),
@@ -54,7 +60,7 @@ export const generateImageJsonSchema = {
     prompt: {
       type: "string",
       description:
-        "The image description to render. Optional. Defaults to the run prompt when omitted. Reference images attached on the canvas are sent to the image service automatically and are NOT visible to you.",
+        "The image description to render. Optional. Defaults to the run prompt when omitted. Reference images attached on the canvas are resolved by the server and are NOT visible to you; providers that cannot accept images receive a server-authored text prompt instead.",
     },
     aspectRatio: {
       type: "string",
@@ -98,7 +104,7 @@ export const generateImageJsonSchema = {
 } as const;
 
 export const generateImageToolDescription =
-  "Generate image artifacts from a text prompt using the configured image service. Generated images are rendered onto the canvas automatically as image result nodes. This tool does not write the database directly; it produces in-memory artifacts that the Cucumber runtime emits. Reference images are forwarded to the service directly and never exposed to you, so do not try to read or fabricate image URLs.";
+  "Generate image artifacts from a text prompt using the configured image service. Generated images are rendered onto the canvas automatically as image result nodes. This tool does not write the database directly; it produces in-memory artifacts that the Cucumber runtime emits. Reference images are resolved by the server and never exposed to you, so do not try to read or fabricate image URLs.";
 
 export const generateImageTool = tool({
   name: "generate_image",
@@ -138,18 +144,21 @@ export async function executeGenerateImageTool({
   }
 
   // No silent fallback: surface a configuration error instead of faking output.
+  const lemoRequested =
+    isLemoImagePrompt(parsed.data.prompt) || isLemoImagePrompt(context.prompt);
   const imageProvider = assertImageProviderConfigured(
     "generation",
-    context.imageProvider
+    lemoRequested ? "byteartist" : context.imageProvider
   );
 
-  const prompt = normalizeSeedreamProviderPrompt(
+  let prompt = normalizeSeedreamProviderPrompt(
     parsed.data.prompt?.trim() || context.prompt?.trim() || ""
   );
   if (!prompt) {
     return { error: "empty_prompt: no image prompt was provided." };
   }
   const variants = normalizeImageToolVariants(parsed.data.variants);
+  let providerPromptMetadata: Record<string, unknown> = {};
 
   const artifacts: ArtifactRef[] = [];
   const emitArtifact = async (image: {
@@ -162,6 +171,7 @@ export async function executeGenerateImageTool({
       artifactId: image.id,
       metadata: {
         ...image.metadata,
+        ...providerPromptMetadata,
         prompt,
         sourcePrompt: context.prompt,
       },
@@ -235,7 +245,41 @@ export async function executeGenerateImageTool({
       );
     }
   } else if (imageProvider.provider === "byteartist") {
-    const config = readByteArtistConfigFromEnv();
+    let config = readByteArtistConfigFromEnv();
+    if (lemoRequested) {
+      config = { ...config, modelId: BYTEARTIST_LEMO_MODEL };
+    }
+    let byteArtistUpstreamContext = upstreamContext;
+    const byteArtistReferenceImages = collectResolvedReferenceImages(upstreamContext);
+    if (
+      byteArtistReferenceImages.length &&
+      !doesByteArtistModelSupportReferenceImages(config.modelId)
+    ) {
+      const rewritten = await rewritePromptWithReferenceImagesForTextOnlyModel({
+        images: byteArtistReferenceImages,
+        modelId: config.modelId,
+        prompt,
+        signal: signal ?? context.signal,
+      });
+      if (rewritten) {
+        prompt = rewritten.prompt;
+        providerPromptMetadata = {
+          lemoModelForced: lemoRequested || undefined,
+          referenceImageDescriptionModel: rewritten.descriptionModel,
+          referenceImageDescriptionProvider: rewritten.descriptionProvider,
+          referenceImageDescriptions: rewritten.descriptions,
+          referenceImagePromptRewrite: true,
+        };
+        byteArtistUpstreamContext = upstreamContext.filter(
+          (item) => item.type !== "image"
+        );
+      }
+    } else if (lemoRequested) {
+      providerPromptMetadata = {
+        lemoModelForced: true,
+      };
+    }
+
     await generateByteArtistImage(
       buildGenerateImageByteArtistInput(
         {
@@ -245,7 +289,7 @@ export async function executeGenerateImageTool({
           variants,
           width: parsed.data.width,
           height: parsed.data.height,
-          upstreamContext,
+          upstreamContext: byteArtistUpstreamContext,
           onImage: emitArtifact,
           signal: signal ?? context.signal,
         },
@@ -280,6 +324,25 @@ export async function executeGenerateImageTool({
     prompt,
     note: "Images rendered to the canvas. Image URLs are intentionally omitted from your context.",
   };
+}
+
+function collectResolvedReferenceImages(
+  upstreamContext: CucumberAgentContext["upstreamContext"]
+) {
+  return upstreamContext.flatMap((item) => {
+    if (item.type !== "image" || !item.imageUrl) {
+      return [];
+    }
+    return [
+      {
+        imageUrl: item.imageUrl,
+        nodeId: item.nodeId,
+        prompt: item.prompt,
+        summary: item.summary,
+        title: item.title ?? item.artifact?.title,
+      },
+    ];
+  });
 }
 
 function requireCucumberContext(context: unknown): CucumberAgentContext {

@@ -319,7 +319,7 @@ describe("generate image request normalization", () => {
     ]);
   });
 
-  it("builds one ByteArtist request per requested image", () => {
+  it("builds text-only seed4 ByteArtist requests without reference images", () => {
     const requests = buildByteArtistRequestBodies(
       {
         prompts: ["生成四张小狗的图"],
@@ -351,9 +351,9 @@ describe("generate image request normalization", () => {
     expect(requests[0]).toMatchObject({
       width: 1024,
       height: 1024,
-      image: "https://cdn.example/ref.png",
-      inputImageCount: 1,
+      inputImageCount: 0,
     });
+    expect(requests[0].image).toBeUndefined();
   });
 
   it("builds ByteArtist variant requests with explicit dimensions", () => {
@@ -380,15 +380,38 @@ describe("generate image request normalization", () => {
         prompt: "基于参考图扩展画布",
         width: 2048,
         height: 1024,
-        image: "https://cdn.example/ref.png",
+        inputImageCount: 0,
       }),
       expect.objectContaining({
         prompt: "基于参考图扩展画布",
         width: 1536,
         height: 1536,
-        image: "https://cdn.example/ref.png",
+        inputImageCount: 0,
       }),
     ]);
+  });
+
+  it("passes reference images to ByteArtist models that support them", () => {
+    const requests = buildByteArtistRequestBodies(
+      {
+        prompts: ["参考图生成"],
+        resultCount: 1,
+        promptBatchMode: "single_prompt",
+        upstreamContext: [
+          {
+            nodeId: "image-1",
+            type: "image",
+            imageUrl: "https://cdn.example/ref.png",
+          },
+        ],
+      },
+      { ...testByteArtistConfig, modelId: "future_model" }
+    );
+
+    expect(requests[0]).toMatchObject({
+      image: "https://cdn.example/ref.png",
+      inputImageCount: 1,
+    });
   });
 
   it("scales small explicit variants into Seedream's supported 1K to 4K range", () => {

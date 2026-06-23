@@ -72,8 +72,12 @@ export function assertImageProviderConfigured(
   if (action === "matting") {
     const matting = getImageMattingProviderConfiguration();
     if (!matting.configured) {
+      const expected =
+        matting.provider === "rembg"
+          ? "Set IMAGE_MATTING_PROVIDER=rembg and REMBG_BIN."
+          : "Set IMAGE_MATTING_PROVIDER=byteartist and BYTEARTIST_BASE_URL, BYTEARTIST_AID, BYTEARTIST_APP_KEY, and BYTEARTIST_APP_SECRET, or the docs aliases GATEWAY_BASE_URL, BYTEDANCE_AID, BYTEDANCE_APP_KEY, and BYTEDANCE_APP_SECRET.";
       throw new Error(
-        `Image matting provider "${matting.provider ?? "none"}" is not configured. Set IMAGE_MATTING_PROVIDER=rembg and REMBG_BIN.`
+        `Image matting provider "${matting.provider ?? "none"}" is not configured. ${expected}`
       );
     }
     return matting;

@@ -11,6 +11,7 @@ const upscaleSeedreamImage = vi.fn();
 const isSeedreamConfigured = vi.fn();
 const isCozeImageConfigured = vi.fn();
 const isByteArtistConfigured = vi.fn();
+const rewritePromptWithReferenceImagesForTextOnlyModel = vi.fn();
 const runImageMatting = vi.fn();
 const createImageMattingArtifactId = vi.fn();
 const resolveStorageBackedImageContext = vi.fn(async (items: UpstreamContextItem[]) =>
@@ -171,12 +172,41 @@ vi.mock("../../../../byteartist.ts", async () => {
   };
 });
 
+vi.mock("./reference-image-prompt.ts", async () => {
+  const actual = await vi.importActual<typeof import("./reference-image-prompt.ts")>(
+    "./reference-image-prompt.ts"
+  );
+  return {
+    ...actual,
+    rewritePromptWithReferenceImagesForTextOnlyModel: (...args: unknown[]) =>
+      rewritePromptWithReferenceImagesForTextOnlyModel(...args),
+  };
+});
+
 vi.mock("./image-matting-provider.ts", () => ({
   createImageMattingArtifactId: () => createImageMattingArtifactId(),
   runImageMatting: (...args: unknown[]) => runImageMatting(...args),
 }));
 
 vi.mock("../../../storage.ts", () => ({
+  getArtifactStorageContentRef: (artifact: {
+    contentRef?: string;
+    metadata?: Record<string, unknown>;
+  }) =>
+    artifact.contentRef ??
+    (typeof artifact.metadata?.storageBucket === "string" &&
+    typeof artifact.metadata?.storagePath === "string"
+      ? `r2://${artifact.metadata.storageBucket}/${artifact.metadata.storagePath}`
+      : null),
+  parseStorageContentRef: (contentRef: string) => {
+    const match = contentRef.match(/^r2:\/\/([^/]+)\/(.+)$/);
+    return match ? { bucket: match[1], path: match[2] } : null;
+  },
+  readArtifactContent: () => ({
+    bytes: new Uint8Array([9, 8, 7]),
+    mimeType: "image/png",
+    sizeBytes: 3,
+  }),
   resolveStorageBackedImageContext: (items: UpstreamContextItem[]) =>
     resolveStorageBackedImageContext(items),
   storeGeneratedImageFromBytes: (
@@ -246,6 +276,8 @@ describe("generate_image tool", () => {
     isSeedreamConfigured.mockReset();
     isCozeImageConfigured.mockReset();
     isByteArtistConfigured.mockReset();
+    rewritePromptWithReferenceImagesForTextOnlyModel.mockReset();
+    rewritePromptWithReferenceImagesForTextOnlyModel.mockResolvedValue(null);
     runImageMatting.mockReset();
     createImageMattingArtifactId.mockReset();
     createImageMattingArtifactId.mockReturnValue("rembg-matting-1");
@@ -572,8 +604,14 @@ describe("generate_image tool", () => {
     );
   });
 
-  it("can generate through ByteArtist with server-resolved reference images", async () => {
+  it("converts references to text before generating through seed4 ByteArtist", async () => {
     isByteArtistConfigured.mockReturnValue(true);
+    rewritePromptWithReferenceImagesForTextOnlyModel.mockResolvedValue({
+      descriptionModel: "vision-model",
+      descriptionProvider: "ark",
+      descriptions: "参考图是一张黄色角色海报。",
+      prompt: "结合参考图描述生成 Lemo 黄色 IP 海报",
+    });
     generateByteArtistImage.mockImplementation(
       async (input: { onImage?: (image: unknown) => void }) => {
         const image = {
@@ -612,29 +650,69 @@ describe("generate_image tool", () => {
 
     expect(result.generated).toBe(1);
     expect(JSON.stringify(result)).not.toContain("cdn.example");
+    expect(rewritePromptWithReferenceImagesForTextOnlyModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        images: [
+          expect.objectContaining({
+            imageUrl: "https://signed.example/ref.png",
+            nodeId: "image-1",
+          }),
+        ],
+        modelId: "seed4_0407_lemo",
+        prompt: "参考图生成",
+      })
+    );
     expect(generateByteArtistImage).toHaveBeenCalledWith(
       expect.objectContaining({
         totalRequestedImageCount: 1,
         requests: [
           expect.objectContaining({
-            prompt: "参考图生成",
+            prompt: "结合参考图描述生成 Lemo 黄色 IP 海报",
             width: 1536,
             height: 1024,
-            image: "https://signed.example/ref.png",
-            inputImageCount: 1,
+            inputImageCount: 0,
           }),
         ],
       }),
       testByteArtistConfig
     );
+    expect(generateByteArtistImage.mock.calls[0][0].requests[0].image).toBeUndefined();
     expect(storeGeneratedImageFromUrl).toHaveBeenCalledWith(
       expect.objectContaining({
         artifactId: "byteartist-1",
         metadata: expect.objectContaining({
           provider: "byteartist",
-          prompt: "参考图生成",
+          prompt: "结合参考图描述生成 Lemo 黄色 IP 海报",
+          referenceImageDescriptionModel: "vision-model",
+          referenceImageDescriptions: "参考图是一张黄色角色海报。",
+          referenceImagePromptRewrite: true,
         }),
         sourceUrl: "https://cdn.example/byteartist.png",
+      })
+    );
+  });
+
+  it("forces Lemo requests to seed4 ByteArtist even when Coze is selected", async () => {
+    isByteArtistConfigured.mockReturnValue(true);
+    generateByteArtistImage.mockResolvedValue({ images: [] });
+    const context = buildContext({
+      imageProvider: "coze",
+      prompt: "生成一张 lemo 角色海报",
+    });
+
+    await invokeTool(context, { prompt: "生成 lemo 海报" });
+
+    expect(generateCozeImage).not.toHaveBeenCalled();
+    expect(generateByteArtistImage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requests: [
+          expect.objectContaining({
+            prompt: "生成 lemo 海报",
+          }),
+        ],
+      }),
+      expect.objectContaining({
+        modelId: "seed4_0407_lemo",
       })
     );
   });

@@ -1,420 +1,567 @@
-好的，以下是一份完整的 ByteArtist（Seed4/字节 AFR）集成文档，包含可直接复用的 TypeScript 代码。
+# ByteArtist 调用文档
 
----
+本文记录 Cucumber 当前接入 ByteArtist / 智创网关的完整调用约定。代码以当前仓库实现为准，入口在 [byteartist.ts](../byteartist.ts)，抠图 provider 在 [server/agent/tools/image/byteartist-matting.ts](../server/agent/tools/image/byteartist-matting.ts)。
 
-# ByteArtist (Seed4) 图像生成 API 集成文档
+## 1. 调用模型
 
-## 1. 概述
+ByteArtist 通过智创网关的异步任务接口调用：
 
-ByteArtist 是字节跳动内部的 AI 图像生成服务（又称 Seed4 / AFR），采用**异步任务提交 + 轮询获取结果**的模式：
+1. `POST /media/api/pic/submit_task_v2` 提交任务并获取 `task_id`
+2. `POST /media/api/pic/batch_get_result_v2` 按 `task_id` 轮询结果
+3. 完成后优先读取 `pic_urls[].main_url` / `backup_url`，没有 URL 时读取 `binary_data`
 
-1. 调用 `submit_task_v2` 提交生成任务，获得 `task_id`
-2. 轮询 `batch_get_result_v2` 查询任务状态，直到任务完成或失败
-3. 任务完成后从响应中提取图片 URL 或 base64 数据
+当前仓库使用两类能力：
 
-**当前使用模型**: `seed4_0407_lemo`（Prompt 字段名特殊，见下文）
+| 能力 | req_key / model | 用途 |
+| --- | --- | --- |
+| 图片生成 | `seed4_0407_lemo` | Lemo / Seed4 文生图 |
+| 图片抠图 | `image_matting_lemo` | 透明底、白底或中性底抠图 |
 
----
+`seed4_0407_lemo` 在本仓库标记为 text-only，不直接接收参考图。若用户带上游图片并要求 Lemo 生图，服务端会先把参考图转为文字描述，再调用 ByteArtist。
 
-## 2. 环境变量配置
+## 2. 环境变量
 
-| 变量名 | 说明 | 示例值 |
-|--------|------|--------|
-| `GATEWAY_BASE_URL` | AFR 网关地址 | `https://lv-api-lf.ulikecam.com` |
-| `BYTEDANCE_AID` | 应用 ID | `6834` |
-| `BYTEDANCE_APP_KEY` | App Key | 从字节 AFR 平台获取 |
-| `BYTEDANCE_APP_SECRET` | App Secret（用于签名） | 从字节 AFR 平台获取 |
+ByteArtist 生图和抠图共用网关凭据：
 
----
-
-## 3. 签名算法
-
-每次 API 请求都需要携带签名参数。签名规则：
-
-```
-sign = SHA1(sort([nonce, timestamp, APP_SECRET]).join(''))
+```bash
+BYTEARTIST_BASE_URL=https://lv-api-lf.ulikecam.com
+BYTEARTIST_AID=
+BYTEARTIST_APP_KEY=
+BYTEARTIST_APP_SECRET=
 ```
 
-- `nonce`: 随机正整数（建议 `Math.floor(Math.random() * 2147483647)`）
-- `timestamp`: 秒级 Unix 时间戳（`Math.floor(Date.now() / 1000)`）
-- 三个字符串按字典序排序后拼接，再做 SHA1 哈希
+也兼容智创网关文档中的别名：
 
----
+```bash
+GATEWAY_BASE_URL=https://lv-api-lf.ulikecam.com
+BYTEDANCE_AID=
+BYTEDANCE_APP_KEY=
+BYTEDANCE_APP_SECRET=
+```
 
-## 4. 完整 TypeScript 集成代码
+生图配置：
 
-### 4.1 类型定义与工具函数
+```bash
+IMAGE_PROVIDER=byteartist
+BYTEARTIST_MODEL=seed4_0407_lemo
+BYTEARTIST_WIDTH=1024
+BYTEARTIST_HEIGHT=1024
+BYTEARTIST_MAX_OUTPUT_IMAGES=4
+BYTEARTIST_MAX_INPUT_IMAGES=1
+BYTEARTIST_MAX_ATTEMPTS=120
+BYTEARTIST_POLL_INTERVAL_MS=1000
+BYTEARTIST_EXPIRED_DURATION=600
+BYTEARTIST_IMAGE_RETURN_TYPE=url
+BYTEARTIST_IMAGE_RETURN_FORMAT=png
+BYTEARTIST_SEED=-1
+```
 
-```typescript
-import crypto from 'crypto';
+抠图配置：
 
-// ============ 配置 ============
-interface AFRConfig {
-  baseUrl: string;
+```bash
+IMAGE_MATTING_PROVIDER=byteartist
+BYTEARTIST_MATTING_MODEL=image_matting_lemo
+BYTEARTIST_MATTING_BLUE=-1
+BYTEARTIST_MATTING_GREEN=-1
+BYTEARTIST_MATTING_RED=-1
+BYTEARTIST_MATTING_ONLY_MASK=0
+BYTEARTIST_MATTING_REFINE_MASK=2
+BYTEARTIST_MATTING_IMAGE_RETURN_TYPE=url
+BYTEARTIST_MATTING_IMAGE_RETURN_FORMAT=png
+```
+
+## 3. 签名规则
+
+每次 submit 和 poll 都要重新生成签名参数。当前实现：
+
+```ts
+import { createHash } from "node:crypto";
+
+function generateByteArtistSign(
+  nonce: string,
+  timestamp: string,
+  appSecret: string
+) {
+  return createHash("sha1")
+    .update([nonce, timestamp, appSecret].sort().join(""))
+    .digest("hex");
+}
+```
+
+公共表单字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `aid` | 应用 ID |
+| `app_key` | App Key |
+| `nonce` | 随机正整数 |
+| `timestamp` | 秒级 Unix 时间戳 |
+| `sign` | SHA1 签名 |
+| `req_key` | 算法名 / 模型名 |
+| `img_return_type` | 建议 `url` |
+| `img_return_format` | 建议 `png` |
+
+请求使用 `application/x-www-form-urlencoded`。不要用 raw JSON。
+
+## 4. 图片参数
+
+智创网关图片参数规则如下：
+
+| 场景 | 表单字段 | 说明 |
+| --- | --- | --- |
+| 公共 HTTP/HTTPS URL 单图 | `source` | 首选方式，体积小 |
+| TOS URL 单图 | `source` | 需要网关支持对应 bucket |
+| base64 单图 | `base64file` | 去掉 `data:image/...;base64,` 前缀 |
+| 文件二进制单图 | `file` | 需要 multipart/form-data |
+| 文件二进制多图 | `files[]` + `input_img_type=multiple_files` | 需要 multipart/form-data |
+
+当前仓库只使用 `source` 和 `base64file`：
+
+```ts
+function appendByteArtistImageFormField(
+  formData: URLSearchParams,
+  image: string
+) {
+  if (/^(https?:|tos:)\/\//i.test(image)) {
+    formData.append("source", image);
+    return;
+  }
+
+  formData.append(
+    "base64file",
+    image.startsWith("data:") ? image.split(",")[1] ?? image : image
+  );
+}
+```
+
+不要再使用旧字段 `image`、`image_url` 或 `image_data`。
+
+## 5. 提交任务
+
+接口：
+
+```text
+POST {BYTEARTIST_BASE_URL}/media/api/pic/submit_task_v2
+Content-Type: application/x-www-form-urlencoded
+```
+
+必填业务字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `req_json` | 算法参数，JSON stringify 后放入表单 |
+| `expired_duration` | 任务过期时间，单位秒，默认 `600` |
+
+生图 `req_json`：
+
+```json
+{
+  "Prompt": "小龙虾形状的 lemo，米黄色纯色背景",
+  "width": 1024,
+  "height": 1024,
+  "seed": -1
+}
+```
+
+注意：`seed4_0407_lemo` 使用大写 `Prompt`。其它未显式适配的 ByteArtist 模型默认使用小写 `string`：
+
+```json
+{
+  "string": "图片提示词",
+  "width": 1024,
+  "height": 1024,
+  "seed": -1
+}
+```
+
+抠图 `req_json`：
+
+```json
+{
+  "blue": -1,
+  "green": -1,
+  "red": -1,
+  "only_mask": 0,
+  "refine_mask": 2
+}
+```
+
+背景参数约定：
+
+| 背景 | red | green | blue |
+| --- | ---: | ---: | ---: |
+| transparent | `-1` | `-1` | `-1` |
+| white | `255` | `255` | `255` |
+| neutral | `242` | `242` | `239` |
+
+提交成功响应：
+
+```json
+{
+  "status_code": 0,
+  "message": "",
+  "data": {
+    "task_id": "123456"
+  }
+}
+```
+
+## 6. 轮询结果
+
+接口：
+
+```text
+POST {BYTEARTIST_BASE_URL}/media/api/pic/batch_get_result_v2
+Content-Type: application/x-www-form-urlencoded
+```
+
+必填字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `task_ids` | 任务 ID，多个用逗号分隔，最多 10 个 |
+
+可选字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `omit_fields` | 不返回的字段，例如 `resp_json,binary_data,req_json` |
+| `img_return_type` | `url` 或 `base64` |
+| `img_return_format` | `png`、`jpeg`、`webp` 等 |
+
+当前实现每次 poll 都重新带完整签名字段、`req_key`、`img_return_type` 和 `img_return_format`。
+
+结果可能是数组，也可能是按 task id 索引的对象，代码需要兼容两种：
+
+```ts
+function readByteArtistResult(data: PollResponse, taskId: string) {
+  const results = data.data?.results;
+  if (Array.isArray(results)) {
+    return results[0] ?? null;
+  }
+  if (results && typeof results === "object") {
+    return results[taskId] ?? Object.values(results)[0] ?? null;
+  }
+  return null;
+}
+```
+
+完成状态：
+
+```ts
+status === 1 || status === "done" || status === "DONE"
+```
+
+失败状态：
+
+```ts
+status === 2 || status === "failed" || status === "FAILED"
+```
+
+图片提取顺序：
+
+```ts
+const urls = (result.pic_urls ?? [])
+  .map((item) => item.main_url || item.backup_url)
+  .filter(Boolean);
+
+if (urls.length) return urls;
+
+return (result.binary_data ?? []).map(
+  (base64) => `data:image/png;base64,${base64.trim()}`
+);
+```
+
+## 7. Cucumber 当前调用链
+
+### 7.1 生图
+
+运行时入口：
+
+- `generate_image` tool
+- provider 选择：`IMAGE_PROVIDER=byteartist`，或用户输入明确提到 `lemo`
+- 执行层：[byteartist.ts](../byteartist.ts)
+
+调用链：
+
+1. 服务端从持久化画布重建 upstream context
+2. 如果是 `seed4_0407_lemo` 且存在参考图，先用视觉模型改写 prompt
+3. `generateByteArtistImage` 提交异步任务
+4. poll 成功后拿 provider URL
+5. 服务端下载结果并转存到 R2
+6. 创建 image artifact，由 runtime materializer 投影到画布
+
+`seed4_0407_lemo` 不直接发送参考图 URL。
+
+### 7.2 抠图
+
+运行时入口：
+
+- Agent tool：`image_matting`
+- Toolbar API：`POST /api/projects/:projectId/images/matting`
+- provider：`IMAGE_MATTING_PROVIDER=byteartist`
+- 执行层：[server/agent/tools/image/byteartist-matting.ts](../server/agent/tools/image/byteartist-matting.ts)
+
+调用链：
+
+1. 客户端只提交选中节点 ID，不提交可信 URL
+2. 服务端从项目快照找到 image artifact
+3. 服务端根据 `r2://...` content ref 签发短期 R2 read URL
+4. ByteArtist 抠图请求使用 `source=<signed http url>`
+5. provider 返回结果 URL 或 base64
+6. 服务端下载结果 bytes 并转存到 R2
+7. 创建新的 image artifact / canvas node，并连到原图节点
+
+只有当调用方没有可拉取 URL、但已经有服务端 bytes 时，才走 `base64file`。
+
+## 8. TypeScript 最小示例
+
+```ts
+import { createHash } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
+
+type ByteArtistConfig = {
   aid: string;
   appKey: string;
   appSecret: string;
+  baseUrl: string;
+  reqKey: string;
+};
+
+function sign(nonce: string, timestamp: string, secret: string) {
+  return createHash("sha1")
+    .update([nonce, timestamp, secret].sort().join(""))
+    .digest("hex");
 }
 
-function resolveConfig(): AFRConfig {
-  const baseUrl = process.env.GATEWAY_BASE_URL?.trim();
-  const aid = process.env.BYTEDANCE_AID?.trim();
-  const appKey = process.env.BYTEDANCE_APP_KEY?.trim();
-  const appSecret = process.env.BYTEDANCE_APP_SECRET?.trim();
-
-  if (!baseUrl || !aid || !appKey || !appSecret) {
-    const missing = [
-      !baseUrl && 'GATEWAY_BASE_URL',
-      !aid && 'BYTEDANCE_AID',
-      !appKey && 'BYTEDANCE_APP_KEY',
-      !appSecret && 'BYTEDANCE_APP_SECRET',
-    ].filter(Boolean);
-    throw new Error(`Missing ByteDance AFR environment variables: ${missing.join(', ')}`);
-  }
-
-  return { baseUrl, aid, appKey, appSecret };
+function signedForm(config: ByteArtistConfig) {
+  const nonce = Math.floor(Math.random() * 2_147_483_647).toString();
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const form = new URLSearchParams();
+  form.append("aid", config.aid);
+  form.append("app_key", config.appKey);
+  form.append("nonce", nonce);
+  form.append("timestamp", timestamp);
+  form.append("sign", sign(nonce, timestamp, config.appSecret));
+  form.append("req_key", config.reqKey);
+  form.append("img_return_type", "url");
+  form.append("img_return_format", "png");
+  return form;
 }
 
-// ============ 签名工具 ============
-function sha1(message: string): string {
-  return crypto.createHash('sha1').update(message).digest('hex');
-}
-
-function generateNonce(): string {
-  return Math.floor(Math.random() * 2147483647).toString();
-}
-
-function generateTimestamp(): string {
-  return Math.floor(Date.now() / 1000).toString();
-}
-
-function generateSign(nonce: string, timestamp: string, secretKey: string): string {
-  const stringList = [nonce, timestamp, secretKey];
-  stringList.sort();
-  return sha1(stringList.join(''));
-}
-
-// ============ 公共签名参数构建 ============
-function buildSignedFormParams(config: AFRConfig, reqKey: string): URLSearchParams {
-  const nonce = generateNonce();
-  const timestamp = generateTimestamp();
-  const sign = generateSign(nonce, timestamp, config.appSecret);
-
-  const formData = new URLSearchParams();
-  formData.append('aid', config.aid);
-  formData.append('app_key', config.appKey);
-  formData.append('nonce', nonce);
-  formData.append('timestamp', timestamp);
-  formData.append('sign', sign);
-  formData.append('req_key', reqKey);
-  formData.append('img_return_type', 'url');
-  formData.append('img_return_format', 'png');
-  return formData;
-}
-```
-
-### 4.2 提交任务接口
-
-```typescript
-interface SubmitTaskOptions {
-  modelId: string;       // 如 'seed4_0407_lemo'
-  prompt: string;
-  width: number;
-  height: number;
-  image?: string;        // 参考图：URL / data:image/...;base64,xxx / 纯base64
-}
-
-interface SubmitTaskResponse {
-  status_code: number;
-  message?: string;
-  data?: { task_id?: string };
-}
-
-async function submitTask(options: SubmitTaskOptions): Promise<string> {
-  const { modelId, prompt, width, height, image } = options;
-  const config = resolveConfig();
-  const url = `${config.baseUrl}/media/api/pic/submit_task_v2`;
-
-  // 构建 req_json
-  const reqJson: Record<string, unknown> = {
-    width,
-    height,
-    seed: -1,
-  };
-
-  // ⚠️ 注意：seed4_0407_lemo 模型使用大写 Prompt 字段，其他模型用 string 字段
-  if (modelId === 'seed4_0407_lemo') {
-    reqJson.Prompt = prompt;
-  } else {
-    reqJson.string = prompt;
-  }
-
-  const formData = buildSignedFormParams(config, modelId);
-  formData.append('req_json', JSON.stringify(reqJson));
-  formData.append('expired_duration', '600');
-
-  // 处理参考图
-  if (image) {
-    if (image.startsWith('http')) {
-      formData.append('image_url', image);
-    } else if (image.startsWith('data:')) {
-      const base64Data = image.split(',')[1] ?? image;
-      formData.append('image_data', base64Data);
-    } else {
-      formData.append('image_data', image);
-    }
-  }
-
+async function postForm<T>(url: string, body: URLSearchParams): Promise<T> {
   const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: formData.toString(),
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
   });
-
-  const data = await response.json() as SubmitTaskResponse;
-
+  const data = (await response.json()) as T & {
+    message?: string;
+    status_code?: number;
+  };
   if (!response.ok || data.status_code !== 0) {
-    throw new Error(`Submit task failed [${data.status_code}]: ${data.message || response.status}`);
+    throw new Error(`ByteArtist failed: ${data.message ?? response.statusText}`);
+  }
+  return data;
+}
+
+async function submitTask(
+  config: ByteArtistConfig,
+  reqJson: Record<string, unknown>,
+  imageUrl?: string
+) {
+  const form = signedForm(config);
+  form.append("req_json", JSON.stringify(reqJson));
+  form.append("expired_duration", "600");
+  if (imageUrl) {
+    form.append("source", imageUrl);
   }
 
-  const taskId = data.data?.task_id;
-  if (!taskId) {
-    throw new Error('No task_id returned from submit_task_v2');
+  const data = await postForm<{ data?: { task_id?: string } }>(
+    `${config.baseUrl}/media/api/pic/submit_task_v2`,
+    form
+  );
+  if (!data.data?.task_id) {
+    throw new Error("ByteArtist did not return task_id.");
   }
-
-  return taskId;
-}
-```
-
-### 4.3 轮询获取结果接口
-
-```typescript
-type TaskStatus = number | string;
-
-interface PollResultOptions {
-  modelId: string;
-  taskId: string;
-  maxAttempts?: number;   // 默认 120（约 120 秒超时）
-  pollIntervalMs?: number; // 默认 1000ms
+  return data.data.task_id;
 }
 
-interface PollResultItem {
-  status?: TaskStatus;
-  pic_urls?: Array<{ main_url?: string; backup_url?: string }>;
-  binary_data?: string[];
-  message?: string;
-}
+async function pollTask(config: ByteArtistConfig, taskId: string) {
+  for (let attempt = 1; attempt <= 120; attempt += 1) {
+    const form = signedForm(config);
+    form.append("task_ids", taskId);
+    const data = await postForm<{
+      data?: {
+        results?:
+          | Array<{
+              binary_data?: string[];
+              pic_urls?: Array<{ backup_url?: string; main_url?: string }>;
+              status?: number | string;
+            }>
+          | Record<
+              string,
+              {
+                binary_data?: string[];
+                pic_urls?: Array<{ backup_url?: string; main_url?: string }>;
+                status?: number | string;
+              }
+            >;
+      };
+    }>(`${config.baseUrl}/media/api/pic/batch_get_result_v2`, form);
 
-interface PollResultResponse {
-  status_code: number;
-  message?: string;
-  data?: { results?: PollResultItem[] };
-}
-
-function isDoneStatus(status: TaskStatus | undefined): boolean {
-  return status === 'done' || status === 1 || status === 'DONE';
-}
-
-function isFailedStatus(status: TaskStatus | undefined): boolean {
-  return status === 'failed' || status === 2 || status === 'FAILED';
-}
-
-async function pollForResult(options: PollResultOptions): Promise<string[]> {
-  const { modelId, taskId, maxAttempts = 120, pollIntervalMs = 1000 } = options;
-  const config = resolveConfig();
-  const url = `${config.baseUrl}/media/api/pic/batch_get_result_v2`;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const formData = buildSignedFormParams(config, modelId);
-    formData.append('task_ids', taskId);
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: formData.toString(),
-    });
-
-    const data = await response.json() as PollResultResponse;
-
-    if (!response.ok || data.status_code !== 0) {
-      throw new Error(`Poll result failed [${data.status_code}]: ${data.message || response.status}`);
-    }
-
-    const result = data.data?.results?.[0];
+    const results = data.data?.results;
+    const result = Array.isArray(results)
+      ? results[0]
+      : results?.[taskId] ?? Object.values(results ?? {})[0];
     if (!result) {
-      await new Promise((r) => setTimeout(r, pollIntervalMs));
+      await delay(1000);
       continue;
     }
 
-    const { status } = result;
-
-    // 任务完成
-    if (isDoneStatus(status)) {
-      // 优先取 pic_urls
-      const picUrls = result.pic_urls;
-      if (picUrls && picUrls.length > 0) {
-        const images = picUrls
-          .map((p) => p.main_url || p.backup_url)
-          .filter((url): url is string => Boolean(url));
-        if (images.length > 0) return images;
-      }
-      // 其次取 binary_data (base64)
-      if (result.binary_data && result.binary_data.length > 0) {
-        return result.binary_data.map((b64) => `data:image/png;base64,${b64}`);
-      }
-      throw new Error(`Task completed but no image data: ${result.message || 'No pic_urls or binary_data'}`);
+    if (result.status === 1 || result.status === "done" || result.status === "DONE") {
+      const urls = (result.pic_urls ?? [])
+        .map((item) => item.main_url || item.backup_url)
+        .filter((url): url is string => Boolean(url));
+      if (urls.length) return urls;
+      return (result.binary_data ?? []).map(
+        (item) => `data:image/png;base64,${item.trim()}`
+      );
     }
 
-    // 任务失败
-    if (isFailedStatus(status)) {
-      throw new Error(`Task failed: ${result.message || 'Unknown error'}`);
+    if (
+      result.status === 2 ||
+      result.status === "failed" ||
+      result.status === "FAILED"
+    ) {
+      throw new Error(`ByteArtist task failed: ${taskId}`);
     }
 
-    // 处理中，等待后继续
-    if (attempt < maxAttempts) {
-      await new Promise((r) => setTimeout(r, pollIntervalMs));
-    }
+    await delay(1000);
   }
 
-  throw new Error(`Poll timeout: task ${taskId} did not complete within ${maxAttempts * pollIntervalMs / 1000} seconds`);
+  throw new Error(`ByteArtist task timed out: ${taskId}`);
 }
 ```
 
-### 4.4 统一调用入口
+文生图：
 
-```typescript
-interface GenerateImageOptions {
-  modelId?: string;       // 默认 'seed4_0407_lemo'
-  prompt: string;
-  width?: number;         // 默认 1024
-  height?: number;        // 默认 1024
-  imageSize?: '1K' | '2K' | '4K';  // 尺寸预设，优先级低于 width/height
-  image?: string;         // 参考图（i2i）
-}
+```ts
+const config = {
+  aid: process.env.BYTEARTIST_AID!,
+  appKey: process.env.BYTEARTIST_APP_KEY!,
+  appSecret: process.env.BYTEARTIST_APP_SECRET!,
+  baseUrl: process.env.BYTEARTIST_BASE_URL ?? "https://lv-api-lf.ulikecam.com",
+  reqKey: "seed4_0407_lemo",
+};
 
-interface GenerateImageResult {
-  images: string[];       // 图片 URL 或 data URL 列表
-  taskId: string;
-  width: number;
-  height: number;
-}
-
-const SIZE_MAP: Record<string, number> = { '1K': 1024, '2K': 2048, '4K': 4096 };
-
-async function generateImage(options: GenerateImageOptions): Promise<GenerateImageResult> {
-  const modelId = options.modelId || 'seed4_0407_lemo';
-  const sizePx = options.imageSize ? SIZE_MAP[options.imageSize] : undefined;
-  const width = options.width || sizePx || 1024;
-  const height = options.height || sizePx || 1024;
-
-  // 1. 提交任务
-  const taskId = await submitTask({
-    modelId,
-    prompt: options.prompt,
-    width,
-    height,
-    image: options.image,
-  });
-
-  // 2. 轮询结果
-  const images = await pollForResult({ modelId, taskId });
-
-  return { images, taskId, width, height };
-}
-```
-
----
-
-## 5. 使用示例
-
-```typescript
-// 文生图 (text-to-image)
-const result = await generateImage({
-  prompt: '小龙虾形状的lemo，米黄色纯色背景',
-  imageSize: '2K',
+const taskId = await submitTask(config, {
+  Prompt: "小龙虾形状的 lemo，米黄色纯色背景",
+  width: 1024,
+  height: 1024,
+  seed: -1,
 });
-console.log('Generated images:', result.images);
-console.log('Task ID:', result.taskId);
-
-// 图生图 (image-to-image)
-const result2 = await generateImage({
-  prompt: '保持构图，换成赛博朋克风格',
-  width: 2048,
-  height: 2048,
-  image: 'https://example.com/reference.jpg',  // 支持 URL、data URL 或纯 base64
-});
+const imageUrls = await pollTask(config, taskId);
 ```
 
----
+URL 抠图：
 
-## 6. 关键注意事项
+```ts
+const config = {
+  aid: process.env.BYTEARTIST_AID!,
+  appKey: process.env.BYTEARTIST_APP_KEY!,
+  appSecret: process.env.BYTEARTIST_APP_SECRET!,
+  baseUrl: process.env.BYTEARTIST_BASE_URL ?? "https://lv-api-lf.ulikecam.com",
+  reqKey: "image_matting_lemo",
+};
 
-| 事项 | 说明 |
-|------|------|
-| **Prompt 字段名** | `seed4_0407_lemo` 使用大写 `Prompt`，其他模型使用小写 `string` |
-| **签名每次重新生成** | 提交和每次轮询都必须生成新的 `nonce`/`timestamp`/`sign` |
-| **Content-Type** | 必须是 `application/x-www-form-urlencoded`，**不是 JSON** |
-| **参考图格式** | URL 传 `image_url`；base64/data URL 传 `image_data`（去掉 data: 前缀） |
-| **尺寸约束** | `seed4_0407_lemo` 最小 1024×1024，推荐 2048×2048 (2K) |
-| **轮询间隔** | 建议 1 秒，不要过于频繁；超时时间建议 120 秒以上 |
-| **返回格式** | 设置了 `img_return_type=url`，优先返回 CDN URL；`binary_data` 为 base64 兜底 |
-| **seed 参数** | 当前固定为 `-1`（随机），如需要固定种子可修改 `reqJson.seed` |
-| **不支持的参数** | negativePrompt（反向提示词）、batchSize（批量）、aspectRatio 均不在当前 req_json 中传递 |
-| **代理** | 内网环境可能需要配置 `HTTPS_PROXY`/`HTTP_PROXY`，通过 `HttpsProxyAgent`（Node.js）或系统代理传递给 fetch |
+const taskId = await submitTask(
+  config,
+  {
+    blue: -1,
+    green: -1,
+    red: -1,
+    only_mask: 0,
+    refine_mask: 2,
+  },
+  "https://example.com/source.png"
+);
+const mattedUrls = await pollTask(config, taskId);
+```
 
----
+## 9. cURL 示例
 
-## 7. Node.js 环境补充（代理支持）
-
-如果在 Node.js 环境需要走代理，安装 `https-proxy-agent` 并改造 fetch 调用：
+下面示例只展示字段形状。`nonce`、`timestamp`、`sign` 需要每次请求动态生成。
 
 ```bash
-pnpm add https-proxy-agent
+curl -X POST "$BYTEARTIST_BASE_URL/media/api/pic/submit_task_v2" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "aid=$BYTEARTIST_AID" \
+  --data-urlencode "app_key=$BYTEARTIST_APP_KEY" \
+  --data-urlencode "nonce=$NONCE" \
+  --data-urlencode "timestamp=$TIMESTAMP" \
+  --data-urlencode "sign=$SIGN" \
+  --data-urlencode "req_key=image_matting_lemo" \
+  --data-urlencode "img_return_type=url" \
+  --data-urlencode "img_return_format=png" \
+  --data-urlencode 'req_json={"blue":-1,"green":-1,"red":-1,"only_mask":0,"refine_mask":2}' \
+  --data-urlencode "expired_duration=600" \
+  --data-urlencode "source=https://example.com/source.png"
 ```
 
-```typescript
-import { HttpsProxyAgent } from 'https-proxy-agent';
+```bash
+curl -X POST "$BYTEARTIST_BASE_URL/media/api/pic/batch_get_result_v2" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "aid=$BYTEARTIST_AID" \
+  --data-urlencode "app_key=$BYTEARTIST_APP_KEY" \
+  --data-urlencode "nonce=$NONCE" \
+  --data-urlencode "timestamp=$TIMESTAMP" \
+  --data-urlencode "sign=$SIGN" \
+  --data-urlencode "req_key=image_matting_lemo" \
+  --data-urlencode "img_return_type=url" \
+  --data-urlencode "img_return_format=png" \
+  --data-urlencode "task_ids=$TASK_ID"
+```
 
-function getProxyAgent() {
-  const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
-  return proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
+## 10. 排障清单
+
+| 现象 | 常见原因 | 检查 |
+| --- | --- | --- |
+| 上传图片不生效 | 用了旧字段 `image` / `image_url` / `image_data` | URL 必须发 `source`，base64 必须发 `base64file` |
+| 返回没有图片 | `img_return_type` 未设为 `url`，或模型返回了 `binary_data` | 同时兼容 `pic_urls` 和 `binary_data` |
+| `task_id` 为空 | `status_code` 非 0、签名错误、req_key 错误 | 记录 `message` 和网关错误码 |
+| poll 一直处理中 | 模型慢或任务积压 | 提高 `BYTEARTIST_MAX_ATTEMPTS`，保留 1s 左右轮询间隔 |
+| 抠图不是透明底 | RGB 参数不是 `-1/-1/-1`，或模型只支持白底 fallback | 检查 `BYTEARTIST_MATTING_*` |
+| 抠图接口拿不到原图 | 客户端传了本地 URL 或未保存 artifact | 由服务端从 R2 content ref 签发 read URL |
+| Lemo 参考图没有生效 | `seed4_0407_lemo` 当前 text-only | 先把参考图改写成文字 prompt，再调用 ByteArtist |
+
+## 11. 验证命令
+
+相关单测：
+
+```bash
+pnpm exec vitest run byteartist.test.ts server/agent/tools/image/byteartist-matting.test.ts server/agent/tools/image/generate-image.test.ts
+```
+
+类型检查：
+
+```bash
+pnpm exec tsc -b --pretty false
+```
+
+本地健康检查：
+
+```bash
+curl http://127.0.0.1:8787/api/health
+```
+
+期望看到：
+
+```json
+{
+  "byteArtistConfigured": true,
+  "imageMattingConfigured": true,
+  "imageMattingProvider": "byteartist",
+  "imageMattingModel": "image_matting_lemo"
 }
-
-// fetch 时传入 agent
-const response = await fetch(url, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-  body: formData.toString(),
-  agent: getProxyAgent(),  // Node.js 特有
-} as RequestInit & { agent?: unknown });
 ```
-
----
-
-## 8. API 时序图
-
-```mermaid
-sequenceDiagram
-    participant Client as 调用方
-    participant AFR as ByteArtist AFR 网关
-
-    Client->>AFR: POST /media/api/pic/submit_task_v2 (form + sign)
-    AFR-->>Client: { status_code:0, data:{ task_id } }
-
-    loop 每秒轮询 (最多 120 次)
-        Client->>AFR: POST /media/api/pic/batch_get_result_v2 (form + sign, task_ids)
-        AFR-->>Client: { data:{ results:[{ status }] } }
-        alt status=done
-            AFR-->>Client: { pic_urls: [{main_url, backup_url}] }
-            Client->>Client: 返回图片 URL 列表
-        else status=failed
-            Client->>Client: throw Error
-        else 处理中
-            Client->>Client: sleep(1s)
-        end
-    end
-```
-
----
-
-以上代码可以直接复制到任何 Node.js/TypeScript 项目中使用，零依赖（仅需 Node.js 内置 `crypto` 模块；代理场景额外安装 `https-proxy-agent`）。

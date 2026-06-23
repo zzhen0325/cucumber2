@@ -161,16 +161,17 @@ const projectPatchSchema = z
     message: "No project updates provided.",
   });
 
-const canvasPatchSaveSchema = z
-  .object({
-    expectedVersion: z.number().int().nonnegative().optional(),
-    nodeUpserts: z.array(z.unknown()).optional(),
-    nodeDeletes: z.array(z.string()).optional(),
-    edgeUpserts: z.array(z.unknown()).optional(),
-    edgeDeletes: z.array(z.string()).optional(),
-    selectedNodeId: z.string().nullable().optional(),
-    lastRunId: z.string().nullable().optional(),
-  })
+const canvasPatchPayloadSchema = z.object({
+  expectedVersion: z.number().int().nonnegative().optional(),
+  nodeUpserts: z.array(z.unknown()).optional(),
+  nodeDeletes: z.array(z.string()).optional(),
+  edgeUpserts: z.array(z.unknown()).optional(),
+  edgeDeletes: z.array(z.string()).optional(),
+  selectedNodeId: z.string().nullable().optional(),
+  lastRunId: z.string().nullable().optional(),
+});
+
+const canvasPatchSaveSchema = canvasPatchPayloadSchema
   .refine((value) => Object.keys(value).length > 0, {
     message: "No canvas updates provided.",
   });
@@ -1269,19 +1270,33 @@ app.post("/api/agent-run", async (c) => {
   const body = await c.req.json();
   const messages = (body.messages ?? []) as UIMessage[];
   const parsedCanvasContext = canvasContextSchema.parse(body.canvasContext ?? {});
+  const parsedCanvasPatchInput = body.canvasPatch
+    ? canvasPatchPayloadSchema.parse(body.canvasPatch)
+    : null;
+  const parsedCanvasPatch =
+    parsedCanvasPatchInput && hasCanvasPatchPayloadUpdates(parsedCanvasPatchInput)
+      ? parsedCanvasPatchInput
+      : null;
   const projectId = z.string().uuid().parse(body.projectId);
   const runNodeId = z.string().min(1).parse(body.runNodeId);
-  const project = await waitForProjectSnapshotForRun({
-    projectId,
-    promptNodeId: parsedCanvasContext.promptNodeId ?? null,
-    runNodeId,
-    selectedNodeIds: normalizeSelectedNodeIdsForRun(
-      parsedCanvasContext.selectedNodeIds,
-      parsedCanvasContext.selectedNodeId ?? null
-    ),
-    signal: c.req.raw.signal,
-    userId: user.id,
-  });
+  const selectedNodeIds = normalizeSelectedNodeIdsForRun(
+    parsedCanvasContext.selectedNodeIds,
+    parsedCanvasContext.selectedNodeId ?? null
+  );
+  const project = parsedCanvasPatch
+    ? await applyAgentRunCanvasPatchAndLoadSnapshot({
+        canvasPatch: parsedCanvasPatch,
+        projectId,
+        userId: user.id,
+      })
+    : await waitForProjectSnapshotForRun({
+        projectId,
+        promptNodeId: parsedCanvasContext.promptNodeId ?? null,
+        runNodeId,
+        selectedNodeIds,
+        signal: c.req.raw.signal,
+        userId: user.id,
+      });
 
   if (!project) {
     return notFound(c);
@@ -1290,10 +1305,7 @@ app.post("/api/agent-run", async (c) => {
     !hasAgentRunSnapshot(project, {
       promptNodeId: parsedCanvasContext.promptNodeId ?? null,
       runNodeId,
-      selectedNodeIds: normalizeSelectedNodeIdsForRun(
-        parsedCanvasContext.selectedNodeIds,
-        parsedCanvasContext.selectedNodeId ?? null
-      ),
+      selectedNodeIds,
     })
   ) {
     return c.json({ error: "项目快照尚未保存完成，请稍后重试。" }, 409);
@@ -1331,6 +1343,7 @@ app.post("/api/agent-run", async (c) => {
           projectId,
           projectSnapshot: project,
           runNodeId,
+          canvasPatchApplied: Boolean(parsedCanvasPatch),
           signal: controller.signal,
           userId: user.id,
           writer,
@@ -1383,6 +1396,48 @@ async function waitForProjectSnapshotForRun({
   return latestProject;
 }
 
+async function applyAgentRunCanvasPatchAndLoadSnapshot({
+  canvasPatch,
+  projectId,
+  userId,
+}: {
+  canvasPatch: z.infer<typeof canvasPatchPayloadSchema>;
+  projectId: string;
+  userId: string;
+}) {
+  const maxConflictRetries = 3;
+  let expectedVersion = canvasPatch.expectedVersion;
+
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const project = await applyCanvasPatchForUser({
+        projectId,
+        userId,
+        expectedVersion,
+        nodeUpserts: canvasPatch.nodeUpserts as AgentCanvasNode[] | undefined,
+        nodeDeletes: canvasPatch.nodeDeletes,
+        edgeUpserts: canvasPatch.edgeUpserts as AgentCanvasEdge[] | undefined,
+        edgeDeletes: canvasPatch.edgeDeletes,
+        selectedNodeId: canvasPatch.selectedNodeId,
+        lastRunId: canvasPatch.lastRunId,
+      });
+      if (!project) {
+        return null;
+      }
+      return loadCanvasSnapshotForUser(projectId, userId);
+    } catch (error) {
+      if (
+        error instanceof ProjectVersionConflictError &&
+        attempt < maxConflictRetries
+      ) {
+        expectedVersion = error.project.version;
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
 function hasAgentRunSnapshot(
   project: CanvasProject,
   {
@@ -1417,6 +1472,19 @@ function normalizeSelectedNodeIdsForRun(
     }
   }
   return [...ids];
+}
+
+function hasCanvasPatchPayloadUpdates(
+  patch: z.infer<typeof canvasPatchPayloadSchema>
+) {
+  return (
+    (patch.nodeUpserts?.length ?? 0) > 0 ||
+    (patch.nodeDeletes?.length ?? 0) > 0 ||
+    (patch.edgeUpserts?.length ?? 0) > 0 ||
+    (patch.edgeDeletes?.length ?? 0) > 0 ||
+    "selectedNodeId" in patch ||
+    "lastRunId" in patch
+  );
 }
 
 function waitForSnapshotPoll(signal?: AbortSignal) {

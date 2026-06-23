@@ -106,6 +106,27 @@ describe("agent context", () => {
     expect(buildCucumberAgentContext(input).imageProvider).toBe("coze");
   });
 
+  it("carries agent-run canvas patch persistence metadata", () => {
+    const input = buildAgentRunInput({
+      userId: "user-1",
+      projectId: "project-1",
+      runNodeId: "run-2",
+      canvasPatchApplied: true,
+      canvasContext: {
+        prompt: "基于刚保存的草稿继续",
+        promptNodeId: "prompt-2",
+        selectedNodeId: null,
+      },
+      projectSnapshot: {
+        ...snapshot(),
+        version: 7,
+      },
+    });
+
+    expect(input.canvasPatchApplied).toBe(true);
+    expect(input.projectVersion).toBe(7);
+  });
+
   it("rebuilds upstream context from multiple selected project nodes", () => {
     const input = buildAgentRunInput({
       userId: "user-1",

@@ -1,8 +1,9 @@
 import type { UpstreamContextItem } from "../../../../src/types/canvas.ts";
-import type {
-  ByteArtistConfig,
-  ByteArtistGenerateInput,
-  ByteArtistImageRequest,
+import {
+  doesByteArtistModelSupportReferenceImages,
+  type ByteArtistConfig,
+  type ByteArtistGenerateInput,
+  type ByteArtistImageRequest,
 } from "../../../../byteartist.ts";
 import type {
   SeedreamConfig,
@@ -240,10 +241,9 @@ export function buildByteArtistRequestBodies(
   input: SeedreamRequestBuildInput,
   config: ByteArtistConfig
 ): ByteArtistImageRequest[] {
-  const imageUrls = collectInputImageUrls(
-    input.upstreamContext ?? [],
-    config.maxInputImages
-  );
+  const imageUrls = doesByteArtistModelSupportReferenceImages(config.modelId)
+    ? collectInputImageUrls(input.upstreamContext ?? [], config.maxInputImages)
+    : [];
 
   if (input.variants?.length) {
     if (input.variants.length > config.maxOutputImages) {

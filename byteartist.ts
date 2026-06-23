@@ -44,6 +44,13 @@ export type ByteArtistConfig = {
   height: number;
 };
 
+export type ByteArtistImageTaskInput = {
+  image?: string;
+  imageField?: "base64file" | "source";
+  reqJson: Record<string, unknown>;
+  signal?: AbortSignal;
+};
+
 type ByteArtistSubmitResponse = {
   data?: { task_id?: string };
   message?: string;
@@ -73,19 +80,23 @@ type ByteArtistModelAdapter = {
     width: number;
   }) => Record<string, unknown>;
   extractImages?: (result: ByteArtistPollResultItem) => string[];
+  supportsReferenceImages: boolean;
 };
 
-const DEFAULT_BYTEARTIST_MODEL = "seed4_0407_lemo";
+export const BYTEARTIST_LEMO_MODEL = "seed4_0407_lemo";
+export const BYTEARTIST_MATTING_MODEL = "image_matting_lemo";
+const DEFAULT_BYTEARTIST_MODEL = BYTEARTIST_LEMO_MODEL;
 const DEFAULT_BYTEARTIST_BASE_URL = "https://lv-api-lf.ulikecam.com";
 
 const modelAdapters: Record<string, ByteArtistModelAdapter> = {
-  seed4_0407_lemo: {
+  [BYTEARTIST_LEMO_MODEL]: {
     buildReqJson: ({ height, prompt, seed, width }) => ({
       Prompt: prompt,
       height,
       seed,
       width,
     }),
+    supportsReferenceImages: false,
   },
 };
 
@@ -106,26 +117,48 @@ class ByteArtistClient {
     return { imageUrls, taskId };
   }
 
+  async submitRawAndPoll(
+    input: Omit<ByteArtistImageTaskInput, "signal">,
+    signal?: AbortSignal
+  ): Promise<{ imageUrls: string[]; taskId: string }> {
+    signal?.throwIfAborted();
+    const taskId = await this.submitRawTask(input, signal);
+    const imageUrls = await this.pollForResult(taskId, signal);
+    return { imageUrls, taskId };
+  }
+
   private async submitTask(
     request: ByteArtistImageRequest,
     signal?: AbortSignal
   ): Promise<string> {
-    const formData = buildSignedFormParams(this.config);
-    formData.append(
-      "req_json",
-      JSON.stringify(
-        getByteArtistModelAdapter(this.config.modelId).buildReqJson({
+    const adapter = getByteArtistModelAdapter(this.config.modelId);
+    return this.submitRawTask(
+      {
+        image:
+          request.image && adapter.supportsReferenceImages
+            ? request.image
+            : undefined,
+        reqJson: adapter.buildReqJson({
           height: request.height,
           prompt: request.prompt,
           seed: this.config.seed,
           width: request.width,
-        })
-      )
+        }),
+      },
+      signal
     );
+  }
+
+  private async submitRawTask(
+    input: Omit<ByteArtistImageTaskInput, "signal">,
+    signal?: AbortSignal
+  ): Promise<string> {
+    const formData = buildSignedFormParams(this.config);
+    formData.append("req_json", JSON.stringify(input.reqJson));
     formData.append("expired_duration", String(this.config.expiredDuration));
 
-    if (request.image) {
-      appendByteArtistImageFormField(formData, request.image);
+    if (input.image) {
+      appendByteArtistImageFormField(formData, input.image, input.imageField);
     }
 
     const data = await postByteArtistForm<ByteArtistSubmitResponse>({
@@ -234,38 +267,59 @@ export async function generateByteArtistImage(
   return { images };
 }
 
-export function isByteArtistConfigured() {
-  return Boolean(
-    readOptionalEnv("BYTEARTIST_BASE_URL", "GATEWAY_BASE_URL") &&
-      readOptionalEnv("BYTEARTIST_AID", "BYTEDANCE_AID") &&
-      readOptionalEnv("BYTEARTIST_APP_KEY", "BYTEDANCE_APP_KEY") &&
-      readOptionalEnv("BYTEARTIST_APP_SECRET", "BYTEDANCE_APP_SECRET")
+export async function submitAndPollByteArtistImageTask(
+  input: ByteArtistImageTaskInput,
+  config = readByteArtistConfigFromEnv()
+): Promise<{ imageUrls: string[]; taskId: string }> {
+  const client = new ByteArtistClient(config);
+  return client.submitRawAndPoll(
+    {
+      image: input.image,
+      imageField: input.imageField,
+      reqJson: input.reqJson,
+    },
+    input.signal
   );
 }
 
-export function readByteArtistConfigFromEnv(): ByteArtistConfig {
+export function isByteArtistConfigured(env: NodeJS.ProcessEnv = process.env) {
+  return Boolean(
+    readOptionalEnv(env, "BYTEARTIST_BASE_URL", "GATEWAY_BASE_URL") &&
+      readOptionalEnv(env, "BYTEARTIST_AID", "BYTEDANCE_AID") &&
+      readOptionalEnv(env, "BYTEARTIST_APP_KEY", "BYTEDANCE_APP_KEY") &&
+      readOptionalEnv(env, "BYTEARTIST_APP_SECRET", "BYTEDANCE_APP_SECRET")
+  );
+}
+
+export function readByteArtistConfigFromEnv(
+  env: NodeJS.ProcessEnv = process.env
+): ByteArtistConfig {
   return {
-    aid: readRequiredEnv("BYTEARTIST_AID", "BYTEDANCE_AID"),
-    appKey: readRequiredEnv("BYTEARTIST_APP_KEY", "BYTEDANCE_APP_KEY"),
-    appSecret: readRequiredEnv("BYTEARTIST_APP_SECRET", "BYTEDANCE_APP_SECRET"),
+    aid: readRequiredEnv(env, "BYTEARTIST_AID", "BYTEDANCE_AID"),
+    appKey: readRequiredEnv(env, "BYTEARTIST_APP_KEY", "BYTEDANCE_APP_KEY"),
+    appSecret: readRequiredEnv(
+      env,
+      "BYTEARTIST_APP_SECRET",
+      "BYTEDANCE_APP_SECRET"
+    ),
     baseUrl: trimTrailingSlash(
-      readOptionalEnv("BYTEARTIST_BASE_URL", "GATEWAY_BASE_URL")?.trim() ||
+      readOptionalEnv(env, "BYTEARTIST_BASE_URL", "GATEWAY_BASE_URL")?.trim() ||
         DEFAULT_BYTEARTIST_BASE_URL
     ),
-    expiredDuration: readNumberEnv("BYTEARTIST_EXPIRED_DURATION", 600),
-    height: readNumberEnv("BYTEARTIST_HEIGHT", 1024),
-    imageReturnFormat: process.env.BYTEARTIST_IMAGE_RETURN_FORMAT?.trim() || "png",
-    imageReturnType: process.env.BYTEARTIST_IMAGE_RETURN_TYPE?.trim() || "url",
-    maxAttempts: readNumberEnv("BYTEARTIST_MAX_ATTEMPTS", 120),
-    maxInputImages: readNumberEnv("BYTEARTIST_MAX_INPUT_IMAGES", 1),
-    maxOutputImages: readNumberEnv("BYTEARTIST_MAX_OUTPUT_IMAGES", 4),
+    expiredDuration: readNumberEnv(env, "BYTEARTIST_EXPIRED_DURATION", 600),
+    height: readNumberEnv(env, "BYTEARTIST_HEIGHT", 1024),
+    imageReturnFormat: env.BYTEARTIST_IMAGE_RETURN_FORMAT?.trim() || "png",
+    imageReturnType: env.BYTEARTIST_IMAGE_RETURN_TYPE?.trim() || "url",
+    maxAttempts: readNumberEnv(env, "BYTEARTIST_MAX_ATTEMPTS", 120),
+    maxInputImages: readNumberEnv(env, "BYTEARTIST_MAX_INPUT_IMAGES", 1),
+    maxOutputImages: readNumberEnv(env, "BYTEARTIST_MAX_OUTPUT_IMAGES", 4),
     modelId:
-      process.env.IMAGE_MODEL?.trim() ||
-      process.env.BYTEARTIST_MODEL?.trim() ||
+      env.IMAGE_MODEL?.trim() ||
+      env.BYTEARTIST_MODEL?.trim() ||
       DEFAULT_BYTEARTIST_MODEL,
-    pollIntervalMs: readNumberEnv("BYTEARTIST_POLL_INTERVAL_MS", 1000),
-    seed: readNumberEnv("BYTEARTIST_SEED", -1),
-    width: readNumberEnv("BYTEARTIST_WIDTH", 1024),
+    pollIntervalMs: readNumberEnv(env, "BYTEARTIST_POLL_INTERVAL_MS", 1000),
+    seed: readNumberEnv(env, "BYTEARTIST_SEED", -1),
+    width: readNumberEnv(env, "BYTEARTIST_WIDTH", 1024),
   };
 }
 
@@ -316,8 +370,13 @@ function getByteArtistModelAdapter(modelId: string): ByteArtistModelAdapter {
         string: prompt,
         width,
       }),
+      supportsReferenceImages: true,
     }
   );
+}
+
+export function doesByteArtistModelSupportReferenceImages(modelId: string) {
+  return getByteArtistModelAdapter(modelId).supportsReferenceImages;
 }
 
 function buildByteArtistGeneratedImage({
@@ -396,17 +455,26 @@ function generateTimestamp() {
 
 function appendByteArtistImageFormField(
   formData: URLSearchParams,
-  image: string
+  image: string,
+  imageField?: ByteArtistImageTaskInput["imageField"]
 ) {
-  if (/^https?:\/\//i.test(image)) {
-    formData.append("image_url", image);
+  if (imageField === "source" || (!imageField && isByteArtistSourceImage(image))) {
+    formData.append("source", image);
     return;
   }
+
+  formData.append("base64file", stripDataImagePrefix(image));
+}
+
+function isByteArtistSourceImage(image: string) {
+  return /^(https?:|tos:)\/\//i.test(image);
+}
+
+function stripDataImagePrefix(image: string) {
   if (image.startsWith("data:")) {
-    formData.append("image_data", image.split(",")[1] ?? image);
-    return;
+    return image.split(",")[1] ?? image;
   }
-  formData.append("image_data", image);
+  return image;
 }
 
 async function postByteArtistForm<T>({
@@ -503,8 +571,12 @@ function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
 }
 
-function readRequiredEnv(primary: string, fallback?: string) {
-  const value = readOptionalEnv(primary, fallback)?.trim();
+function readRequiredEnv(
+  env: NodeJS.ProcessEnv,
+  primary: string,
+  fallback?: string
+) {
+  const value = readOptionalEnv(env, primary, fallback)?.trim();
   if (!value) {
     throw new Error(
       `${primary}${fallback ? ` or ${fallback}` : ""} is not configured.`
@@ -513,12 +585,20 @@ function readRequiredEnv(primary: string, fallback?: string) {
   return value;
 }
 
-function readOptionalEnv(primary: string, fallback?: string) {
-  return process.env[primary] ?? (fallback ? process.env[fallback] : undefined);
+function readOptionalEnv(
+  env: NodeJS.ProcessEnv,
+  primary: string,
+  fallback?: string
+) {
+  return env[primary] ?? (fallback ? env[fallback] : undefined);
 }
 
-function readNumberEnv(name: string, fallback: number) {
-  const raw = process.env[name];
+function readNumberEnv(
+  env: NodeJS.ProcessEnv,
+  name: string,
+  fallback: number
+) {
+  const raw = env[name];
   if (!raw) {
     return fallback;
   }

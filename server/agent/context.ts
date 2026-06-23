@@ -36,12 +36,14 @@ export type AgentRunInput = {
   userId: string;
   workspaceId?: string;
   projectId: string;
+  canvasPatchApplied?: boolean;
   canvasId: string;
   runNodeId: string;
   message: string;
   imageProvider?: ImageProviderSelection;
   normalizedInput?: NormalizedAgentInput;
   promptNodeId: string | null;
+  projectVersion?: number;
   retryFrom?: AgentRetryContext | null;
   selectedNodeId: string | null;
   upstreamContext: UpstreamContextItem[];
@@ -214,8 +216,10 @@ export type ExecuteAgentRunInput = {
   projectId: string;
   runNodeId: string;
   canvasContext: AgentRunRequestContext;
+  canvasPatchApplied?: boolean;
   writer: UIMessageStreamWriter<UIMessage>;
-  projectSnapshot: Pick<CanvasProject, "id" | "nodes" | "edges">;
+  projectSnapshot: Pick<CanvasProject, "id" | "nodes" | "edges"> &
+    Partial<Pick<CanvasProject, "version">>;
   signal?: AbortSignal;
 };
 
@@ -231,6 +235,7 @@ export class AgentContextValidationError extends Error {
 }
 
 export function buildAgentRunInput({
+  canvasPatchApplied,
   canvasContext,
   projectId,
   projectSnapshot,
@@ -312,6 +317,7 @@ export function buildAgentRunInput({
 
   return {
     canvasId: projectId,
+    canvasPatchApplied,
     canvasSnapshot: {
       nodes: projectSnapshot.nodes,
       edges: projectSnapshot.edges,
@@ -319,6 +325,7 @@ export function buildAgentRunInput({
     message: canvasContext.prompt,
     imageProvider: canvasContext.imageProvider,
     promptNodeId,
+    projectVersion: projectSnapshot.version,
     projectId,
     retryFrom: normalizeRetryContext(canvasContext.retryFrom),
     runNodeId,
