@@ -106,6 +106,39 @@ describe("agent context", () => {
     expect(buildCucumberAgentContext(input).imageProvider).toBe("coze");
   });
 
+  it("normalizes explicit image composer controls into an image task", () => {
+    const input = buildAgentRunInput({
+      userId: "user-1",
+      projectId: "project-1",
+      runNodeId: "run-2",
+      canvasContext: {
+        imageAspectRatio: "9:16",
+        imageResultCount: 3,
+        inputMode: "image",
+        prompt: "黄瓜",
+        promptNodeId: "prompt-2",
+        selectedNodeId: null,
+      },
+      projectSnapshot: snapshot(),
+    });
+
+    expect(input.normalizedInput).toMatchObject({
+      artifact: { kind: "image", format: "png" },
+      intent: "image.generate",
+      image: {
+        aspectRatio: "9:16",
+        contentPrompt: "黄瓜",
+        resultCount: 3,
+      },
+      requiredCapabilities: ["image-generation"],
+    });
+    expect(buildCucumberAgentContext(input)).toMatchObject({
+      imageAspectRatio: "9:16",
+      imageResultCount: 3,
+      inputMode: "image",
+    });
+  });
+
   it("carries agent-run canvas patch persistence metadata", () => {
     const input = buildAgentRunInput({
       userId: "user-1",

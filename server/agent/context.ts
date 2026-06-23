@@ -14,7 +14,10 @@ import type {
 import type { CanvasOperation } from "../../src/types/runtime.ts";
 import type { CanvasProject } from "../canvas-store.ts";
 import type { ImageProviderSelection } from "../provider-config.ts";
-import type { NormalizedAgentInput } from "./input-normalizer.ts";
+import {
+  finalizeNormalizedAgentInput,
+  type NormalizedAgentInput,
+} from "./input-normalizer.ts";
 import type { ActivatedAgentSkill, AgentSkillCard } from "./skills/types.ts";
 import { getTextArtifactContentForUser } from "../artifact-content-store.ts";
 
@@ -24,7 +27,10 @@ export type CanvasSnapshot = {
 };
 
 export type AgentRunRequestContext = {
+  imageAspectRatio?: ImageAspectRatioSelection;
+  imageResultCount?: ImageResultCountSelection;
   imageProvider?: ImageProviderSelection;
+  inputMode?: AgentRunInputMode;
   prompt: string;
   promptNodeId?: string | null;
   retryFrom?: AgentRetryContext | null;
@@ -40,7 +46,10 @@ export type AgentRunInput = {
   canvasId: string;
   runNodeId: string;
   message: string;
+  imageAspectRatio?: ImageAspectRatioSelection;
+  imageResultCount?: ImageResultCountSelection;
   imageProvider?: ImageProviderSelection;
+  inputMode?: AgentRunInputMode;
   normalizedInput?: NormalizedAgentInput;
   promptNodeId: string | null;
   projectVersion?: number;
@@ -52,6 +61,10 @@ export type AgentRunInput = {
   selectedNodeIds: string[];
   signal?: AbortSignal;
 };
+
+export type AgentRunInputMode = "agent" | "image";
+export type ImageAspectRatioSelection = "1:1" | "16:9" | "9:16" | "4:3" | "3:4";
+export type ImageResultCountSelection = 1 | 2 | 3 | 4;
 
 export type AgentRunContextNodeSummary = {
   id: string;
@@ -208,7 +221,10 @@ export type CucumberAgentContext = {
   pushLiveEvent?: (event: PendingCucumberEvent) => void;
   skillCandidates: AgentSkillCard[];
   prompt: string;
+  imageAspectRatio?: ImageAspectRatioSelection;
+  imageResultCount?: ImageResultCountSelection;
   imageProvider?: ImageProviderSelection;
+  inputMode?: AgentRunInputMode;
   normalizedInput?: NormalizedAgentInput;
   retryFrom?: AgentRetryContext | null;
   selectedNodeId: string | null;
@@ -328,7 +344,11 @@ export function buildAgentRunInput({
       edges: projectSnapshot.edges,
     },
     message: canvasContext.prompt,
+    imageAspectRatio: canvasContext.imageAspectRatio,
+    imageResultCount: canvasContext.imageResultCount,
     imageProvider: canvasContext.imageProvider,
+    inputMode: canvasContext.inputMode,
+    normalizedInput: buildExplicitImageModeInput(canvasContext),
     promptNodeId,
     projectVersion: projectSnapshot.version,
     projectId,
@@ -341,6 +361,32 @@ export function buildAgentRunInput({
     contextSummary,
     userId,
   };
+}
+
+function buildExplicitImageModeInput(
+  canvasContext: AgentRunRequestContext
+): NormalizedAgentInput | undefined {
+  if (canvasContext.inputMode !== "image") {
+    return undefined;
+  }
+
+  return finalizeNormalizedAgentInput(
+    {
+      rawPrompt: canvasContext.prompt,
+      userGoal: canvasContext.prompt,
+      operation: "create",
+      artifact: { kind: "image", format: "png" },
+      domain: "visual-design",
+      requiredCapabilities: ["image-generation"],
+      negativeCapabilities: [],
+      image: {
+        contentPrompt: canvasContext.prompt,
+        aspectRatio: canvasContext.imageAspectRatio,
+        resultCount: canvasContext.imageResultCount,
+      },
+    },
+    canvasContext.prompt
+  );
 }
 
 const maxHydratedArtifactContentChars = 12_000;
@@ -487,7 +533,10 @@ export function buildCucumberAgentContext(input: AgentRunInput): CucumberAgentCo
     producedArtifacts: [],
     projectId: input.projectId,
     prompt: input.message,
+    imageAspectRatio: input.imageAspectRatio,
+    imageResultCount: input.imageResultCount,
     imageProvider: input.imageProvider,
+    inputMode: input.inputMode,
     normalizedInput: input.normalizedInput,
     retryFrom: input.retryFrom ?? null,
     runNodeId: input.runNodeId,

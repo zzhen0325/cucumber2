@@ -37,6 +37,7 @@ import {
   BranchIcon as Workflow,
   GlobeIcon as Globe2,
   FullScreenMaximizeIcon as Maximize2,
+  PhotoIcon as ImageIcon,
   SearchIcon as Search,
   SparkleIcon as Sparkles,
   SquareIcon as Square,
@@ -219,7 +220,10 @@ type AgentRunRequestBody = {
   runNodeId: string;
   canvasPatch?: Omit<SaveProjectCanvasPatchInput, "projectId">;
   canvasContext: {
+    imageAspectRatio?: ImageAspectRatioSelection;
+    imageResultCount?: ImageResultCountSelection;
     imageProvider?: ImageProviderSelection;
+    inputMode?: ComposerMode;
     prompt: string;
     promptNodeId: string;
     retryFrom?: {
@@ -240,6 +244,9 @@ type PendingRunCanvasPatchAck = {
   revision: number;
 };
 
+type ComposerMode = "agent" | "image";
+type ImageAspectRatioSelection = "1:1" | "16:9" | "9:16" | "4:3" | "3:4";
+type ImageResultCountSelection = 1 | 2 | 3 | 4;
 type ImageProviderSelection = "seedream" | "coze" | "byteartist";
 
 type CanvasWorkspaceProps = {
@@ -308,6 +315,9 @@ const MIDDLE_MOUSE_BUTTON = 1;
 const PAN_ON_DRAG_BUTTONS = [MIDDLE_MOUSE_BUTTON];
 const HAND_TOOL_PAN_ON_DRAG_BUTTONS = [LEFT_MOUSE_BUTTON, MIDDLE_MOUSE_BUTTON];
 const SHIFT_MULTI_SELECTION_KEYS = ["Shift", "ShiftLeft", "ShiftRight"];
+const COMPOSER_MODE_STORAGE_KEY = "cucumber:composer-mode";
+const IMAGE_ASPECT_RATIO_STORAGE_KEY = "cucumber:image-aspect-ratio";
+const IMAGE_RESULT_COUNT_STORAGE_KEY = "cucumber:image-result-count";
 const IMAGE_PROVIDER_STORAGE_KEY = "cucumber:image-provider";
 const TRACE_RECONCILE_DELAYS_MS = [0, 1500, 4000, 8000] as const;
 
@@ -427,6 +437,13 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   } | null>(null);
   const pointerScreenRef = useRef<CanvasPoint | null>(null);
   const [creationPreview, setCreationPreview] = useState<CreationPreview | null>(null);
+  const [composerMode, setComposerModeState] = useState<ComposerMode>(
+    () => readStoredComposerMode()
+  );
+  const [imageAspectRatio, setImageAspectRatioState] =
+    useState<ImageAspectRatioSelection>(() => readStoredImageAspectRatio());
+  const [imageResultCount, setImageResultCountState] =
+    useState<ImageResultCountSelection>(() => readStoredImageResultCount());
   const [imageProvider, setImageProviderState] = useState<ImageProviderSelection>(
     () => readStoredImageProvider()
   );
@@ -1555,6 +1572,21 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     [buildPendingCanvasSaveInput, flushPendingArtifactContentSaves, hasPendingCanvasSave]
   );
 
+  const setComposerMode = useCallback((mode: ComposerMode) => {
+    setComposerModeState(mode);
+    window.localStorage.setItem(COMPOSER_MODE_STORAGE_KEY, mode);
+  }, []);
+
+  const setImageAspectRatio = useCallback((ratio: ImageAspectRatioSelection) => {
+    setImageAspectRatioState(ratio);
+    window.localStorage.setItem(IMAGE_ASPECT_RATIO_STORAGE_KEY, ratio);
+  }, []);
+
+  const setImageResultCount = useCallback((count: ImageResultCountSelection) => {
+    setImageResultCountState(count);
+    window.localStorage.setItem(IMAGE_RESULT_COUNT_STORAGE_KEY, String(count));
+  }, []);
+
   const setImageProvider = useCallback((provider: ImageProviderSelection) => {
     setImageProviderState(provider);
     window.localStorage.setItem(IMAGE_PROVIDER_STORAGE_KEY, provider);
@@ -1563,6 +1595,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const startAgentRun = useCallback(
     async ({
       clearComposer = false,
+      inputMode = composerMode,
+      imageAspectRatio: requestedImageAspectRatio = imageAspectRatio,
+      imageResultCount: requestedImageResultCount = imageResultCount,
       promptText,
       retryFrom,
       selectedNodeId,
@@ -1571,6 +1606,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       clearComposer?: boolean;
       promptText: string;
       retryFrom?: AgentRunRequestBody["canvasContext"]["retryFrom"];
+      inputMode?: ComposerMode;
+      imageAspectRatio?: ImageAspectRatioSelection;
+      imageResultCount?: ImageResultCountSelection;
       selectedNodeId: string | null;
       selectedNodeIds?: string[];
     }) => {
@@ -1607,6 +1645,13 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         projectId,
         runNodeId: draft.runNode.id,
         canvasContext: {
+          ...(inputMode === "image"
+            ? {
+                imageAspectRatio: requestedImageAspectRatio,
+                imageResultCount: requestedImageResultCount,
+                inputMode,
+              }
+            : { inputMode }),
           imageProvider,
           prompt: value,
           promptNodeId: draft.promptNode.id,
@@ -1682,9 +1727,12 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       buildPendingCanvasSaveInput,
       clearTraceReconcileTimers,
       commitCanvasMutation,
+      composerMode,
       flushPendingArtifactContentSaves,
       hasLocalUploadNodes,
+      imageAspectRatio,
       imageProvider,
+      imageResultCount,
       isBusy,
       markRunError,
       sendMessage,
@@ -2499,12 +2547,23 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       const value = (message.text || prompt).trim();
       await startAgentRun({
         clearComposer: true,
+        inputMode: composerMode,
+        imageAspectRatio,
+        imageResultCount,
         promptText: value,
         selectedNodeId: referenceNodeId,
         selectedNodeIds: referenceNodeIds,
       });
     },
-    [prompt, referenceNodeId, referenceNodeIds, startAgentRun]
+    [
+      composerMode,
+      imageAspectRatio,
+      imageResultCount,
+      prompt,
+      referenceNodeId,
+      referenceNodeIds,
+      startAgentRun,
+    ]
   );
 
   const handleReplayTrace = useCallback(() => {
@@ -2850,17 +2909,25 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         busy={isBusy}
         canEdit={canEditComposer}
         canSubmit={canSubmit}
+        composerMode={composerMode}
         contextCount={contextCount}
         hasFailedUpload={hasFailedLocalUploadNodes}
         hasUploading={hasUploadingLocalNodes}
+        imageAspectRatio={imageAspectRatio}
         imageProvider={imageProvider}
+        imageResultCount={imageResultCount}
         prompt={prompt}
         referenceContextCount={referenceContextCount}
         referenceNode={referenceNode}
+        referenceNodeIds={referenceNodeIds}
         referenceNodeCount={referenceNodeIds.length}
         replayActive={isReplayMode}
         selectionCount={selectedNodeIds.length}
+        selectedNodes={selectedNodes}
+        setComposerMode={setComposerMode}
+        setImageAspectRatio={setImageAspectRatio}
         setImageProvider={setImageProvider}
+        setImageResultCount={setImageResultCount}
         setPrompt={setPrompt}
         stop={handleStop}
         onSubmit={handleSubmit}
@@ -3660,17 +3727,25 @@ function Composer({
   busy,
   canEdit,
   canSubmit,
+  composerMode,
   contextCount,
   hasFailedUpload,
   hasUploading,
+  imageAspectRatio,
   imageProvider,
+  imageResultCount,
   prompt,
   referenceContextCount,
   referenceNode,
+  referenceNodeIds,
   referenceNodeCount,
   replayActive,
   selectionCount,
+  selectedNodes,
+  setComposerMode,
+  setImageAspectRatio,
   setImageProvider,
+  setImageResultCount,
   setPrompt,
   stop,
   onSubmit,
@@ -3678,17 +3753,25 @@ function Composer({
   busy: boolean;
   canEdit: boolean;
   canSubmit: boolean;
+  composerMode: ComposerMode;
   contextCount: number;
   hasFailedUpload: boolean;
   hasUploading: boolean;
+  imageAspectRatio: ImageAspectRatioSelection;
   imageProvider: ImageProviderSelection;
+  imageResultCount: ImageResultCountSelection;
   prompt: string;
   referenceContextCount: number;
   referenceNode?: AgentCanvasNode;
+  referenceNodeIds: string[];
   referenceNodeCount: number;
   replayActive: boolean;
   selectionCount: number;
+  selectedNodes: AgentCanvasNode[];
+  setComposerMode: (value: ComposerMode) => void;
+  setImageAspectRatio: (value: ImageAspectRatioSelection) => void;
   setImageProvider: (value: ImageProviderSelection) => void;
+  setImageResultCount: (value: ImageResultCountSelection) => void;
   setPrompt: (value: string) => void;
   stop: () => void;
   onSubmit: (
@@ -3697,73 +3780,98 @@ function Composer({
   ) => void;
 }) {
   const hasReference = Boolean(referenceNode);
-  const hasMultiSelection = selectionCount > 1;
   const hasMultipleReferences = referenceNodeCount > 1;
+  const hasSelectedTokens = selectedNodes.length > 0;
+  const referenceNodeIdSet = useMemo(
+    () => new Set(referenceNodeIds),
+    [referenceNodeIds]
+  );
   const submitBlockedLabel = hasFailedUpload
     ? "请先移除上传失败文件"
     : hasUploading
       ? "文件上传中，可继续输入，完成后提交"
       : "项目连接失败，无法提交";
-  const footerContextLabel = hasReference
-    ? hasMultipleReferences
-      ? `${referenceNodeCount} 个引用节点 · ${referenceContextCount} upstream items`
-      : `${referenceContextCount} upstream items`
-    : hasMultiSelection
-      ? "选中节点无可引用内容"
-      : `${contextCount} upstream items`;
+  const footerContextLabel =
+    !canSubmit && canEdit
+      ? submitBlockedLabel
+      : hasReference
+        ? hasMultipleReferences
+          ? `继续基于 ${referenceNodeCount} 个引用节点生成分支`
+          : "继续基于引用节点生成分支"
+        : selectionCount > 1
+          ? "选中节点无可引用内容"
+          : `${contextCount} upstream items`;
+  const placeholder = replayActive
+    ? "Run 回放模式为只读..."
+    : !canEdit
+      ? "项目连接失败，无法输入..."
+      : !canSubmit
+        ? submitBlockedLabel
+        : hasReference
+          ? composerMode === "image"
+            ? "基于引用节点生成图像..."
+            : "基于引用节点继续生成..."
+          : composerMode === "image"
+            ? "描述你要生成的图像..."
+            : "输入需求，让 Agent 帮你实现...";
 
   return (
-    <div className="composer-wrap">
-      <div className="context-pill" data-active={hasReference || hasMultiSelection}>
-        {hasReference
-          ? hasMultipleReferences
-            ? `引用节点: ${referenceNodeCount} 个`
-            : `引用节点: ${getReferenceNodeLabel(referenceNode)}`
-          : hasMultiSelection
-            ? `已选中 ${selectionCount} 个节点，无可引用节点`
-          : "未引用节点"}
-      </div>
+    <div className="composer-wrap" data-mode={composerMode}>
+      <ComposerModeSwitch
+        disabled={busy || replayActive}
+        value={composerMode}
+        onChange={setComposerMode}
+      />
       <PromptInput
         attachmentsEnabled={false}
         className="composer"
+        data-mode={composerMode}
+        data-has-tokens={hasSelectedTokens}
         onSubmit={(message, event) => onSubmit(message, event)}
       >
-        <PromptInputBody>
-          <PromptInputTextarea
-            disabled={!canEdit && !busy}
-            placeholder={
-              replayActive
-                ? "Run 回放模式为只读..."
-                : !canEdit
-                ? "项目连接失败，无法输入..."
-                : !canSubmit
-                ? submitBlockedLabel
-                : hasReference
-                  ? "基于引用节点继续生成..."
-                  : "输入需求，让 Agent 生成图片..."
-            }
-            value={prompt}
-            onChange={(event) => setPrompt(event.currentTarget.value)}
-          />
+        <PromptInputBody className="composer-body">
+          <div className="composer-input-stack">
+            <ComposerReferenceTokens
+              nodes={selectedNodes}
+              referenceNodeIdSet={referenceNodeIdSet}
+            />
+            <PromptInputTextarea
+              disabled={!canEdit && !busy}
+              placeholder={placeholder}
+              value={prompt}
+              onChange={(event) => setPrompt(event.currentTarget.value)}
+            />
+          </div>
         </PromptInputBody>
         <PromptInputFooter className="composer-footer">
           <div className="composer-footer-tools">
-            <ComposerFooterStatus
-              label={
-                !canSubmit && canEdit
-                  ? submitBlockedLabel
-                  : hasReference
-                  ? hasMultipleReferences
-                    ? `继续基于 ${referenceNodeCount} 个引用节点生成分支`
-                    : "继续基于引用节点生成分支"
-                  : footerContextLabel
-              }
-            />
-            <ImageProviderSelect
-              disabled={busy || replayActive}
-              value={imageProvider}
-              onChange={setImageProvider}
-            />
+            {composerMode === "image" ? (
+              <>
+                <ImageAspectRatioSelect
+                  disabled={busy || replayActive}
+                  value={imageAspectRatio}
+                  onChange={setImageAspectRatio}
+                />
+                <ImageProviderSelect
+                  disabled={busy || replayActive}
+                  value={imageProvider}
+                  onChange={setImageProvider}
+                />
+                <ImageResultCountSelect
+                  disabled={busy || replayActive}
+                  value={imageResultCount}
+                  onChange={setImageResultCount}
+                />
+              </>
+            ) : (
+              <ComposerFooterStatus
+                label={
+                  hasReference && !hasMultipleReferences
+                    ? `${referenceContextCount} upstream items`
+                    : footerContextLabel
+                }
+              />
+            )}
           </div>
           <PromptInputSubmit
             disabled={busy ? false : !prompt.trim() || !canSubmit}
@@ -3772,6 +3880,89 @@ function Composer({
           />
         </PromptInputFooter>
       </PromptInput>
+    </div>
+  );
+}
+
+function ComposerModeSwitch({
+  disabled,
+  value,
+  onChange,
+}: {
+  disabled: boolean;
+  value: ComposerMode;
+  onChange: (value: ComposerMode) => void;
+}) {
+  return (
+    <div aria-label="输入模式" className="composer-mode-switch" role="tablist">
+      <button
+        aria-label="Agent 模式"
+        aria-selected={value === "agent"}
+        data-active={value === "agent"}
+        disabled={disabled}
+        onClick={() => onChange("agent")}
+        role="tab"
+        title="Agent 模式"
+        type="button"
+      >
+        <Sparkles size={14} />
+        <span className="composer-mode-label">Agent</span>
+      </button>
+      <button
+        aria-label="图像模式"
+        aria-selected={value === "image"}
+        data-active={value === "image"}
+        disabled={disabled}
+        onClick={() => onChange("image")}
+        role="tab"
+        title="图像模式"
+        type="button"
+      >
+        <ImageIcon size={14} />
+        <span className="composer-mode-label">图像</span>
+      </button>
+    </div>
+  );
+}
+
+function ComposerReferenceTokens({
+  nodes,
+  referenceNodeIdSet,
+}: {
+  nodes: AgentCanvasNode[];
+  referenceNodeIdSet: Set<string>;
+}) {
+  if (!nodes.length) {
+    return null;
+  }
+
+  const visibleNodes = nodes.slice(0, 4);
+  const hiddenCount = nodes.length - visibleNodes.length;
+
+  return (
+    <div aria-label="选中节点" className="composer-reference-tokens">
+      {visibleNodes.map((node) => {
+        const referenceable = referenceNodeIdSet.has(node.id);
+        const label = getCanvasNodeTokenLabel(node);
+        return (
+          <span
+            className="composer-reference-token"
+            data-referenceable={referenceable}
+            key={node.id}
+            title={referenceable ? label : `${label} · 未引用`}
+          >
+            <span className="composer-reference-token-kind">
+              {getCanvasNodeKindLabel(node)}
+            </span>
+            <span className="composer-reference-token-label">{label}</span>
+          </span>
+        );
+      })}
+      {hiddenCount > 0 ? (
+        <span className="composer-reference-token composer-reference-token-more">
+          +{hiddenCount}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -3806,39 +3997,207 @@ function ImageProviderSelect({
       }
     >
       <SelectTrigger
-        aria-label="选择图像 provider"
+        aria-label="选择生图模型"
         className="composer-provider-select"
-        title="选择图像 provider"
+        title="选择生图模型"
       >
         <SelectValue />
       </SelectTrigger>
       <SelectContent align="end" className="composer-provider-menu">
-        <SelectItem value="seedream">Seedream</SelectItem>
-        <SelectItem value="coze">Coze</SelectItem>
-        <SelectItem value="byteartist">ByteArtist</SelectItem>
+        <SelectItem value="seedream">Seedream 4.6</SelectItem>
+        <SelectItem value="coze">Coze Image</SelectItem>
+        <SelectItem value="byteartist">Seed4 Lemo</SelectItem>
       </SelectContent>
     </Select>
   );
 }
 
-function getReferenceNodeLabel(node?: AgentCanvasNode) {
-  if (!node) {
-    return "";
-  }
+function ImageAspectRatioSelect({
+  disabled,
+  value,
+  onChange,
+}: {
+  disabled: boolean;
+  value: ImageAspectRatioSelection;
+  onChange: (value: ImageAspectRatioSelection) => void;
+}) {
+  return (
+    <Select
+      disabled={disabled}
+      value={value}
+      onValueChange={(nextValue) =>
+        onChange(readImageAspectRatioSelection(nextValue))
+      }
+    >
+      <SelectTrigger
+        aria-label="选择图像比例"
+        className="composer-aspect-ratio-select"
+        title="选择图像比例"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent align="start" className="composer-provider-menu">
+        <SelectItem value="1:1">1:1</SelectItem>
+        <SelectItem value="16:9">16:9</SelectItem>
+        <SelectItem value="9:16">9:16</SelectItem>
+        <SelectItem value="4:3">4:3</SelectItem>
+        <SelectItem value="3:4">3:4</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
 
+function ImageResultCountSelect({
+  disabled,
+  value,
+  onChange,
+}: {
+  disabled: boolean;
+  value: ImageResultCountSelection;
+  onChange: (value: ImageResultCountSelection) => void;
+}) {
+  return (
+    <Select
+      disabled={disabled}
+      value={String(value)}
+      onValueChange={(nextValue) =>
+        onChange(readImageResultCountSelection(nextValue))
+      }
+    >
+      <SelectTrigger
+        aria-label="选择生成数量"
+        className="composer-count-select"
+        title="选择生成数量"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent align="end" className="composer-provider-menu">
+        <SelectItem value="1">1 张</SelectItem>
+        <SelectItem value="2">2 张</SelectItem>
+        <SelectItem value="3">3 张</SelectItem>
+        <SelectItem value="4">4 张</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
+
+function getCanvasNodeTokenLabel(node: AgentCanvasNode) {
   if (node.data.kind === "prompt") {
-    return node.data.prompt;
+    return truncateTokenLabel(node.data.prompt || "用户输入");
   }
 
   if (node.data.kind === "imageResult") {
-    return node.data.image.title ?? "Generated image";
+    return truncateTokenLabel(node.data.image.title ?? "生成图像");
+  }
+
+  if (node.data.kind === "stickyNote") {
+    return truncateTokenLabel(node.data.text || "便签");
+  }
+
+  if (node.data.kind === "shape") {
+    return truncateTokenLabel(node.data.label || "形状");
+  }
+
+  if (node.data.kind === "run") {
+    return truncateTokenLabel(node.data.agentText || node.data.prompt || "Run");
   }
 
   if ("artifact" in node.data) {
-    return node.data.title;
+    return truncateTokenLabel(node.data.title);
   }
 
-  return "";
+  return "节点";
+}
+
+function getCanvasNodeKindLabel(node: AgentCanvasNode) {
+  switch (node.data.kind) {
+    case "prompt":
+      return "输入";
+    case "imageResult":
+      return "图像";
+    case "stickyNote":
+      return "便签";
+    case "shape":
+      return "形状";
+    case "run":
+      return "Run";
+    case "markdown":
+      return "文档";
+    case "webpage":
+      return "网页";
+    case "code":
+      return "代码";
+    case "toolResult":
+      return "工具";
+    default:
+      return "素材";
+  }
+}
+
+function truncateTokenLabel(value: string) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= 28) {
+    return normalized;
+  }
+  return `${normalized.slice(0, 27)}...`;
+}
+
+function readStoredComposerMode(): ComposerMode {
+  if (typeof window === "undefined") {
+    return "agent";
+  }
+  return readComposerMode(window.localStorage.getItem(COMPOSER_MODE_STORAGE_KEY));
+}
+
+function readComposerMode(value: string | null | undefined): ComposerMode {
+  return value === "image" ? "image" : "agent";
+}
+
+function readStoredImageAspectRatio(): ImageAspectRatioSelection {
+  if (typeof window === "undefined") {
+    return "1:1";
+  }
+  return readImageAspectRatioSelection(
+    window.localStorage.getItem(IMAGE_ASPECT_RATIO_STORAGE_KEY)
+  );
+}
+
+function readImageAspectRatioSelection(
+  value: string | null | undefined
+): ImageAspectRatioSelection {
+  if (
+    value === "16:9" ||
+    value === "9:16" ||
+    value === "4:3" ||
+    value === "3:4"
+  ) {
+    return value;
+  }
+  return "1:1";
+}
+
+function readStoredImageResultCount(): ImageResultCountSelection {
+  if (typeof window === "undefined") {
+    return 1;
+  }
+  return readImageResultCountSelection(
+    window.localStorage.getItem(IMAGE_RESULT_COUNT_STORAGE_KEY)
+  );
+}
+
+function readImageResultCountSelection(
+  value: string | null | undefined
+): ImageResultCountSelection {
+  if (value === "2") {
+    return 2;
+  }
+  if (value === "3") {
+    return 3;
+  }
+  if (value === "4") {
+    return 4;
+  }
+  return 1;
 }
 
 function readStoredImageProvider(): ImageProviderSelection {

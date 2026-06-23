@@ -47,6 +47,18 @@ export function routeAgentRunQuick(input: AgentRunInput): QuickAgentRunRoute {
   const prompt = normalizeText(input.message);
   const localNormalized = buildLocalNormalizedInput(input);
 
+  if (isImageArtifactTask(localNormalized)) {
+    return {
+      normalizedInput: localNormalized,
+      requiresModelNormalization: false,
+      route: "image_task",
+      routerSource: "quick-router",
+      skippedSteps: isSimpleImageFastPathInput(input, localNormalized)
+        ? simpleImageSkippedSteps
+        : routeOnlySkippedSteps,
+    };
+  }
+
   if (isSmalltalk(prompt)) {
     return {
       directResponse: smalltalkResponse(prompt),
@@ -67,18 +79,6 @@ export function routeAgentRunQuick(input: AgentRunInput): QuickAgentRunRoute {
       route: "simple_canvas",
       routerSource: "quick-router",
       skippedSteps: slowPrepSteps,
-    };
-  }
-
-  if (isImageArtifactTask(localNormalized)) {
-    return {
-      normalizedInput: localNormalized,
-      requiresModelNormalization: false,
-      route: "image_task",
-      routerSource: "quick-router",
-      skippedSteps: isSimpleImageFastPathInput(input, localNormalized)
-        ? simpleImageSkippedSteps
-        : routeOnlySkippedSteps,
     };
   }
 
@@ -111,6 +111,10 @@ export function routeAgentRunQuick(input: AgentRunInput): QuickAgentRunRoute {
 }
 
 function buildLocalNormalizedInput(input: AgentRunInput) {
+  if (input.normalizedInput) {
+    return input.normalizedInput;
+  }
+
   return finalizeNormalizedAgentInput(
     {
       rawPrompt: input.message,

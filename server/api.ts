@@ -132,8 +132,19 @@ const authInputSchema = z.object({
   password: z.string().min(1).max(200),
 });
 
+const imageAspectRatioSchema = z.enum(["1:1", "16:9", "9:16", "4:3", "3:4"]);
+const imageResultCountSchema = z.union([
+  z.literal(1),
+  z.literal(2),
+  z.literal(3),
+  z.literal(4),
+]);
+
 const canvasContextSchema = z.object({
+  imageAspectRatio: imageAspectRatioSchema.optional(),
+  imageResultCount: imageResultCountSchema.optional(),
   imageProvider: z.enum(["seedream", "coze", "byteartist"]).optional(),
+  inputMode: z.enum(["agent", "image"]).optional(),
   prompt: z.string().trim().min(1),
   promptNodeId: z.string().nullable().optional(),
   retryFrom: z

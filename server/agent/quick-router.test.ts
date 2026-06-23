@@ -55,6 +55,44 @@ describe("quick agent run router", () => {
     );
   });
 
+  it("lets image composer mode force terse prompts into image generation", () => {
+    const route = routeAgentRunQuick(
+      input({
+        inputMode: "image",
+        message: "黄瓜",
+        normalizedInput: {
+          rawPrompt: "黄瓜",
+          userGoal: "黄瓜",
+          operation: "create",
+          artifact: { kind: "image", format: "png" },
+          domain: "visual-design",
+          requiredCapabilities: ["image-generation"],
+          negativeCapabilities: [],
+          intent: "image.generate",
+          image: {
+            contentPrompt: "黄瓜",
+            aspectRatio: "1:1",
+            resultCount: 2,
+          },
+        },
+      })
+    );
+
+    expect(route).toMatchObject({
+      route: "image_task",
+      requiresModelNormalization: false,
+      normalizedInput: {
+        artifact: { kind: "image", format: "png" },
+        image: {
+          contentPrompt: "黄瓜",
+          aspectRatio: "1:1",
+          resultCount: 2,
+        },
+      },
+    });
+    expect(route.directResponse).toBeUndefined();
+  });
+
   it("routes selected-image character IP figure requests locally", () => {
     const route = routeAgentRunQuick(
       input({
