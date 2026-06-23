@@ -53,6 +53,32 @@ describe("input normalizer", () => {
     });
   });
 
+  it("does not create an image artifact when the prompt explicitly says not to generate images", () => {
+    const raw = "请用一句话解释什么是无限画布，不要生成图片。";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        artifact: { kind: "image", format: "png" },
+        image: {
+          contentPrompt: raw,
+          resultCount: 1,
+        },
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      rawPrompt: "请用一句话解释什么是无限画布，不要生成图片。",
+      artifact: null,
+      negativeCapabilities: ["image-generation"],
+      operation: "answer",
+      intent: "text.answer",
+    });
+    expect(normalized).not.toHaveProperty("image");
+    expect(selectAgentRoute(normalized)).toBe("manager");
+  });
+
   it("routes image dimension expansion as outpaint generation instead of upscale", () => {
     const raw =
       "帮我把这个图拓展4个尺寸：1125-450 / 1125-600 / 900-1200 / 800-800";

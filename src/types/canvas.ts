@@ -152,6 +152,7 @@ export type CanvasAgentMessage = {
   role: "assistant";
   content: string;
   agentName?: string;
+  kind?: "assistant" | "progress";
   status?: "streaming" | "completed";
 };
 

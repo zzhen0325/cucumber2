@@ -1,11 +1,22 @@
 import type { RunStreamEvent } from "@openai/agents";
 
-import type { CucumberAgentContext, CucumberRunEvent, PendingCucumberEvent } from "../context.ts";
+import type {
+  CucumberAgentContext,
+  CucumberRunEvent,
+  CucumberTextDeltaSource,
+  PendingCucumberEvent,
+} from "../context.ts";
 import { getAgentErrorMessage } from "../errors.ts";
 
 type StreamWithCompletion = AsyncIterable<RunStreamEvent> & {
   completed?: Promise<unknown>;
   finalOutput?: unknown;
+};
+
+type TextDelta = {
+  normalized: boolean;
+  source: CucumberTextDeltaSource;
+  text: string;
 };
 
 export async function* openAIStreamToCucumberEvents(
@@ -23,6 +34,7 @@ export async function* openAIStreamToCucumberEvents(
   let finished = false;
   let streamError: unknown = null;
   const activeTools = new Map<string, { toolName: string; input?: unknown }>();
+  const recentlyNormalizedOutputTextDeltas: string[] = [];
 
   const wake = () => {
     if (notify) {
@@ -52,7 +64,17 @@ export async function* openAIStreamToCucumberEvents(
         if (event.type === "raw_model_stream_event") {
           const delta = readTextDelta(event.data);
           if (delta) {
-            push({ type: "text_delta", text: delta });
+            if (isDuplicateRawOutputTextDelta(delta)) {
+              continue;
+            }
+            if (delta.normalized && delta.source === "output_text") {
+              rememberNormalizedOutputTextDelta(delta.text);
+            }
+            push(
+              delta.source === "output_text"
+                ? { type: "text_delta", text: delta.text }
+                : { type: "text_delta", text: delta.text, source: delta.source }
+            );
           }
           continue;
         }
@@ -156,6 +178,25 @@ export async function* openAIStreamToCucumberEvents(
   if (streamError) {
     throw streamError;
   }
+
+  function rememberNormalizedOutputTextDelta(text: string) {
+    recentlyNormalizedOutputTextDeltas.push(text);
+    if (recentlyNormalizedOutputTextDeltas.length > 24) {
+      recentlyNormalizedOutputTextDeltas.shift();
+    }
+  }
+
+  function isDuplicateRawOutputTextDelta(delta: TextDelta) {
+    if (delta.normalized || delta.source !== "output_text") {
+      return false;
+    }
+    const index = recentlyNormalizedOutputTextDeltas.indexOf(delta.text);
+    if (index < 0) {
+      return false;
+    }
+    recentlyNormalizedOutputTextDeltas.splice(index, 1);
+    return true;
+  }
 }
 
 function* drainPendingEvents(context: CucumberAgentContext): Iterable<PendingCucumberEvent> {
@@ -167,19 +208,93 @@ function* drainPendingEvents(context: CucumberAgentContext): Iterable<PendingCuc
   }
 }
 
-function readTextDelta(data: unknown) {
+function readTextDelta(
+  data: unknown
+): TextDelta | null {
   if (!isRecord(data)) {
     return null;
   }
 
+  if (data.type === "output_text_delta") {
+    const text = readDeltaText(data.delta);
+    return text
+      ? { normalized: true, source: "output_text", text }
+      : null;
+  }
+
+  const chatText = readChatCompletionsTextDelta(data);
+  if (chatText) {
+    return { normalized: false, source: "output_text", text: chatText };
+  }
+
+  const rawEvent = isRecord(data.event) ? data.event : data;
+  const type = readString(rawEvent.type);
+  if (type === "response.output_text.delta") {
+    const text = readDeltaText(rawEvent.delta);
+    return text
+      ? { normalized: false, source: "output_text", text }
+      : null;
+  }
+
   if (
-    data.type === "output_text_delta" ||
-    data.type === "response.output_text.delta"
+    type === "response.reasoning_summary_text.delta" ||
+    type === "response.reasoning_summary.delta"
   ) {
-    return typeof data.delta === "string" ? data.delta : null;
+    const text = readDeltaText(rawEvent.delta);
+    return text
+      ? { normalized: false, source: "reasoning_summary", text }
+      : null;
+  }
+
+  if (type === "response.refusal.delta") {
+    const text = readDeltaText(rawEvent.delta);
+    return text
+      ? { normalized: false, source: "refusal", text }
+      : null;
   }
 
   return null;
+}
+
+function readChatCompletionsTextDelta(data: Record<string, unknown>) {
+  const event = isRecord(data.event) ? data.event : data;
+  const choices = readArray(event.choices);
+  for (const choice of choices) {
+    const delta = isRecord(choice) ? choice.delta : undefined;
+    if (!isRecord(delta)) {
+      continue;
+    }
+    const content = delta.content;
+    if (typeof content === "string" && content) {
+      return content;
+    }
+    const contentParts = readArray(content);
+    const text = contentParts
+      .flatMap((part) => {
+        const record = isRecord(part) ? part : null;
+        const value = record?.text ?? record?.content;
+        return typeof value === "string" ? [value] : [];
+      })
+      .join("");
+    if (text) {
+      return text;
+    }
+  }
+  return null;
+}
+
+function readDeltaText(value: unknown) {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (isRecord(value)) {
+    return readString(value.text) ?? readString(value.content);
+  }
+  return null;
+}
+
+function readArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
 function readToolName(item: unknown) {
@@ -253,6 +368,10 @@ function readRecordValue(value: unknown, key: string) {
   }
   const rawItem = readRawItem(value);
   return rawItem?.[key];
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value : undefined;
 }
 
 function stringifyFinalOutput(output: unknown) {

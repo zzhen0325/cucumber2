@@ -942,30 +942,6 @@ function buildRunSummaryItems(events: RunStepTraceEvent[]): RunSummaryItem[] {
     });
   }
 
-  const artifactTypes = events.flatMap((event) => {
-    if (event.type !== "artifact.created") {
-      return [];
-    }
-    const artifact = readRecord(event.payload.artifact);
-    const type = readString(artifact?.type);
-    return type ? [type] : [];
-  });
-  if (artifactTypes.length) {
-    const counts = new Map<string, number>();
-    for (const type of artifactTypes) {
-      counts.set(type, (counts.get(type) ?? 0) + 1);
-    }
-    const detail = Array.from(counts.entries())
-      .map(([type, count]) => `${count} ${humanizeRuntimeLabel(type)}`)
-      .join("，");
-
-    items.push({
-      kind: "artifact",
-      label: "产物",
-      detail,
-    });
-  }
-
   const appliedOperations = events.filter(
     (event) => event.type === "canvas.operation.applied"
   ).length;
@@ -1874,9 +1850,11 @@ function buildAgentText(
     events
   )
 ): string | undefined {
-  const persistedText = formatAgentMessageText(agentMessages);
-  if (persistedText) {
-    return persistedText;
+  const assistantText = formatAgentMessageText(agentMessages, {
+    includeProgress: false,
+  });
+  if (assistantText) {
+    return assistantText;
   }
 
   const finalOutput = readString(
@@ -1884,6 +1862,11 @@ function buildAgentText(
   );
   if (finalOutput) {
     return finalOutput;
+  }
+
+  const persistedText = formatAgentMessageText(agentMessages);
+  if (persistedText) {
+    return persistedText;
   }
 
   if (streamedAgentText) {
@@ -1931,6 +1914,7 @@ function buildAgentMessages(
         id: messageId,
         role: "assistant",
         content: "",
+        kind: readAgentMessageKind(event.payload.messageKind),
         deltaIndexes: new Set<number>(),
         order: nextOrder++,
       } satisfies CanvasAgentMessage & {
@@ -1940,6 +1924,10 @@ function buildAgentMessages(
     const agentName = readString(event.payload.agentName);
     if (agentName) {
       message.agentName = agentName;
+    }
+    const messageKind = readAgentMessageKind(event.payload.messageKind);
+    if (messageKind) {
+      message.kind = messageKind;
     }
 
     if (event.type === "agent.message.delta") {
@@ -1976,6 +1964,7 @@ function buildAgentMessages(
               role: message.role,
               content,
               agentName: message.agentName,
+              kind: message.kind,
               status: message.status,
             },
           ]
@@ -1985,12 +1974,16 @@ function buildAgentMessages(
   return projectedMessages;
 }
 
-function formatAgentMessageText(messages: CanvasAgentMessage[]) {
+function formatAgentMessageText(
+  messages: CanvasAgentMessage[],
+  options: { includeProgress?: boolean } = { includeProgress: true }
+) {
   if (!messages.length) {
     return undefined;
   }
 
   return messages
+    .filter((message) => options.includeProgress !== false || message.kind !== "progress")
     .map((message) => {
       const content = message.content.trim();
       if (!content) {
@@ -2001,6 +1994,11 @@ function formatAgentMessageText(messages: CanvasAgentMessage[]) {
     .filter(Boolean)
     .join("\n\n")
     .trim();
+}
+
+function readAgentMessageKind(value: unknown): CanvasAgentMessage["kind"] {
+  const kind = readString(value);
+  return kind === "progress" ? "progress" : kind === "assistant" ? "assistant" : undefined;
 }
 
 function getRunOutputKind(

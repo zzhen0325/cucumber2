@@ -2,6 +2,11 @@
 
 本文记录 2026-06-11 Agent v2 正式切换后的变更。
 
+## 2026-06-23 Run Node Conversation Flow
+
+- Run 节点信息层级调整为 Agent 对话优先：所有可见文本 delta（`output_text_delta`、Responses `response.output_text.delta`、reasoning summary 和 refusal）都会立即写入 `agent.message.*` 并同步进入 AI SDK `text-delta`，最终输出在没有被文本流覆盖时会补成 assistant 消息；计划、handoff/skill 摘要和工具调用折叠在 Agent 执行流下方，不再把图片等 artifact 摘要作为 Run 卡主内容展示。
+- OpenAI Agents SDK raw stream 兼容 normalized delta、嵌套 `event.data.event.type` 的 Responses 事件和 Chat Completions `delta.content`；Responses 同时发 normalized/raw `output_text` 时会按 delta 去重，避免 Run 节点重复显示同一段字。
+
 ## 2026-06-18 Image Agent Matting And Inspection
 
 - Image Agent 扩展为图片生成、抠图、拆解、理解和高清处理的统一 specialist；Manager 继续只做编排，工具只创建 artifact 和事件，不直接写画布节点。

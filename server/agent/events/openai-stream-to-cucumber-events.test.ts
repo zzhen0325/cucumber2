@@ -42,6 +42,111 @@ describe("OpenAI Agents stream adapter", () => {
     expect(events).toContainEqual({ type: "text_delta", text: "旧协议" });
   });
 
+  it("does not duplicate OpenAI Responses text when normalized and raw events both arrive", async () => {
+    const context = agentContext();
+    const stream = fakeStream([
+      {
+        type: "raw_model_stream_event",
+        data: { type: "output_text_delta", delta: "同一段" },
+      },
+      {
+        type: "raw_model_stream_event",
+        data: {
+          type: "model",
+          event: { type: "response.output_text.delta", delta: "同一段" },
+        },
+      },
+    ], "同一段");
+
+    const events = await collect(openAIStreamToCucumberEvents(stream, context));
+
+    expect(events.filter((event) => event.type === "text_delta")).toEqual([
+      { type: "text_delta", text: "同一段" },
+    ]);
+  });
+
+  it("emits text deltas from nested OpenAI Responses raw events", async () => {
+    const context = agentContext();
+    const stream = fakeStream([
+      {
+        type: "raw_model_stream_event",
+        data: {
+          type: "model",
+          event: { type: "response.output_text.delta", delta: "嵌套输出" },
+        },
+      },
+    ], "嵌套输出");
+
+    const events = await collect(openAIStreamToCucumberEvents(stream, context));
+
+    expect(events).toContainEqual({ type: "text_delta", text: "嵌套输出" });
+  });
+
+  it("emits reasoning summary deltas as visible agent text", async () => {
+    const context = agentContext();
+    const stream = fakeStream([
+      {
+        type: "raw_model_stream_event",
+        data: {
+          type: "model",
+          event: {
+            type: "response.reasoning_summary_text.delta",
+            delta: "正在整理任务",
+          },
+        },
+      },
+    ], "完成");
+
+    const events = await collect(openAIStreamToCucumberEvents(stream, context));
+
+    expect(events).toContainEqual({
+      type: "text_delta",
+      text: "正在整理任务",
+      source: "reasoning_summary",
+    });
+  });
+
+  it("emits refusal deltas as visible agent text", async () => {
+    const context = agentContext();
+    const stream = fakeStream([
+      {
+        type: "raw_model_stream_event",
+        data: {
+          type: "model",
+          event: {
+            type: "response.refusal.delta",
+            delta: "这个请求我不能处理。",
+          },
+        },
+      },
+    ], "这个请求我不能处理。");
+
+    const events = await collect(openAIStreamToCucumberEvents(stream, context));
+
+    expect(events).toContainEqual({
+      type: "text_delta",
+      text: "这个请求我不能处理。",
+      source: "refusal",
+    });
+  });
+
+  it("emits Chat Completions raw content deltas if a provider skips normalization", async () => {
+    const context = agentContext();
+    const stream = fakeStream([
+      {
+        type: "raw_model_stream_event",
+        data: {
+          type: "model",
+          event: { choices: [{ delta: { content: "聊天文本" } }] },
+        },
+      },
+    ], "聊天文本");
+
+    const events = await collect(openAIStreamToCucumberEvents(stream, context));
+
+    expect(events).toContainEqual({ type: "text_delta", text: "聊天文本" });
+  });
+
   it("projects agents, handoffs, tools, artifacts, final output, and artifact ids", async () => {
     const context = agentContext();
     const stream = fakeStream([

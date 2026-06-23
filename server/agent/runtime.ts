@@ -16,6 +16,7 @@ import {
   type AgentRunInput,
   type AgentRuntime,
   type CucumberRunEvent,
+  type CucumberTextDeltaSource,
   type ExecuteAgentRunInput,
 } from "./context.ts";
 import {
@@ -355,11 +356,13 @@ export async function executeAgentRun({
   let finalOutput: string | undefined;
   let artifactIds: string[] = [];
   let currentAgentName: string | undefined;
+  let assistantTextContent = "";
   let activeAgentMessage:
     | {
         agentName?: string;
         deltaIndex: number;
         id: string;
+        messageKind: "assistant" | "progress";
         text: string;
       }
     | null = null;
@@ -696,7 +699,7 @@ export async function executeAgentRun({
       }
 
       if (event.type === "text_delta") {
-        await writeAgentTextDelta(event.text);
+        await writeAgentTextDelta(event.text, event.source);
         continue;
       }
 
@@ -971,6 +974,13 @@ export async function executeAgentRun({
 
   async function completeRun() {
     await finishAgentMessage();
+    if (
+      finalOutput?.trim() &&
+      !textAlreadyIncludesFinalOutput(assistantTextContent, finalOutput)
+    ) {
+      await writeAgentTextDelta(finalOutput);
+      await finishAgentMessage();
+    }
     closeTextStream();
     if (!shouldDeferRunMaterialization()) {
       await eventWriter.flush();
@@ -1002,9 +1012,12 @@ export async function executeAgentRun({
     writeStreamPart({ type: "text-delta", id: textStreamId, delta: text });
   }
 
-  async function writeAgentTextDelta(text: string) {
+  async function writeAgentTextDelta(
+    text: string,
+    source?: CucumberTextDeltaSource
+  ) {
     writeTextDelta(text);
-    await writeAgentMessageDelta(text);
+    await writeAgentMessageDelta(text, "assistant", source);
   }
 
   async function switchActiveAgent(agentName: string) {
@@ -1021,14 +1034,28 @@ export async function executeAgentRun({
     }
   }
 
-  async function writeAgentMessageDelta(delta: string) {
+  async function writeAgentMessageDelta(
+    delta: string,
+    messageKind: "assistant" | "progress",
+    source?: CucumberTextDeltaSource
+  ) {
     if (!delta) {
       return;
     }
-    const message = getActiveAgentMessage();
+    if (
+      activeAgentMessage &&
+      activeAgentMessage.messageKind !== messageKind &&
+      activeAgentMessage.text.trim()
+    ) {
+      await finishAgentMessage();
+    }
+    const message = getActiveAgentMessage(messageKind);
     const index = message.deltaIndex;
     message.deltaIndex += 1;
     message.text += delta;
+    if (messageKind === "assistant") {
+      assistantTextContent += delta;
+    }
     await writeRunEvent({
       projectId: input.projectId,
       runNodeId: input.runNodeId,
@@ -1038,9 +1065,11 @@ export async function executeAgentRun({
         agentName: message.agentName,
         delta,
         index,
+        messageKind,
         messageId: message.id,
         role: "assistant",
         runtime: "openai-agents-sdk",
+        source,
       },
     });
   }
@@ -1063,6 +1092,7 @@ export async function executeAgentRun({
       payload: {
         agentName: message.agentName,
         content,
+        messageKind: message.messageKind,
         messageId: message.id,
         role: "assistant",
         runtime: "openai-agents-sdk",
@@ -1071,13 +1101,14 @@ export async function executeAgentRun({
     });
   }
 
-  function getActiveAgentMessage() {
+  function getActiveAgentMessage(messageKind: "assistant" | "progress") {
     if (!activeAgentMessage) {
       agentMessageCount += 1;
       activeAgentMessage = {
         agentName: currentAgentName,
         deltaIndex: 0,
         id: `${input.runNodeId}-agent-message-${agentMessageCount}`,
+        messageKind,
         text: "",
       };
     }
@@ -1116,6 +1147,21 @@ export async function executeAgentRun({
       // The run can continue after the user leaves; persisted events hydrate UI.
     }
   }
+}
+
+function textAlreadyIncludesFinalOutput(text: string, finalOutput: string) {
+  const normalizedText = normalizeAssistantText(text);
+  const normalizedFinalOutput = normalizeAssistantText(finalOutput);
+  return Boolean(
+    normalizedFinalOutput &&
+      (normalizedText === normalizedFinalOutput ||
+        normalizedText.endsWith(normalizedFinalOutput) ||
+        normalizedText.includes(normalizedFinalOutput))
+  );
+}
+
+function normalizeAssistantText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
 }
 
 function classifyRunFailure({

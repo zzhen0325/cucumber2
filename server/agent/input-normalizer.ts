@@ -762,6 +762,16 @@ function inferTaskProtocol(prompt: string): Pick<
     };
   }
 
+  if (hasNegatedImageGenerationRequest(prompt)) {
+    return {
+      artifact: null,
+      domain,
+      negativeCapabilities: ["image-generation"],
+      operation: "answer",
+      requiredCapabilities: [],
+    };
+  }
+
   if (
     hasExplicitImageCreationRequest(prompt) ||
     /(生成|创建|画|出图|图片|图像|插画|海报|banner|kv|photo|image|illustration|poster)/i.test(
@@ -842,6 +852,9 @@ function normalizeArtifact(
     return inferred ?? null;
   }
   if (isVisualBriefAnalysisRequest(rawPrompt) && artifact.kind === "image") {
+    return null;
+  }
+  if (hasNegatedImageGenerationRequest(rawPrompt) && artifact.kind === "image") {
     return null;
   }
   if (isImageCanvasExpansionRequest(rawPrompt)) {
@@ -1168,6 +1181,12 @@ function isImageCanvasExpansionRequest(prompt: string) {
 
 function hasExplicitImageCreationRequest(prompt: string) {
   return /((生成|创建|画|出图|渲染|产出|输出|制作).{0,16}(图片|图像|图|海报|banner|kv|主视觉)|(生成|创建|设计|制作|做|产出|输出|出).{0,24}(角色|IP|形象|头像|玩偶|公仔|毛绒|贴纸)|(图片|图像|海报|banner|kv|主视觉|角色|IP|形象|头像|玩偶|公仔|毛绒|贴纸).{0,24}(生成|创建|渲染|产出|输出|制作|设计)|\b(generate|create|render|make)\b.{0,48}\b(image|poster|banner|key visual|character|avatar|mascot)\b)/i.test(
+    prompt
+  );
+}
+
+function hasNegatedImageGenerationRequest(prompt: string) {
+  return /((不要|不用|无需|不需要|别|禁止|别再|不要再)\s*(?:生成|创建|画|出图|渲染|产出|输出|制作)?\s*(?:任何|新的|一张|这些|此)?\s*(?:图片|图像|图|海报|banner|kv)|(?:不|别|禁止)\s*(?:生成|创建|画|出图|渲染|产出|输出|制作)\s*(?:任何|新的|一张|这些|此)?\s*(?:图片|图像|图|海报|banner|kv)|(?:no|not|without|don't|do not)\s*(?:image\s*generation|generate\s+image|create\s+image|images?|pictures?|posters?))/i.test(
     prompt
   );
 }

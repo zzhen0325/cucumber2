@@ -83,8 +83,13 @@ export type AgentRetryContext = {
   errorText?: string;
 };
 
+export type CucumberTextDeltaSource =
+  | "output_text"
+  | "reasoning_summary"
+  | "refusal";
+
 export type CucumberRunEvent =
-  | { type: "text_delta"; text: string }
+  | { type: "text_delta"; text: string; source?: CucumberTextDeltaSource }
   | {
       type: "run_phase_started";
       details?: Record<string, unknown>;

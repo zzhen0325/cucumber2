@@ -142,8 +142,36 @@ describe("RunNodeView", () => {
     expect(screen.getByText("我会先整理画面要求，然后调用图片工具。")).toBeTruthy();
   });
 
-  it("renders a compact execution summary in the run stream", () => {
+  it("renders reasoning progress as an agent conversation message", () => {
     renderRunNode({
+      agentMessages: [
+        {
+          agentName: "Image Agent",
+          content: "正在整理画面要求和参考图。",
+          id: "progress-1",
+          kind: "progress",
+          role: "assistant",
+          status: "streaming",
+        },
+      ],
+      status: "running",
+    });
+
+    expect(screen.getByText("正在整理画面要求和参考图。")).toBeTruthy();
+    expect(screen.getByText("进展中")).toBeTruthy();
+  });
+
+  it("renders execution details under the agent conversation without artifact summary", () => {
+    renderRunNode({
+      agentMessages: [
+        {
+          agentName: "Image Agent",
+          content: "我会先整理画面要求，然后调用图片工具。",
+          id: "message-1",
+          role: "assistant",
+          status: "completed",
+        },
+      ],
       status: "running",
       summaryItems: [
         {
@@ -157,11 +185,22 @@ describe("RunNodeView", () => {
           detail: "1 image",
         },
       ],
+      plan: [
+        { id: "prepare", label: "整理需求和上下文", status: "success" },
+        { id: "execute", label: "生成图片产物", status: "running" },
+      ],
     });
 
     expect(screen.getByLabelText("执行摘要")).toBeTruthy();
     expect(screen.getByText("Cucumber Manager -> Image Agent")).toBeTruthy();
-    expect(screen.getByText("1 image")).toBeTruthy();
+    expect(screen.queryByText("1 image")).toBeNull();
+    expect(screen.getByLabelText("Agent 执行")).toBeTruthy();
+    expect(
+      screen
+        .getByText("我会先整理画面要求，然后调用图片工具。")
+        .compareDocumentPosition(screen.getByText("1/2 已完成")) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
   });
 
   it("shows a compact plan and current step", () => {

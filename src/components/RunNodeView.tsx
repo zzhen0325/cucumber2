@@ -61,11 +61,13 @@ export function RunNodeView({
   const agentText =
     data.agentText?.trim() || formatAgentMessagesForText(agentMessages);
   const summaryItems = useMemo(
-    () => data.summaryItems ?? [],
+    () => (data.summaryItems ?? []).filter((item) => item.kind !== "artifact"),
     [data.summaryItems]
   );
   const hasPlan = Boolean(data.plan?.length);
   const hasSummaryItems = Boolean(summaryItems.length);
+  const hasToolParts = hasToolDetail && toolParts.length > 0;
+  const hasAgentActivity = hasSummaryItems || hasPlan || hasToolParts;
   const hasRunOutput =
     isActiveRun ||
     Boolean(agentText) ||
@@ -249,8 +251,6 @@ export function RunNodeView({
             data-expanded="true"
           >
             <div className="run-conversation-flow">
-              {hasSummaryItems && <RunSummaryTimeline items={summaryItems} />}
-              {hasPlan && <RunPlanView plan={data.plan ?? []} />}
               <div className="run-agent-text-region nodrag nopan nowheel">
                 {agentMessages.length ? (
                   <AgentMessageList messages={agentMessages} />
@@ -263,20 +263,25 @@ export function RunNodeView({
                     {pendingAgentText}
                   </Shimmer>
                 )}
-              </div>
-              {hasToolDetail &&
-                toolParts.length > 0 && (
-                  <div className="tool-call-stack" aria-label="工具调用">
-                    {toolParts.map((part, index) => (
-                      <ToolPartView
-                        error={data.error}
-                        key={`${part.type}-${part.toolCallId ?? index}`}
-                        runNodeId={id}
-                        toolPart={part}
-                      />
-                    ))}
+                {hasAgentActivity && (
+                  <div className="agent-activity-stack" aria-label="Agent 执行">
+                    {hasSummaryItems && <RunSummaryTimeline items={summaryItems} />}
+                    {hasPlan && <RunPlanView plan={data.plan ?? []} />}
+                    {hasToolParts && (
+                      <div className="tool-call-stack" aria-label="工具调用">
+                        {toolParts.map((part, index) => (
+                          <ToolPartView
+                            error={data.error}
+                            key={`${part.type}-${part.toolCallId ?? index}`}
+                            runNodeId={id}
+                            toolPart={part}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
+              </div>
             </div>
           </div>
         )}
@@ -300,7 +305,9 @@ function AgentMessageList({ messages }: { messages: CanvasAgentMessage[] }) {
               <strong title={message.agentName ?? "Agent"}>
                 {message.agentName ?? "Agent"}
               </strong>
-              {message.status === "streaming" && <span>输出中</span>}
+              {getAgentMessageBadges(message).map((badge) => (
+                <span key={badge}>{badge}</span>
+              ))}
             </div>
             <MessageResponse className="agent-text-output">
               {message.content}
@@ -310,6 +317,16 @@ function AgentMessageList({ messages }: { messages: CanvasAgentMessage[] }) {
       ))}
     </div>
   );
+}
+
+function getAgentMessageBadges(message: CanvasAgentMessage) {
+  const badges: string[] = [];
+  if (message.kind === "progress") {
+    badges.push(message.status === "streaming" ? "进展中" : "进展");
+  } else if (message.status === "streaming") {
+    badges.push("输出中");
+  }
+  return badges;
 }
 
 function normalizeAgentMessages(messages?: CanvasAgentMessage[]) {

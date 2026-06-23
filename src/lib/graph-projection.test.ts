@@ -310,7 +310,7 @@ describe("agent event graph projection", () => {
           items: [
             { id: "document-brief", label: "梳理文档目标和上游素材", phase: "prepare" },
             { id: "document-agent", label: "委派 Document Agent", phase: "route" },
-            { id: "document-create", label: "创建文档 artifact", phase: "execute" },
+            { id: "document-create", label: "创建文档内容", phase: "execute" },
             { id: "document-materialize", label: "投影为画布文档节点", phase: "materialize" },
           ],
         }),
@@ -506,6 +506,50 @@ describe("agent event graph projection", () => {
           agentName: "Image Agent",
           content: "我已经准备好提示词，开始调用 Seedream。",
           status: "completed",
+        }),
+      ],
+    });
+  });
+
+  it("keeps reasoning progress visible without making it the final run text", () => {
+    const projection = projectRunTraceToCanvas({
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", { prompt: "生成图片", promptNodeId: "prompt-1" }),
+        event("agent.message.completed", "agent-message", {
+          agentName: "Image Agent",
+          content: "正在整理画面要求和参考图。",
+          messageId: "progress-1",
+          messageKind: "progress",
+          role: "assistant",
+        }),
+        event("agent.message.completed", "agent-message", {
+          agentName: "Image Agent",
+          content: "已生成图片。",
+          messageId: "message-1",
+          messageKind: "assistant",
+          role: "assistant",
+        }),
+        event("run.completed", "run", {
+          artifactIds: [],
+          finalOutput: "已生成图片。",
+        }),
+      ],
+    });
+    const run = projection.nodes.find((node) => node.id === "run-1");
+
+    expect(run?.data).toMatchObject({
+      kind: "run",
+      status: "success",
+      agentText: "Image Agent\n已生成图片。",
+      agentMessages: [
+        expect.objectContaining({
+          content: "正在整理画面要求和参考图。",
+          kind: "progress",
+        }),
+        expect.objectContaining({
+          content: "已生成图片。",
+          kind: "assistant",
         }),
       ],
     });
