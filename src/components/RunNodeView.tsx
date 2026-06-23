@@ -19,6 +19,7 @@ import { isSimpleRunOutput } from "@/lib/graph";
 import type {
   CanvasAgentMessage,
   CanvasToolPart,
+  RunSummaryItem,
   RunNodeData,
 } from "@/types/canvas";
 
@@ -59,8 +60,18 @@ export function RunNodeView({
   );
   const agentText =
     data.agentText?.trim() || formatAgentMessagesForText(agentMessages);
+  const summaryItems = useMemo(
+    () => data.summaryItems ?? [],
+    [data.summaryItems]
+  );
   const hasPlan = Boolean(data.plan?.length);
-  const hasRunOutput = isActiveRun || Boolean(agentText) || hasToolDetail || hasPlan;
+  const hasSummaryItems = Boolean(summaryItems.length);
+  const hasRunOutput =
+    isActiveRun ||
+    Boolean(agentText) ||
+    hasToolDetail ||
+    hasPlan ||
+    hasSummaryItems;
   const pendingAgentText = getPendingAgentText(data.status, headerSummary);
   const toggleLabel = expanded ? "收起输出" : "展开输出";
   const nodeClassName = [
@@ -83,6 +94,7 @@ export function RunNodeView({
         currentStep: data.currentStep,
         agentMessages,
         plan: data.plan,
+        summaryItems,
         toolParts: toolParts.map((part) => ({
           errorText: part.errorText,
           input: part.input,
@@ -101,6 +113,7 @@ export function RunNodeView({
       data.status,
       expanded,
       simpleRunOutput,
+      summaryItems,
       toolParts,
     ]
   );
@@ -235,33 +248,36 @@ export function RunNodeView({
             aria-label="Agent run stream"
             data-expanded="true"
           >
-            <div className="run-agent-text-region nodrag nopan nowheel">
-              {agentMessages.length ? (
-                <AgentMessageList messages={agentMessages} />
-              ) : agentText ? (
-                <MessageResponse className="agent-text-output">
-                  {agentText}
-                </MessageResponse>
-              ) : (
-                <Shimmer as="p" className="agent-text-output muted" duration={1.8}>
-                  {pendingAgentText}
-                </Shimmer>
-              )}
+            <div className="run-conversation-flow">
+              {hasSummaryItems && <RunSummaryTimeline items={summaryItems} />}
+              {hasPlan && <RunPlanView plan={data.plan ?? []} />}
+              <div className="run-agent-text-region nodrag nopan nowheel">
+                {agentMessages.length ? (
+                  <AgentMessageList messages={agentMessages} />
+                ) : agentText ? (
+                  <MessageResponse className="agent-text-output">
+                    {agentText}
+                  </MessageResponse>
+                ) : (
+                  <Shimmer as="p" className="agent-text-output muted" duration={1.8}>
+                    {pendingAgentText}
+                  </Shimmer>
+                )}
+              </div>
+              {hasToolDetail &&
+                toolParts.length > 0 && (
+                  <div className="tool-call-stack" aria-label="工具调用">
+                    {toolParts.map((part, index) => (
+                      <ToolPartView
+                        error={data.error}
+                        key={`${part.type}-${part.toolCallId ?? index}`}
+                        runNodeId={id}
+                        toolPart={part}
+                      />
+                    ))}
+                  </div>
+                )}
             </div>
-            {hasPlan && <RunPlanView plan={data.plan ?? []} />}
-            {hasToolDetail &&
-              toolParts.length > 0 && (
-                <div className="tool-call-stack" aria-label="工具调用">
-                  {toolParts.map((part, index) => (
-                    <ToolPartView
-                      error={data.error}
-                      key={`${part.type}-${part.toolCallId ?? index}`}
-                      runNodeId={id}
-                      toolPart={part}
-                    />
-                  ))}
-                </div>
-              )}
           </div>
         )}
       </NodeContent>
@@ -273,16 +289,19 @@ function AgentMessageList({ messages }: { messages: CanvasAgentMessage[] }) {
   return (
     <div className="agent-message-list" aria-label="Agent 对话">
       {messages.map((message) => (
-        <div className="run-stream-group agent-message" key={message.id}>
-          <div className="run-stream-group-heading">
+        <div className="run-flow-entry agent-message" key={message.id}>
+          <div className="run-flow-marker">
             <span>
               <Sparkles size={10} />
             </span>
-            <strong title={message.agentName ?? "Agent"}>
-              {message.agentName ?? "Agent"}
-            </strong>
           </div>
-          <div className="run-stream-group-body">
+          <div className="run-flow-body">
+            <div className="run-flow-heading">
+              <strong title={message.agentName ?? "Agent"}>
+                {message.agentName ?? "Agent"}
+              </strong>
+              {message.status === "streaming" && <span>输出中</span>}
+            </div>
             <MessageResponse className="agent-text-output">
               {message.content}
             </MessageResponse>
@@ -350,6 +369,7 @@ export function ToolPartView({
       ? toolPart.errorText ?? error
       : toolPart.errorText;
   const stateLabel = getToolStateLabel(toolPart.state);
+  const previewLine = errorText ?? getToolPreviewLine(toolPart);
 
   return (
     <div
@@ -357,6 +377,7 @@ export function ToolPartView({
       data-state={open ? "open" : "closed"}
     >
       <button
+        aria-label={`${toolName}${stateLabel}`}
         aria-expanded={open}
         className="tool-call-main nodrag nopan"
         onClick={(event) => {
@@ -365,8 +386,17 @@ export function ToolPartView({
         }}
         type="button"
       >
-        <Wrench size={13} />
-        <strong>{toolName}</strong>
+        <span className="tool-call-icon">
+          <Wrench size={12} />
+        </span>
+        <span className="tool-call-copy">
+          <strong>{toolName}</strong>
+          {previewLine && (
+            <span className="tool-call-preview" title={previewLine}>
+              {previewLine}
+            </span>
+          )}
+        </span>
         <span className={`tool-state ${toolPart.state}`}>{stateLabel}</span>
         <ChevronDown className="tool-call-chevron" size={13} />
       </button>
@@ -412,18 +442,64 @@ export function ToolPartView({
 }
 
 function RunPlanView({ plan }: { plan: NonNullable<RunNodeData["plan"]> }) {
+  const completedCount = plan.filter((item) => item.status === "success").length;
+  const currentItem =
+    plan.find((item) => item.status === "running") ??
+    plan.find((item) => item.status === "queued") ??
+    plan.at(-1);
+
   return (
-    <div className="run-plan-list" aria-label="任务计划">
-      {plan.map((item) => (
-        <div className={`run-plan-item ${item.status}`} key={item.id}>
-          <span className={`run-plan-dot ${item.status}`}>
-            <RunStatusIcon status={item.status} />
-          </span>
-          <strong title={item.label}>{item.label}</strong>
+    <div className="run-plan-panel" aria-label="任务计划">
+      <div className="run-plan-header">
+        <span>
+          <ListTree size={10} />
+        </span>
+        <strong>{completedCount}/{plan.length} 已完成</strong>
+        {currentItem && <em title={currentItem.label}>{currentItem.label}</em>}
+      </div>
+      <div className="run-plan-list">
+        {plan.map((item) => (
+          <div className={`run-plan-item ${item.status}`} key={item.id}>
+            <span className={`run-plan-dot ${item.status}`}>
+              <RunStatusIcon status={item.status} />
+            </span>
+            <strong title={item.label}>{item.label}</strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RunSummaryTimeline({ items }: { items: RunSummaryItem[] }) {
+  return (
+    <div className="run-summary-timeline" aria-label="执行摘要">
+      {items.map((item) => (
+        <div
+          className={`run-summary-item ${item.kind}`}
+          key={`${item.kind}-${item.label}-${item.detail ?? ""}`}
+        >
+          <span aria-hidden="true">{getSummaryMarker(item.kind)}</span>
+          <strong title={item.detail ?? item.label}>
+            {item.detail ?? item.label}
+          </strong>
+          <em>{item.label}</em>
         </div>
       ))}
     </div>
   );
+}
+
+function getSummaryMarker(kind: RunSummaryItem["kind"]) {
+  const markers: Record<RunSummaryItem["kind"], string> = {
+    agent: "A",
+    artifact: "产",
+    canvas: "画",
+    handoff: "→",
+    skill: "技",
+  };
+
+  return markers[kind];
 }
 
 function RunStatusIcon({ status }: { status: RunNodeData["status"] }) {
@@ -565,6 +641,44 @@ function getToolHeaderLabel(toolPart: CanvasToolPart) {
   return getToolName(toolPart);
 }
 
+function getToolPreviewLine(toolPart: CanvasToolPart) {
+  const skillName =
+    readToolString(toolPart.output, "skillName") ??
+    readToolString(toolPart.input, "skillName");
+  if (skillName) {
+    return skillName;
+  }
+
+  const scriptName = readToolString(toolPart.input, "scriptName");
+  if (scriptName) {
+    return scriptName;
+  }
+
+  const prompt =
+    readToolString(toolPart.input, "prompt") ??
+    readToolString(toolPart.input, "sourcePrompt") ??
+    readToolString(toolPart.output, "expandedPrompt");
+  if (prompt) {
+    return prompt;
+  }
+
+  const summary =
+    readToolString(toolPart.output, "summary") ??
+    readToolString(toolPart.output, "message");
+  if (summary) {
+    return summary;
+  }
+
+  const count =
+    readToolNumber(toolPart.output, "generated") ??
+    readToolNumber(toolPart.input, "resultCount");
+  if (count !== null) {
+    return `${count} 个结果`;
+  }
+
+  return null;
+}
+
 function readToolString(value: unknown, key: string) {
   if (!value || typeof value !== "object") {
     return null;
@@ -572,6 +686,15 @@ function readToolString(value: unknown, key: string) {
 
   const nested = (value as Record<string, unknown>)[key];
   return typeof nested === "string" && nested.trim() ? nested : null;
+}
+
+function readToolNumber(value: unknown, key: string) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const nested = (value as Record<string, unknown>)[key];
+  return typeof nested === "number" && Number.isFinite(nested) ? nested : null;
 }
 
 function getToolStateLabel(state: CanvasToolPart["state"]) {

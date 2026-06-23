@@ -1,5 +1,10 @@
 import type { UpstreamContextItem } from "../../../../src/types/canvas.ts";
 import type {
+  ByteArtistConfig,
+  ByteArtistGenerateInput,
+  ByteArtistImageRequest,
+} from "../../../../byteartist.ts";
+import type {
   SeedreamConfig,
   SeedreamGenerateInput,
   SeedreamImageRequest,
@@ -23,6 +28,18 @@ export type GenerateImageSeedreamRequestInput = {
   width?: number;
   upstreamContext?: UpstreamContextItem[];
   onImage?: SeedreamGenerateInput["onImage"];
+  signal?: AbortSignal;
+};
+
+export type GenerateImageByteArtistRequestInput = {
+  aspectRatio?: string;
+  height?: number;
+  prompt: string;
+  requestedResultCount?: number;
+  variants?: SeedreamGeometryInput[];
+  width?: number;
+  upstreamContext?: UpstreamContextItem[];
+  onImage?: ByteArtistGenerateInput["onImage"];
   signal?: AbortSignal;
 };
 
@@ -89,6 +106,50 @@ export function buildGenerateImageSeedreamInput(
     ),
     totalRequestedImageCount: resultCount,
     promptBatchMode: "single_prompt",
+    onImage: input.onImage,
+    signal: input.signal,
+  };
+}
+
+export function buildGenerateImageByteArtistInput(
+  input: GenerateImageByteArtistRequestInput,
+  config: ByteArtistConfig
+): ByteArtistGenerateInput {
+  const normalizedPrompt = normalizeImagePrompt(input.prompt);
+  const prompt = normalizeSeedreamProviderPrompt(normalizedPrompt);
+  if (!prompt) {
+    throw new Error("ByteArtist image prompt is empty.");
+  }
+
+  const variants = normalizeSeedreamVariants(
+    input.variants,
+    config.maxOutputImages
+  );
+  const resultCount = variants.length
+    ? variants.length
+    : resolveImageResultCount(
+        input.requestedResultCount,
+        [normalizedPrompt],
+        config.maxOutputImages
+      );
+
+  return {
+    requests: buildByteArtistRequestBodies(
+      {
+        prompts: [normalizedPrompt],
+        geometry: {
+          aspectRatio: input.aspectRatio,
+          height: input.height,
+          width: input.width,
+        },
+        variants,
+        resultCount,
+        promptBatchMode: "single_prompt",
+        upstreamContext: toSeedreamUpstreamContext(input.upstreamContext ?? []),
+      },
+      config
+    ),
+    totalRequestedImageCount: resultCount,
     onImage: input.onImage,
     signal: input.signal,
   };
@@ -170,6 +231,64 @@ export function buildSeedreamRequestBodies(
         body,
         imageUrls,
         ...getSeedreamTargetGeometry(geometry),
+      };
+    }
+  );
+}
+
+export function buildByteArtistRequestBodies(
+  input: SeedreamRequestBuildInput,
+  config: ByteArtistConfig
+): ByteArtistImageRequest[] {
+  const imageUrls = collectInputImageUrls(
+    input.upstreamContext ?? [],
+    config.maxInputImages
+  );
+
+  if (input.variants?.length) {
+    if (input.variants.length > config.maxOutputImages) {
+      throw new Error(`一次最多生成 ${config.maxOutputImages} 张图片。`);
+    }
+    if (input.prompts.length !== 1) {
+      throw new Error("ByteArtist variant batch must include exactly one prompt.");
+    }
+    const variantPrompt = normalizeSeedreamProviderPrompt(
+      normalizeSingleImagePrompt(input.prompts[0])
+    );
+    if (!variantPrompt) {
+      throw new Error("ByteArtist image prompt is empty.");
+    }
+
+    return input.variants.map((variant, index) => {
+      const geometry = resolveByteArtistGeometry(
+        variantPrompt,
+        config,
+        variant
+      );
+      return {
+        prompt: variantPrompt,
+        promptIndex: index + 1,
+        image: imageUrls[0],
+        inputImageCount: imageUrls.length,
+        ...geometry,
+      };
+    });
+  }
+
+  return resolveSeedreamPromptRequests(input, config.maxOutputImages).map(
+    (request) => {
+      const prompt = normalizeSeedreamProviderPrompt(request.prompt);
+      const geometry = resolveByteArtistGeometry(
+        prompt,
+        config,
+        input.geometry
+      );
+      return {
+        prompt,
+        promptIndex: request.promptIndex,
+        image: imageUrls[0],
+        inputImageCount: imageUrls.length,
+        ...geometry,
       };
     }
   );
@@ -296,7 +415,7 @@ function resolveSeedreamPromptRequests(
 
 function resolveSeedreamGeometry(
   prompt: string,
-  config: SeedreamConfig,
+  config: Pick<SeedreamConfig, "height" | "width">,
   geometry?: SeedreamGeometryInput
 ): SeedreamResolvedGeometry {
   if (geometry?.width !== undefined || geometry?.height !== undefined) {
@@ -328,6 +447,31 @@ function resolveSeedreamGeometry(
   }
 
   return normalizeExplicitSeedreamDimensions(config.width, config.height);
+}
+
+function resolveByteArtistGeometry(
+  prompt: string,
+  config: Pick<ByteArtistConfig, "height" | "width">,
+  geometry?: SeedreamGeometryInput
+) {
+  const resolved = resolveSeedreamGeometry(prompt, config, geometry);
+  const width = readPositiveInteger(resolved.fields.width);
+  const height = readPositiveInteger(resolved.fields.height);
+  const size = readPositiveInteger(resolved.fields.size);
+  const dimensions =
+    width !== undefined && height !== undefined
+      ? { width, height }
+      : size !== undefined
+        ? (() => {
+            const side = Math.max(1, Math.round(Math.sqrt(size)));
+            return { width: side, height: side };
+          })()
+        : { width: config.width, height: config.height };
+
+  return {
+    ...dimensions,
+    ...getSeedreamTargetGeometry(resolved),
+  };
 }
 
 function findExplicitDimensions(prompt: string) {
@@ -495,6 +639,12 @@ function getSeedreamTargetGeometry(geometry: SeedreamResolvedGeometry) {
         targetWidth: geometry.targetWidth,
       }
     : {};
+}
+
+function readPositiveInteger(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+    ? value
+    : undefined;
 }
 
 function validateSeedreamDimensions(width: number, height: number) {

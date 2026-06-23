@@ -400,6 +400,7 @@ function readRecord(value: unknown) {
 
 function getErrorSourceLabel(source: string) {
   const labels: Record<string, string> = {
+    byteartist: "ByteArtist",
     context: "上下文校验",
     coze: "Coze",
     model: "模型",

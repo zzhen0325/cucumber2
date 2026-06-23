@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { SeedreamConfig } from "../../../../seedream.ts";
 import { buildCozeImageRequestBody, type CozeImageConfig } from "../../../../coze.ts";
+import type { ByteArtistConfig } from "../../../../byteartist.ts";
 import {
   SEEDREAM_PROMPT_MAX_LENGTH,
+  buildByteArtistRequestBodies,
+  buildGenerateImageByteArtistInput,
   buildSeedreamRequestBodies,
   buildGenerateImageSeedreamInput,
   inferImageResultCount,
@@ -35,6 +38,23 @@ const testCozeConfig: CozeImageConfig = {
   size: undefined,
   watermark: undefined,
   model: undefined,
+};
+const testByteArtistConfig: ByteArtistConfig = {
+  aid: "6834",
+  appKey: "app-key",
+  appSecret: "app-secret",
+  baseUrl: "https://byteartist.example",
+  expiredDuration: 600,
+  imageReturnFormat: "png",
+  imageReturnType: "url",
+  maxAttempts: 120,
+  maxInputImages: 1,
+  maxOutputImages: 4,
+  modelId: "seed4_0407_lemo",
+  pollIntervalMs: 1000,
+  seed: -1,
+  width: 1024,
+  height: 1024,
 };
 
 describe("generate image request normalization", () => {
@@ -295,6 +315,78 @@ describe("generate image request normalization", () => {
         width: 1536,
         height: 1536,
         image_urls: ["https://cdn.example/ref.png"],
+      }),
+    ]);
+  });
+
+  it("builds one ByteArtist request per requested image", () => {
+    const requests = buildByteArtistRequestBodies(
+      {
+        prompts: ["生成四张小狗的图"],
+        resultCount: 4,
+        promptBatchMode: "single_prompt",
+        upstreamContext: [
+          {
+            nodeId: "image-1",
+            type: "image",
+            imageUrl: "https://cdn.example/ref.png",
+          },
+          {
+            nodeId: "image-2",
+            type: "image",
+            imageUrl: "https://cdn.example/ref-2.png",
+          },
+        ],
+      },
+      testByteArtistConfig
+    );
+
+    expect(requests).toHaveLength(4);
+    expect(requests.map((request) => request.prompt)).toEqual([
+      "小狗的图",
+      "小狗的图",
+      "小狗的图",
+      "小狗的图",
+    ]);
+    expect(requests[0]).toMatchObject({
+      width: 1024,
+      height: 1024,
+      image: "https://cdn.example/ref.png",
+      inputImageCount: 1,
+    });
+  });
+
+  it("builds ByteArtist variant requests with explicit dimensions", () => {
+    const requests = buildGenerateImageByteArtistInput(
+      {
+        prompt: "基于参考图扩展画布",
+        upstreamContext: [
+          {
+            nodeId: "image-1",
+            type: "image",
+            imageUrl: "https://cdn.example/ref.png",
+          },
+        ],
+        variants: [
+          { width: 2048, height: 1024 },
+          { width: 1536, height: 1536 },
+        ],
+      },
+      testByteArtistConfig
+    ).requests;
+
+    expect(requests).toEqual([
+      expect.objectContaining({
+        prompt: "基于参考图扩展画布",
+        width: 2048,
+        height: 1024,
+        image: "https://cdn.example/ref.png",
+      }),
+      expect.objectContaining({
+        prompt: "基于参考图扩展画布",
+        width: 1536,
+        height: 1536,
+        image: "https://cdn.example/ref.png",
       }),
     ]);
   });

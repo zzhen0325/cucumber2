@@ -133,9 +133,9 @@
 ## 2026-06-12 Image Request Boundary
 
 - 新增 `server/agent/tools/image/generate-image.request.ts`，集中负责图片数量、尺寸/比例和 upstream 引用图归一化。
-- `generate_image` 工具只做 Agent tool 边界、artifact 事件和图片 provider 调用编排；`image_matting` 工具只依赖 `runImageMatting` 统一接口，当前实现用 `IMAGE_MATTING_PROVIDER=rembg` 调用 rembg 2.x CLI；图片生成 provider 支持 `IMAGE_PROVIDER=seedream` 或 `IMAGE_PROVIDER=coze`，其中 Coze 请求体为 `prompt`、`reference_images`、`size`、`watermark`、`model`；`reference_images` 是由上游图片 URL 生成的 `{ url }` file dict 数组，`size/model` 是字符串，`watermark` 是布尔值，空配置不发送占位字段。
+- `generate_image` 工具只做 Agent tool 边界、artifact 事件和图片 provider 调用编排；`image_matting` 工具只依赖 `runImageMatting` 统一接口，当前实现用 `IMAGE_MATTING_PROVIDER=rembg` 调用 rembg 2.x CLI；图片生成 provider 支持 `IMAGE_PROVIDER=seedream`、`IMAGE_PROVIDER=coze` 或 `IMAGE_PROVIDER=byteartist`，其中 Coze 请求体为 `prompt`、`reference_images`、`size`、`watermark`、`model`；ByteArtist 使用统一签名表单提交 `submit_task_v2` 并轮询 `batch_get_result_v2`，模型差异封装在 provider adapter 中，当前 `seed4_0407_lemo` 使用 `Prompt` 字段；`reference_images` 是由上游图片 URL 生成的 `{ url }` file dict 数组或 ByteArtist 参考图字段，`size/model` 是字符串，`watermark` 是布尔值，空配置不发送占位字段。
 - 底部输入器可选择本轮图片 provider；客户端只提交白名单 `imageProvider`，服务端写入 agent context 后由 `generate_image` 选择 provider，`upscale_image` 仍只走 Seedream。
-- `seedream.ts` 收敛为 Seedream provider 执行层，保留配置读取、签名、提交/轮询、并发/重试、取消和 provider metadata。
+- `seedream.ts` 收敛为 Seedream provider 执行层，保留配置读取、签名、提交/轮询、并发/重试、取消和 provider metadata；`byteartist.ts` 是 ByteArtist provider 执行层，保留配置读取、SHA1 表单签名、submit/poll、模型 adapter、取消和 provider metadata。
 - 多张图片生成按 `SEEDREAM_MAX_CONCURRENCY` 限制完整 submit+poll 生命周期的并发数，并按 `SEEDREAM_STAGGER_MS` 间隔启动新任务；默认 `SEEDREAM_MAX_CONCURRENCY=1` 会等上一张完整出图或失败后再提交下一张，避免触发 Seedream 账号级并发限制。
 
 ## 2026-06-13 Input Normalization
@@ -176,8 +176,8 @@
 - Cloudflare R2 private bucket `agent-assets` 成为用户上传和图片生成结果的对象存储边界；画布快照只保存稳定 `ArtifactRef`、`contentRef` 和同源 content API URL。
 - 用户拖拽或粘贴文件会先插入本地预览节点并后台上传；浏览器通过 `/api/projects/:projectId/uploads/sign` 获取 R2 presigned `PUT` URL 后直传，再调用 `/complete` 写入 `agent_artifacts`，成功后用真实 artifact 节点替换本地节点。
 - 本地上传中/失败的节点不会进入项目持久化或 Agent upstream context；上传失败会留在画布上展示错误状态。
-- `generate_image` 和 `upscale_image` 收到 Seedream URL 后由服务端下载并上传到 `agent-assets`，随后才发 `artifact.created`；转存失败会走 `tool.error`/`run.failed`，不会生成假成功结果节点。toolbar 高清放大和抠图同样先转存再把真实节点写回项目。
-- 上游图片引用对 Manager prompt 仍隐藏真实 URL；调用 Seedream/Coze 前，服务端仅根据 `r2://agent-assets/...` 临时签发 provider 可读 URL。
+- `generate_image` 和 `upscale_image` 收到 provider URL 后由服务端下载并上传到 `agent-assets`，随后才发 `artifact.created`；转存失败会走 `tool.error`/`run.failed`，不会生成假成功结果节点。toolbar 高清放大和抠图同样先转存再把真实节点写回项目。
+- 上游图片引用对 Manager prompt 仍隐藏真实 URL；调用 Seedream/Coze/ByteArtist 前，服务端仅根据 `r2://agent-assets/...` 临时签发 provider 可读 URL。
 - Agent 模型 provider 改为 Agents SDK 官方 `ModelProvider` + `Runner({ model, modelProvider })` 写法；Manager、specialist、input normalizer 和 prompt expansion 共用同一 Runner provider 配置。
 - 媒体 provider 独立暴露：图片生成 provider 和图片抠图 provider 已接入配置检查；视频 provider 仅进入 `/api/health` 配置面，尚未启用 `generate_video`、video artifact 或画布投影。
 - 私有预览统一走 `/api/projects/:projectId/artifacts/:artifactId/content`，服务端校验项目权限后从 R2 读取对象内容。
@@ -194,7 +194,7 @@
 - Agent Run 开始后服务端从可信画布快照检索最多 6 个启用技能，只把 skill cards 注入 Manager；完整 `SKILL.md` 只能通过 `activate_skill` 加载，每轮最多激活 3 个技能。
 - 新增 `read_skill_resource`，仅已激活技能可用；Agent 可以先 list 资源，再读取安全文本资源。新增 `run_skill_script`，仅已激活且含脚本的技能可用；脚本包下载后校验 SHA-256，通过 `sandbox-exec`、空 secret 环境、args/stdin、bash/node/python、15 秒超时执行。普通 stdout 会包装成结构化工具结果，原 Cucumber JSON 输出继续支持 canvasOperations。没有 sandbox 支持时失败，不做不安全 fallback。
 - Image Agent 的 `expand_image_prompt` 改为只使用已激活的 image/prompt_expansion 技能；短、关键词式或视觉细节不足的新图片请求会先激活扩写技能，再把 `expandedPrompt` 传给 `generate_image`。
-- `generate_image` 的工具输出和 artifact metadata 保留实际 Seedream prompt，同时保留原始 run prompt，供 Trace 和图片结果节点追溯。
+- `generate_image` 的工具输出和 artifact metadata 保留实际 provider prompt，同时保留原始 run prompt，供 Trace 和图片结果节点追溯。
 - Trace 新增 `skill.retrieved`、`skill.activated`、`skill.script.started`、`skill.script.completed`、`skill.script.failed`；Run Trace 面板新增 Skills 区，Run 节点摘要显示已激活技能名称但不暴露 package path。
 
 ## 2026-06-14 Tool Registry, Scopes, Trace Redaction

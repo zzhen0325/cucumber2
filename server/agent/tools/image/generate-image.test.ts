@@ -6,9 +6,11 @@ import type { UpstreamContextItem } from "../../../../src/types/canvas.ts";
 
 const generateSeedreamImage = vi.fn();
 const generateCozeImage = vi.fn();
+const generateByteArtistImage = vi.fn();
 const upscaleSeedreamImage = vi.fn();
 const isSeedreamConfigured = vi.fn();
 const isCozeImageConfigured = vi.fn();
+const isByteArtistConfigured = vi.fn();
 const runImageMatting = vi.fn();
 const createImageMattingArtifactId = vi.fn();
 const resolveStorageBackedImageContext = vi.fn(async (items: UpstreamContextItem[]) =>
@@ -109,6 +111,23 @@ const testCozeConfig = {
   watermark: undefined,
   model: undefined,
 };
+const testByteArtistConfig = {
+  aid: "6834",
+  appKey: "app-key",
+  appSecret: "app-secret",
+  baseUrl: "https://byteartist.example",
+  expiredDuration: 600,
+  imageReturnFormat: "png",
+  imageReturnType: "url",
+  maxAttempts: 120,
+  maxInputImages: 1,
+  maxOutputImages: 4,
+  modelId: "seed4_0407_lemo",
+  pollIntervalMs: 1000,
+  seed: -1,
+  width: 1024,
+  height: 1024,
+};
 
 vi.mock("../../../../seedream.ts", async () => {
   const actual = await vi.importActual<typeof import("../../../../seedream.ts")>(
@@ -136,6 +155,19 @@ vi.mock("../../../../coze.ts", async () => {
     generateCozeImage: (...args: unknown[]) => generateCozeImage(...args),
     isCozeImageConfigured: () => isCozeImageConfigured(),
     readCozeImageConfigFromEnv: () => testCozeConfig,
+  };
+});
+
+vi.mock("../../../../byteartist.ts", async () => {
+  const actual = await vi.importActual<typeof import("../../../../byteartist.ts")>(
+    "../../../../byteartist.ts"
+  );
+  return {
+    ...actual,
+    generateByteArtistImage: (...args: unknown[]) =>
+      generateByteArtistImage(...args),
+    isByteArtistConfigured: () => isByteArtistConfigured(),
+    readByteArtistConfigFromEnv: () => testByteArtistConfig,
   };
 });
 
@@ -209,9 +241,11 @@ describe("generate_image tool", () => {
     }
     generateSeedreamImage.mockReset();
     generateCozeImage.mockReset();
+    generateByteArtistImage.mockReset();
     upscaleSeedreamImage.mockReset();
     isSeedreamConfigured.mockReset();
     isCozeImageConfigured.mockReset();
+    isByteArtistConfigured.mockReset();
     runImageMatting.mockReset();
     createImageMattingArtifactId.mockReset();
     createImageMattingArtifactId.mockReturnValue("rembg-matting-1");
@@ -534,6 +568,73 @@ describe("generate_image tool", () => {
           prompt: "参考图生成",
         }),
         sourceUrl: "https://cdn.example/coze.png",
+      })
+    );
+  });
+
+  it("can generate through ByteArtist with server-resolved reference images", async () => {
+    isByteArtistConfigured.mockReturnValue(true);
+    generateByteArtistImage.mockImplementation(
+      async (input: { onImage?: (image: unknown) => void }) => {
+        const image = {
+          id: "byteartist-1",
+          metadata: { provider: "byteartist", model: "seed4_0407_lemo" },
+          title: "ByteArtist image",
+          url: "https://cdn.example/byteartist.png",
+        };
+        await input.onImage?.(image);
+        return { images: [image] };
+      }
+    );
+    const context = buildContext({
+      imageProvider: "byteartist",
+      upstreamContext: [
+        {
+          artifact: {
+            contentRef: "r2://agent-assets/projects/project-1/uploads/ref.png",
+            id: "ref",
+            type: "image",
+            uri: "/api/projects/project-1/artifacts/ref/content",
+          },
+          contentRef: "r2://agent-assets/projects/project-1/uploads/ref.png",
+          imageUrl: "/api/projects/project-1/artifacts/ref/content",
+          nodeId: "image-1",
+          type: "image",
+        },
+      ],
+    });
+
+    const result = await invokeTool(context, {
+      prompt: "参考图生成",
+      width: 1536,
+      height: 1024,
+    });
+
+    expect(result.generated).toBe(1);
+    expect(JSON.stringify(result)).not.toContain("cdn.example");
+    expect(generateByteArtistImage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        totalRequestedImageCount: 1,
+        requests: [
+          expect.objectContaining({
+            prompt: "参考图生成",
+            width: 1536,
+            height: 1024,
+            image: "https://signed.example/ref.png",
+            inputImageCount: 1,
+          }),
+        ],
+      }),
+      testByteArtistConfig
+    );
+    expect(storeGeneratedImageFromUrl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        artifactId: "byteartist-1",
+        metadata: expect.objectContaining({
+          provider: "byteartist",
+          prompt: "参考图生成",
+        }),
+        sourceUrl: "https://cdn.example/byteartist.png",
       })
     );
   });

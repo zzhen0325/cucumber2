@@ -142,6 +142,28 @@ describe("RunNodeView", () => {
     expect(screen.getByText("我会先整理画面要求，然后调用图片工具。")).toBeTruthy();
   });
 
+  it("renders a compact execution summary in the run stream", () => {
+    renderRunNode({
+      status: "running",
+      summaryItems: [
+        {
+          kind: "agent",
+          label: "Agent",
+          detail: "Cucumber Manager -> Image Agent",
+        },
+        {
+          kind: "artifact",
+          label: "产物",
+          detail: "1 image",
+        },
+      ],
+    });
+
+    expect(screen.getByLabelText("执行摘要")).toBeTruthy();
+    expect(screen.getByText("Cucumber Manager -> Image Agent")).toBeTruthy();
+    expect(screen.getByText("1 image")).toBeTruthy();
+  });
+
   it("shows a compact plan and current step", () => {
     renderRunNode({
       currentStep: {
@@ -158,7 +180,26 @@ describe("RunNodeView", () => {
 
     expect(screen.getAllByTitle("生成图片产物").length).toBeGreaterThan(0);
     expect(screen.getByLabelText("任务计划")).toBeTruthy();
+    expect(screen.getByText("1/2 已完成")).toBeTruthy();
     expect(screen.getByText("整理需求和上下文")).toBeTruthy();
+  });
+
+  it("shows useful tool previews before expanding details", () => {
+    renderRunNode({
+      status: "running",
+      toolParts: [
+        {
+          input: { prompt: "生成一张绿色黄瓜海报", resultCount: 1 },
+          state: "input-available",
+          toolCallId: "tool-1",
+          type: "tool-generate_image",
+        },
+      ],
+    });
+
+    expect(screen.getByRole("button", { name: "生成图片运行中" })).toBeTruthy();
+    expect(screen.getByText("生成一张绿色黄瓜海报")).toBeTruthy();
+    expect(screen.queryByText("参数")).toBeNull();
   });
 
   it("renders all task-specific plan items", () => {

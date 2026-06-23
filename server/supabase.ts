@@ -49,7 +49,8 @@ export type AgentEventRecord = {
 export type AgentArtifactOrigin =
   | "user_upload"
   | "seedream_generated"
-  | "coze_generated";
+  | "coze_generated"
+  | "byteartist_generated";
 
 export type AgentArtifactRecord = {
   id: string;

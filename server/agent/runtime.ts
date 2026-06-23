@@ -1169,6 +1169,13 @@ function classifyRunFailure({
     };
   }
 
+  if (/byteartist/i.test(message)) {
+    return {
+      errorCode: "byteartist_failed",
+      errorSource: "byteartist",
+    };
+  }
+
   if (/seedream/i.test(message) || /generate_image|image_matting|upscale_image/.test(toolName)) {
     return {
       errorCode: "seedream_failed",

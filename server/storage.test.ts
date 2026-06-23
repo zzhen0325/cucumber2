@@ -75,6 +75,7 @@ const {
   getStorageContentRef,
   parseStorageContentRef,
   resolveStorageBackedImageContext,
+  storeGeneratedImageFromBytes,
 } = await import("./storage.ts");
 
 describe("agent asset storage helpers", () => {
@@ -199,6 +200,27 @@ describe("agent asset storage helpers", () => {
         bucket: "agent-assets",
         contentType: "image/png",
         expiresIn: 7200,
+      })
+    );
+  });
+
+  it("stores ByteArtist generated images with a distinct artifact origin", async () => {
+    await storeGeneratedImageFromBytes({
+      artifactId: "byteartist-1",
+      bytes: new Uint8Array([1, 2, 3]),
+      metadata: { provider: "byteartist" },
+      mimeType: "image/png",
+      projectId: "project-1",
+      runNodeId: "run-1",
+      sourceToolName: "generate_image",
+      title: "ByteArtist image",
+      userId: "user-1",
+    });
+
+    expect(storageMocks.registerAgentArtifact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "byteartist-1",
+        origin: "byteartist_generated",
       })
     );
   });

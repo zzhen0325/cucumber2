@@ -600,6 +600,8 @@ function buildToolParts(
         errorText: summarizeRunError(rawErrorText, {
           errorSource: /coze/i.test(rawErrorText ?? "")
             ? "coze"
+            : /byteartist/i.test(rawErrorText ?? "")
+              ? "byteartist"
             : /generate_image|image_matting|upscale_image/.test(toolName)
             ? "seedream"
             : "tool",
@@ -2092,6 +2094,11 @@ function summarizeRunError(
   }
   if (errorSource === "coze" || /coze/i.test(detail ?? "")) {
     return safeDetail ? `Coze 调用失败：${safeDetail}` : "Coze 调用失败。";
+  }
+  if (errorSource === "byteartist" || /byteartist/i.test(detail ?? "")) {
+    return safeDetail
+      ? `ByteArtist 调用失败：${safeDetail}`
+      : "ByteArtist 调用失败。";
   }
   if (errorSource === "tool" || toolName) {
     const label = toolName ? humanizeRuntimeLabel(toolName) ?? "工具" : "工具";

@@ -6,6 +6,10 @@ import {
   readSeedreamConfigFromEnv,
 } from "../../../../seedream.ts";
 import {
+  generateByteArtistImage,
+  readByteArtistConfigFromEnv,
+} from "../../../../byteartist.ts";
+import {
   generateCozeImage,
   readCozeImageConfigFromEnv,
 } from "../../../../coze.ts";
@@ -18,6 +22,7 @@ import { assertImageProviderConfigured } from "../../../provider-config.ts";
 import type { CucumberAgentContext } from "../../context.ts";
 import { assertImageToolAllowed } from "../../policy/task-artifact-policy.ts";
 import {
+  buildGenerateImageByteArtistInput,
   buildGenerateImageSeedreamInput,
   normalizeSeedreamProviderPrompt,
   resolveImageResultCount,
@@ -229,6 +234,25 @@ export async function executeGenerateImageTool({
         config
       );
     }
+  } else if (imageProvider.provider === "byteartist") {
+    const config = readByteArtistConfigFromEnv();
+    await generateByteArtistImage(
+      buildGenerateImageByteArtistInput(
+        {
+          prompt,
+          requestedResultCount: parsed.data.resultCount,
+          aspectRatio: parsed.data.aspectRatio,
+          variants,
+          width: parsed.data.width,
+          height: parsed.data.height,
+          upstreamContext,
+          onImage: emitArtifact,
+          signal: signal ?? context.signal,
+        },
+        config
+      ),
+      config
+    );
   } else {
     const config = readSeedreamConfigFromEnv();
     await generateSeedreamImage(

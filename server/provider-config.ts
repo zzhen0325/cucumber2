@@ -1,5 +1,6 @@
 import { isSeedreamConfigured } from "../seedream.ts";
 import { isCozeImageConfigured } from "../coze.ts";
+import { isByteArtistConfigured } from "../byteartist.ts";
 import { getAgentModelConfiguration } from "./agent/model-config.ts";
 import { getImageMattingProviderConfiguration } from "./agent/tools/image/image-matting-provider.ts";
 
@@ -9,7 +10,7 @@ export type RuntimeProviderConfiguration = {
   model: string | null;
 };
 
-export type ImageProviderSelection = "seedream" | "coze";
+export type ImageProviderSelection = "seedream" | "coze" | "byteartist";
 
 export function getRuntimeProviderConfiguration() {
   return {
@@ -32,6 +33,17 @@ export function getImageProviderConfiguration(
         process.env.IMAGE_MODEL?.trim() ||
         process.env.COZE_IMAGE_MODEL?.trim() ||
         null,
+      };
+  }
+
+  if (provider === "byteartist") {
+    return {
+      configured: isByteArtistConfigured(),
+      provider,
+      model:
+        process.env.IMAGE_MODEL?.trim() ||
+        process.env.BYTEARTIST_MODEL?.trim() ||
+        "seed4_0407_lemo",
     };
   }
 
@@ -77,9 +89,22 @@ export function assertImageProviderConfigured(
     return image;
   }
 
+  if (image.provider === "byteartist" && action === "generation") {
+    if (!image.configured) {
+      throw new Error(
+        "ByteArtist image generation is not configured. Set BYTEARTIST_BASE_URL, BYTEARTIST_AID, BYTEARTIST_APP_KEY, and BYTEARTIST_APP_SECRET, or the docs aliases GATEWAY_BASE_URL, BYTEDANCE_AID, BYTEDANCE_APP_KEY, and BYTEDANCE_APP_SECRET."
+      );
+    }
+    return image;
+  }
+
   if (image.provider !== "seedream") {
+    const expected =
+      action === "generation"
+        ? "Set IMAGE_PROVIDER=seedream, coze, or byteartist."
+        : "Set IMAGE_PROVIDER=seedream.";
     throw new Error(
-      `Image ${action} provider "${image.provider ?? "none"}" is not supported. Set IMAGE_PROVIDER=seedream.`
+      `Image ${action} provider "${image.provider ?? "none"}" is not supported. ${expected}`
     );
   }
   if (!image.configured) {

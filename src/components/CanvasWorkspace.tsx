@@ -228,7 +228,7 @@ type AgentRunRequestBody = {
   };
 };
 
-type ImageProviderSelection = "seedream" | "coze";
+type ImageProviderSelection = "seedream" | "coze" | "byteartist";
 
 type CanvasWorkspaceProps = {
   projectId: string;
@@ -3631,7 +3631,7 @@ function ImageProviderSelect({
       disabled={disabled}
       value={value}
       onValueChange={(nextValue) =>
-        onChange(nextValue === "coze" ? "coze" : "seedream")
+        onChange(readImageProviderSelection(nextValue))
       }
     >
       <SelectTrigger
@@ -3644,6 +3644,7 @@ function ImageProviderSelect({
       <SelectContent align="end" className="composer-provider-menu">
         <SelectItem value="seedream">Seedream</SelectItem>
         <SelectItem value="coze">Coze</SelectItem>
+        <SelectItem value="byteartist">ByteArtist</SelectItem>
       </SelectContent>
     </Select>
   );
@@ -3673,9 +3674,18 @@ function readStoredImageProvider(): ImageProviderSelection {
   if (typeof window === "undefined") {
     return "seedream";
   }
-  return window.localStorage.getItem(IMAGE_PROVIDER_STORAGE_KEY) === "coze"
-    ? "coze"
-    : "seedream";
+  return readImageProviderSelection(
+    window.localStorage.getItem(IMAGE_PROVIDER_STORAGE_KEY)
+  );
+}
+
+function readImageProviderSelection(
+  value: string | null | undefined
+): ImageProviderSelection {
+  if (value === "coze" || value === "byteartist") {
+    return value;
+  }
+  return "seedream";
 }
 
 function getStorageStatusLabel(status: StorageStatus) {

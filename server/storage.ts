@@ -331,7 +331,12 @@ export async function storeGeneratedImageFromBytes(
     typeof input.metadata?.provider === "string"
       ? input.metadata.provider
       : "seedream";
-  const origin = provider === "coze" ? "coze_generated" : "seedream_generated";
+  const origin =
+    provider === "coze"
+      ? "coze_generated"
+      : provider === "byteartist"
+        ? "byteartist_generated"
+        : "seedream_generated";
   const metadata = compactRecord({
     ...input.metadata,
     byteSize: input.bytes.byteLength,
