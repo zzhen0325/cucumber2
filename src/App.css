@@ -1830,6 +1830,12 @@
   overflow: visible;
 }
 
+.agent-message-list {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
 .run-stream-group {
   display: grid;
   gap: 4px;

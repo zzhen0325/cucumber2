@@ -436,6 +436,81 @@ describe("agent event graph projection", () => {
     });
   });
 
+  it("projects persisted agent message deltas while the run is active", () => {
+    const projection = projectRunTraceToCanvas({
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", { prompt: "生成图片", promptNodeId: "prompt-1" }),
+        event("agent.active", "agent", { agentName: "Cucumber Manager" }),
+        event("agent.message.delta", "agent-message", {
+          agentName: "Cucumber Manager",
+          delta: "我会先整理需求，",
+          index: 0,
+          messageId: "message-1",
+          role: "assistant",
+        }),
+        event("agent.message.delta", "agent-message", {
+          agentName: "Cucumber Manager",
+          delta: "再调用图片工具。",
+          index: 1,
+          messageId: "message-1",
+          role: "assistant",
+        }),
+      ],
+    });
+    const run = projection.nodes.find((node) => node.id === "run-1");
+
+    expect(run?.data).toMatchObject({
+      kind: "run",
+      status: "running",
+      agentText: "Cucumber Manager\n我会先整理需求，再调用图片工具。",
+      agentMessages: [
+        {
+          agentName: "Cucumber Manager",
+          content: "我会先整理需求，再调用图片工具。",
+          id: "message-1",
+          role: "assistant",
+          status: "streaming",
+        },
+      ],
+    });
+  });
+
+  it("keeps completed agent messages visible on failed runs", () => {
+    const projection = projectRunTraceToCanvas({
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", { prompt: "生成图片", promptNodeId: "prompt-1" }),
+        event("agent.message.completed", "agent-message", {
+          agentName: "Image Agent",
+          content: "我已经准备好提示词，开始调用 Seedream。",
+          messageId: "message-1",
+          role: "assistant",
+        }),
+        event("tool.error", "generate_image", {
+          toolCallId: "call-1",
+          toolName: "generate_image",
+          errorText: "Seedream missing",
+        }, "Seedream missing"),
+        event("run.failed", "run", { errorText: "Seedream missing" }, "Seedream missing"),
+      ],
+    });
+    const run = projection.nodes.find((node) => node.id === "run-1");
+
+    expect(run?.data).toMatchObject({
+      kind: "run",
+      status: "error",
+      agentText: "Image Agent\n我已经准备好提示词，开始调用 Seedream。",
+      agentMessages: [
+        expect.objectContaining({
+          agentName: "Image Agent",
+          content: "我已经准备好提示词，开始调用 Seedream。",
+          status: "completed",
+        }),
+      ],
+    });
+  });
+
   it("replays persisted traces without streamed text", () => {
     const projection = projectRunTraceToCanvas({
       runNodeId: "run-1",

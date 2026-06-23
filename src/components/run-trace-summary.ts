@@ -7,6 +7,11 @@ export function summarizeRunTrace(events: RunStepTraceEvent[]) {
 
   return {
     agents: events.filter((event) => event.type === "agent.active"),
+    agentMessageEvents: events.filter(
+      (event) =>
+        event.type === "agent.message.delta" ||
+        event.type === "agent.message.completed"
+    ),
     artifacts: events.flatMap((event) => {
       const artifact = event.payload.artifact;
       return event.type === "artifact.created" && isTraceArtifact(artifact)
@@ -69,6 +74,8 @@ export function summarizeRunTrace(events: RunStepTraceEvent[]) {
 export function getEventLabel(event: RunStepTraceEvent) {
   const labels: Record<RunStepTraceEvent["type"], string> = {
     "agent.active": "Agent active",
+    "agent.message.completed": "Agent message completed",
+    "agent.message.delta": "Agent message delta",
     "artifact.created": "Artifact created",
     "canvas.operation.applied": "Canvas operation applied",
     "canvas.operation.proposed": "Canvas operation proposed",
@@ -134,6 +141,16 @@ export function summarizeTraceEvent(event: RunStepTraceEvent) {
     const name = readString(skill?.name) ?? "技能";
     const purpose = readString(skill?.purpose);
     return purpose ? `${name} · ${purpose}` : name;
+  }
+
+  if (
+    event.type === "agent.message.delta" ||
+    event.type === "agent.message.completed"
+  ) {
+    const agentName = readString(event.payload.agentName) ?? "Agent";
+    const text =
+      readString(event.payload.content) ?? readString(event.payload.delta);
+    return text ? `${agentName}: ${summarizeUnknown(text)}` : agentName;
   }
 
   if (event.type.startsWith("skill.script.")) {

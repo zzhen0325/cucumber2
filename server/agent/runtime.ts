@@ -3,6 +3,7 @@ import { Agent, Runner } from "@openai/agents";
 import type { AgentEvent } from "../../src/types/runtime.ts";
 import type { CanvasOperation } from "../../src/types/runtime.ts";
 import { createDocumentAgent } from "./agents/document.agent.ts";
+import { createFastImageAgent } from "./agents/image.agent.ts";
 import { createImageAgent } from "./agents/image.agent.ts";
 import { createManagerAgent } from "./agents/manager.agent.ts";
 import { createResearchAgent } from "./agents/research.agent.ts";
@@ -25,15 +26,9 @@ import { openAIStreamToCucumberEvents } from "./events/openai-stream-to-cucumber
 import { getAgentErrorMessage, isAbortError } from "./errors.ts";
 import {
   normalizeAgentInput,
+  hasNegativeCapability,
   selectAgentRoute,
 } from "./input-normalizer.ts";
-import {
-  ensureCucumberInternalMcpConnected,
-} from "./mcp/internal-mcp-client.ts";
-import {
-  registerMcpRunContext,
-  unregisterMcpRunContext,
-} from "./mcp/context-registry.ts";
 import {
   materializeAgentRunSnapshot,
   shouldBlockRunForMaterialization,
@@ -73,27 +68,19 @@ export class OpenAIAgentsRuntime implements AgentRuntime {
       (await normalizeAgentInput(input, { signal: input.signal }));
     const normalizedRunInput = { ...input, normalizedInput };
     const context = buildCucumberAgentContext(normalizedRunInput);
-    const mcpContextId = registerMcpRunContext(context);
-    try {
-      const skillPhase = startRunPhase(
-        "skills.retrieve",
-        "检索可用技能",
-        "route"
-      );
-      const needsMcp = shouldConnectInternalMcp(normalizedInput);
-      const mcpPhase = needsMcp
-        ? startRunPhase("mcp.connect", "连接内部 MCP 工具", "route")
-        : null;
-      const skillRegistryWasCached = getAgentSkillRegistryCacheState().cached;
-      const skillTask = settlePromise(retrieveRelevantAgentSkills(normalizedRunInput));
-      const mcpTask = mcpPhase
-        ? settlePromise(ensureCucumberInternalMcpConnected())
-        : null;
+    const useFastImageAgent = shouldUseFastImageAgent(normalizedRunInput);
+    const skillPhase = startRunPhase(
+      "skills.retrieve",
+      "检索可用技能",
+      "route"
+    );
+    const skillRegistryWasCached = getAgentSkillRegistryCacheState().cached;
+    const skillTask = useFastImageAgent
+      ? null
+      : settlePromise(retrieveRelevantAgentSkills(normalizedRunInput));
 
+    if (skillTask) {
       yield runPhaseStarted(skillPhase);
-      if (mcpPhase) {
-        yield runPhaseStarted(mcpPhase);
-      }
       try {
         const skillResult = await skillTask;
         if (skillResult.status === "rejected") {
@@ -109,52 +96,43 @@ export class OpenAIAgentsRuntime implements AgentRuntime {
         throw error;
       }
       yield { type: "skill_retrieved", candidates: context.skillCandidates };
-
-      if (mcpPhase && mcpTask) {
-        try {
-          const mcpResult = await mcpTask;
-          if (mcpResult.status === "rejected") {
-            throw mcpResult.reason;
-          }
-          yield runPhaseCompleted(mcpPhase);
-        } catch (error) {
-          yield runPhaseFailed(mcpPhase, error);
-          throw error;
-        }
-      }
-      const startAgent = createStartingAgentForRun(normalizedInput);
-
-      const agentStartPhase = startRunPhase(
-        "agent.start",
-        "启动 Agent Runner",
-        "route"
-      );
-      yield runPhaseStarted(agentStartPhase, {
-        agentName: startAgent.name,
-      });
-      let stream;
-      try {
-        stream = await getAgentRunner().run(startAgent, buildManagerRunPrompt(normalizedRunInput), {
-          context,
-          maxTurns: 8,
-          signal: input.signal,
-          stream: true,
-        });
-        yield runPhaseCompleted(agentStartPhase, {
-          agentName: startAgent.name,
-          maxTurns: 8,
-        });
-      } catch (error) {
-        yield runPhaseFailed(agentStartPhase, error, {
-          agentName: startAgent.name,
-          maxTurns: 8,
-        });
-        throw error;
-      }
-      yield* openAIStreamToCucumberEvents(stream, context);
-    } finally {
-      unregisterMcpRunContext(mcpContextId);
     }
+    const startAgent = createStartingAgentForRun(normalizedInput, {
+      fastImage: useFastImageAgent,
+    });
+
+    const agentStartPhase = startRunPhase(
+      "agent.start",
+      "启动 Agent Runner",
+      "route"
+    );
+    const maxTurns = useFastImageAgent ? 2 : 8;
+    yield runPhaseStarted(agentStartPhase, {
+      agentName: startAgent.name,
+      fastPath: useFastImageAgent || undefined,
+    });
+    let stream;
+    try {
+      stream = await getAgentRunner().run(startAgent, buildManagerRunPrompt(normalizedRunInput), {
+        context,
+        maxTurns,
+        signal: input.signal,
+        stream: true,
+      });
+      yield runPhaseCompleted(agentStartPhase, {
+        agentName: startAgent.name,
+        fastPath: useFastImageAgent || undefined,
+        maxTurns,
+      });
+    } catch (error) {
+      yield runPhaseFailed(agentStartPhase, error, {
+        agentName: startAgent.name,
+        fastPath: useFastImageAgent || undefined,
+        maxTurns,
+      });
+      throw error;
+    }
+    yield* openAIStreamToCucumberEvents(stream, context);
   }
 }
 
@@ -205,6 +183,7 @@ export function prewarmAgentRuntimeWorld() {
   getSimpleChatRunner();
   getSimpleChatAgent();
   createManagerAgent();
+  createFastImageAgent();
   createImageAgent();
   createDocumentAgent();
   createResearchAgent();
@@ -299,13 +278,14 @@ function elapsedRunPhaseMs(timer: RunPhaseTimer) {
 }
 
 function createStartingAgentForRun(
-  normalizedInput: NonNullable<AgentRunInput["normalizedInput"]>
+  normalizedInput: NonNullable<AgentRunInput["normalizedInput"]>,
+  options: { fastImage?: boolean } = {}
 ) {
   switch (selectAgentRoute(normalizedInput)) {
     case "document":
       return createDocumentAgent();
     case "image":
-      return createImageAgent();
+      return options.fastImage ? createFastImageAgent() : createImageAgent();
     case "research":
       return createResearchAgent();
     case "web":
@@ -314,12 +294,6 @@ function createStartingAgentForRun(
     default:
       return createManagerAgent();
   }
-}
-
-function shouldConnectInternalMcp(
-  normalizedInput: NonNullable<AgentRunInput["normalizedInput"]>
-) {
-  return selectAgentRoute(normalizedInput) === "image";
 }
 
 async function settlePromise<T>(promise: Promise<T>) {
@@ -332,6 +306,35 @@ async function settlePromise<T>(promise: Promise<T>) {
 
 function shouldWriteRunPlan(route: AgentRunRoute, itemCount: number) {
   return route === "complex_agent_task" || route === "image_task" || itemCount > 0;
+}
+
+function shouldUseFastImageAgent(input: AgentRunInput) {
+  const normalizedInput = input.normalizedInput;
+  if (!normalizedInput || input.retryFrom) {
+    return false;
+  }
+  if (selectAgentRoute(normalizedInput) !== "image") {
+    return false;
+  }
+  if (
+    normalizedInput.operation !== "create" &&
+    normalizedInput.intent !== "image.generate"
+  ) {
+    return false;
+  }
+  if (normalizedInput.artifact?.kind !== "image") {
+    return false;
+  }
+  if (hasNegativeCapability(normalizedInput, "image-generation")) {
+    return false;
+  }
+  if (input.upstreamContext.length || input.selectedNodeIds.length) {
+    return false;
+  }
+  const requiredCapabilities = normalizedInput.requiredCapabilities ?? [];
+  return requiredCapabilities.every((capability) =>
+    ["image-generation"].includes(capability)
+  );
 }
 
 export async function executeAgentRun({
@@ -351,6 +354,16 @@ export async function executeAgentRun({
   let textStarted = false;
   let finalOutput: string | undefined;
   let artifactIds: string[] = [];
+  let currentAgentName: string | undefined;
+  let activeAgentMessage:
+    | {
+        agentName?: string;
+        deltaIndex: number;
+        id: string;
+        text: string;
+      }
+    | null = null;
+  let agentMessageCount = 0;
   let materializationQueued = false;
   let materializationDrainPromise: Promise<void> | null = null;
   const runEvents: AgentEvent[] = [];
@@ -574,7 +587,7 @@ export async function executeAgentRun({
     });
 
     if (quickRoute.route === "smalltalk" && quickRoute.directResponse) {
-      writeTextDelta(quickRoute.directResponse);
+      await writeAgentTextDelta(quickRoute.directResponse);
       finalOutput = quickRoute.directResponse;
       await completeRun();
       return;
@@ -638,6 +651,7 @@ export async function executeAgentRun({
     if (!aborted) {
       console.error("[agent-run]", error);
     }
+    await finishAgentMessage();
     closeTextStream();
     const failedEvent = await eventWriter.writeEvent({
       projectId: input.projectId,
@@ -680,11 +694,12 @@ export async function executeAgentRun({
       }
 
       if (event.type === "text_delta") {
-        writeTextDelta(event.text);
+        await writeAgentTextDelta(event.text);
         continue;
       }
 
       if (event.type === "agent_active") {
+        await switchActiveAgent(event.agentName);
         await writeRunEvent({
           projectId: input.projectId,
           runNodeId: input.runNodeId,
@@ -785,6 +800,7 @@ export async function executeAgentRun({
       }
 
       if (event.type === "handoff_requested" || event.type === "handoff_completed") {
+        await finishAgentMessage();
         await writeRunEvent({
           projectId: input.projectId,
           runNodeId: input.runNodeId,
@@ -801,6 +817,7 @@ export async function executeAgentRun({
       }
 
       if (event.type === "tool_started") {
+        await finishAgentMessage();
         await trackEvent(
           await eventWriter.writeToolInput({
             stepId: event.toolName,
@@ -927,7 +944,7 @@ export async function executeAgentRun({
       throw new Error("Simple canvas operation was rejected by policy.");
     }
     finalOutput = "已在画布上完成操作。";
-    writeTextDelta(finalOutput);
+    await writeAgentTextDelta(finalOutput);
   }
 
   async function writeCanvasOperationRejections(
@@ -951,6 +968,7 @@ export async function executeAgentRun({
   }
 
   async function completeRun() {
+    await finishAgentMessage();
     closeTextStream();
     if (!shouldDeferRunMaterialization()) {
       await eventWriter.flush();
@@ -980,6 +998,88 @@ export async function executeAgentRun({
       writeStreamPart({ type: "text-start", id: textStreamId });
     }
     writeStreamPart({ type: "text-delta", id: textStreamId, delta: text });
+  }
+
+  async function writeAgentTextDelta(text: string) {
+    writeTextDelta(text);
+    await writeAgentMessageDelta(text);
+  }
+
+  async function switchActiveAgent(agentName: string) {
+    if (
+      activeAgentMessage?.text.trim() &&
+      activeAgentMessage.agentName &&
+      activeAgentMessage.agentName !== agentName
+    ) {
+      await finishAgentMessage();
+    }
+    currentAgentName = agentName;
+    if (activeAgentMessage && !activeAgentMessage.agentName) {
+      activeAgentMessage.agentName = agentName;
+    }
+  }
+
+  async function writeAgentMessageDelta(delta: string) {
+    if (!delta) {
+      return;
+    }
+    const message = getActiveAgentMessage();
+    const index = message.deltaIndex;
+    message.deltaIndex += 1;
+    message.text += delta;
+    await writeRunEvent({
+      projectId: input.projectId,
+      runNodeId: input.runNodeId,
+      stepId: "agent-message",
+      type: "agent.message.delta",
+      payload: {
+        agentName: message.agentName,
+        delta,
+        index,
+        messageId: message.id,
+        role: "assistant",
+        runtime: "openai-agents-sdk",
+      },
+    });
+  }
+
+  async function finishAgentMessage() {
+    const message = activeAgentMessage;
+    if (!message) {
+      return;
+    }
+    activeAgentMessage = null;
+    const content = message.text;
+    if (!content.trim()) {
+      return;
+    }
+    await writeRunEvent({
+      projectId: input.projectId,
+      runNodeId: input.runNodeId,
+      stepId: "agent-message",
+      type: "agent.message.completed",
+      payload: {
+        agentName: message.agentName,
+        content,
+        messageId: message.id,
+        role: "assistant",
+        runtime: "openai-agents-sdk",
+        status: "completed",
+      },
+    });
+  }
+
+  function getActiveAgentMessage() {
+    if (!activeAgentMessage) {
+      agentMessageCount += 1;
+      activeAgentMessage = {
+        agentName: currentAgentName,
+        deltaIndex: 0,
+        id: `${input.runNodeId}-agent-message-${agentMessageCount}`,
+        text: "",
+      };
+    }
+    return activeAgentMessage;
   }
 
   function closeTextStream() {

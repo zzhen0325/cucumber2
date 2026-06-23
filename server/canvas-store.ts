@@ -232,7 +232,12 @@ export async function applyCanvasPatchForUser(input: {
   selectedNodeId?: string | null;
   lastRunId?: string | null;
 }): Promise<ProjectMeta | null> {
-  const nodeRows = (input.nodeUpserts ?? []).map((node) =>
+  const nodeUpserts = await protectMaterializedRuntimeNodeUpsertsForUser({
+    projectId: input.projectId,
+    userId: input.userId,
+    nodeUpserts: input.nodeUpserts,
+  });
+  const nodeRows = nodeUpserts.map((node) =>
     nodeToRow(input.projectId, node)
   );
   const edgeRows = (input.edgeUpserts ?? []).map((edge) =>
@@ -266,6 +271,137 @@ export async function applyCanvasPatchForUser(input: {
   }
 
   return mapRpcProjectMeta(data as RpcProjectMeta);
+}
+
+async function protectMaterializedRuntimeNodeUpsertsForUser({
+  projectId,
+  userId,
+  nodeUpserts,
+}: {
+  projectId: string;
+  userId: string;
+  nodeUpserts?: AgentCanvasNode[];
+}) {
+  if (!nodeUpserts?.length) {
+    return [];
+  }
+
+  const current = await loadCanvasSnapshotForUser(projectId, userId);
+  if (!current) {
+    return nodeUpserts;
+  }
+
+  return preserveMaterializedRuntimeNodeUpserts(current.nodes, nodeUpserts);
+}
+
+export function preserveMaterializedRuntimeNodeUpserts(
+  currentNodes: AgentCanvasNode[],
+  nodeUpserts: AgentCanvasNode[]
+) {
+  const currentById = new Map(currentNodes.map((node) => [node.id, node]));
+  return nodeUpserts.map((incoming) => {
+    const existing = currentById.get(incoming.id);
+    if (!existing) {
+      return incoming;
+    }
+
+    if (
+      shouldPreserveMaterializedImageResult(existing, incoming) ||
+      shouldPreserveMaterializedArtifactNode(existing, incoming)
+    ) {
+      return preserveExistingRuntimeNode(existing, incoming);
+    }
+
+    return incoming;
+  });
+}
+
+function shouldPreserveMaterializedImageResult(
+  existing: AgentCanvasNode,
+  incoming: AgentCanvasNode
+) {
+  if (
+    existing.data.kind !== "imageResult" ||
+    incoming.data.kind !== "imageResult"
+  ) {
+    return false;
+  }
+  if (!sameRuntimeRun(existing, incoming)) {
+    return false;
+  }
+
+  return isMaterializedImageResult(existing) && isPendingImageResult(incoming);
+}
+
+function shouldPreserveMaterializedArtifactNode(
+  existing: AgentCanvasNode,
+  incoming: AgentCanvasNode
+) {
+  if (
+    existing.data.kind !== incoming.data.kind ||
+    existing.data.kind === "imageResult" ||
+    incoming.data.kind === "imageResult"
+  ) {
+    return false;
+  }
+  if (!sameRuntimeRun(existing, incoming)) {
+    return false;
+  }
+  if (!("artifact" in existing.data) || !("artifact" in incoming.data)) {
+    return false;
+  }
+
+  return (
+    !isPendingArtifactId(existing.data.artifact.id) &&
+    isPendingArtifactId(incoming.data.artifact.id)
+  );
+}
+
+function preserveExistingRuntimeNode(
+  existing: AgentCanvasNode,
+  incoming: AgentCanvasNode
+): AgentCanvasNode {
+  return {
+    ...existing,
+    position: incoming.position,
+  };
+}
+
+function sameRuntimeRun(existing: AgentCanvasNode, incoming: AgentCanvasNode) {
+  const existingRunId = "runId" in existing.data ? existing.data.runId : undefined;
+  const incomingRunId = "runId" in incoming.data ? incoming.data.runId : undefined;
+  return Boolean(existingRunId && existingRunId === incomingRunId);
+}
+
+function isMaterializedImageResult(node: AgentCanvasNode) {
+  if (node.data.kind !== "imageResult") {
+    return false;
+  }
+
+  const artifactId = node.data.artifact?.id ?? node.data.image.artifact?.id;
+  return Boolean(
+    node.data.status === "ready" ||
+      node.data.image.url ||
+      (artifactId && !isPendingArtifactId(artifactId))
+  );
+}
+
+function isPendingImageResult(node: AgentCanvasNode) {
+  if (node.data.kind !== "imageResult") {
+    return false;
+  }
+
+  const artifactId = node.data.artifact?.id ?? node.data.image.artifact?.id;
+  return Boolean(
+    node.data.status === "loading" ||
+      !node.data.image.url ||
+      isPendingArtifactId(node.data.image.id) ||
+      (artifactId && isPendingArtifactId(artifactId))
+  );
+}
+
+function isPendingArtifactId(id: string | undefined) {
+  return Boolean(id?.startsWith("pending-"));
 }
 
 export function nodeToRow(projectId: string, node: AgentCanvasNode) {

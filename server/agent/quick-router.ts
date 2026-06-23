@@ -31,7 +31,6 @@ const slowPrepSteps = [
   "input.normalize",
   "plan.build",
   "skills.retrieve",
-  "mcp.connect",
   "agent.start",
 ];
 
@@ -39,10 +38,10 @@ const simpleModelSkippedSteps = [
   "input.normalize",
   "plan.build",
   "skills.retrieve",
-  "mcp.connect",
 ];
 
 const routeOnlySkippedSteps = ["input.normalize"];
+const simpleImageSkippedSteps = ["input.normalize", "skills.retrieve"];
 
 export function routeAgentRunQuick(input: AgentRunInput): QuickAgentRunRoute {
   const prompt = normalizeText(input.message);
@@ -77,7 +76,9 @@ export function routeAgentRunQuick(input: AgentRunInput): QuickAgentRunRoute {
       requiresModelNormalization: false,
       route: "image_task",
       routerSource: "quick-router",
-      skippedSteps: routeOnlySkippedSteps,
+      skippedSteps: isSimpleImageFastPathInput(input, localNormalized)
+        ? simpleImageSkippedSteps
+        : routeOnlySkippedSteps,
     };
   }
 
@@ -277,6 +278,30 @@ function isHighConfidenceStructuredTask(input: NormalizedAgentInput) {
       input.requiredCapabilities?.length ||
       input.negativeCapabilities?.length ||
       selectAgentRoute(input) !== "manager"
+  );
+}
+
+function isSimpleImageFastPathInput(
+  input: AgentRunInput,
+  normalizedInput: NormalizedAgentInput
+) {
+  if (input.retryFrom || input.upstreamContext.length || input.selectedNodeIds.length) {
+    return false;
+  }
+  if (
+    normalizedInput.operation !== "create" &&
+    normalizedInput.intent !== "image.generate"
+  ) {
+    return false;
+  }
+  if (normalizedInput.artifact?.kind !== "image") {
+    return false;
+  }
+  if (normalizedInput.negativeCapabilities?.includes("image-generation")) {
+    return false;
+  }
+  return (normalizedInput.requiredCapabilities ?? []).every(
+    (capability) => capability === "image-generation"
   );
 }
 

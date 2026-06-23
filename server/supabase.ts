@@ -269,6 +269,49 @@ type AgentSkillDefinitionRow = {
   updated_at: string;
 };
 
+type AgentSkillDefinitionSummaryRow = Pick<
+  AgentSkillDefinitionRow,
+  | "id"
+  | "name"
+  | "description"
+  | "frontmatter"
+  | "agent_scope"
+  | "purpose"
+  | "tags"
+  | "triggers"
+  | "bindings"
+  | "scripts"
+  | "package_sha256"
+  | "package_size_bytes"
+  | "enabled"
+  | "source_type"
+  | "source_manifest"
+  | "created_by"
+  | "created_at"
+  | "updated_at"
+>;
+
+const agentSkillDefinitionSummaryColumns = [
+  "id",
+  "name",
+  "description",
+  "frontmatter",
+  "agent_scope",
+  "purpose",
+  "tags",
+  "triggers",
+  "bindings",
+  "scripts",
+  "package_sha256",
+  "package_size_bytes",
+  "enabled",
+  "source_type",
+  "source_manifest",
+  "created_by",
+  "created_at",
+  "updated_at",
+].join(",");
+
 export type RegisterAgentArtifactInput = {
   id: string;
   projectId: string;
@@ -480,10 +523,10 @@ export async function listAgentSkillDefinitions() {
   const client = getSupabaseClient();
   const { data, error } = await client
     .from("agent_skill_definitions")
-    .select("*")
+    .select(agentSkillDefinitionSummaryColumns)
     .is("deleted_at", null)
     .order("updated_at", { ascending: false })
-    .returns<AgentSkillDefinitionRow[]>();
+    .returns<AgentSkillDefinitionSummaryRow[]>();
 
   if (error) {
     throw error;
@@ -1041,7 +1084,7 @@ function mapAgentKnowledgeChunkRow(
 }
 
 function mapAgentSkillDefinitionSummaryRow(
-  row: AgentSkillDefinitionRow
+  row: AgentSkillDefinitionSummaryRow
 ): AgentSkillDefinitionSummary {
   const frontmatter = row.frontmatter ?? {};
   return {

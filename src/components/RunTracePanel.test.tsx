@@ -33,6 +33,9 @@ describe("run trace summary", () => {
   });
 
   it("labels all v2 events", () => {
+    expect(getEventLabel(event("agent.message.delta", {}))).toBe(
+      "Agent message delta"
+    );
     expect(getEventLabel(event("handoff.requested", {}))).toBe("Handoff requested");
     expect(getEventLabel(event("tool.error", {}))).toBe("Tool error");
   });

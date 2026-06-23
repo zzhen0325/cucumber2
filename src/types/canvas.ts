@@ -147,6 +147,14 @@ export type RunSummaryItem = {
   detail?: string;
 };
 
+export type CanvasAgentMessage = {
+  id: string;
+  role: "assistant";
+  content: string;
+  agentName?: string;
+  status?: "streaming" | "completed";
+};
+
 export type RunPlanItem = {
   id: string;
   label: string;
@@ -167,6 +175,7 @@ export type RunNodeData = {
   prompt: string;
   status: AgentRunStatus;
   agentText?: string;
+  agentMessages?: CanvasAgentMessage[];
   outputKind?: "simple" | "artifact";
   toolParts?: CanvasToolPart[];
   toolPart?: CanvasToolPart;

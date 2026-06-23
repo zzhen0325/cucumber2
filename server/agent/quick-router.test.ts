@@ -14,7 +14,7 @@ describe("quick agent run router", () => {
     });
     expect(route.directResponse).toContain("我在");
     expect(route.skippedSteps).toEqual(
-      expect.arrayContaining(["input.normalize", "skills.retrieve", "mcp.connect", "agent.start"])
+      expect.arrayContaining(["input.normalize", "skills.retrieve", "agent.start"])
     );
   });
 
@@ -31,7 +31,7 @@ describe("quick agent run router", () => {
       },
     });
     expect(route.skippedSteps).toEqual(
-      expect.arrayContaining(["input.normalize", "skills.retrieve", "mcp.connect"])
+      expect.arrayContaining(["input.normalize", "skills.retrieve"])
     );
   });
 
@@ -50,6 +50,31 @@ describe("quick agent run router", () => {
         },
       },
     });
+    expect(route.skippedSteps).toEqual(
+      expect.arrayContaining(["input.normalize", "skills.retrieve"])
+    );
+  });
+
+  it("routes selected-image character IP figure requests locally", () => {
+    const route = routeAgentRunQuick(
+      input({
+        message: "根据这个帮我出这个角色的毛绒IP形象",
+        selectedNodeId: "image-1",
+        selectedNodeIds: ["image-1"],
+        upstreamContext: [{ nodeId: "image-1", type: "image", summary: "参考图" }],
+      })
+    );
+
+    expect(route).toMatchObject({
+      route: "image_task",
+      requiresModelNormalization: false,
+      normalizedInput: {
+        artifact: { kind: "image", format: "png" },
+        intent: "image.generate",
+        requiredCapabilities: ["image-generation"],
+      },
+    });
+    expect(route.skippedSteps).toContain("input.normalize");
   });
 
   it("routes HTML animation creation locally as a webpage artifact", () => {

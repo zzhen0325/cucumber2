@@ -33,6 +33,8 @@ export const agentEventTypes = [
   "skill.script.completed",
   "skill.script.failed",
   "agent.active",
+  "agent.message.delta",
+  "agent.message.completed",
   "handoff.requested",
   "handoff.completed",
   "tool.input",

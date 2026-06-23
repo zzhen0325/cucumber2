@@ -74,6 +74,50 @@ describe("project canvas patches", () => {
       })
     ).rejects.toBeInstanceOf(ProjectVersionConflictError);
   });
+
+  it("does not let stale pending run nodes overwrite materialized image results", async () => {
+    const project = await createProjectForUser("user-patch-3", "Runtime guard");
+    const pending = pendingRuntimeImageNode("image-pending-run-1-1");
+
+    const withPending = await applyCanvasPatchForUser({
+      projectId: project.id,
+      userId: "user-patch-3",
+      nodeUpserts: [pending],
+      expectedVersion: project.version,
+    });
+    const materialized = await applyCanvasPatchForUser({
+      projectId: project.id,
+      userId: "user-patch-3",
+      nodeUpserts: [readyRuntimeImageNode(pending.id)],
+      expectedVersion: withPending?.version,
+    });
+
+    await applyCanvasPatchForUser({
+      projectId: project.id,
+      userId: "user-patch-3",
+      nodeUpserts: [
+        {
+          ...pending,
+          position: { x: 120, y: 80 },
+        },
+      ],
+      expectedVersion: materialized?.version,
+    });
+
+    const snapshot = await loadCanvasSnapshotForUser(project.id, "user-patch-3");
+    expect(snapshot?.nodes.find((node) => node.id === pending.id)).toMatchObject({
+      position: { x: 120, y: 80 },
+      data: {
+        kind: "imageResult",
+        artifact: { id: "image-1" },
+        image: {
+          id: "image-1",
+          url: "/api/projects/project-1/artifacts/image-1/content",
+        },
+        status: "ready",
+      },
+    });
+  });
 });
 
 describe("agent skill definitions", () => {
@@ -139,6 +183,55 @@ function imageNode(id: string): AgentCanvasNode {
       kind: "imageResult",
       prompt: "upload",
       runId: "local-upload",
+    },
+  };
+}
+
+function pendingRuntimeImageNode(id: string): AgentCanvasNode {
+  return {
+    id,
+    position: { x: 0, y: 0 },
+    type: "imageResultNode",
+    data: {
+      image: {
+        id: "pending-run-1-1",
+        title: "生成中 1/1",
+        url: "",
+      },
+      kind: "imageResult",
+      prompt: "生成一张图",
+      request: { count: 1, index: 1 },
+      runId: "run-1",
+      status: "loading",
+    },
+  };
+}
+
+function readyRuntimeImageNode(id: string): AgentCanvasNode {
+  return {
+    id,
+    position: { x: 0, y: 0 },
+    type: "imageResultNode",
+    data: {
+      artifact: {
+        id: "image-1",
+        type: "image",
+        uri: "/api/projects/project-1/artifacts/image-1/content",
+      },
+      image: {
+        artifact: {
+          id: "image-1",
+          type: "image",
+          uri: "/api/projects/project-1/artifacts/image-1/content",
+        },
+        id: "image-1",
+        url: "/api/projects/project-1/artifacts/image-1/content",
+      },
+      kind: "imageResult",
+      prompt: "生成一张图",
+      request: { count: 1, index: 1 },
+      runId: "run-1",
+      status: "ready",
     },
   };
 }

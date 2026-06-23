@@ -96,6 +96,55 @@ describe("input normalizer", () => {
     expect(selectAgentRoute(normalized)).toBe("image");
   });
 
+  it("uses a clean reference-image prompt for spaced dimension expansion", () => {
+    const normalized = normalizeImageRequestSlots(
+      "帮我把这个图拓展4个尺寸： 1125-450 / 1125-672  /  1080-1440  /1029-540",
+      undefined,
+      { maxOutputImages: 4 }
+    );
+
+    expect(normalized).toMatchObject({
+      resultCount: 4,
+      contentPrompt:
+        "基于参考图扩展画布，保持原图主体、文字、风格、光影和构图一致，补全新增区域。",
+      variants: [
+        { width: 1125, height: 450, label: "1125x450" },
+        { width: 1125, height: 672, label: "1125x672" },
+        { width: 1080, height: 1440, label: "1080x1440" },
+        { width: 1029, height: 540, label: "1029x540" },
+      ],
+    });
+  });
+
+  it("classifies character IP figure requests as image generation", () => {
+    const raw = "根据这个帮我出这个角色的毛绒IP形象";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        userGoal: raw,
+        operation: "answer",
+        artifact: null,
+        requiredCapabilities: [],
+        negativeCapabilities: [],
+      },
+      raw,
+      { maxOutputImages: 4 }
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "create",
+      artifact: { kind: "image", format: "png" },
+      requiredCapabilities: ["image-generation"],
+      intent: "image.generate",
+      image: {
+        resultCount: 1,
+        contentPrompt: "根据这个帮我出这个角色的毛绒 IP 形象",
+      },
+    });
+    expect(selectAgentRoute(normalized)).toBe("image");
+  });
+
   it("keeps pure image clarity enhancement as upscale", () => {
     const raw = "把这张图高清放大到 4K";
 

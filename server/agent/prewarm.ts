@@ -1,4 +1,3 @@
-import { prewarmCucumberInternalMcpConnection } from "./mcp/internal-mcp-client.ts";
 import { configureAgentModelProvider } from "./model-config.ts";
 import { prewarmAgentRuntimeWorld } from "./runtime.ts";
 import { prewarmAgentSkillRegistry } from "./skills/skill-registry.ts";
@@ -19,7 +18,6 @@ async function prewarmAgentRunDependencies() {
     Promise.resolve().then(() => configureAgentModelProvider()),
     Promise.resolve().then(() => prewarmAgentRuntimeWorld()),
     prewarmAgentSkillRegistry(),
-    prewarmCucumberInternalMcpConnection(),
   ]);
 
   for (const result of results) {

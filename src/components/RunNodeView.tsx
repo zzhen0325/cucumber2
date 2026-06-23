@@ -16,7 +16,11 @@ import { Node, NodeContent } from "@/components/ai-elements/node";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { isSimpleRunOutput } from "@/lib/graph";
-import type { CanvasToolPart, RunNodeData } from "@/types/canvas";
+import type {
+  CanvasAgentMessage,
+  CanvasToolPart,
+  RunNodeData,
+} from "@/types/canvas";
 
 export function RunNodeView({
   id,
@@ -49,7 +53,12 @@ export function RunNodeView({
   const hasToolDetail =
     data.status !== "queued" ||
     toolParts.some((part) => part.state !== "input-streaming");
-  const agentText = data.agentText?.trim() ?? "";
+  const agentMessages = useMemo(
+    () => normalizeAgentMessages(data.agentMessages),
+    [data.agentMessages]
+  );
+  const agentText =
+    data.agentText?.trim() || formatAgentMessagesForText(agentMessages);
   const hasPlan = Boolean(data.plan?.length);
   const hasRunOutput = isActiveRun || Boolean(agentText) || hasToolDetail || hasPlan;
   const pendingAgentText = getPendingAgentText(data.status, headerSummary);
@@ -72,6 +81,7 @@ export function RunNodeView({
         simpleRunOutput,
         status: data.status,
         currentStep: data.currentStep,
+        agentMessages,
         plan: data.plan,
         toolParts: toolParts.map((part) => ({
           errorText: part.errorText,
@@ -85,6 +95,7 @@ export function RunNodeView({
     [
       agentText,
       data.currentStep,
+      agentMessages,
       data.outputKind,
       data.plan,
       data.status,
@@ -225,7 +236,9 @@ export function RunNodeView({
             data-expanded="true"
           >
             <div className="run-agent-text-region nodrag nopan nowheel">
-              {agentText ? (
+              {agentMessages.length ? (
+                <AgentMessageList messages={agentMessages} />
+              ) : agentText ? (
                 <MessageResponse className="agent-text-output">
                   {agentText}
                 </MessageResponse>
@@ -254,6 +267,48 @@ export function RunNodeView({
       </NodeContent>
     </Node>
   );
+}
+
+function AgentMessageList({ messages }: { messages: CanvasAgentMessage[] }) {
+  return (
+    <div className="agent-message-list" aria-label="Agent 对话">
+      {messages.map((message) => (
+        <div className="run-stream-group agent-message" key={message.id}>
+          <div className="run-stream-group-heading">
+            <span>
+              <Sparkles size={10} />
+            </span>
+            <strong title={message.agentName ?? "Agent"}>
+              {message.agentName ?? "Agent"}
+            </strong>
+          </div>
+          <div className="run-stream-group-body">
+            <MessageResponse className="agent-text-output">
+              {message.content}
+            </MessageResponse>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function normalizeAgentMessages(messages?: CanvasAgentMessage[]) {
+  return (messages ?? []).flatMap((message) => {
+    const content = message.content.trim();
+    return content ? [{ ...message, content }] : [];
+  });
+}
+
+function formatAgentMessagesForText(messages: CanvasAgentMessage[]) {
+  return messages
+    .map((message) =>
+      message.agentName
+        ? `${message.agentName}\n${message.content}`
+        : message.content
+    )
+    .join("\n\n")
+    .trim();
 }
 
 function getResizableNodeStyle(

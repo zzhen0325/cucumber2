@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { RunContext } from "@openai/agents";
 import JSZip from "jszip";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CucumberAgentContext } from "../../context.ts";
 import type { ActivatedAgentSkill } from "../../skills/types.ts";
@@ -14,9 +14,15 @@ vi.mock("../../../storage.ts", () => ({
   downloadAgentSkillPackage: mocks.downloadAgentSkillPackage,
 }));
 
+const { invalidateSkillResourceCache } = await import("../../skills/skill-resources.ts");
 const { readSkillResourceTool } = await import("./read-skill-resource.tool.ts");
 
 describe("read_skill_resource tool", () => {
+  beforeEach(() => {
+    invalidateSkillResourceCache();
+    mocks.downloadAgentSkillPackage.mockReset();
+  });
+
   it("lists and reads text resources from an activated skill package", async () => {
     const bytes = await packageBytes();
     const sha = createHash("sha256").update(bytes).digest("hex");
@@ -85,6 +91,7 @@ describe("read_skill_resource tool", () => {
       readable: true,
       type: "script",
     });
+    expect(mocks.downloadAgentSkillPackage).toHaveBeenCalledTimes(1);
   });
 });
 

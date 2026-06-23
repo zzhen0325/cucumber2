@@ -9,6 +9,7 @@ import {
 } from "../canvas-store.ts";
 
 const materializedEventTypes = new Set<AgentEventType>([
+  "agent.message.completed",
   "artifact.created",
   "canvas.operation.applied",
   "input.normalized",

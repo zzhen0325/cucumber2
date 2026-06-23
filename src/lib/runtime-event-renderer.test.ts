@@ -109,6 +109,41 @@ describe("agent event renderer", () => {
     });
   });
 
+  it("keeps persisted agent messages above final output", () => {
+    const projection = projectRuntimeEventsToCanvas({
+      projectId: "project-1",
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run-1", {
+          prompt: "生成图片",
+          promptNodeId: "prompt-1",
+        }),
+        event("agent.message.completed", "run-1", {
+          agentName: "Image Agent",
+          content: "我会先整理提示词，然后调用图片工具。",
+          messageId: "message-1",
+          role: "assistant",
+        }),
+        event("run.completed", "run-1", {
+          finalOutput: "图片已生成",
+          artifactIds: [],
+        }),
+      ],
+    });
+
+    expect(projection.nodes.find((node) => node.id === "run-1")?.data).toMatchObject({
+      kind: "run",
+      status: "success",
+      agentText: "Image Agent\n我会先整理提示词，然后调用图片工具。",
+      agentMessages: [
+        expect.objectContaining({
+          agentName: "Image Agent",
+          content: "我会先整理提示词，然后调用图片工具。",
+        }),
+      ],
+    });
+  });
+
   it("projects final output to the run node", () => {
     const projection = projectRuntimeEventsToCanvas({
       projectId: "project-1",

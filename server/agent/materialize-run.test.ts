@@ -11,6 +11,7 @@ import {
 describe("agent run materializer", () => {
   it("treats normalized artifact input as a materialization trigger", () => {
     expect(shouldMaterializeRunEvent("input.normalized")).toBe(true);
+    expect(shouldMaterializeRunEvent("agent.message.completed")).toBe(true);
   });
 
   it("does not block the run on non-terminal materialization triggers", () => {

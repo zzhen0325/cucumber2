@@ -28,7 +28,6 @@ import type {
   ImageResultNodeData,
 } from "../src/types/canvas.ts";
 import { executeAgentRun } from "./agent/index.ts";
-import { handleInternalMcpRequest } from "./agent/mcp/internal-mcp-server.ts";
 import { scheduleAgentRunPrewarm } from "./agent/prewarm.ts";
 import {
   assertImageProviderConfigured,
@@ -300,8 +299,6 @@ const skillImportSchema = z.object({
 });
 
 app.use("*", cors());
-
-app.all("/internal/mcp", async (c) => handleInternalMcpRequest(c.req.raw));
 
 app.onError((error, c) => {
   console.error("[api]", error);
@@ -1724,6 +1721,7 @@ const port = Number(process.env.API_PORT ?? 8787);
 
 serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, (info) => {
   console.log(`Cucumber Agent API listening on http://${info.address}:${info.port}`);
+  scheduleAgentRunPrewarm();
 });
 
 async function startSession(c: Context, user: AppUser) {

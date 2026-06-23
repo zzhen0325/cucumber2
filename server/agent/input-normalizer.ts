@@ -893,6 +893,9 @@ function normalizeOperation(
   if (isImageArtifact(artifact) && /(放大|高清|超清|提升清晰|upscale|enhance)/i.test(rawPrompt)) {
     return "transform";
   }
+  if (isImageArtifact(artifact) && operation === "answer") {
+    return "create";
+  }
   if (isDocumentArtifactKind(artifact) && operation === "answer") {
     return "create";
   }
@@ -1139,8 +1142,11 @@ function hasActualImageCue(prompt: string) {
 }
 
 function isGenericImageReferencePrompt(prompt: string) {
+  const normalized = normalizeText(prompt)
+    .replace(/[\s,，:：;；.。/\\|_-]+/g, " ")
+    .trim();
   return /^(?:把|将|给我|帮我)?\s*(?:这个|这张|当前|选中|参考)?\s*(?:图|图片|图像|画布|image|picture)\s*$/i.test(
-    prompt
+    normalized
   );
 }
 
@@ -1161,7 +1167,7 @@ function isImageCanvasExpansionRequest(prompt: string) {
 }
 
 function hasExplicitImageCreationRequest(prompt: string) {
-  return /((生成|创建|画|出图|渲染|产出|输出|制作).{0,16}(图片|图像|图|海报|banner|kv|主视觉)|(图片|图像|海报|banner|kv|主视觉).{0,16}(生成|创建|渲染|产出|输出|制作)|\b(generate|create|render|make)\b.{0,48}\b(image|poster|banner|key visual)\b)/i.test(
+  return /((生成|创建|画|出图|渲染|产出|输出|制作).{0,16}(图片|图像|图|海报|banner|kv|主视觉)|(生成|创建|设计|制作|做|产出|输出|出).{0,24}(角色|IP|形象|头像|玩偶|公仔|毛绒|贴纸)|(图片|图像|海报|banner|kv|主视觉|角色|IP|形象|头像|玩偶|公仔|毛绒|贴纸).{0,24}(生成|创建|渲染|产出|输出|制作|设计)|\b(generate|create|render|make)\b.{0,48}\b(image|poster|banner|key visual|character|avatar|mascot)\b)/i.test(
     prompt
   );
 }

@@ -9,6 +9,7 @@ import type {
   AgentCanvasNode,
   AgentCanvasNodeData,
   AgentRunStatus,
+  CanvasAgentMessage,
   ArtifactRef,
   ArtifactPreviewKind,
   CanvasToolPart,
@@ -267,7 +268,13 @@ export function projectRunTraceToCanvas({
   const plan = buildRunPlanItems(orderedEvents, runStatus);
   const stepTimeline = buildStepTimeline(orderedEvents);
   const currentStep = getCurrentRunStep(orderedEvents, runStatus, stepTimeline, plan);
-  const agentText = buildAgentText(orderedEvents, runStatus, streamedAgentText);
+  const agentMessages = buildAgentMessages(orderedEvents);
+  const agentText = buildAgentText(
+    orderedEvents,
+    runStatus,
+    streamedAgentText,
+    agentMessages
+  );
   const outputKind = getRunOutputKind(orderedEvents, runStatus);
   const runWasAborted = isAbortedRun(orderedEvents);
   const promptDimensions = getPromptNodeDimensions(prompt);
@@ -301,6 +308,7 @@ export function projectRunTraceToCanvas({
         prompt,
         status: runStatus,
         agentText,
+        agentMessages,
         outputKind,
         currentStep,
         plan,
@@ -1859,8 +1867,16 @@ function getProjectedRunStatus(events: RunStepTraceEvent[]): AgentRunStatus {
 function buildAgentText(
   events: RunStepTraceEvent[],
   status: AgentRunStatus,
-  streamedAgentText?: string
+  streamedAgentText?: string,
+  agentMessages: CanvasAgentMessage[] = buildAgentMessages(
+    events
+  )
 ): string | undefined {
+  const persistedText = formatAgentMessageText(agentMessages);
+  if (persistedText) {
+    return persistedText;
+  }
+
   const finalOutput = readString(
     events.findLast((event) => event.type === "run.completed")?.payload.finalOutput
   );
@@ -1882,6 +1898,107 @@ function buildAgentText(
     return "正在调用工具，结果会自动写入画布。";
   }
   return undefined;
+}
+
+function buildAgentMessages(
+  events: RunStepTraceEvent[]
+): CanvasAgentMessage[] {
+  const messages = new Map<
+    string,
+    CanvasAgentMessage & {
+      deltaIndexes: Set<number>;
+      order: number;
+    }
+  >();
+  let nextOrder = 0;
+
+  for (const event of events) {
+    if (
+      event.type !== "agent.message.delta" &&
+      event.type !== "agent.message.completed"
+    ) {
+      continue;
+    }
+
+    const messageId =
+      readString(event.payload.messageId) ?? `${event.runNodeId}-agent-message`;
+    const previous = messages.get(messageId);
+    const message =
+      previous ??
+      ({
+        id: messageId,
+        role: "assistant",
+        content: "",
+        deltaIndexes: new Set<number>(),
+        order: nextOrder++,
+      } satisfies CanvasAgentMessage & {
+        deltaIndexes: Set<number>;
+        order: number;
+      });
+    const agentName = readString(event.payload.agentName);
+    if (agentName) {
+      message.agentName = agentName;
+    }
+
+    if (event.type === "agent.message.delta") {
+      const delta = readRawString(event.payload.delta);
+      const index = readNumber(event.payload.index);
+      if (delta && (index === undefined || !message.deltaIndexes.has(index))) {
+        message.content += delta;
+        if (index !== undefined) {
+          message.deltaIndexes.add(index);
+        }
+      }
+      message.status = "streaming";
+    }
+
+    if (event.type === "agent.message.completed") {
+      const content = readRawString(event.payload.content);
+      if (content) {
+        message.content = content;
+      }
+      message.status = "completed";
+    }
+
+    messages.set(messageId, message);
+  }
+
+  const projectedMessages = Array.from(messages.values())
+    .sort((left, right) => left.order - right.order)
+    .flatMap((message) => {
+      const content = message.content.trim();
+      return content
+        ? [
+            {
+              id: message.id,
+              role: message.role,
+              content,
+              agentName: message.agentName,
+              status: message.status,
+            },
+          ]
+        : [];
+    });
+
+  return projectedMessages;
+}
+
+function formatAgentMessageText(messages: CanvasAgentMessage[]) {
+  if (!messages.length) {
+    return undefined;
+  }
+
+  return messages
+    .map((message) => {
+      const content = message.content.trim();
+      if (!content) {
+        return "";
+      }
+      return message.agentName ? `${message.agentName}\n${content}` : content;
+    })
+    .filter(Boolean)
+    .join("\n\n")
+    .trim();
 }
 
 function getRunOutputKind(
@@ -2092,6 +2209,10 @@ function readCanvasOperationPatch(
 
 function readString(value: unknown) {
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function readRawString(value: unknown) {
+  return typeof value === "string" ? value : undefined;
 }
 
 function readNumber(value: unknown) {

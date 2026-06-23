@@ -93,6 +93,10 @@ export function RunTracePanel({
             <EventList events={[...summary.agents, ...summary.handoffs]} />
           </TraceSection>
 
+          <TraceSection title="Agent Messages">
+            <EventList events={summary.agentMessageEvents} />
+          </TraceSection>
+
           <TraceSection title="Skills">
             <div className="trace-chip-row">
               {summary.skills.map((skill) => (

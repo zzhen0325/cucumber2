@@ -122,6 +122,26 @@ describe("RunNodeView", () => {
     expect(screen.getByText("黄瓜是一种常见的葫芦科蔬菜。")).toBeTruthy();
   });
 
+  it("renders persisted agent message dialogue", () => {
+    renderRunNode({
+      agentMessages: [
+        {
+          agentName: "Image Agent",
+          content: "我会先整理画面要求，然后调用图片工具。",
+          id: "message-1",
+          role: "assistant",
+          status: "completed",
+        },
+      ],
+      agentText: "Image Agent\n我会先整理画面要求，然后调用图片工具。",
+      status: "running",
+    });
+
+    expect(screen.getByLabelText("Agent 对话")).toBeTruthy();
+    expect(screen.getByText("Image Agent")).toBeTruthy();
+    expect(screen.getByText("我会先整理画面要求，然后调用图片工具。")).toBeTruthy();
+  });
+
   it("shows a compact plan and current step", () => {
     renderRunNode({
       currentStep: {

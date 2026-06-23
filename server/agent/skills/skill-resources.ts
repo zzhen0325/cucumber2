@@ -8,6 +8,8 @@ import type { ActivatedAgentSkill } from "./types.ts";
 
 const MAX_RESOURCE_TEXT_CHARS = 80_000;
 const MAX_LISTED_RESOURCES = 2_000;
+const MAX_CACHED_SKILL_ZIPS = 4;
+const SKILL_ZIP_CACHE_TTL_MS = 10 * 60 * 1000;
 const readableTextExtensions = new Set([
   ".bash",
   ".cjs",
@@ -57,6 +59,13 @@ export type AgentSkillResourceSource = Pick<
   | "packageSha256"
   | "sourceManifest"
 >;
+
+type CachedSkillZip = {
+  loadedAt: number;
+  zip: Promise<JSZip>;
+};
+
+const skillZipCache = new Map<string, CachedSkillZip>();
 
 export async function listActivatedSkillResources(
   skill: AgentSkillResourceSource
@@ -138,6 +147,28 @@ export async function readActivatedSkillResourceBytes({
 }
 
 async function loadSkillZip(skill: AgentSkillResourceSource) {
+  const cacheKey = getSkillZipCacheKey(skill);
+  const cached = skillZipCache.get(cacheKey);
+  const now = Date.now();
+  if (cached && now - cached.loadedAt < SKILL_ZIP_CACHE_TTL_MS) {
+    return cached.zip;
+  }
+  if (cached) {
+    skillZipCache.delete(cacheKey);
+  }
+
+  const zip = loadSkillZipUncached(skill).catch((error: unknown) => {
+    if (skillZipCache.get(cacheKey)?.zip === zip) {
+      skillZipCache.delete(cacheKey);
+    }
+    throw error;
+  });
+  skillZipCache.set(cacheKey, { loadedAt: now, zip });
+  pruneSkillZipCache();
+  return zip;
+}
+
+async function loadSkillZipUncached(skill: AgentSkillResourceSource) {
   const packageBytes = await downloadAgentSkillPackage({
     bucket: skill.packageBucket ?? "",
     path: skill.packagePath ?? "",
@@ -147,6 +178,30 @@ async function loadSkillZip(skill: AgentSkillResourceSource) {
     throw new Error(`Skill package hash mismatch for ${skill.name}.`);
   }
   return JSZip.loadAsync(packageBytes);
+}
+
+function getSkillZipCacheKey(skill: AgentSkillResourceSource) {
+  return [
+    skill.packageBucket ?? "",
+    skill.packagePath ?? "",
+    skill.packageSha256 ?? "",
+  ].join(":");
+}
+
+function pruneSkillZipCache() {
+  while (skillZipCache.size > MAX_CACHED_SKILL_ZIPS) {
+    const oldestKey = [...skillZipCache.entries()].sort(
+      (left, right) => left[1].loadedAt - right[1].loadedAt
+    )[0]?.[0];
+    if (!oldestKey) {
+      return;
+    }
+    skillZipCache.delete(oldestKey);
+  }
+}
+
+export function invalidateSkillResourceCache() {
+  skillZipCache.clear();
 }
 
 async function listZipResources(zip: JSZip, rootPrefix: string) {

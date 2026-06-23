@@ -33,12 +33,12 @@
 ## 2026-06-17 Runtime Fast Path
 
 - `/api/agent-run` 入口保持 AI SDK HTTP stream 不变；新增 `Quick Router` 在本地规则层先判定 `smalltalk`、`simple_chat`、`simple_canvas`、`image_task` 和 `complex_agent_task`，并在 `run.created` / `input.normalized` payload 中写入 route、routerSource、skippedSteps 和 cache 状态。
-- `smalltalk` 直接写 Trace、流式文本和 `run.completed`；`simple_chat` 使用缓存的轻量 chat Agent/Runner，不加载 skills、MCP、handoff 或动态计划；`simple_canvas` 只处理确定性的安全画布操作，并继续通过 canvas policy 写 `canvas.operation.*`。
+- `smalltalk` 直接写 Trace、流式文本和 `run.completed`；`simple_chat` 使用缓存的轻量 chat Agent/Runner，不加载 skills、handoff 或动态计划；`simple_canvas` 只处理确定性的安全画布操作，并继续通过 canvas policy 写 `canvas.operation.*`。
 - `image_task` 可在 `input.normalized` 后由投影层先创建 loading 图片结果节点；完整图片 artifact 由 `generate_image`、`image_matting` 或 `upscale_image` 产生并按 artifact id 幂等物化，不重复生成结果节点；图片拆解/理解则由 `decompose_image` / `analyze_media` 创建 Markdown artifact 节点。
-- `complex_agent_task` 才进入完整 Agent Runner；compact context、skill retrieval 和 MCP/tool prepare 在依赖允许时并行。`plan.build` 只在复杂、图片或非空动态计划时写 Trace，简单任务不再写空计划步骤。
-- Agent world 进程级缓存 Manager、Document/Web/Research/Image agents、handoff registry、normalizer Agent、Runner 和 simple chat Runner；per-run instructions/context 仍从 `runContext` 注入，不写入单例。
-- 内部 MCP 使用全局 Streamable HTTP 连接池，共享连接 promise，失败后重置；非图片 Fast Path 不连接 MCP。技能 registry 增加 60s 内存缓存，应用内 create/update/import/delete skill 后立即 invalidation。
-- 打开项目成功后服务端 fire-and-forget 预热 model provider、Agent world、skill registry 和 MCP pool；预热失败只记录日志，不阻塞画布加载。
+- `complex_agent_task` 才进入完整 Agent Runner；compact context、skill retrieval 和 tool prepare 在依赖允许时并行。`plan.build` 只在复杂、图片或非空动态计划时写 Trace，简单任务不再写空计划步骤。
+- Agent world 进程级缓存 Manager、Document/Web/Research/Image/Image Fast agents、handoff registry、normalizer Agent、Runner 和 simple chat Runner；per-run instructions/context 仍从 `runContext` 注入，不写入单例。
+- `generate_image` 是 Image Agent 本地 function tool；无上游引用、无重试、仅需 image-generation 的简单生图请求走 Image Fast Agent，不检索 skills，不加载 style-library，也不做 prompt expansion。复杂图片任务仍可检索技能并按需使用风格库或扩写工具。
+- API server 启动成功后服务端 fire-and-forget 预热 model provider、Agent world 和 skill registry；打开项目成功后也会补触发同一预热。预热失败只记录日志，不阻塞服务或画布加载。
 
 ## 2026-06-16 Artifact-First Routing
 
@@ -86,7 +86,7 @@
 
 - Agent Run Trace 继续只写 `agent_run_events`，不新增平行 Trace 表。
 - `run.created` 和 `input.normalized` payload 增加服务端重建的 context summary，包含 selected nodes、reference nodes、upstream path 和 omitted nodes/reason；Trace 面板新增 Context/Input 摘要。
-- Agent Run 启动阶段新增轻量 `run.step.*` 耗时 Trace，覆盖 `context.build`、`input.normalize`、`plan.build`、`skills.retrieve`、`mcp.connect` 和 `agent.start`，用于定位“准备 Agent”阶段的慢点。
+- Agent Run 启动阶段新增轻量 `run.step.*` 耗时 Trace，覆盖 `context.build`、`input.normalize`、`plan.build`、`skills.retrieve` 和 `agent.start`，用于定位“准备 Agent”阶段的慢点。
 - `input.normalized`、`skill.retrieved`、`skill.activated`、`skill.script.*`、`tool.error`、`canvas.operation.rejected` 和 `run.failed` 在 Trace 面板中显示用户可读摘要，不再只依赖截断 JSON。
 - `buildAgentRunInput` 的上下文校验失败会被 runtime 捕获并写入 `run.failed`，错误来源标记为 `context`，Run 节点显示短错误。
 - Run 节点错误文案收敛为短来源提示；完整 provider、工具、Seedream、技能脚本和上下文诊断保留在 Trace payload/errorText。
@@ -124,7 +124,8 @@
 ## 2026-06-12 Run Node Streamed Text
 
 - 前端开始消费 AI SDK UI assistant `text` parts，并将当前 Run 的实时文字投影到 `RunNodeData.agentText`。
-- Run 节点文字优先级为 `run.completed.finalOutput` 高于当前 streamed text，高于运行状态占位文案；历史 Trace 回放不依赖实时 text Map。
+- Agent 模型输出同时持久化为 `agent.message.delta` / `agent.message.completed` Trace 事件；Run 节点优先从这些事件还原完整 Agent 对话，失败、刷新和 Trace 回放不再依赖临时 streamed text。
+- Run 节点文字优先级为持久化 Agent message 高于 `run.completed.finalOutput`；旧 Trace 没有 Agent message 时，`finalOutput` 继续高于当前 streamed text 和运行状态占位文案。
 - Run 节点默认收起，仅展示 Agent 流式文字和工具调用摘要；简单文本输出完成后保持展开，详细 Agent/handoff/timeline 诊断继续通过 Trace 面板查看。
 - Run 节点内部滚动区使用 React Flow `nodrag`、`nopan`、`nowheel`，避免滚动文字或工具详情时拖动、平移画布。
 - 简单问答、解释、轻量分析或简短总结任务不调用工具时，`run.completed.finalOutput` 只显示在 Run 节点内；不再自动创建下游 Prompt/Markdown 结果节点。用户选中该 Run 后可以继续提交下一轮对话，服务端会从持久化画布重建该 Run 的文本上下文。
@@ -149,11 +150,10 @@
 - 画布选择工具支持 Shift 点击追加/取消多选；画布任意工具下都可用鼠标中键拖动平移，手型工具仍保留左键拖动平移。
 - 服务端继续从持久化项目快照重建 upstream context，并过滤不可引用的 Run 节点；简单文本输出 Run 可作为下一轮文本上下文。客户端提供的节点列表只作为待验证 id，不提供可信上下文。
 
-## 2026-06-13 Internal MCP Tools
+## 2026-06-13 Image Tool Boundary
 
-- `generate_image` 已迁为内部 MCP tool，由 `/internal/mcp` 通过 Streamable HTTP 暴露给当前 Agents SDK runtime。
-- 内部 MCP endpoint 只接受进程内随机 bearer token；暂不作为外部 API 使用。
-- MCP tool input 只包含模型可决定的图片参数；`userId`、`projectId`、`runNodeId`、upstream context 和 artifact URL 继续由服务端 run context registry 注入，不进入模型参数。
+- `generate_image` 是 Image Agent 本地 function tool，由 Agents SDK tool calling 直接调用同进程函数，不再经 `/internal/mcp`。
+- tool input 只包含模型可决定的图片参数；`userId`、`projectId`、`runNodeId`、upstream context 和 artifact URL 继续由服务端 run context 注入，不进入模型参数。
 - 图片 artifact、tool 事件和错误仍通过现有 Cucumber runtime 事件投影到画布。
 
 ## 2026-06-12 Image Node Toolbar
