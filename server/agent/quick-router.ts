@@ -3,10 +3,12 @@ import type { CanvasOperation } from "../../src/types/runtime.ts";
 import type { AgentRunInput } from "./context.ts";
 import {
   finalizeNormalizedAgentInput,
-  isImageArtifactTask,
-  selectAgentRoute,
   type NormalizedAgentInput,
 } from "./input-normalizer.ts";
+import {
+  isImageArtifactTask,
+  selectAgentRoute,
+} from "./task-router.ts";
 
 export type AgentRunRoute =
   | "smalltalk"

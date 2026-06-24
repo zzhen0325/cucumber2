@@ -4,7 +4,7 @@ import type { AgentRunInput } from "../context.ts";
 import {
   hasNegativeCapability,
   isImageArtifactTask,
-} from "../input-normalizer.ts";
+} from "../task-router.ts";
 import type { AgentSkillCard } from "./types.ts";
 import { listCachedAgentSkillDefinitions } from "./skill-registry.ts";
 

@@ -49,7 +49,7 @@ describe("buildRunPlan", () => {
 
     expect(plan).toMatchObject([
       { id: "document-brief", label: "梳理文档目标和上游素材", phase: "prepare" },
-      { id: "document-agent", label: "委派 Document Agent", phase: "route" },
+      { id: "document-agent", label: "进入 Document Agent", phase: "route" },
       { id: "document-create", label: "创建文档内容", phase: "execute" },
       { id: "document-materialize", label: "投影为画布文档节点", phase: "materialize" },
     ]);
@@ -68,7 +68,7 @@ describe("buildRunPlan", () => {
 
     expect(plan).toMatchObject([
       { id: "html-brief", label: "梳理 HTML 产物目标和交互要求", phase: "prepare" },
-      { id: "document-agent", label: "委派 Document Agent", phase: "route" },
+      { id: "document-agent", label: "进入 Document Agent", phase: "route" },
       { id: "html-create", label: "创建 HTML 页面", phase: "execute" },
       { id: "html-materialize", label: "投影为网页预览节点", phase: "materialize" },
     ]);

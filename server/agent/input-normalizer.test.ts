@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   finalizeNormalizedAgentInput,
   normalizeImageRequestSlots,
-  selectAgentRoute,
 } from "./input-normalizer.ts";
+import { selectAgentRoute } from "./task-router.ts";
 
 describe("input normalizer", () => {
   it("extracts image content, count, and aspect ratio from a compact Chinese brief", () => {

@@ -27,9 +27,11 @@ import { openAIStreamToCucumberEvents } from "./events/openai-stream-to-cucumber
 import { getAgentErrorMessage, isAbortError } from "./errors.ts";
 import {
   normalizeAgentInput,
+} from "./input-normalizer.ts";
+import {
   hasNegativeCapability,
   selectAgentRoute,
-} from "./input-normalizer.ts";
+} from "./task-router.ts";
 import {
   materializeAgentRunSnapshot,
   shouldBlockRunForMaterialization,

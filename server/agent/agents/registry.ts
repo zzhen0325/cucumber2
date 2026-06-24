@@ -4,7 +4,7 @@ import type { ArtifactType } from "../../../src/types/canvas.ts";
 import {
   selectAgentRoutesForTask,
   type SpecialistRoute,
-} from "../input-normalizer.ts";
+} from "../task-router.ts";
 import type { CucumberAgentContext } from "../context.ts";
 import { createDocumentAgent } from "./document.agent.ts";
 import { createImageAgent } from "./image.agent.ts";

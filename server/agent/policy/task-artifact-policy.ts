@@ -3,7 +3,7 @@ import {
   hasNegativeCapability,
   isImageArtifactTask,
   isTextArtifactTask,
-} from "../input-normalizer.ts";
+} from "../task-router.ts";
 
 export function assertImageToolAllowed(
   context: CucumberAgentContext,

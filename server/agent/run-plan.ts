@@ -41,35 +41,35 @@ export function buildRunPlan(input: AgentRunInput): RuntimeRunPlanItem[] {
     case "document.create":
       return [
         step("document-brief", "梳理文档目标和上游素材", "prepare"),
-        step("document-agent", "委派 Document Agent", "route"),
+        step("document-agent", "进入 Document Agent", "route"),
         step("document-create", "创建文档内容", "execute"),
         step("document-materialize", "投影为画布文档节点", "materialize"),
       ];
     case "document.edit":
       return [
         step("document-source", "读取上游文档和改写要求", "prepare"),
-        step("document-agent", "委派 Document Agent", "route"),
+        step("document-agent", "进入 Document Agent", "route"),
         step("document-rewrite", "生成改写后的文档内容", "execute"),
         step("document-materialize", "投影为画布文档节点", "materialize"),
       ];
     case "web.fetch":
       return [
         step("web-boundary", "确认公开 URL 和访问边界", "prepare"),
-        step("web-agent", "委派 Web Agent", "route"),
+        step("web-agent", "进入 Web Agent", "route"),
         step("web-fetch", "抓取网页并保存内容", "execute"),
         step("web-materialize", "投影网页摘要节点", "materialize"),
       ];
     case "webpage.create":
       return [
         step("html-brief", "梳理 HTML 产物目标和交互要求", "prepare"),
-        step("document-agent", "委派 Document Agent", "route"),
+        step("document-agent", "进入 Document Agent", "route"),
         step("html-create", "创建 HTML 页面", "execute"),
         step("html-materialize", "投影为网页预览节点", "materialize"),
       ];
     case "research.answer":
       return [
         step("research-sources", "梳理用户提供的来源", "prepare"),
-        step("research-agent", "委派 Research Agent", "route"),
+        step("research-agent", "进入 Research Agent", "route"),
         step("research-collect", "收集来源摘录和 citation", "execute"),
         step("research-artifact", "生成调研内容", "execute"),
         step("research-materialize", "投影调研结果节点", "materialize"),
@@ -77,35 +77,35 @@ export function buildRunPlan(input: AgentRunInput): RuntimeRunPlanItem[] {
     case "image.generate":
       return [
         step("image-brief", "整理画面要求和引用图", "prepare"),
-        step("image-agent", "委派 Image Agent", "route"),
+        step("image-agent", "进入 Image Agent", "route"),
         step("image-generate", `生成${getImageCountLabel(input)}图片`, "execute"),
         step("image-materialize", "投影图片结果节点", "materialize"),
       ];
     case "image.matting":
       return [
         step("matting-source", "确认要抠图的图片", "prepare"),
-        step("image-agent", "委派 Image Agent", "route"),
+        step("image-agent", "进入 Image Agent", "route"),
         step("image-matting", "生成主体抠图", "execute"),
         step("matting-materialize", "投影抠图结果节点", "materialize"),
       ];
     case "image.decompose":
       return [
         step("decompose-source", "确认要拆解的图片", "prepare"),
-        step("image-agent", "委派 Image Agent", "route"),
+        step("image-agent", "进入 Image Agent", "route"),
         step("image-decompose", "生成图像拆解内容", "execute"),
         step("decompose-materialize", "投影拆解文档节点", "materialize"),
       ];
     case "image.upscale":
       return [
         step("upscale-source", "确认要高清放大的图片", "prepare"),
-        step("image-agent", "委派 Image Agent", "route"),
+        step("image-agent", "进入 Image Agent", "route"),
         step("image-upscale", "生成高清放大图片", "execute"),
         step("upscale-materialize", "投影高清图片结果", "materialize"),
       ];
     case "media.analyze":
       return [
         step("media-source", "确认要理解的图片", "prepare"),
-        step("image-agent", "委派 Image Agent", "route"),
+        step("image-agent", "进入 Image Agent", "route"),
         step("media-analyze", "生成图片理解内容", "execute"),
         step("media-materialize", "投影理解结果节点", "materialize"),
       ];
