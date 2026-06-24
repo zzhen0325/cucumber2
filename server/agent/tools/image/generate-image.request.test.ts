@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { SeedreamConfig } from "../../../../seedream.ts";
 import { buildCozeImageRequestBody, type CozeImageConfig } from "../../../../coze.ts";
-import type { ByteArtistConfig } from "../../../../byteartist.ts";
+import {
+  BYTEARTIST_SEED5_DUOTU_MODEL,
+  type ByteArtistConfig,
+} from "../../../../byteartist.ts";
 import {
   SEEDREAM_PROMPT_MAX_LENGTH,
   buildByteArtistRequestBodies,
@@ -55,6 +58,13 @@ const testByteArtistConfig: ByteArtistConfig = {
   seed: -1,
   width: 1024,
   height: 1024,
+};
+const testSeed5DuotuConfig: ByteArtistConfig = {
+  ...testByteArtistConfig,
+  height: 2048,
+  maxInputImages: 6,
+  modelId: BYTEARTIST_SEED5_DUOTU_MODEL,
+  width: 2048,
 };
 
 describe("generate image request normalization", () => {
@@ -412,6 +422,39 @@ describe("generate image request normalization", () => {
       image: "https://cdn.example/ref.png",
       inputImageCount: 1,
     });
+  });
+
+  it("passes up to six reference images to seed5_duotu_zz", () => {
+    const requests = buildByteArtistRequestBodies(
+      {
+        prompts: ["将图1、图2融合在一张图内"],
+        resultCount: 1,
+        promptBatchMode: "single_prompt",
+        upstreamContext: Array.from({ length: 7 }, (_, index) => ({
+          nodeId: `image-${index + 1}`,
+          type: "image" as const,
+          imageUrl: `https://cdn.example/ref-${index + 1}.png`,
+        })),
+      },
+      testSeed5DuotuConfig
+    );
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      prompt: "将图1、图2融合在一张图内",
+      width: 2048,
+      height: 2048,
+      image: "https://cdn.example/ref-1.png",
+      inputImageCount: 6,
+    });
+    expect(requests[0].images).toEqual([
+      "https://cdn.example/ref-1.png",
+      "https://cdn.example/ref-2.png",
+      "https://cdn.example/ref-3.png",
+      "https://cdn.example/ref-4.png",
+      "https://cdn.example/ref-5.png",
+      "https://cdn.example/ref-6.png",
+    ]);
   });
 
   it("scales small explicit variants into Seedream's supported 1K to 4K range", () => {

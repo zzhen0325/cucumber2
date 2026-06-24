@@ -94,16 +94,16 @@ describe("agent context", () => {
       projectId: "project-1",
       runNodeId: "run-2",
       canvasContext: {
-        imageProvider: "coze",
-        prompt: "使用 Coze 生成图片",
+        imageProvider: "seed5_duotu_zz",
+        prompt: "使用 Seedream 5 生成图片",
         promptNodeId: "prompt-2",
         selectedNodeId: null,
       },
       projectSnapshot: snapshot(),
     });
 
-    expect(input.imageProvider).toBe("coze");
-    expect(buildCucumberAgentContext(input).imageProvider).toBe("coze");
+    expect(input.imageProvider).toBe("seed5_duotu_zz");
+    expect(buildCucumberAgentContext(input).imageProvider).toBe("seed5_duotu_zz");
   });
 
   it("normalizes explicit image composer controls into an image task", () => {

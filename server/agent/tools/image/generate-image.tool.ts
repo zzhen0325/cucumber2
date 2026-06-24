@@ -7,9 +7,11 @@ import {
 } from "../../../../seedream.ts";
 import {
   BYTEARTIST_LEMO_MODEL,
+  BYTEARTIST_SEED5_DUOTU_MODEL,
   doesByteArtistModelSupportReferenceImages,
   generateByteArtistImage,
   readByteArtistConfigFromEnv,
+  withByteArtistModelConfig,
 } from "../../../../byteartist.ts";
 import {
   generateCozeImage,
@@ -246,8 +248,10 @@ export async function executeGenerateImageTool({
     }
   } else if (imageProvider.provider === "byteartist") {
     let config = readByteArtistConfigFromEnv();
-    if (lemoRequested) {
-      config = { ...config, modelId: BYTEARTIST_LEMO_MODEL };
+    if (lemoRequested || context.imageProvider === "byteartist") {
+      config = withByteArtistModelConfig(config, BYTEARTIST_LEMO_MODEL);
+    } else if (imageProvider.model === BYTEARTIST_SEED5_DUOTU_MODEL) {
+      config = withByteArtistModelConfig(config, BYTEARTIST_SEED5_DUOTU_MODEL);
     }
     let byteArtistUpstreamContext = upstreamContext;
     const byteArtistReferenceImages = collectResolvedReferenceImages(upstreamContext);

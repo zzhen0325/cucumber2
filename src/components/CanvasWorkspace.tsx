@@ -247,7 +247,7 @@ type PendingRunCanvasPatchAck = {
 type ComposerMode = "agent" | "image";
 type ImageAspectRatioSelection = "1:1" | "16:9" | "9:16" | "4:3" | "3:4";
 type ImageResultCountSelection = 1 | 2 | 3 | 4;
-type ImageProviderSelection = "seedream" | "coze" | "byteartist";
+type ImageProviderSelection = "byteartist" | "seed5_duotu_zz";
 
 type CanvasWorkspaceProps = {
   projectId: string;
@@ -4004,9 +4004,8 @@ function ImageProviderSelect({
         <SelectValue />
       </SelectTrigger>
       <SelectContent align="end" className="composer-provider-menu">
-        <SelectItem value="seedream">Seedream 4.6</SelectItem>
-        <SelectItem value="coze">Coze Image</SelectItem>
-        <SelectItem value="byteartist">Seed4 Lemo</SelectItem>
+        <SelectItem value="byteartist">Lemo</SelectItem>
+        <SelectItem value="seed5_duotu_zz">Seedream 5</SelectItem>
       </SelectContent>
     </Select>
   );
@@ -4202,7 +4201,7 @@ function readImageResultCountSelection(
 
 function readStoredImageProvider(): ImageProviderSelection {
   if (typeof window === "undefined") {
-    return "seedream";
+    return "seed5_duotu_zz";
   }
   return readImageProviderSelection(
     window.localStorage.getItem(IMAGE_PROVIDER_STORAGE_KEY)
@@ -4212,10 +4211,10 @@ function readStoredImageProvider(): ImageProviderSelection {
 function readImageProviderSelection(
   value: string | null | undefined
 ): ImageProviderSelection {
-  if (value === "coze" || value === "byteartist") {
+  if (value === "byteartist" || value === "seed5_duotu_zz") {
     return value;
   }
-  return "seedream";
+  return "seed5_duotu_zz";
 }
 
 function getStorageStatusLabel(status: StorageStatus) {

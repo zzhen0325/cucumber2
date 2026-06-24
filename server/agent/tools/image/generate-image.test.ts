@@ -287,12 +287,17 @@ describe("generate_image tool", () => {
     storeTextArtifactContent.mockClear();
   });
 
-  it("generates images and emits artifact_created events without leaking urls", async () => {
-    isSeedreamConfigured.mockReturnValue(true);
-    generateSeedreamImage.mockImplementation(
+  it("defaults to Seedream 5 and emits artifact_created events without leaking urls", async () => {
+    isByteArtistConfigured.mockReturnValue(true);
+    generateByteArtistImage.mockImplementation(
       async (input: { onImage?: (image: unknown) => void }) => {
         const images = [
-          { id: "seedream-1", url: "https://cdn.example/1.png", title: "Seedream image" },
+          {
+            id: "byteartist-seed5-1",
+            metadata: { provider: "byteartist", model: "seed5_duotu_zz" },
+            title: "ByteArtist image",
+            url: "https://cdn.example/seed5.png",
+          },
         ];
         for (const image of images) {
           await input.onImage?.(image);
@@ -311,28 +316,30 @@ describe("generate_image tool", () => {
     expect(context.producedArtifacts).toHaveLength(1);
     expect(context.producedArtifacts[0]).toMatchObject({
       contentRef:
-        "r2://agent-assets/projects/project-1/runs/run-1/artifacts/seedream-1.png",
-      id: "seedream-1",
+        "r2://agent-assets/projects/project-1/runs/run-1/artifacts/byteartist-seed5-1.png",
+      id: "byteartist-seed5-1",
       type: "image",
-      uri: "/api/projects/project-1/artifacts/seedream-1/content",
+      uri: "/api/projects/project-1/artifacts/byteartist-seed5-1/content",
     });
     expect(storeGeneratedImageFromUrl).toHaveBeenCalledWith(
       expect.objectContaining({
-        artifactId: "seedream-1",
+        artifactId: "byteartist-seed5-1",
         metadata: expect.objectContaining({
+          model: "seed5_duotu_zz",
+          provider: "byteartist",
           prompt: "黄瓜海报",
           sourcePrompt: "生成一张黄瓜海报",
         }),
         projectId: "project-1",
         runNodeId: "run-1",
-        sourceUrl: "https://cdn.example/1.png",
+        sourceUrl: "https://cdn.example/seed5.png",
       })
     );
     expect(context.pendingEvents).toEqual([
       {
         type: "artifact_created",
         artifact: expect.objectContaining({
-          id: "seedream-1",
+          id: "byteartist-seed5-1",
           metadata: expect.objectContaining({
             prompt: "黄瓜海报",
             sourcePrompt: "生成一张黄瓜海报",
@@ -343,30 +350,34 @@ describe("generate_image tool", () => {
       },
     ]);
 
-    const callArg = generateSeedreamImage.mock.calls[0][0];
+    expect(generateSeedreamImage).not.toHaveBeenCalled();
+    const [callArg, config] = generateByteArtistImage.mock.calls[0];
     expect(callArg).toMatchObject({
       totalRequestedImageCount: 1,
-      promptBatchMode: "single_prompt",
       requests: [
-        {
-          body: expect.objectContaining({ prompt: "黄瓜海报" }),
-          resultCount: 1,
+        expect.objectContaining({
+          prompt: "黄瓜海报",
+          width: 2048,
+          height: 2048,
+          inputImageCount: 0,
           promptIndex: 1,
-        },
+        }),
       ],
+    });
+    expect(config).toMatchObject({
+      maxInputImages: 6,
+      modelId: "seed5_duotu_zz",
     });
   });
 
   it("falls back to the run prompt when no prompt argument is provided", async () => {
-    isSeedreamConfigured.mockReturnValue(true);
-    generateSeedreamImage.mockResolvedValue({
-      images: [{ id: "seedream-1", url: "https://cdn.example/1.png" }],
-    });
+    isByteArtistConfigured.mockReturnValue(true);
+    generateByteArtistImage.mockResolvedValue({ images: [] });
 
     const context = buildContext({ prompt: "默认提示词" });
     await invokeTool(context, {});
 
-    expect(generateSeedreamImage.mock.calls[0][0].requests[0].body.prompt).toBe(
+    expect(generateByteArtistImage.mock.calls[0][0].requests[0].prompt).toBe(
       "默认提示词"
     );
   });
@@ -386,7 +397,7 @@ describe("generate_image tool", () => {
     );
 
     const longPrompt = "手绘日本家居清洁海报，".repeat(120);
-    const context = buildContext();
+    const context = buildContext({ imageProvider: "seedream" });
     const result = await invokeTool(context, { prompt: longPrompt });
     const providerPrompt =
       generateSeedreamImage.mock.calls[0][0].requests[0].body.prompt;
@@ -407,7 +418,7 @@ describe("generate_image tool", () => {
     isSeedreamConfigured.mockReturnValue(true);
     generateSeedreamImage.mockResolvedValue({ images: [] });
 
-    const context = buildContext();
+    const context = buildContext({ imageProvider: "seedream" });
     await invokeTool(context, { prompt: "生成四张小狗的图", resultCount: 4 });
 
     const callArg = generateSeedreamImage.mock.calls[0][0];
@@ -424,7 +435,7 @@ describe("generate_image tool", () => {
     isSeedreamConfigured.mockReturnValue(true);
     generateSeedreamImage.mockResolvedValue({ images: [] });
 
-    const context = buildContext();
+    const context = buildContext({ imageProvider: "seedream" });
     await invokeTool(context, {
       prompt: "日本家居 banner KV，主体是女生打扫家里的插画",
       resultCount: 4,
@@ -453,7 +464,7 @@ describe("generate_image tool", () => {
     isSeedreamConfigured.mockReturnValue(true);
     generateSeedreamImage.mockResolvedValue({ images: [] });
 
-    const context = buildContext();
+    const context = buildContext({ imageProvider: "seedream" });
     await invokeTool(context, {
       prompt: "基于参考图扩展画布",
       resultCount: 2,
@@ -474,7 +485,7 @@ describe("generate_image tool", () => {
 
   it("throws when seedream is not configured (no silent fallback)", async () => {
     isSeedreamConfigured.mockReturnValue(false);
-    const context = buildContext();
+    const context = buildContext({ imageProvider: "seedream" });
 
     await expect(invokeTool(context, { prompt: "x" })).rejects.toThrow(
       /not configured/i
@@ -517,6 +528,7 @@ describe("generate_image tool", () => {
     isSeedreamConfigured.mockReturnValue(true);
     generateSeedreamImage.mockResolvedValue({ images: [] });
     const context = buildContext({
+      imageProvider: "seedream",
       upstreamContext: [
         {
           artifact: {
@@ -692,11 +704,72 @@ describe("generate_image tool", () => {
     );
   });
 
-  it("forces Lemo requests to seed4 ByteArtist even when Coze is selected", async () => {
+  it("routes seed5_duotu_zz selection to ByteArtist with multiple references", async () => {
+    isByteArtistConfigured.mockReturnValue(true);
+    generateByteArtistImage.mockImplementation(
+      async (input: { onImage?: (image: unknown) => void }) => {
+        const image = {
+          id: "byteartist-seed5-1",
+          metadata: { provider: "byteartist", model: "seed5_duotu_zz" },
+          title: "ByteArtist image",
+          url: "https://cdn.example/seed5.png",
+        };
+        await input.onImage?.(image);
+        return { images: [image] };
+      }
+    );
+    const context = buildContext({
+      imageProvider: "seed5_duotu_zz",
+      upstreamContext: [
+        {
+          imageUrl: "https://signed.example/ref-1.png",
+          nodeId: "image-1",
+          type: "image",
+        },
+        {
+          imageUrl: "https://signed.example/ref-2.png",
+          nodeId: "image-2",
+          type: "image",
+        },
+      ],
+    });
+
+    const result = await invokeTool(context, {
+      prompt: "将图1、图2融合在一张图内",
+    });
+
+    expect(result.generated).toBe(1);
+    expect(generateByteArtistImage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        totalRequestedImageCount: 1,
+        requests: [
+          expect.objectContaining({
+            prompt: "将图1、图2融合在一张图内",
+            width: 2048,
+            height: 2048,
+            image: "https://signed.example/ref-1.png",
+            images: [
+              "https://signed.example/ref-1.png",
+              "https://signed.example/ref-2.png",
+            ],
+            inputImageCount: 2,
+          }),
+        ],
+      }),
+      expect.objectContaining({
+        maxInputImages: 6,
+        modelId: "seed5_duotu_zz",
+      })
+    );
+    expect(generateCozeImage).not.toHaveBeenCalled();
+    expect(generateSeedreamImage).not.toHaveBeenCalled();
+  });
+
+  it("forces Lemo requests to seed4 ByteArtist even when Seedream 5 is selected", async () => {
     isByteArtistConfigured.mockReturnValue(true);
     generateByteArtistImage.mockResolvedValue({ images: [] });
     const context = buildContext({
-      imageProvider: "coze",
+      imageProvider: "seed5_duotu_zz",
       prompt: "生成一张 lemo 角色海报",
     });
 

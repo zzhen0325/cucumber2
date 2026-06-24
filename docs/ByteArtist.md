@@ -15,9 +15,11 @@ ByteArtist 通过智创网关的异步任务接口调用：
 | 能力 | req_key / model | 用途 |
 | --- | --- | --- |
 | 图片生成 | `seed4_0407_lemo` | Lemo / Seed4 文生图 |
+| 多图合成 | `seed5_duotu_zz` | 最多 6 张参考图融合生成 |
 | 图片抠图 | `image_matting_lemo` | 透明底、白底或中性底抠图 |
 
 `seed4_0407_lemo` 在本仓库标记为 text-only，不直接接收参考图。若用户带上游图片并要求 Lemo 生图，服务端会先把参考图转为文字描述，再调用 ByteArtist。
+`seed5_duotu_zz` 复用 ByteArtist 网关凭据，前端可在底部输入器按本轮选择；服务端会固定 req_key 为 `seed5_duotu_zz`，默认 2048x2048，最多上传 6 张上游参考图。
 
 ## 2. 环境变量
 
@@ -54,6 +56,16 @@ BYTEARTIST_EXPIRED_DURATION=600
 BYTEARTIST_IMAGE_RETURN_TYPE=url
 BYTEARTIST_IMAGE_RETURN_FORMAT=png
 BYTEARTIST_SEED=-1
+```
+
+`seed5_duotu_zz` 可通过前端本轮选择直接使用，不要求改全局 `IMAGE_MODEL`。如果需要把服务端默认 ByteArtist 模型固定为 seed5，可配置：
+
+```bash
+IMAGE_PROVIDER=byteartist
+BYTEARTIST_MODEL=seed5_duotu_zz
+BYTEARTIST_WIDTH=2048
+BYTEARTIST_HEIGHT=2048
+BYTEARTIST_MAX_INPUT_IMAGES=6
 ```
 
 抠图配置：
@@ -115,7 +127,7 @@ function generateByteArtistSign(
 | 文件二进制单图 | `file` | 需要 multipart/form-data |
 | 文件二进制多图 | `files[]` + `input_img_type=multiple_files` | 需要 multipart/form-data |
 
-当前仓库只使用 `source` 和 `base64file`：
+当前仓库的单图路径使用 `source` 和 `base64file`；`seed5_duotu_zz` 多图路径会把上游图片下载后用 multipart `files[]` 上传：
 
 ```ts
 function appendByteArtistImageFormField(
@@ -173,6 +185,20 @@ Content-Type: application/x-www-form-urlencoded
   "seed": -1
 }
 ```
+
+`seed5_duotu_zz` 生图 `req_json`：
+
+```json
+{
+  "extra_inputs": {
+    "height": 2048,
+    "width": 2048
+  },
+  "user_prompt": "将图1、图2融合在一张图内"
+}
+```
+
+`seed5_duotu_zz` 的参考图不放入 `req_json`。服务端会构造 multipart 表单，附带公共签名字段、`req_key=seed5_duotu_zz`、`input_img_type=multiple_files`，并把最多 6 张参考图作为 `files[]` 上传。
 
 抠图 `req_json`：
 
@@ -279,19 +305,20 @@ return (result.binary_data ?? []).map(
 运行时入口：
 
 - `generate_image` tool
-- provider 选择：`IMAGE_PROVIDER=byteartist`，或用户输入明确提到 `lemo`
+- provider 选择：`IMAGE_PROVIDER=byteartist`、底部输入器选择 `seed5_duotu_zz`，或用户输入明确提到 `lemo`
 - 执行层：[byteartist.ts](../byteartist.ts)
 
 调用链：
 
 1. 服务端从持久化画布重建 upstream context
-2. 如果是 `seed4_0407_lemo` 且存在参考图，先用视觉模型改写 prompt
+2. 如果是 `seed4_0407_lemo` 且存在参考图，先用视觉模型改写 prompt；如果是 `seed5_duotu_zz`，收集最多 6 张参考图并准备 multipart `files[]`
 3. `generateByteArtistImage` 提交异步任务
 4. poll 成功后拿 provider URL
 5. 服务端下载结果并转存到 R2
 6. 创建 image artifact，由 runtime materializer 投影到画布
 
 `seed4_0407_lemo` 不直接发送参考图 URL。
+`seed5_duotu_zz` 不把参考图 URL 写进 `req_json`，而是下载后以 `files[]` 上传给网关。
 
 ### 7.2 抠图
 
@@ -534,6 +561,7 @@ curl -X POST "$BYTEARTIST_BASE_URL/media/api/pic/batch_get_result_v2" \
 | 抠图不是透明底 | RGB 参数不是 `-1/-1/-1`，或模型只支持白底 fallback | 检查 `BYTEARTIST_MATTING_*` |
 | 抠图接口拿不到原图 | 客户端传了本地 URL 或未保存 artifact | 由服务端从 R2 content ref 签发 read URL |
 | Lemo 参考图没有生效 | `seed4_0407_lemo` 当前 text-only | 先把参考图改写成文字 prompt，再调用 ByteArtist |
+| seed5 多图没有生效 | 未走 multipart 或参考图超过上限 | 检查 `input_img_type=multiple_files`、`files[]` 和最多 6 张参考图 |
 
 ## 11. 验证命令
 

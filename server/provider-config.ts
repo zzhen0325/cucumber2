@@ -1,6 +1,9 @@
 import { isSeedreamConfigured } from "../seedream.ts";
 import { isCozeImageConfigured } from "../coze.ts";
-import { isByteArtistConfigured } from "../byteartist.ts";
+import {
+  BYTEARTIST_SEED5_DUOTU_MODEL,
+  isByteArtistConfigured,
+} from "../byteartist.ts";
 import { getAgentModelConfiguration } from "./agent/model-config.ts";
 import { getImageMattingProviderConfiguration } from "./agent/tools/image/image-matting-provider.ts";
 
@@ -10,7 +13,13 @@ export type RuntimeProviderConfiguration = {
   model: string | null;
 };
 
-export type ImageProviderSelection = "seedream" | "coze" | "byteartist";
+export type ImageProviderSelection =
+  | "seedream"
+  | "coze"
+  | "byteartist"
+  | "seed5_duotu_zz";
+
+const DEFAULT_IMAGE_PROVIDER: ImageProviderSelection = "seed5_duotu_zz";
 
 export function getRuntimeProviderConfiguration() {
   return {
@@ -24,7 +33,7 @@ export function getRuntimeProviderConfiguration() {
 export function getImageProviderConfiguration(
   providerOverride?: ImageProviderSelection | null
 ): RuntimeProviderConfiguration {
-  const provider = providerOverride ?? process.env.IMAGE_PROVIDER?.trim() ?? "seedream";
+  const provider = providerOverride ?? DEFAULT_IMAGE_PROVIDER;
   if (provider === "coze") {
     return {
       configured: isCozeImageConfigured(),
@@ -36,14 +45,16 @@ export function getImageProviderConfiguration(
       };
   }
 
-  if (provider === "byteartist") {
+  if (provider === "byteartist" || provider === "seed5_duotu_zz") {
     return {
       configured: isByteArtistConfigured(),
-      provider,
+      provider: "byteartist",
       model:
-        process.env.IMAGE_MODEL?.trim() ||
-        process.env.BYTEARTIST_MODEL?.trim() ||
-        "seed4_0407_lemo",
+        provider === "seed5_duotu_zz"
+          ? BYTEARTIST_SEED5_DUOTU_MODEL
+          : process.env.IMAGE_MODEL?.trim() ||
+            process.env.BYTEARTIST_MODEL?.trim() ||
+            "seed4_0407_lemo",
     };
   }
 
@@ -83,7 +94,9 @@ export function assertImageProviderConfigured(
     return matting;
   }
 
-  const image = getImageProviderConfiguration(providerOverride);
+  const image = getImageProviderConfiguration(
+    action === "upscale" ? "seedream" : providerOverride
+  );
   if (image.provider === "coze" && action === "generation") {
     if (!image.configured) {
       throw new Error(
@@ -105,7 +118,7 @@ export function assertImageProviderConfigured(
   if (image.provider !== "seedream") {
     const expected =
       action === "generation"
-        ? "Set IMAGE_PROVIDER=seedream, coze, or byteartist."
+        ? "Use imageProvider=seed5_duotu_zz for Seedream 5 or imageProvider=byteartist for Lemo."
         : "Set IMAGE_PROVIDER=seedream.";
     throw new Error(
       `Image ${action} provider "${image.provider ?? "none"}" is not supported. ${expected}`

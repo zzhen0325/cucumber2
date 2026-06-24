@@ -143,7 +143,7 @@ const imageResultCountSchema = z.union([
 const canvasContextSchema = z.object({
   imageAspectRatio: imageAspectRatioSchema.optional(),
   imageResultCount: imageResultCountSchema.optional(),
-  imageProvider: z.enum(["seedream", "coze", "byteartist"]).optional(),
+  imageProvider: z.enum(["byteartist", "seed5_duotu_zz"]).optional(),
   inputMode: z.enum(["agent", "image"]).optional(),
   prompt: z.string().trim().min(1),
   promptNodeId: z.string().nullable().optional(),

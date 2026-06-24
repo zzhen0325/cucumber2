@@ -11,6 +11,7 @@ export type ByteArtistGeneratedImage = {
 export type ByteArtistImageRequest = {
   height: number;
   image?: string;
+  images?: string[];
   inputImageCount: number;
   prompt: string;
   promptIndex: number;
@@ -46,7 +47,8 @@ export type ByteArtistConfig = {
 
 export type ByteArtistImageTaskInput = {
   image?: string;
-  imageField?: "base64file" | "source";
+  imageField?: "base64file" | "files" | "source";
+  images?: string[];
   reqJson: Record<string, unknown>;
   signal?: AbortSignal;
 };
@@ -58,10 +60,16 @@ type ByteArtistSubmitResponse = {
 };
 
 export type ByteArtistPollResultItem = {
+  algo_status_code?: number;
+  algo_status_message?: string;
   binary_data?: string[];
+  req_key?: string;
   message?: string;
   pic_urls?: Array<{ backup_url?: string; main_url?: string }>;
   status?: number | string;
+  status_code?: number;
+  status_message?: string;
+  task_id?: string;
 };
 
 type ByteArtistPollResponse = {
@@ -79,12 +87,17 @@ type ByteArtistModelAdapter = {
     seed: number;
     width: number;
   }) => Record<string, unknown>;
+  defaultHeight: number;
+  defaultWidth: number;
   extractImages?: (result: ByteArtistPollResultItem) => string[];
+  maxInputImages: number;
+  referenceImageTransport?: "multipart_files" | "single_source";
   supportsReferenceImages: boolean;
 };
 
 export const BYTEARTIST_LEMO_MODEL = "seed4_0407_lemo";
 export const BYTEARTIST_MATTING_MODEL = "image_matting_lemo";
+export const BYTEARTIST_SEED5_DUOTU_MODEL = "seed5_duotu_zz";
 const DEFAULT_BYTEARTIST_MODEL = BYTEARTIST_LEMO_MODEL;
 const DEFAULT_BYTEARTIST_BASE_URL = "https://lv-api-lf.ulikecam.com";
 
@@ -96,7 +109,24 @@ const modelAdapters: Record<string, ByteArtistModelAdapter> = {
       seed,
       width,
     }),
+    defaultHeight: 1024,
+    defaultWidth: 1024,
+    maxInputImages: 1,
     supportsReferenceImages: false,
+  },
+  [BYTEARTIST_SEED5_DUOTU_MODEL]: {
+    buildReqJson: ({ height, prompt, width }) => ({
+      extra_inputs: {
+        height,
+        width,
+      },
+      user_prompt: prompt,
+    }),
+    defaultHeight: 2048,
+    defaultWidth: 2048,
+    maxInputImages: 6,
+    referenceImageTransport: "multipart_files",
+    supportsReferenceImages: true,
   },
 };
 
@@ -132,12 +162,16 @@ class ByteArtistClient {
     signal?: AbortSignal
   ): Promise<string> {
     const adapter = getByteArtistModelAdapter(this.config.modelId);
+    const images = adapter.supportsReferenceImages
+      ? collectRequestImages(request).slice(0, adapter.maxInputImages)
+      : [];
+    const useMultipartImages =
+      images.length > 0 && adapter.referenceImageTransport === "multipart_files";
     return this.submitRawTask(
       {
-        image:
-          request.image && adapter.supportsReferenceImages
-            ? request.image
-            : undefined,
+        image: !useMultipartImages ? images[0] : undefined,
+        imageField: useMultipartImages ? "files" : undefined,
+        images: useMultipartImages ? images : undefined,
         reqJson: adapter.buildReqJson({
           height: request.height,
           prompt: request.prompt,
@@ -153,11 +187,21 @@ class ByteArtistClient {
     input: Omit<ByteArtistImageTaskInput, "signal">,
     signal?: AbortSignal
   ): Promise<string> {
-    const formData = buildSignedFormParams(this.config);
-    formData.append("req_json", JSON.stringify(input.reqJson));
-    formData.append("expired_duration", String(this.config.expiredDuration));
+    const usesMultipart = input.imageField === "files";
+    const formData = buildSignedFormParams(this.config, usesMultipart);
+    appendTextFormField(formData, "req_json", JSON.stringify(input.reqJson));
+    appendTextFormField(
+      formData,
+      "expired_duration",
+      String(this.config.expiredDuration)
+    );
 
-    if (input.image) {
+    if (input.images?.length) {
+      if (!(formData instanceof FormData)) {
+        throw new Error("ByteArtist multi-image upload requires multipart form data.");
+      }
+      await appendByteArtistImageFiles(formData, input.images, signal);
+    } else if (input.image) {
       appendByteArtistImageFormField(formData, input.image, input.imageField);
     }
 
@@ -182,7 +226,7 @@ class ByteArtistClient {
     for (let attempt = 1; attempt <= this.config.maxAttempts; attempt += 1) {
       signal?.throwIfAborted();
       const formData = buildSignedFormParams(this.config);
-      formData.append("task_ids", taskId);
+      appendTextFormField(formData, "task_ids", taskId);
 
       const data = await postByteArtistForm<ByteArtistPollResponse>({
         body: formData,
@@ -198,6 +242,10 @@ class ByteArtistClient {
       }
 
       if (isByteArtistDoneStatus(result.status)) {
+        const providerError = readByteArtistResultProviderError(result);
+        if (providerError) {
+          throw new Error(providerError);
+        }
         const images = getByteArtistModelAdapter(
           this.config.modelId
         ).extractImages?.(result) ?? extractDefaultByteArtistImages(result);
@@ -276,6 +324,7 @@ export async function submitAndPollByteArtistImageTask(
     {
       image: input.image,
       imageField: input.imageField,
+      images: input.images,
       reqJson: input.reqJson,
     },
     input.signal
@@ -294,6 +343,11 @@ export function isByteArtistConfigured(env: NodeJS.ProcessEnv = process.env) {
 export function readByteArtistConfigFromEnv(
   env: NodeJS.ProcessEnv = process.env
 ): ByteArtistConfig {
+  const modelId =
+    env.IMAGE_MODEL?.trim() ||
+    env.BYTEARTIST_MODEL?.trim() ||
+    DEFAULT_BYTEARTIST_MODEL;
+  const adapter = getByteArtistModelAdapter(modelId);
   return {
     aid: readRequiredEnv(env, "BYTEARTIST_AID", "BYTEDANCE_AID"),
     appKey: readRequiredEnv(env, "BYTEARTIST_APP_KEY", "BYTEDANCE_APP_KEY"),
@@ -307,19 +361,34 @@ export function readByteArtistConfigFromEnv(
         DEFAULT_BYTEARTIST_BASE_URL
     ),
     expiredDuration: readNumberEnv(env, "BYTEARTIST_EXPIRED_DURATION", 600),
-    height: readNumberEnv(env, "BYTEARTIST_HEIGHT", 1024),
+    height: readNumberEnv(env, "BYTEARTIST_HEIGHT", adapter.defaultHeight),
     imageReturnFormat: env.BYTEARTIST_IMAGE_RETURN_FORMAT?.trim() || "png",
     imageReturnType: env.BYTEARTIST_IMAGE_RETURN_TYPE?.trim() || "url",
     maxAttempts: readNumberEnv(env, "BYTEARTIST_MAX_ATTEMPTS", 120),
-    maxInputImages: readNumberEnv(env, "BYTEARTIST_MAX_INPUT_IMAGES", 1),
+    maxInputImages: readNumberEnv(
+      env,
+      "BYTEARTIST_MAX_INPUT_IMAGES",
+      adapter.maxInputImages
+    ),
     maxOutputImages: readNumberEnv(env, "BYTEARTIST_MAX_OUTPUT_IMAGES", 4),
-    modelId:
-      env.IMAGE_MODEL?.trim() ||
-      env.BYTEARTIST_MODEL?.trim() ||
-      DEFAULT_BYTEARTIST_MODEL,
+    modelId,
     pollIntervalMs: readNumberEnv(env, "BYTEARTIST_POLL_INTERVAL_MS", 1000),
     seed: readNumberEnv(env, "BYTEARTIST_SEED", -1),
-    width: readNumberEnv(env, "BYTEARTIST_WIDTH", 1024),
+    width: readNumberEnv(env, "BYTEARTIST_WIDTH", adapter.defaultWidth),
+  };
+}
+
+export function withByteArtistModelConfig(
+  config: ByteArtistConfig,
+  modelId: string
+): ByteArtistConfig {
+  const adapter = getByteArtistModelAdapter(modelId);
+  return {
+    ...config,
+    height: adapter.defaultHeight,
+    maxInputImages: Math.max(config.maxInputImages, adapter.maxInputImages),
+    modelId,
+    width: adapter.defaultWidth,
   };
 }
 
@@ -370,6 +439,10 @@ function getByteArtistModelAdapter(modelId: string): ByteArtistModelAdapter {
         string: prompt,
         width,
       }),
+      defaultHeight: 1024,
+      defaultWidth: 1024,
+      maxInputImages: 1,
+      referenceImageTransport: "single_source",
       supportsReferenceImages: true,
     }
   );
@@ -419,19 +492,19 @@ function buildByteArtistGeneratedImage({
   };
 }
 
-function buildSignedFormParams(config: ByteArtistConfig) {
+function buildSignedFormParams(config: ByteArtistConfig, multipart = false) {
   const nonce = generateNonce();
   const timestamp = generateTimestamp();
   const sign = generateByteArtistSign(nonce, timestamp, config.appSecret);
-  const formData = new URLSearchParams();
-  formData.append("aid", config.aid);
-  formData.append("app_key", config.appKey);
-  formData.append("nonce", nonce);
-  formData.append("timestamp", timestamp);
-  formData.append("sign", sign);
-  formData.append("req_key", config.modelId);
-  formData.append("img_return_type", config.imageReturnType);
-  formData.append("img_return_format", config.imageReturnFormat);
+  const formData = multipart ? new FormData() : new URLSearchParams();
+  appendTextFormField(formData, "aid", config.aid);
+  appendTextFormField(formData, "app_key", config.appKey);
+  appendTextFormField(formData, "nonce", nonce);
+  appendTextFormField(formData, "timestamp", timestamp);
+  appendTextFormField(formData, "sign", sign);
+  appendTextFormField(formData, "req_key", config.modelId);
+  appendTextFormField(formData, "img_return_type", config.imageReturnType);
+  appendTextFormField(formData, "img_return_format", config.imageReturnFormat);
   return formData;
 }
 
@@ -454,16 +527,93 @@ function generateTimestamp() {
 }
 
 function appendByteArtistImageFormField(
-  formData: URLSearchParams,
+  formData: URLSearchParams | FormData,
   image: string,
   imageField?: ByteArtistImageTaskInput["imageField"]
 ) {
+  if (imageField === "files") {
+    throw new Error("ByteArtist files upload requires images[].");
+  }
   if (imageField === "source" || (!imageField && isByteArtistSourceImage(image))) {
-    formData.append("source", image);
+    appendTextFormField(formData, "source", image);
     return;
   }
 
-  formData.append("base64file", stripDataImagePrefix(image));
+  appendTextFormField(formData, "base64file", stripDataImagePrefix(image));
+}
+
+async function appendByteArtistImageFiles(
+  formData: FormData,
+  images: string[],
+  signal?: AbortSignal
+) {
+  appendTextFormField(formData, "input_img_type", "multiple_files");
+  const uniqueImages = uniqueNonEmpty(images);
+
+  for (const [index, image] of uniqueImages.entries()) {
+    const { blob, extension } = await readImageAsBlob(image, signal);
+    formData.append("files[]", blob, `reference-${index + 1}.${extension}`);
+  }
+}
+
+async function readImageAsBlob(image: string, signal?: AbortSignal) {
+  const dataUrlMatch = image.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (dataUrlMatch) {
+    const mimeType = dataUrlMatch[1];
+    const bytes = Buffer.from(dataUrlMatch[2], "base64");
+    return {
+      blob: new Blob([bytes], { type: mimeType }),
+      extension: extensionFromMimeType(mimeType),
+    };
+  }
+
+  if (!/^https?:\/\//i.test(image)) {
+    throw new Error(
+      "ByteArtist multi-image upload requires HTTP(S) or data image references."
+    );
+  }
+
+  const response = await fetch(image, { signal });
+  if (!response.ok) {
+    throw new Error(
+      `ByteArtist failed to download reference image (${response.status} ${response.statusText}).`
+    );
+  }
+  const mimeType =
+    response.headers.get("content-type")?.split(";")[0]?.trim() || "image/png";
+  const bytes = await response.arrayBuffer();
+  return {
+    blob: new Blob([bytes], { type: mimeType }),
+    extension: extensionFromMimeType(mimeType),
+  };
+}
+
+function extensionFromMimeType(mimeType: string) {
+  if (/jpe?g$/i.test(mimeType)) {
+    return "jpg";
+  }
+  if (/webp$/i.test(mimeType)) {
+    return "webp";
+  }
+  if (/gif$/i.test(mimeType)) {
+    return "gif";
+  }
+  return "png";
+}
+
+function appendTextFormField(
+  formData: URLSearchParams | FormData,
+  name: string,
+  value: string
+) {
+  formData.append(name, value);
+}
+
+function collectRequestImages(request: ByteArtistImageRequest) {
+  return uniqueNonEmpty([
+    ...(request.images ?? []),
+    ...(request.image ? [request.image] : []),
+  ]);
 }
 
 function isByteArtistSourceImage(image: string) {
@@ -482,13 +632,16 @@ async function postByteArtistForm<T>({
   signal,
   url,
 }: {
-  body: URLSearchParams;
+  body: URLSearchParams | FormData;
   signal?: AbortSignal;
   url: string;
 }): Promise<T> {
+  const isMultipart = body instanceof FormData;
   const response = await fetch(url, {
-    body: body.toString(),
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: isMultipart ? body : body.toString(),
+    headers: isMultipart
+      ? undefined
+      : { "Content-Type": "application/x-www-form-urlencoded" },
     method: "POST",
     signal,
   });
@@ -526,6 +679,35 @@ function isByteArtistDoneStatus(status: number | string | undefined) {
 
 function isByteArtistFailedStatus(status: number | string | undefined) {
   return status === 2 || status === "failed" || status === "FAILED";
+}
+
+function readByteArtistResultProviderError(result: ByteArtistPollResultItem) {
+  const statusCode =
+    typeof result.status_code === "number" ? result.status_code : undefined;
+  const algoStatusCode =
+    typeof result.algo_status_code === "number"
+      ? result.algo_status_code
+      : undefined;
+  const statusMessage = normalizeErrorMessage(
+    result.status_message ?? result.algo_status_message ?? result.message
+  );
+
+  if (statusCode !== undefined && statusCode !== 0) {
+    return `ByteArtist task completed with provider error [${statusCode}]: ${
+      statusMessage ?? "unknown error"
+    }`;
+  }
+  if (algoStatusCode !== undefined && algoStatusCode !== 0) {
+    return `ByteArtist task completed with algorithm error [${algoStatusCode}]: ${
+      statusMessage ?? "unknown error"
+    }`;
+  }
+  return null;
+}
+
+function normalizeErrorMessage(value: string | undefined) {
+  const trimmed = value?.trim();
+  return trimmed || undefined;
 }
 
 async function waitBeforeNextPoll(
@@ -569,6 +751,10 @@ function truncateForError(text: string) {
 
 function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
+}
+
+function uniqueNonEmpty(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
 function readRequiredEnv(

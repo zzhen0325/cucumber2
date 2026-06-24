@@ -269,6 +269,7 @@ export function buildByteArtistRequestBodies(
         prompt: variantPrompt,
         promptIndex: index + 1,
         image: imageUrls[0],
+        images: imageUrls,
         inputImageCount: imageUrls.length,
         ...geometry,
       };
@@ -287,6 +288,7 @@ export function buildByteArtistRequestBodies(
         prompt,
         promptIndex: request.promptIndex,
         image: imageUrls[0],
+        images: imageUrls,
         inputImageCount: imageUrls.length,
         ...geometry,
       };
