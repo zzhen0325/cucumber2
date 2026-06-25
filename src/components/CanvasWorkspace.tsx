@@ -50,6 +50,7 @@ import {
   createContext,
   lazy,
   memo,
+  type ReactNode,
   type PointerEvent as ReactPointerEvent,
   Suspense,
   useCallback,
@@ -4609,6 +4610,130 @@ type ArtifactLikeNodeData = Extract<
 >;
 type ArtifactLikeNodeProps = NodeProps<FlowNode<ArtifactLikeNodeData, string>>;
 
+type ArtifactFrameProps = {
+  children: ReactNode;
+  className: string;
+  copyText?: string;
+  data: ArtifactLikeNodeData;
+  downloadText?: string;
+  downloadUrl?: string;
+};
+
+function ArtifactFrame({
+  children,
+  className,
+  copyText,
+  data,
+  downloadText,
+  downloadUrl,
+}: ArtifactFrameProps) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const copyResetTimer = useRef<number | undefined>(undefined);
+  const displayName = getArtifactDisplayName(data);
+  const canCopy = Boolean(copyText?.trim());
+  const canDownload = Boolean(downloadUrl || downloadText?.trim());
+
+  useEffect(
+    () => () => {
+      if (copyResetTimer.current) {
+        window.clearTimeout(copyResetTimer.current);
+      }
+    },
+    []
+  );
+
+  const scheduleCopyReset = useCallback((state: "copied" | "error") => {
+    setCopyState(state);
+    if (copyResetTimer.current) {
+      window.clearTimeout(copyResetTimer.current);
+    }
+    copyResetTimer.current = window.setTimeout(() => setCopyState("idle"), 1200);
+  }, []);
+
+  const handleCopy = useCallback(async () => {
+    if (!copyText?.trim()) {
+      return;
+    }
+    try {
+      await copyTextToClipboard(copyText);
+      scheduleCopyReset("copied");
+    } catch {
+      scheduleCopyReset("error");
+    }
+  }, [copyText, scheduleCopyReset]);
+
+  const handleDownload = useCallback(() => {
+    if (downloadUrl) {
+      downloadArtifactAsset(downloadUrl, data);
+      return;
+    }
+    if (downloadText?.trim()) {
+      downloadTextArtifact(downloadText, data);
+    }
+  }, [data, downloadText, downloadUrl]);
+
+  return (
+    <NodeContent className="artifact-frame p-0">
+      <div className="artifact-frame-header">
+        <span
+          className="artifact-frame-title copyable-text nodrag nopan"
+          title={displayName}
+        >
+          {displayName}
+        </span>
+        <div className="artifact-frame-actions nodrag nopan">
+          <button
+            aria-label="复制产物内容"
+            disabled={!canCopy}
+            onClick={(event) => {
+              if (event.detail === 0) {
+                void handleCopy();
+              }
+              event.stopPropagation();
+            }}
+            onMouseDown={(event) => event.stopPropagation()}
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              void handleCopy();
+            }}
+            title={copyState === "error" ? "复制失败" : "复制"}
+            type="button"
+          >
+            {copyState === "copied" ? <Check size={13} /> : <Copy size={13} />}
+          </button>
+          <button
+            aria-label="下载产物"
+            disabled={!canDownload}
+            onClick={(event) => {
+              if (event.detail === 0) {
+                handleDownload();
+              }
+              event.stopPropagation();
+            }}
+            onMouseDown={(event) => event.stopPropagation()}
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              handleDownload();
+            }}
+            title="下载"
+            type="button"
+          >
+            <Download size={13} />
+          </button>
+        </div>
+      </div>
+      <div className={className}>{children}</div>
+      {data.upload && (
+        <span className={`upload-state artifact-frame-upload ${data.upload.status}`}>
+          {data.upload.status === "error" ? "上传失败" : "上传中"}
+        </span>
+      )}
+    </NodeContent>
+  );
+}
+
 function ArtifactLikeNode({ data, selected, width, height }: ArtifactLikeNodeProps) {
   const label = getArtifactNodeLabel(data);
   const metaLine = getArtifactMetaLine(data);
@@ -4693,23 +4818,26 @@ function ArtifactLikeNode({ data, selected, width, height }: ArtifactLikeNodePro
             : `canvas-node artifact-card ${data.kind}`
         }
         handles={{ source: true, target: true }}
-        minHeight={96}
+        minHeight={160}
         minWidth={180}
         selected={selected}
         style={getResizableNodeStyle(width, height)}
       >
-        <NodeContent className="artifact-content">
+        <ArtifactFrame
+          className="artifact-content"
+          copyText={inlinePreview ?? loadedCardText ?? summary}
+          data={data}
+          downloadText={inlinePreview ?? loadedCardText ?? summary}
+          downloadUrl={contentUrl}
+        >
           <div className="artifact-heading">
             <span className="artifact-icon">
               <ArtifactNodeIcon kind={data.kind} />
             </span>
             <span className="copyable-text nodrag nopan">{label}</span>
           </div>
-          <strong className="copyable-text nodrag nopan" title={data.title}>
-            {data.title}
-          </strong>
           {summary && (
-            <p className="copyable-text nodrag nopan" title={summary}>
+            <p className="artifact-body-text copyable-text nodrag nopan" title={summary}>
               {summary}
             </p>
           )}
@@ -4718,12 +4846,7 @@ function ArtifactLikeNode({ data, selected, width, height }: ArtifactLikeNodePro
               {metaLine}
             </small>
           )}
-          {data.upload && (
-            <span className={`upload-state ${data.upload.status}`}>
-              {data.upload.status === "error" ? "上传失败" : "上传中"}
-            </span>
-          )}
-        </NodeContent>
+        </ArtifactFrame>
       </Node>
 
       <ArtifactPreviewDialog
@@ -4929,64 +5052,32 @@ function CodeNode({
           selected ? "canvas-node selected code-card" : "canvas-node code-card"
         }
         handles={{ source: true, target: true }}
-        minHeight={160}
-        minWidth={260}
+        minHeight={180}
+        minWidth={180}
         selected={selected}
         style={getResizableNodeStyle(width, height)}
       >
-        <NodeContent className="code-content">
-          <div className="code-heading">
-            <span className="artifact-icon">
-              <Type size={14} />
-            </span>
-            <div>
-              <span>Code</span>
-              <strong className="copyable-text nodrag nopan" title={data.title}>
-                {data.title}
-              </strong>
-            </div>
-          </div>
+        <ArtifactFrame
+          className="code-content"
+          copyText={codeText}
+          data={data}
+          downloadText={codeText}
+          downloadUrl={contentUrl}
+        >
           <div className="code-node-editor nodrag nopan nowheel">
-            {isHtmlCode ? (
-              <HtmlSourcePreview
-                className="code-node-block code-node-html-preview"
-                filename={data.title}
-                html={codeText}
-                previewDisabled={!codeText}
-                previewDisabledText={displayCode}
-                showLineNumbers
-                sourceLabel="html"
-                title={data.title}
-              />
-            ) : (
-              <CodeBlock
-                className="code-node-block"
-                code={displayCode}
-                language={language}
-                showLineNumbers
-              >
-                <CodeBlockHeader className="code-node-block-header">
-                  <CodeBlockTitle>
-                    <CodeBlockFilename>{language}</CodeBlockFilename>
-                  </CodeBlockTitle>
-                  <CodeBlockActions>
-                    <CodeBlockCopyButton aria-label="复制代码" title="复制代码" />
-                  </CodeBlockActions>
-                </CodeBlockHeader>
-              </CodeBlock>
-            )}
+            <CodeBlock
+              className="code-node-block"
+              code={displayCode}
+              language={language}
+              showLineNumbers
+            />
           </div>
           {metaLine && (
             <small className="artifact-meta copyable-text nodrag nopan">
               {metaLine}
             </small>
           )}
-          {data.upload && (
-            <span className={`upload-state ${data.upload.status}`}>
-              {data.upload.status === "error" ? "上传失败" : "上传中"}
-            </span>
-          )}
-        </NodeContent>
+        </ArtifactFrame>
       </Node>
 
       <ArtifactPreviewDialog
@@ -5038,49 +5129,30 @@ function HtmlPageNode({
           : "canvas-node html-page-card"
       }
       handles={{ source: true, target: true }}
-      minHeight={220}
-      minWidth={280}
+      minHeight={180}
+      minWidth={180}
       selected={selected}
       style={getResizableNodeStyle(width, height)}
     >
-      <NodeContent className="html-page-content">
-        <div className="html-page-heading">
-          <span className="artifact-icon">
-            <Globe2 size={14} />
-          </span>
-          <div>
-            <span>HTML</span>
-            <strong className="copyable-text nodrag nopan" title={data.title}>
-              {data.title}
-            </strong>
-          </div>
-          <button
-            aria-label="打开页面预览"
-            className="html-page-open nodrag nopan"
-            disabled={!htmlText}
-            onClick={(event) => {
-              event.stopPropagation();
-              openHtmlPreviewWindow(data.title, htmlText);
-            }}
-            onMouseDown={(event) => event.stopPropagation()}
-            onPointerDown={(event) => event.stopPropagation()}
-            title="打开页面预览"
-            type="button"
-          >
-            <ArrowUpRight size={13} />
-          </button>
+      <ArtifactFrame
+        className="html-page-content"
+        copyText={htmlText}
+          data={data}
+          downloadText={htmlText}
+          downloadUrl={contentUrl}
+        >
+        <div className="html-page-frame nodrag nopan nowheel">
+          {htmlText ? (
+            <iframe
+              referrerPolicy="no-referrer"
+              sandbox="allow-forms allow-modals allow-scripts"
+              srcDoc={htmlText}
+              title={`${data.title} 预览`}
+            />
+          ) : (
+            <div className="html-page-empty">{previewDisabledText}</div>
+          )}
         </div>
-        <HtmlSourcePreview
-          className="html-page-viewer nodrag nopan nowheel"
-          defaultMode="preview"
-          filename={data.title}
-          html={htmlText}
-          previewDisabled={!htmlText}
-          previewDisabledText={previewDisabledText}
-          showLineNumbers
-          sourceLabel="html"
-          title={data.title}
-        />
         {selected && (
           <div className="html-page-footer">
             <span className="copyable-text nodrag nopan">
@@ -5088,7 +5160,7 @@ function HtmlPageNode({
             </span>
           </div>
         )}
-      </NodeContent>
+      </ArtifactFrame>
     </Node>
   );
 }
@@ -5537,33 +5609,18 @@ function stringifyPreviewValue(value: unknown) {
   }
 }
 
-function openHtmlPreviewWindow(title: string, html: string) {
-  if (!html.trim()) {
-    return;
-  }
-  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const opened = window.open(url, "_blank");
-  if (!opened) {
-    URL.revokeObjectURL(url);
-    return;
-  }
-  opened.opener = null;
-  opened.addEventListener(
-    "load",
-    () => {
-      opened.document.title = title;
-    },
-    { once: true }
-  );
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-}
-
 function downloadArtifactAsset(
   url: string,
   data: ArtifactLikeNodeProps["data"]
 ) {
   triggerImageDownload(url, getArtifactDownloadName(data));
+}
+
+function downloadTextArtifact(text: string, data: ArtifactLikeNodeProps["data"]) {
+  const blob = new Blob([text], { type: getArtifactDownloadMimeType(data) });
+  const url = URL.createObjectURL(blob);
+  triggerImageDownload(url, getArtifactDownloadName(data));
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function getArtifactDownloadName(data: ArtifactLikeNodeProps["data"]) {
@@ -5579,16 +5636,50 @@ function getArtifactDownloadName(data: ArtifactLikeNodeProps["data"]) {
   return `${safeName}.${extension}`;
 }
 
+function getArtifactDisplayName(data: ArtifactLikeNodeProps["data"]) {
+  const extension = getArtifactDownloadExtension(data);
+  const title = data.title.trim() || data.artifact.title?.trim() || data.artifact.id;
+  return title.toLowerCase().endsWith(`.${extension.toLowerCase()}`)
+    ? title
+    : `${title}.${extension}`;
+}
+
+function getArtifactDownloadMimeType(data: ArtifactLikeNodeProps["data"]) {
+  if (data.kind === "markdown") {
+    return "text/markdown;charset=utf-8";
+  }
+  if (data.kind === "webpage") {
+    return "text/html;charset=utf-8";
+  }
+  if (data.kind === "code") {
+    return `${readArtifactMimeType(data.artifact) ?? "text/plain"};charset=utf-8`;
+  }
+  return `${readArtifactMimeType(data.artifact) ?? "text/plain"};charset=utf-8`;
+}
+
+const CODE_LANGUAGE_EXTENSIONS: Record<string, string> = {
+  javascript: "js",
+  markdown: "md",
+  python: "py",
+  shellscript: "sh",
+  text: "txt",
+  typescript: "ts",
+};
+
 function getArtifactDownloadExtension(data: ArtifactLikeNodeProps["data"]) {
   const mimeType = readArtifactMimeType(data.artifact);
   if (data.kind === "code") {
-    return readMetadataString(data.artifact.metadata?.language) ?? "txt";
+    const language = getCodeBlockLanguage(data);
+    return CODE_LANGUAGE_EXTENSIONS[language] ?? language;
   }
   if (data.kind === "markdown") {
     return "md";
   }
   if (data.kind === "webpage" || mimeType === "text/html") {
     return "html";
+  }
+  if (mimeType?.includes("markdown")) {
+    return "md";
   }
   if (mimeType?.includes("json")) {
     return "json";
@@ -5671,6 +5762,7 @@ function MarkdownNode({
     loadedText && loadedText !== data.content
       ? { ...data, content: loadedText }
       : data;
+  const metaLine = getArtifactMetaLine(data);
 
   return (
     <Node
@@ -5680,23 +5772,18 @@ function MarkdownNode({
           : "canvas-node markdown-card"
       }
       handles={{ source: true, target: true }}
-      minHeight={220}
-      minWidth={280}
+      minHeight={180}
+      minWidth={180}
       selected={selected}
       style={getResizableNodeStyle(width, height)}
     >
-      <NodeContent className="markdown-content">
-        <div className="markdown-heading">
-          <span className="artifact-icon">
-            <FileText size={14} />
-          </span>
-          <div>
-          
-            <strong className="copyable-text nodrag nopan" title={data.title}>
-              {data.title}
-            </strong>
-          </div>
-        </div>
+      <ArtifactFrame
+        className="markdown-content"
+        copyText={editorData.content}
+          data={data}
+          downloadText={editorData.content}
+          downloadUrl={contentUrl}
+        >
         <div
           className="blocknote-body nodrag nopan nowheel"
           onFocusCapture={requestFullContent}
@@ -5716,7 +5803,12 @@ function MarkdownNode({
             />
           </Suspense>
         </div>
-      </NodeContent>
+        {metaLine && (
+          <small className="artifact-meta copyable-text nodrag nopan">
+            {metaLine}
+          </small>
+        )}
+      </ArtifactFrame>
     </Node>
   );
 }
@@ -6098,6 +6190,16 @@ async function fetchImageBlob(url: string, timeoutMs?: number) {
 }
 
 async function copyTextToClipboard(text: string) {
+  const clipboard = navigator.clipboard;
+  if (clipboard?.writeText) {
+    try {
+      await clipboard.writeText(text);
+      return;
+    } catch {
+      // Fall back to the legacy copy path below.
+    }
+  }
+
   const textarea = document.createElement("textarea");
   textarea.value = text;
   textarea.setAttribute("readonly", "");
