@@ -5,6 +5,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { LoadingIndicator } from "@/components/LoadingIndicator";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { CanvasToolPart, CanvasToolState } from "@/types/canvas";
@@ -12,7 +13,6 @@ import {
   CheckmarkCircleIcon as CheckCircleIcon,
   ChevronDownIcon,
   CircleIcon,
-  ClockIcon,
   WrenchIcon,
   CancelCircleIcon as XCircleIcon,
 } from "@proicons/react";
@@ -46,7 +46,7 @@ const getStatusBadge = (status: CanvasToolState) => {
 
   const icons: Record<CanvasToolState, ReactNode> = {
     "input-streaming": <CircleIcon className="size-4" />,
-    "input-available": <ClockIcon className="size-4 animate-pulse" />,
+    "input-available": <LoadingIndicator ariaLabel="工具运行中" size={16} />,
     "output-available": <CheckCircleIcon className="size-4 text-green-600" />,
     "output-error": <XCircleIcon className="size-4 text-red-600" />,
   };

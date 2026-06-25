@@ -1,16 +1,27 @@
-import { SpinnerIcon as Loader2Icon } from "@proicons/react"
+import type { ComponentProps } from "react";
 
-import { cn } from "@/lib/utils"
+import { LoadingIndicator } from "@/components/LoadingIndicator";
+import { cn } from "@/lib/utils";
 
-function Spinner({ className, ...props }: React.ComponentProps<typeof Loader2Icon>) {
+type SpinnerProps = ComponentProps<typeof LoadingIndicator> & {
+  "aria-label"?: string;
+};
+
+function Spinner({
+  "aria-label": ariaLabelAttribute,
+  ariaLabel,
+  className,
+  size = 16,
+  ...props
+}: SpinnerProps) {
   return (
-    <Loader2Icon
-      role="status"
-      aria-label="Loading"
-      className={cn("size-4 animate-spin", className)}
+    <LoadingIndicator
+      ariaLabel={ariaLabel ?? ariaLabelAttribute ?? "Loading"}
+      className={cn("text-primary", className)}
+      size={size}
       {...props}
     />
-  )
+  );
 }
 
-export { Spinner }
+export { Spinner };

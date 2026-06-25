@@ -1,6 +1,7 @@
 import { handoff, type Agent } from "@openai/agents";
 
 import type { ArtifactType } from "../../../src/types/canvas.ts";
+import { getAgentCapabilityRoute } from "../agent-capability-manifest.ts";
 import {
   selectAgentRoutesForTask,
   type SpecialistRoute,
@@ -23,47 +24,54 @@ type SpecialistAgentDefinition = {
 let specialistAgentRegistry: SpecialistAgentDefinition[] | undefined;
 
 export function createSpecialistAgentRegistry(): SpecialistAgentDefinition[] {
+  const documentCapability = requireCapabilityRoute("document");
+  const webCapability = requireCapabilityRoute("web");
+  const researchCapability = requireCapabilityRoute("research");
+  const imageCapability = requireCapabilityRoute("image");
+
   specialistAgentRegistry ??= [
     {
       agent: createDocumentAgent(),
       enabledRoutes: ["document"],
       handoffPolicy: shouldEnableDocumentHandoff,
-      name: "Cucumber Document Agent",
-      producedArtifactTypes: ["doc", "code", "webpage"],
-      requiredTools: ["create_text_artifact"],
+      name: documentCapability.agentName,
+      producedArtifactTypes: documentCapability.producedArtifactTypes,
+      requiredTools: documentCapability.requiredTools,
     },
     {
       agent: createWebAgent(),
       enabledRoutes: ["web"],
       handoffPolicy: shouldEnableWebHandoff,
-      name: "Cucumber Web Agent",
-      producedArtifactTypes: ["webpage"],
-      requiredTools: ["fetch_webpage"],
+      name: webCapability.agentName,
+      producedArtifactTypes: webCapability.producedArtifactTypes,
+      requiredTools: webCapability.requiredTools,
     },
     {
       agent: createResearchAgent(),
       enabledRoutes: ["research"],
       handoffPolicy: shouldEnableResearchHandoff,
-      name: "Cucumber Research Agent",
-      producedArtifactTypes: ["doc"],
-      requiredTools: ["collect_research_sources", "create_research_artifact"],
+      name: researchCapability.agentName,
+      producedArtifactTypes: researchCapability.producedArtifactTypes,
+      requiredTools: researchCapability.requiredTools,
     },
     {
       agent: createImageAgent(),
       enabledRoutes: ["image"],
       handoffPolicy: shouldEnableImageHandoff,
-      name: "Cucumber Image Agent",
-      producedArtifactTypes: ["image", "doc"],
-      requiredTools: [
-        "analyze_media",
-        "decompose_image",
-        "generate_image",
-        "image_matting",
-        "upscale_image",
-      ],
+      name: imageCapability.agentName,
+      producedArtifactTypes: imageCapability.producedArtifactTypes,
+      requiredTools: imageCapability.requiredTools,
     },
   ];
   return specialistAgentRegistry;
+}
+
+function requireCapabilityRoute(route: SpecialistRoute) {
+  const definition = getAgentCapabilityRoute(route);
+  if (!definition) {
+    throw new Error(`Missing agent capability route: ${route}`);
+  }
+  return definition;
 }
 
 export function createSpecialistHandoffs(

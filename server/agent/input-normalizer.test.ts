@@ -161,7 +161,7 @@ describe("input normalizer", () => {
     expect(normalized).toMatchObject({
       operation: "create",
       artifact: { kind: "image", format: "png" },
-      requiredCapabilities: ["image-generation"],
+      requiredCapabilities: ["media-analysis", "image-generation"],
       intent: "image.generate",
       image: {
         resultCount: 1,
@@ -391,6 +391,183 @@ describe("input normalizer", () => {
       intent: "text.answer",
     });
     expect(selectAgentRoute(normalized)).toBe("manager");
+  });
+
+  it("keeps generation tooling questions out of image generation", () => {
+    const raw = "有哪些开源免费调用的3D模型生成";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "create",
+        artifact: { kind: "image", subtype: "poster", format: "png" },
+        requiredCapabilities: ["image-generation"],
+        intent: "image.generate",
+        image: {
+          contentPrompt: "开源免费 3D 模型生成工具科普信息图",
+          resultCount: 1,
+        },
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      rawPrompt: "有哪些开源免费调用的3D 模型生成",
+      operation: "answer",
+      artifact: null,
+      negativeCapabilities: ["image-generation"],
+      intent: "text.answer",
+    });
+    expect(normalized.image).toBeUndefined();
+    expect(selectAgentRoute(normalized)).toBe("manager");
+  });
+
+  it("treats selected image generation-info questions as metadata answers", () => {
+    const raw = "这个图片的生成信息是什么";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "analyze",
+        artifact: { kind: "markdown", format: "markdown" },
+        requiredCapabilities: ["media-analysis", "markdown-artifact"],
+        intent: "media.analyze",
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "answer",
+      artifact: null,
+      negativeCapabilities: ["image-generation"],
+      requiredCapabilities: [],
+      intent: "text.answer",
+    });
+    expect(normalized.image).toBeUndefined();
+    expect(selectAgentRoute(normalized)).toBe("manager");
+  });
+
+  it("keeps image-generation tool recommendations as answers", () => {
+    const raw = "有哪些免费的图片生成工具推荐";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "create",
+        artifact: { kind: "image", format: "png" },
+        requiredCapabilities: ["image-generation"],
+        intent: "image.generate",
+        image: { contentPrompt: raw },
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "answer",
+      artifact: null,
+      negativeCapabilities: ["image-generation"],
+      intent: "text.answer",
+    });
+    expect(normalized.image).toBeUndefined();
+  });
+
+  it("keeps image-generation meta questions out of image creation", () => {
+    const raw = "图片生成为什么失败，常见报错流程是什么";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "create",
+        artifact: { kind: "image", format: "png" },
+        requiredCapabilities: ["image-generation"],
+        intent: "image.generate",
+        image: { contentPrompt: raw },
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "answer",
+      artifact: null,
+      negativeCapabilities: ["image-generation"],
+      intent: "text.answer",
+    });
+    expect(normalized.image).toBeUndefined();
+    expect(selectAgentRoute(normalized)).toBe("manager");
+  });
+
+  it("routes code requests about image generation before image fallback", () => {
+    const raw = "写一段调用图片生成接口的 TypeScript 代码";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "create",
+        artifact: { kind: "image", format: "png" },
+        requiredCapabilities: ["image-generation"],
+        intent: "image.generate",
+        image: { contentPrompt: raw },
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "create",
+      artifact: { kind: "code", format: "markdown" },
+      domain: "engineering",
+      requiredCapabilities: [],
+      intent: "code.create",
+    });
+    expect(normalized.image).toBeUndefined();
+    expect(selectAgentRoute(normalized)).toBe("document");
+  });
+
+  it("routes data requests containing image-generation words before image fallback", () => {
+    const raw = "输出图片生成任务的数据表格";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "create",
+        artifact: { kind: "image", format: "png" },
+        requiredCapabilities: ["image-generation"],
+        intent: "image.generate",
+        image: { contentPrompt: raw },
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "create",
+      artifact: { kind: "data", subtype: "table" },
+      requiredCapabilities: [],
+      intent: "data.analyze",
+    });
+    expect(normalized.image).toBeUndefined();
+  });
+
+  it("routes canvas node requests containing image words before image fallback", () => {
+    const raw = "新增一个图片节点到画布";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "create",
+        artifact: { kind: "image", format: "png" },
+        requiredCapabilities: ["image-generation"],
+        intent: "image.generate",
+        image: { contentPrompt: raw },
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "edit",
+      artifact: { kind: "canvas" },
+      requiredCapabilities: ["canvas-operation"],
+      intent: "canvas.operation",
+    });
+    expect(normalized.image).toBeUndefined();
   });
 
   it("routes explicit long-form explanations to the document specialist", () => {

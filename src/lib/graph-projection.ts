@@ -321,7 +321,11 @@ export function projectRunTraceToCanvas({
       },
     }
   );
-  const expectedImageRequest = readExpectedImageRequest(orderedEvents, prompt);
+  const expectedImageRequest = readExpectedImageRequest(
+    orderedEvents,
+    prompt,
+    runStatus
+  );
   const pendingImageProjection = expectedImageRequest && !runWasAborted
     ? createPendingImageResultNodes(
         runNode,
@@ -958,7 +962,8 @@ function buildRunSummaryItems(events: RunStepTraceEvent[]): RunSummaryItem[] {
 
 function readExpectedImageRequest(
   events: RunStepTraceEvent[],
-  prompt: string
+  prompt: string,
+  runStatus: AgentRunStatus
 ): {
   count: number;
   preview: Omit<ImageRequestPreview, "index" | "count">;
@@ -969,6 +974,9 @@ function readExpectedImageRequest(
     .findLast((event) => readToolName(event.payload.toolName) === "generate_image");
   const normalizedImageRequest = readNormalizedImageRequest(events);
   if (!generateInput && events.some((event) => event.type === "artifact.created")) {
+    return null;
+  }
+  if (!generateInput && runStatus === "error") {
     return null;
   }
   if (!generateInput && !normalizedImageRequest) {
@@ -1702,12 +1710,17 @@ function isLegacyFinalOutputArtifact(
 
 function isMarkdownArtifact(artifact: ArtifactRef) {
   const format = readString(artifact.metadata?.format)?.toLowerCase();
-  const mimeType = readString(artifact.metadata?.mimeType)?.toLowerCase();
+  const mimeType = (
+    readString(artifact.mimeType) ?? readString(artifact.metadata?.mimeType)
+  )?.toLowerCase();
+  const previewKind =
+    artifact.previewKind ?? readArtifactPreviewKind(artifact.metadata?.previewKind);
 
   return (
     format === "markdown" ||
     format === "md" ||
     mimeType === "text/markdown" ||
+    previewKind === "markdown" ||
     artifact.uri?.endsWith(".md") ||
     artifact.contentRef?.endsWith(".md")
   );
@@ -1715,10 +1728,12 @@ function isMarkdownArtifact(artifact: ArtifactRef) {
 
 function readMarkdownArtifactContent(artifact: ArtifactRef) {
   return (
+    readString(artifact.preview) ??
     readString(artifact.metadata?.markdown) ??
     readString(artifact.metadata?.content) ??
     readString(artifact.metadata?.text) ??
-    readString(artifact.metadata?.preview)
+    readString(artifact.metadata?.preview) ??
+    readString(artifact.summary)
   );
 }
 
@@ -1765,6 +1780,10 @@ function getArtifactFallbackTitle(artifact: ArtifactRef) {
 }
 
 function getArtifactSummary(artifact: ArtifactRef) {
+  if (artifact.summary?.trim()) {
+    return artifact.summary.trim();
+  }
+
   const summary = artifact.metadata?.summary;
   if (typeof summary === "string" && summary.trim()) {
     return summary.trim();
@@ -2139,16 +2158,41 @@ function readArtifactRef(value: unknown): ArtifactRef | null {
   }
 
   return {
+    contentRef: readString(candidate.contentRef),
     id,
-    type,
-    uri: readString(candidate.uri),
-    title: readString(candidate.title),
+    mimeType: readString(candidate.mimeType),
     metadata:
       candidate.metadata && typeof candidate.metadata === "object"
         ? (candidate.metadata as Record<string, unknown>)
         : undefined,
-    contentRef: readString(candidate.contentRef),
+    preview: readString(candidate.preview),
+    previewKind: readArtifactPreviewKind(candidate.previewKind),
+    sizeBytes: readNumber(candidate.sizeBytes),
+    summary: readString(candidate.summary),
+    title: readString(candidate.title),
+    type,
+    uri: readString(candidate.uri),
+    version: readNumber(candidate.version),
   };
+}
+
+function readArtifactPreviewKind(value: unknown): ArtifactPreviewKind | undefined {
+  if (
+    value === "image" ||
+    value === "markdown" ||
+    value === "code" ||
+    value === "document" ||
+    value === "webpage" ||
+    value === "dataset" ||
+    value === "file" ||
+    value === "decision" ||
+    value === "memory" ||
+    value === "toolResult"
+  ) {
+    return value;
+  }
+
+  return undefined;
 }
 
 function readArtifactPrompt(

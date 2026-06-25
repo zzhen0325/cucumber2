@@ -8,6 +8,14 @@
 - Manager prompt 收窄为通用 fallback 与复合任务编排：运行时已经先完成可信上下文重建、快速路由和输入归一化；明确的单一 specialist 任务直接启动对应 Agent，只有短答 fallback、提示词/文本改写、knowledge 问答、受限画布操作和复合任务才由 Manager 处理。
 - Run plan 的 route 文案从“委派 XX Agent”调整为“进入 XX Agent”，覆盖直接启动 specialist 和 Manager handoff 两种路径，避免把单一任务误读成一定经过 Manager。
 
+## 2026-06-24 Fast Capability-Aware Router
+
+- Agent Run 路由收敛为三层：`Quick Router` 只做确定性 preflight（寒暄、图片生成元信息直返、简单 canvas operation、已有 normalized image-mode input）；其余请求先进入 `Fast Intent Router`，低置信或冲突时再进入完整 Input Normalizer。
+- 新增内部 `agent-capability-manifest`，集中描述 Manager、Document、Web、Research 和 Image route 的 agent 名称、产物类型、required tools、核心 capabilities 和负能力边界；specialist registry、task-router 和 fast router 共用该清单，减少 prompt/工具/route 配置漂移。
+- `Fast Intent Router` 使用当前 Agents SDK `Agent + Runner` 结构化输出，`maxTurns=1`，输入只包含用户 prompt、可信上游摘要、图像控制项和压缩 capability manifest。输出候选协议字段后仍交给 `finalizeNormalizedAgentInput` 做确定性协议化，不绕过 runtime policy。
+- `routerSource` 新增 `fast-intent-router`；`run.created`、`quick.route` 和 `input.normalized` Trace payload 记录 fast route confidence、preferredRoute、fallbackReason 和 candidateTools。没有新增数据库 schema，也没有改变客户端提交合同。
+- `run-plan` 优先从 normalized protocol 派生兼容 intent，避免模型或旧测试直接写入的 `intent` 覆盖 artifact/capability 事实。
+
 ## 2026-06-23 Run Node Conversation Flow
 
 - Run 节点信息层级调整为 Agent 对话优先：所有可见文本 delta（`output_text_delta`、Responses `response.output_text.delta`、reasoning summary 和 refusal）都会立即写入 `agent.message.*` 并同步进入 AI SDK `text-delta`，最终输出在没有被文本流覆盖时会补成 assistant 消息；计划、handoff/skill 摘要和工具调用折叠在 Agent 执行流下方，不再把图片等 artifact 摘要作为 Run 卡主内容展示。
@@ -43,7 +51,7 @@
 
 ## 2026-06-17 Runtime Fast Path
 
-- `/api/agent-run` 入口保持 AI SDK HTTP stream 不变；新增 `Quick Router` 在本地规则层先判定 `smalltalk`、`simple_chat`、`simple_canvas`、`image_task` 和 `complex_agent_task`，并在 `run.created` / `input.normalized` payload 中写入 route、routerSource、skippedSteps 和 cache 状态。
+- `/api/agent-run` 入口保持 AI SDK HTTP stream 不变；最初的 `Quick Router` 本地规则层后来收缩为确定性 preflight，复杂语义路由见 2026-06-24 的 Fast Capability-Aware Router。Trace 仍在 `run.created` / `input.normalized` payload 中写入 route、routerSource、skippedSteps 和路由诊断字段。
 - `smalltalk` 直接写 Trace、流式文本和 `run.completed`；`simple_chat` 使用缓存的轻量 chat Agent/Runner，不加载 skills、handoff 或动态计划；`simple_canvas` 只处理确定性的安全画布操作，并继续通过 canvas policy 写 `canvas.operation.*`。
 - `image_task` 可在 `input.normalized` 后由投影层先创建 loading 图片结果节点；完整图片 artifact 由 `generate_image`、`image_matting` 或 `upscale_image` 产生并按 artifact id 幂等物化，不重复生成结果节点；图片拆解/理解则由 `decompose_image` / `analyze_media` 创建 Markdown artifact 节点。
 - `complex_agent_task` 才进入完整 Agent Runner；compact context、skill retrieval 和 tool prepare 在依赖允许时并行。`plan.build` 只在复杂、图片或非空动态计划时写 Trace，简单任务不再写空计划步骤。

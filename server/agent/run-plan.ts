@@ -1,5 +1,6 @@
 import type { AgentRunInput } from "./context.ts";
 import {
+  inferIntentFromProtocol,
   isPromptTextEditRequest,
   type NormalizedIntent,
 } from "./input-normalizer.ts";
@@ -32,7 +33,7 @@ export function buildRunPlan(input: AgentRunInput): RuntimeRunPlanItem[] {
     return [];
   }
 
-  const intent = input.normalizedInput?.intent ?? "text.answer";
+  const intent = getPlanIntent(input);
   if (input.retryFrom) {
     return retryPlan(input);
   }
@@ -160,7 +161,7 @@ function shouldCreateRunPlan(input: AgentRunInput) {
     return false;
   }
 
-  const intent = input.normalizedInput?.intent ?? "text.answer";
+  const intent = getPlanIntent(input);
   if (ALWAYS_PLAN_INTENTS.has(intent)) {
     return true;
   }
@@ -177,6 +178,22 @@ function isPromptTextEditRun(input: AgentRunInput) {
     !input.normalizedInput.artifact &&
     isPromptTextEditRequest(input.message)
   );
+}
+
+function getPlanIntent(input: AgentRunInput): NormalizedIntent {
+  const normalizedInput = input.normalizedInput;
+  if (!normalizedInput) {
+    return "text.answer";
+  }
+  if (normalizedInput.operation) {
+    return inferIntentFromProtocol({
+      artifact: normalizedInput.artifact,
+      operation: normalizedInput.operation,
+      rawPrompt: normalizedInput.rawPrompt ?? input.message,
+      requiredCapabilities: normalizedInput.requiredCapabilities,
+    });
+  }
+  return normalizedInput.intent ?? "text.answer";
 }
 
 function hasComplexitySignal(input: AgentRunInput) {

@@ -1,6 +1,4 @@
-import { motion } from "framer-motion";
-import { SpinnerIcon as Loader2 } from "@proicons/react";
-
+import { LoadingIndicator } from "@/components/LoadingIndicator";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 
@@ -45,13 +43,7 @@ export function DeleteProjectDialog({
             className="rounded-xl bg-destructive text-white hover:bg-destructive/90"
           >
             {deleting ? (
-              <motion.span
-                animate={{ rotate: 360 }}
-                transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
-                className="flex items-center justify-center"
-              >
-                <Loader2 size={16} />
-              </motion.span>
+              <LoadingIndicator ariaLabel="删除中" size={16} />
             ) : (
               "永久删除"
             )}

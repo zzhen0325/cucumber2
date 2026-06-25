@@ -18,41 +18,87 @@ describe("quick agent run router", () => {
     );
   });
 
-  it("routes short ordinary questions to the lightweight chat path", () => {
+  it("defers short ordinary questions to the model route scorer", () => {
     const route = routeAgentRunQuick(input({ message: "解释一下 React Flow 是什么" }));
+
+    expect(route).toMatchObject({
+      route: "complex_agent_task",
+      routerSource: "quick-router",
+      requiresModelNormalization: true,
+    });
+    expect(route.normalizedInput).toBeUndefined();
+  });
+
+  it("defers generation-tool questions to the model route scorer", () => {
+    const route = routeAgentRunQuick(
+      input({ message: "有哪些开源免费调用的3D模型生成" })
+    );
+
+    expect(route).toMatchObject({
+      route: "complex_agent_task",
+      routerSource: "quick-router",
+      requiresModelNormalization: true,
+    });
+    expect(route.normalizedInput).toBeUndefined();
+  });
+
+  it("answers selected image generation metadata without image tools", () => {
+    const route = routeAgentRunQuick(
+      input({
+        message: "这个图片的生成信息是什么",
+        selectedNodeId: "image-1",
+        selectedNodeIds: ["image-1"],
+        upstreamContext: [
+          {
+            artifact: {
+              id: "artifact-1",
+              metadata: {
+                height: 1024,
+                model: "seed5_duotu_zz",
+                prompt: "开源免费 3D 模型生成工具科普信息图",
+                provider: "byteartist",
+                sourcePrompt: "有哪些开源免费调用的3D模型生成",
+                sourceToolName: "generate_image",
+                width: 1536,
+              },
+              type: "image",
+            },
+            imageUrl: "/api/projects/project-1/artifacts/artifact-1/content",
+            nodeId: "image-1",
+            prompt: "有哪些开源免费调用的3D模型生成",
+            summary: "Generated image",
+            type: "image",
+          },
+        ],
+      })
+    );
 
     expect(route).toMatchObject({
       route: "simple_chat",
       requiresModelNormalization: false,
+      directResponse: expect.stringContaining("这张图记录到的生成信息"),
       normalizedInput: {
         operation: "answer",
         artifact: null,
-        intent: "text.answer",
+        negativeCapabilities: ["image-generation"],
       },
     });
+    expect(route.directResponse).toContain("seed5_duotu_zz");
+    expect(route.directResponse).toContain("1536x1024");
     expect(route.skippedSteps).toEqual(
-      expect.arrayContaining(["input.normalize", "skills.retrieve"])
+      expect.arrayContaining(["input.normalize", "skills.retrieve", "agent.start"])
     );
   });
 
-  it("routes explicit image generation locally without LLM normalization", () => {
+  it("defers explicit image generation to the model route scorer", () => {
     const route = routeAgentRunQuick(input({ message: "生成一张 16:9 黄瓜海报" }));
 
     expect(route).toMatchObject({
-      route: "image_task",
-      requiresModelNormalization: false,
-      normalizedInput: {
-        artifact: { kind: "image", subtype: "poster", format: "png" },
-        intent: "image.generate",
-        image: {
-          resultCount: 1,
-          aspectRatio: "16:9",
-        },
-      },
+      route: "complex_agent_task",
+      routerSource: "quick-router",
+      requiresModelNormalization: true,
     });
-    expect(route.skippedSteps).toEqual(
-      expect.arrayContaining(["input.normalize", "skills.retrieve"])
-    );
+    expect(route.normalizedInput).toBeUndefined();
   });
 
   it("lets image composer mode force terse prompts into image generation", () => {
@@ -93,7 +139,7 @@ describe("quick agent run router", () => {
     expect(route.directResponse).toBeUndefined();
   });
 
-  it("routes selected-image character IP figure requests locally", () => {
+  it("defers selected-image character IP figure requests to the model route scorer", () => {
     const route = routeAgentRunQuick(
       input({
         message: "根据这个帮我出这个角色的毛绒IP形象",
@@ -104,53 +150,37 @@ describe("quick agent run router", () => {
     );
 
     expect(route).toMatchObject({
-      route: "image_task",
-      requiresModelNormalization: false,
-      normalizedInput: {
-        artifact: { kind: "image", format: "png" },
-        intent: "image.generate",
-        requiredCapabilities: ["image-generation"],
-      },
+      route: "complex_agent_task",
+      routerSource: "quick-router",
+      requiresModelNormalization: true,
     });
-    expect(route.skippedSteps).toContain("input.normalize");
+    expect(route.normalizedInput).toBeUndefined();
   });
 
-  it("routes HTML animation creation locally as a webpage artifact", () => {
+  it("defers HTML animation creation to the model route scorer", () => {
     const route = routeAgentRunQuick(
       input({ message: "用huashu skill 帮我做个30秒的HTML动画，讲agent怎么工作" })
     );
 
     expect(route).toMatchObject({
       route: "complex_agent_task",
-      requiresModelNormalization: false,
-      normalizedInput: {
-        artifact: { kind: "webpage", subtype: "animation", format: "html" },
-        intent: "webpage.create",
-        negativeCapabilities: ["image-generation"],
-      },
+      routerSource: "quick-router",
+      requiresModelNormalization: true,
     });
-    expect(route.normalizedInput?.image).toBeUndefined();
-    expect(route.skippedSteps).toContain("input.normalize");
+    expect(route.normalizedInput).toBeUndefined();
   });
 
-  it("keeps diagram requests on the complex agent path but skips LLM normalization", () => {
+  it("defers diagram requests to the model route scorer", () => {
     const route = routeAgentRunQuick(
       input({ message: "帮我创建一个视觉 H5 需求的流程时序图" })
     );
 
     expect(route).toMatchObject({
       route: "complex_agent_task",
-      requiresModelNormalization: false,
-      normalizedInput: {
-        artifact: {
-          kind: "diagram",
-          subtype: "sequenceDiagram",
-          format: "mermaid",
-        },
-        negativeCapabilities: ["image-generation"],
-      },
+      routerSource: "quick-router",
+      requiresModelNormalization: true,
     });
-    expect(route.skippedSteps).toContain("input.normalize");
+    expect(route.normalizedInput).toBeUndefined();
   });
 
   it("routes safe sticky note creation to simple canvas operations", () => {
@@ -183,7 +213,7 @@ describe("quick agent run router", () => {
 
     expect(route).toMatchObject({
       route: "complex_agent_task",
-      routerSource: "llm-normalizer",
+      routerSource: "quick-router",
       requiresModelNormalization: true,
     });
   });

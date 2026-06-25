@@ -29,6 +29,10 @@ import {
   normalizeAgentInput,
 } from "./input-normalizer.ts";
 import {
+  prewarmFastIntentRouter,
+  routeAgentRunFast,
+} from "./fast-intent-router.ts";
+import {
   hasNegativeCapability,
   selectAgentRoute,
 } from "./task-router.ts";
@@ -185,6 +189,7 @@ export function prewarmAgentRuntimeWorld() {
   getAgentRunner();
   getSimpleChatRunner();
   getSimpleChatAgent();
+  prewarmFastIntentRouter();
   createManagerAgent();
   createFastImageAgent();
   createImageAgent();
@@ -309,6 +314,14 @@ async function settlePromise<T>(promise: Promise<T>) {
 
 function shouldWriteRunPlan(route: AgentRunRoute, itemCount: number) {
   return route === "complex_agent_task" || route === "image_task" || itemCount > 0;
+}
+
+function routeForRuntimeNormalizedInput(
+  normalizedInput: NonNullable<AgentRunInput["normalizedInput"]>
+): AgentRunRoute {
+  return selectAgentRoute(normalizedInput) === "image"
+    ? "image_task"
+    : "complex_agent_task";
 }
 
 function shouldUseFastImageAgent(input: AgentRunInput) {
@@ -479,6 +492,11 @@ export async function executeAgentRun({
     );
     agentInput = await hydrateAgentRunInputArtifacts(buildAgentRunInput(input));
     quickRoute = routeAgentRunQuick(agentInput);
+    if (quickRoute.requiresModelNormalization) {
+      quickRoute = await routeAgentRunFast(agentInput, {
+        signal: input.signal,
+      });
+    }
     await writeRunEvent({
       projectId: input.projectId,
       runNodeId: input.runNodeId,
@@ -500,6 +518,10 @@ export async function executeAgentRun({
         route: quickRoute.route,
         routerSource: quickRoute.routerSource,
         skippedSteps: quickRoute.skippedSteps,
+        routeConfidence: quickRoute.confidence,
+        preferredRoute: quickRoute.preferredRoute,
+        routeFallbackReason: quickRoute.fallbackReason,
+        candidateTools: quickRoute.candidateTools,
         runtime: "openai-agents-sdk",
       }),
     });
@@ -520,12 +542,18 @@ export async function executeAgentRun({
     await writeRunPhaseEvent(runPhaseStarted(routePhase, {
       route: quickRoute.route,
       routerSource: quickRoute.routerSource,
+      routeConfidence: quickRoute.confidence,
+      preferredRoute: quickRoute.preferredRoute,
     }));
     await writeRunPhaseEvent(
       runPhaseCompleted(routePhase, {
         route: quickRoute.route,
         routerSource: quickRoute.routerSource,
         skippedSteps: quickRoute.skippedSteps,
+        routeConfidence: quickRoute.confidence,
+        preferredRoute: quickRoute.preferredRoute,
+        routeFallbackReason: quickRoute.fallbackReason,
+        candidateTools: quickRoute.candidateTools,
       })
     );
 
@@ -543,16 +571,21 @@ export async function executeAgentRun({
       await writeRunPhaseEvent(runPhaseStarted(normalizePhase, {
         route: quickRoute.route,
         routerSource: quickRoute.routerSource,
+        routeConfidence: quickRoute.confidence,
+        preferredRoute: quickRoute.preferredRoute,
+        routeFallbackReason: quickRoute.fallbackReason,
       }));
       try {
+        const normalizedInput = await normalizeAgentInput(agentInput, {
+          signal: input.signal,
+        });
         agentInput = {
           ...agentInput,
-          normalizedInput: await normalizeAgentInput(agentInput, {
-            signal: input.signal,
-          }),
+          normalizedInput,
         };
         quickRoute = {
           ...quickRoute,
+          route: routeForRuntimeNormalizedInput(normalizedInput),
           routerSource: "llm-normalizer",
         };
       } catch (error) {
@@ -570,6 +603,9 @@ export async function executeAgentRun({
           artifactKind: modelNormalizedInput?.artifact?.kind,
           route: quickRoute.route,
           routerSource: quickRoute.routerSource,
+          routeConfidence: quickRoute.confidence,
+          preferredRoute: quickRoute.preferredRoute,
+          routeFallbackReason: quickRoute.fallbackReason,
         })
       );
     }
@@ -597,11 +633,15 @@ export async function executeAgentRun({
         route: quickRoute.route,
         routerSource: quickRoute.routerSource,
         skippedSteps: quickRoute.skippedSteps,
+        routeConfidence: quickRoute.confidence,
+        preferredRoute: quickRoute.preferredRoute,
+        routeFallbackReason: quickRoute.fallbackReason,
+        candidateTools: quickRoute.candidateTools,
         runtime: "openai-agents-sdk",
       }),
     });
 
-    if (quickRoute.route === "smalltalk" && quickRoute.directResponse) {
+    if (quickRoute.directResponse) {
       await writeAgentTextDelta(quickRoute.directResponse);
       finalOutput = quickRoute.directResponse;
       await completeRun();

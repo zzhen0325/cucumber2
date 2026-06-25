@@ -1,4 +1,5 @@
 import type { NormalizedAgentInput } from "./input-normalizer.ts";
+import { getAgentCapabilityRoute } from "./agent-capability-manifest.ts";
 
 export type SpecialistRoute =
   | "document"
@@ -13,16 +14,21 @@ export function isImageArtifactTask(input?: NormalizedAgentInput | null) {
 
 export function isDocumentArtifactTask(input?: NormalizedAgentInput | null) {
   const artifact = input?.artifact;
+  const documentRoute = getRouteDefinition("document");
   return Boolean(
     artifact &&
+      documentRoute.artifactKinds.includes(artifact.kind) &&
       ["diagram", "document", "markdown"].includes(artifact.kind)
   );
 }
 
 export function isTextArtifactTask(input?: NormalizedAgentInput | null) {
   const kind = input?.artifact?.kind;
+  const documentRoute = getRouteDefinition("document");
   return Boolean(
-    kind && ["diagram", "document", "markdown", "code", "webpage"].includes(kind)
+    kind &&
+      documentRoute.artifactKinds.includes(kind) &&
+      ["diagram", "document", "markdown", "code", "webpage"].includes(kind)
   );
 }
 
@@ -61,6 +67,9 @@ export function selectAgentRoutesForTask(
     return [];
   }
   const routes: Exclude<SpecialistRoute, "manager">[] = [];
+  const imageRoute = getRouteDefinition("image");
+  const webRoute = getRouteDefinition("web");
+  const researchRoute = getRouteDefinition("research");
   if (hasAnyCapability(input, ["image-decompose", "media-analysis"])) {
     routes.push("image");
     return routes;
@@ -71,7 +80,7 @@ export function selectAgentRoutesForTask(
   }
   if (input.artifact?.kind === "webpage") {
     routes.push(
-      (input.requiredCapabilities ?? []).includes("web-fetch") ? "web" : "document"
+      hasAnyCapability(input, webRoute.requiredCapabilities) ? "web" : "document"
     );
     return routes;
   }
@@ -81,18 +90,17 @@ export function selectAgentRoutesForTask(
   }
   if (
     (input.requiredCapabilities ?? []).some((capability) =>
-      ["research", "source-based-answer", "web-fetch"].includes(capability)
+      [
+        ...researchRoute.requiredCapabilities,
+        ...webRoute.requiredCapabilities,
+      ].includes(capability)
     ) &&
     isDocumentArtifactTask(input)
   ) {
-    if ((input.requiredCapabilities ?? []).includes("web-fetch")) {
+    if (hasAnyCapability(input, webRoute.requiredCapabilities)) {
       routes.push("web");
     }
-    if (
-      (input.requiredCapabilities ?? []).some((capability) =>
-        ["research", "source-based-answer", "citations"].includes(capability)
-      )
-    ) {
+    if (hasAnyCapability(input, researchRoute.requiredCapabilities)) {
       routes.push("research");
     }
     routes.push("document");
@@ -110,7 +118,19 @@ export function selectAgentRoutesForTask(
     routes.push("research");
     return routes;
   }
+  if (hasAnyCapability(input, imageRoute.requiredCapabilities)) {
+    routes.push("image");
+    return routes;
+  }
   return routes;
+}
+
+function getRouteDefinition(route: SpecialistRoute) {
+  const definition = getAgentCapabilityRoute(route);
+  if (!definition) {
+    throw new Error(`Missing agent capability route: ${route}`);
+  }
+  return definition;
 }
 
 function hasAnyCapability(

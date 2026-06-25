@@ -1,6 +1,7 @@
-import { CheckmarkIcon as Check, AlertCircleIcon as CircleAlert, BulletListTreeIcon as ListTree, SpinnerIcon as Loader2, ArrowCounterclockwiseIcon as RotateCcw, CancelIcon as X } from "@proicons/react";
+import { CheckmarkIcon as Check, AlertCircleIcon as CircleAlert, BulletListTreeIcon as ListTree, ArrowCounterclockwiseIcon as RotateCcw, CancelIcon as X } from "@proicons/react";
 import { useMemo, type ReactNode } from "react";
 
+import { LoadingIndicator } from "@/components/LoadingIndicator";
 import type { RunStepTraceEvent } from "@/lib/graph-projection";
 import {
   getEventLabel,
@@ -60,7 +61,7 @@ export function RunTracePanel({
         </div>
       </header>
 
-      {loading && <TraceState icon={<Loader2 size={15} />} label="读取 trace" />}
+      {loading && <TraceState icon={<LoadingIndicator ariaLabel="读取 trace 中" size={15} />} label="读取 trace" />}
       {error && (
         <div className="trace-error">
           <CircleAlert size={14} />
@@ -115,7 +116,7 @@ export function RunTracePanel({
               {summary.steps.map((step) => (
                 <div className="trace-step-row" key={step.id}>
                   <span className={`trace-step-dot ${step.status}`}>
-                    {step.status === "error" ? <CircleAlert size={11} /> : step.status === "success" ? <Check size={11} /> : <Loader2 size={11} />}
+                    {step.status === "error" ? <CircleAlert size={11} /> : step.status === "success" ? <Check size={11} /> : <LoadingIndicator ariaLabel="执行中" size={11} />}
                   </span>
                   <strong>{step.label}</strong>
                   <small>

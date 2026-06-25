@@ -4,7 +4,6 @@ import {
   ArchiveIcon as FileArchive,
   FileTextIcon as FileText,
   PhotoIcon as ImageIcon,
-  SpinnerIcon as Loader2,
   AddIcon as Plus,
   SaveIcon as Save,
   SparkleIcon as Sparkles,
@@ -13,6 +12,7 @@ import {
 } from "@proicons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { LoadingIndicator } from "@/components/LoadingIndicator";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -429,7 +429,11 @@ export function SkillsPage({ className }: SkillsPageProps) {
               onClick={() => fileInputRef.current?.click()}
               title="导入 Agent Skills zip，最高 100MB，支持 SKILL.md、scripts、references、assets 和其他资源"
             >
-              {importing ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+              {importing ? (
+                <LoadingIndicator ariaLabel="导入中" size={16} />
+              ) : (
+                <Upload className="size-4" />
+              )}
               导入
             </Button>
             <Button type="button" size="lg" className="workspace-primary-button" onClick={handleNew}>
@@ -458,7 +462,7 @@ export function SkillsPage({ className }: SkillsPageProps) {
             <span>
               已配置 {skills.length}
             </span>
-            {loading && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+            {loading && <LoadingIndicator ariaLabel="加载技能中" size={14} />}
           </div>
 
           <div className="skills-list">
@@ -533,7 +537,7 @@ export function SkillsPage({ className }: SkillsPageProps) {
                   className="size-3.5 accent-primary"
                 />
                 {updatingEnabled && (
-                  <Loader2 className="size-3 animate-spin text-muted-foreground" />
+                  <LoadingIndicator ariaLabel="更新状态中" size={12} />
                 )}
                 <span>启用</span>
               </label>
@@ -550,7 +554,11 @@ export function SkillsPage({ className }: SkillsPageProps) {
                 onClick={() => void handleSave()}
                 title="保存技能"
               >
-                {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+                {saving ? (
+                  <LoadingIndicator ariaLabel="保存中" size={16} />
+                ) : (
+                  <Save className="size-4" />
+                )}
                 保存
               </Button>
               {!isNew && selectedSkill && (
@@ -564,7 +572,7 @@ export function SkillsPage({ className }: SkillsPageProps) {
                   title="下载技能源文件 zip"
                 >
                   {downloading ? (
-                    <Loader2 className="size-4 animate-spin" />
+                    <LoadingIndicator ariaLabel="下载中" size={16} />
                   ) : (
                     <Download className="size-4" />
                   )}
@@ -583,7 +591,7 @@ export function SkillsPage({ className }: SkillsPageProps) {
                   aria-label="删除技能"
                 >
                   {deleting ? (
-                    <Loader2 className="size-4 animate-spin" />
+                    <LoadingIndicator ariaLabel="删除中" size={16} />
                   ) : (
                     <Trash2 className="size-4" />
                   )}
@@ -841,7 +849,7 @@ function ResourcePreview({
         <span className="truncate text-xs font-medium text-foreground">
           {resource.path}
         </span>
-        {loading && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+        {loading && <LoadingIndicator ariaLabel="读取资源中" size={14} />}
       </div>
       <pre className="h-full overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-[11px] leading-5 text-foreground">
         {loading ? "" : content ?? "无法读取内容"}

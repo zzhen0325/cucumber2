@@ -74,6 +74,33 @@ describe("buildRunPlan", () => {
     ]);
   });
 
+  it("derives plans from artifact protocol before compatibility intent", () => {
+    const plan = buildRunPlan(
+      input({
+        message: "做个 30 秒 HTML 动画",
+        normalizedInput: {
+          intent: "image.generate",
+          operation: "create",
+          artifact: { kind: "webpage", subtype: "animation", format: "html" },
+          requiredCapabilities: ["html-artifact", "animation"],
+          negativeCapabilities: ["image-generation"],
+          rawPrompt: "做个 30 秒 HTML 动画",
+        },
+      })
+    );
+
+    expect(plan).toContainEqual({
+      id: "html-create",
+      label: "创建 HTML 页面",
+      phase: "execute",
+    });
+    expect(plan).not.toContainEqual({
+      id: "image-generate",
+      label: "生成图片",
+      phase: "execute",
+    });
+  });
+
   it("skips simple single-image plans but plans multi-image work", () => {
     expect(
       buildRunPlan(

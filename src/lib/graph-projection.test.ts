@@ -216,6 +216,66 @@ describe("agent event graph projection", () => {
       ]);
   });
 
+  it("does not project failed image nodes when image analysis fails before generation starts", () => {
+    const projection = projectRunTraceToCanvas({
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", {
+          prompt: "分析参考图中的 IP 形象并生成 4 张图片",
+          promptNodeId: "prompt-1",
+        }),
+        event("input.normalized", "input", {
+          normalizedInput: {
+            rawPrompt: "分析参考图中的 IP 形象并生成 4 张图片",
+            operation: "create",
+            artifact: { kind: "image", format: "png" },
+            requiredCapabilities: ["media-analysis", "image-generation"],
+            intent: "image.generate",
+            image: {
+              contentPrompt: "基于参考图中的 IP 形象生成图片",
+              resultCount: 4,
+              aspectRatio: "3:4",
+            },
+          },
+        }),
+        event(
+          "tool.error",
+          "analyze_media",
+          {
+            toolCallId: "call-analysis",
+            toolName: "analyze_media",
+            errorText:
+              "tool_policy_rejected: analyze_media requires media-analysis.",
+          },
+          "tool_policy_rejected: analyze_media requires media-analysis."
+        ),
+        event(
+          "run.failed",
+          "run",
+          {
+            errorText:
+              "tool_policy_rejected: analyze_media requires media-analysis.",
+          },
+          "tool_policy_rejected: analyze_media requires media-analysis."
+        ),
+      ],
+    });
+
+    expect(
+      projection.nodes.some((node) => node.data.kind === "imageResult")
+    ).toBe(false);
+    expect(projection.nodes.find((node) => node.id === "run-1")?.data).toMatchObject({
+      kind: "run",
+      status: "error",
+      toolParts: [
+        expect.objectContaining({
+          type: "tool-analyze_media",
+          state: "output-error",
+        }),
+      ],
+    });
+  });
+
   it("projects pending artifact nodes from normalized non-image input", () => {
     const projection = projectRunTraceToCanvas({
       runNodeId: "run-1",
@@ -294,6 +354,64 @@ describe("agent event graph projection", () => {
         content: "PRD 正文",
         summary: "PRD 摘要",
         title: "PRD",
+      },
+    });
+  });
+
+  it("renders text artifacts that carry preview fields at the artifact top level", () => {
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", {
+          prompt: "帮我分析描述这个 IP 形象的特征",
+          promptNodeId: "prompt-1",
+        }),
+        event("input.normalized", "input", {
+          normalizedInput: {
+            rawPrompt: "帮我分析描述这个 IP 形象的特征",
+            operation: "create",
+            artifact: { kind: "document", format: "markdown" },
+            intent: "document.create",
+          },
+        }),
+        event("artifact.created", "create_text_artifact", {
+          artifact: {
+            id: "text-1",
+            mimeType: "text/markdown",
+            preview: "# IP 形象特征分析\n\n这是最终报告正文。",
+            previewKind: "markdown",
+            sizeBytes: 128,
+            summary: "IP 形象特征分析摘要",
+            title: "上传IP形象特征分析报告",
+            type: "doc",
+            version: 1,
+          },
+          toolName: "create_text_artifact",
+        }),
+      ],
+    });
+
+    const documentNodes = projection.nodes.filter(
+      (node) => node.data.kind === "markdown"
+    );
+    expect(documentNodes).toHaveLength(1);
+    expect(documentNodes[0]).toMatchObject({
+      id: "markdown-pending-run-1-1",
+      data: {
+        kind: "markdown",
+        artifact: {
+          id: "text-1",
+          mimeType: "text/markdown",
+          preview: "# IP 形象特征分析\n\n这是最终报告正文。",
+          previewKind: "markdown",
+          sizeBytes: 128,
+          summary: "IP 形象特征分析摘要",
+          version: 1,
+        },
+        content: "# IP 形象特征分析\n\n这是最终报告正文。",
+        summary: "IP 形象特征分析摘要",
+        title: "上传IP形象特征分析报告",
       },
     });
   });

@@ -3,11 +3,11 @@ import type { CanvasOperation } from "../../src/types/runtime.ts";
 import type { AgentRunInput } from "./context.ts";
 import {
   finalizeNormalizedAgentInput,
+  isImageGenerationMetadataRequest,
   type NormalizedAgentInput,
 } from "./input-normalizer.ts";
 import {
   isImageArtifactTask,
-  selectAgentRoute,
 } from "./task-router.ts";
 
 export type AgentRunRoute =
@@ -17,12 +17,19 @@ export type AgentRunRoute =
   | "image_task"
   | "complex_agent_task";
 
-export type AgentRunRouterSource = "quick-router" | "llm-normalizer";
+export type AgentRunRouterSource =
+  | "quick-router"
+  | "fast-intent-router"
+  | "llm-normalizer";
 
 export type QuickAgentRunRoute = {
   canvasOperations?: CanvasOperation[];
+  candidateTools?: string[];
+  confidence?: number;
   directResponse?: string;
+  fallbackReason?: string;
   normalizedInput?: NormalizedAgentInput;
+  preferredRoute?: string;
   requiresModelNormalization: boolean;
   route: AgentRunRoute;
   routerSource: AgentRunRouterSource;
@@ -36,26 +43,31 @@ const slowPrepSteps = [
   "agent.start",
 ];
 
-const simpleModelSkippedSteps = [
-  "input.normalize",
-  "plan.build",
-  "skills.retrieve",
-];
-
 const routeOnlySkippedSteps = ["input.normalize"];
 const simpleImageSkippedSteps = ["input.normalize", "skills.retrieve"];
 
 export function routeAgentRunQuick(input: AgentRunInput): QuickAgentRunRoute {
   const prompt = normalizeText(input.message);
-  const localNormalized = buildLocalNormalizedInput(input);
 
-  if (isImageArtifactTask(localNormalized)) {
+  const metadataResponse = buildImageGenerationMetadataResponse(input);
+  if (metadataResponse) {
     return {
-      normalizedInput: localNormalized,
+      directResponse: metadataResponse,
+      normalizedInput: buildDirectAnswerNormalizedInput(input),
+      requiresModelNormalization: false,
+      route: "simple_chat",
+      routerSource: "quick-router",
+      skippedSteps: slowPrepSteps,
+    };
+  }
+
+  if (input.normalizedInput && isImageArtifactTask(input.normalizedInput)) {
+    return {
+      normalizedInput: input.normalizedInput,
       requiresModelNormalization: false,
       route: "image_task",
       routerSource: "quick-router",
-      skippedSteps: isSimpleImageFastPathInput(input, localNormalized)
+      skippedSteps: isSimpleImageFastPathInput(input, input.normalizedInput)
         ? simpleImageSkippedSteps
         : routeOnlySkippedSteps,
     };
@@ -64,7 +76,7 @@ export function routeAgentRunQuick(input: AgentRunInput): QuickAgentRunRoute {
   if (isSmalltalk(prompt)) {
     return {
       directResponse: smalltalkResponse(prompt),
-      normalizedInput: localNormalized,
+      normalizedInput: buildDirectAnswerNormalizedInput(input),
       requiresModelNormalization: false,
       route: "smalltalk",
       routerSource: "quick-router",
@@ -76,7 +88,7 @@ export function routeAgentRunQuick(input: AgentRunInput): QuickAgentRunRoute {
   if (canvasOperations.length) {
     return {
       canvasOperations,
-      normalizedInput: localNormalized,
+      normalizedInput: buildCanvasOperationNormalizedInput(input),
       requiresModelNormalization: false,
       route: "simple_canvas",
       routerSource: "quick-router",
@@ -84,21 +96,11 @@ export function routeAgentRunQuick(input: AgentRunInput): QuickAgentRunRoute {
     };
   }
 
-  if (isSimpleChatRun(input, localNormalized)) {
+  if (input.normalizedInput) {
     return {
-      normalizedInput: localNormalized,
+      normalizedInput: input.normalizedInput,
       requiresModelNormalization: false,
-      route: "simple_chat",
-      routerSource: "quick-router",
-      skippedSteps: simpleModelSkippedSteps,
-    };
-  }
-
-  if (isHighConfidenceStructuredTask(localNormalized)) {
-    return {
-      normalizedInput: localNormalized,
-      requiresModelNormalization: false,
-      route: "complex_agent_task",
+      route: routeForNormalizedInput(input.normalizedInput),
       routerSource: "quick-router",
       skippedSteps: routeOnlySkippedSteps,
     };
@@ -107,16 +109,12 @@ export function routeAgentRunQuick(input: AgentRunInput): QuickAgentRunRoute {
   return {
     requiresModelNormalization: true,
     route: "complex_agent_task",
-    routerSource: "llm-normalizer",
+    routerSource: "quick-router",
     skippedSteps: [],
   };
 }
 
-function buildLocalNormalizedInput(input: AgentRunInput) {
-  if (input.normalizedInput) {
-    return input.normalizedInput;
-  }
-
+function buildDirectAnswerNormalizedInput(input: AgentRunInput) {
   return finalizeNormalizedAgentInput(
     {
       rawPrompt: input.message,
@@ -124,6 +122,20 @@ function buildLocalNormalizedInput(input: AgentRunInput) {
       operation: "answer",
       artifact: null,
       requiredCapabilities: [],
+      negativeCapabilities: [],
+    },
+    input.message
+  );
+}
+
+function buildCanvasOperationNormalizedInput(input: AgentRunInput) {
+  return finalizeNormalizedAgentInput(
+    {
+      rawPrompt: input.message,
+      userGoal: input.message,
+      operation: "create",
+      artifact: { kind: "canvas" },
+      requiredCapabilities: ["canvas-operation"],
       negativeCapabilities: [],
     },
     input.message
@@ -261,32 +273,6 @@ function createCanvasNode(
   };
 }
 
-function isSimpleChatRun(
-  input: AgentRunInput,
-  normalizedInput: NormalizedAgentInput
-) {
-  const prompt = normalizeText(input.message);
-  if (input.retryFrom || input.selectedNodeIds.length || input.upstreamContext.length) {
-    return false;
-  }
-  if (normalizedInput.artifact || selectAgentRoute(normalizedInput) !== "manager") {
-    return false;
-  }
-  if (prompt.length > 160) {
-    return false;
-  }
-  return !hasComplexTaskSignal(prompt);
-}
-
-function isHighConfidenceStructuredTask(input: NormalizedAgentInput) {
-  return Boolean(
-    input.artifact ||
-      input.requiredCapabilities?.length ||
-      input.negativeCapabilities?.length ||
-      selectAgentRoute(input) !== "manager"
-  );
-}
-
 function isSimpleImageFastPathInput(
   input: AgentRunInput,
   normalizedInput: NormalizedAgentInput
@@ -311,10 +297,79 @@ function isSimpleImageFastPathInput(
   );
 }
 
-function hasComplexTaskSignal(prompt: string) {
-  return /https?:\/\/|详细|完整|系统|深入|全面|调研|研究|报告|文档|方案|规划|roadmap|引用|来源|citation|sources?|批量|多张|系列|参考|基于|根据|然后|同时|并且/i.test(
-    prompt
+function routeForNormalizedInput(normalizedInput: NormalizedAgentInput) {
+  return isImageArtifactTask(normalizedInput) ? "image_task" : "complex_agent_task";
+}
+
+function buildImageGenerationMetadataResponse(input: AgentRunInput) {
+  const prompt = normalizeText(input.message);
+  if (!isImageGenerationMetadataRequest(prompt)) {
+    return null;
+  }
+
+  const imageItems = input.upstreamContext.filter(
+    (item) => item.type === "image"
   );
+  const selectedImage =
+    imageItems.find((item) => item.nodeId === input.selectedNodeId) ??
+    (imageItems.length === 1 ? imageItems[0] : null);
+
+  if (!selectedImage) {
+    return "请先选中一张图片结果节点，我可以读取它记录的生成 prompt、模型、供应商和尺寸等信息。";
+  }
+
+  const metadata = selectedImage.artifact?.metadata ?? {};
+  const sourcePrompt =
+    readMetadataString(metadata.sourcePrompt) ?? selectedImage.prompt;
+  const providerPrompt = readMetadataString(metadata.prompt);
+  const provider = readMetadataString(metadata.provider);
+  const model = readMetadataString(metadata.model);
+  const sourceToolName = readMetadataString(metadata.sourceToolName);
+  const width = readMetadataNumber(metadata.width);
+  const height = readMetadataNumber(metadata.height);
+  const dimensions = width && height ? `${width}x${height}` : null;
+  const promptIndex = readMetadataNumber(metadata.promptIndex);
+  const createdAt = readMetadataString(metadata.createdAt);
+
+  const lines = ["这张图记录到的生成信息："];
+  if (sourcePrompt) {
+    lines.push(`- 原始需求：${sourcePrompt}`);
+  }
+  if (providerPrompt && providerPrompt !== sourcePrompt) {
+    lines.push(`- 实际生成 prompt：${providerPrompt}`);
+  }
+  if (provider) {
+    lines.push(`- 供应商：${provider}`);
+  }
+  if (model) {
+    lines.push(`- 模型：${model}`);
+  }
+  if (dimensions) {
+    lines.push(`- 尺寸：${dimensions}`);
+  }
+  if (sourceToolName) {
+    lines.push(`- 生成工具：${sourceToolName}`);
+  }
+  if (promptIndex) {
+    lines.push(`- 批次序号：${promptIndex}`);
+  }
+  if (createdAt) {
+    lines.push(`- 记录时间：${createdAt}`);
+  }
+
+  if (lines.length === 1) {
+    return "这张图没有记录可读的生成参数。当前能确认的是它来自一个图片结果节点，但缺少 prompt、模型或供应商等元数据。";
+  }
+
+  return lines.join("\n");
+}
+
+function readMetadataString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readMetadataNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function normalizeText(value: string) {

@@ -74,6 +74,7 @@ import {
 import { Edge } from "@/components/ai-elements/edge";
 import { FileUploadOverlay } from "@/components/FileUploadOverlay";
 import { HtmlSourcePreview } from "@/components/HtmlSourcePreview";
+import { LoadingIndicator } from "@/components/LoadingIndicator";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { Node, NodeContent } from "@/components/ai-elements/node";
 import { ReplayBanner, RunTracePanel } from "@/components/RunTracePanel";
@@ -104,6 +105,7 @@ import {
   getCanvasLayoutSignature,
   layoutAgentCanvasGraph,
 } from "@/lib/canvas-layout";
+import { normalizeLoadedCanvasSnapshot } from "@/lib/canvas-load-normalization";
 import {
   loadProject,
   loadRunTrace,
@@ -1248,19 +1250,27 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         setTraceError(null);
         setTraceLoading(false);
         setReplaySnapshot(null);
-        const nextSelectedNodeIds = getInitialSelectedNodeIds(
+        const normalizedSnapshot = normalizeLoadedCanvasSnapshot({
+          edges,
           nodes,
+          projectId: project.id,
+        });
+        const nextSelectedNodeIds = getInitialSelectedNodeIds(
+          normalizedSnapshot.nodes,
           project.selectedNodeId
         );
         autoLayoutSignatureRef.current = getCanvasLayoutSignature(
-          nodes,
-          edges
+          normalizedSnapshot.nodes,
+          normalizedSnapshot.edges
         );
-        const selectedNodes = applySelectedNodeIds(nodes, nextSelectedNodeIds);
+        const selectedNodes = applySelectedNodeIds(
+          normalizedSnapshot.nodes,
+          nextSelectedNodeIds
+        );
         nodesRef.current = selectedNodes;
-        edgesRef.current = edges;
+        edgesRef.current = normalizedSnapshot.edges;
         setNodes(selectedNodes);
-        setEdges(edges);
+        setEdges(normalizedSnapshot.edges);
         activeRunId.current = project.lastRunId;
         projectVersionRef.current = project.version;
         persistedSelectedNodeIdRef.current = project.selectedNodeId;
@@ -1280,12 +1290,30 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           // Diagnostics for the slow-load investigation (DEV only, never ships).
           console.info("[canvas-load]", {
             projectId: project.id,
-            nodeCount: nodes.length,
-            edgeCount: edges.length,
-            payloadBytes: JSON.stringify({ edges, nodes, project }).length,
+            nodeCount: normalizedSnapshot.nodes.length,
+            edgeCount: normalizedSnapshot.edges.length,
+            payloadBytes: JSON.stringify({
+              edges: normalizedSnapshot.edges,
+              nodes: normalizedSnapshot.nodes,
+              project,
+            }).length,
             fetchMs: Math.round(projectLoadedAt - loadStartedAt),
             totalMs: Math.round(performance.now() - loadStartedAt),
           });
+        }
+
+        const lastRunId = project.lastRunId;
+        if (lastRunId) {
+          void loadRunTrace(project.id, lastRunId)
+            .then(({ events }) => {
+              if (!ignore && events.length) {
+                mergePersistedRunTrace(lastRunId, events);
+              }
+            })
+            .catch(() => {
+              // The saved canvas is still usable; trace hydration only repairs
+              // richer runtime projections when persisted events are available.
+            });
         }
       })
       .catch((nextError: unknown) => {
@@ -1304,7 +1332,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         autoLayoutFrame.current = null;
       }
     };
-  }, [projectId, setEdges, setNodes]);
+  }, [mergePersistedRunTrace, projectId, setEdges, setNodes]);
 
   useEffect(() => {
     if (!traceRunId || !loadedProjectId) {
@@ -4375,10 +4403,20 @@ type ArtifactLikeNodeProps = NodeProps<FlowNode<ArtifactLikeNodeData, string>>;
 
 function ArtifactLikeNode({ data, selected, width, height }: ArtifactLikeNodeProps) {
   const label = getArtifactNodeLabel(data);
-  const summary = getArtifactNodeSummary(data);
   const metaLine = getArtifactMetaLine(data);
   const contentUrl = getArtifactContentUrl(data.artifact);
-  const canPreview = Boolean(getInlineArtifactPreview(data) || contentUrl);
+  const inlinePreview = getInlineArtifactPreview(data);
+  const loadedCardPreview = useTextArtifactContent(
+    contentUrl,
+    shouldLoadArtifactCardPreview(data, inlinePreview, contentUrl),
+    4_000
+  );
+  const loadedCardText =
+    loadedCardPreview && loadedCardPreview.url === contentUrl
+      ? loadedCardPreview.text
+      : null;
+  const summary = getArtifactNodeSummary(data, loadedCardText ?? undefined);
+  const canPreview = Boolean(inlinePreview || loadedCardText || contentUrl);
   const [isPreviewOpen, setPreviewOpen] = useState(false);
 
   return (
@@ -4889,9 +4927,15 @@ function getArtifactNodeLabel(data: ArtifactLikeNodeProps["data"]) {
   return labels[data.kind];
 }
 
-function getArtifactNodeSummary(data: ArtifactLikeNodeProps["data"]) {
+function getArtifactNodeSummary(
+  data: ArtifactLikeNodeProps["data"],
+  loadedPreview?: string
+) {
+  if (loadedPreview?.trim()) {
+    return summarizeMarkdownForCanvasNode(loadedPreview);
+  }
   if (data.kind === "markdown") {
-    return data.summary ?? data.content;
+    return data.summary ?? readArtifactPreviewText(data.artifact) ?? data.content;
   }
   if (data.kind === "decision") {
     return data.decision;
@@ -4900,7 +4944,12 @@ function getArtifactNodeSummary(data: ArtifactLikeNodeProps["data"]) {
     return data.memory;
   }
 
-  return data.summary ?? data.artifact.contentRef ?? data.artifact.uri;
+  return (
+    readMeaningfulSummary(data.summary, data.title) ??
+    summarizeArtifactPreview(readArtifactPreviewText(data.artifact)) ??
+    data.artifact.contentRef ??
+    data.artifact.uri
+  );
 }
 
 function getArtifactMetaLine(data: ArtifactLikeNodeProps["data"]) {
@@ -4908,7 +4957,10 @@ function getArtifactMetaLine(data: ArtifactLikeNodeProps["data"]) {
     readMetadataString(data.artifact.metadata?.sourceToolName) ??
       (data.runId ? "Run" : undefined),
     formatArtifactDate(data.createdAt ?? readMetadataString(data.artifact.metadata?.createdAt)),
-    formatArtifactBytes(readMetadataNumber(data.artifact.metadata?.byteSize)),
+    formatArtifactBytes(
+      readMetadataNumber(data.artifact.sizeBytes) ??
+        readMetadataNumber(data.artifact.metadata?.byteSize)
+    ),
   ].filter(Boolean);
 
   return parts.join(" · ");
@@ -4928,16 +4980,62 @@ function getInlineArtifactPreview(data: ArtifactLikeNodeProps["data"]) {
     return (
       stringifyPreviewValue(data.artifact.metadata?.output) ??
       stringifyPreviewValue(data.artifact.metadata?.result) ??
+      readArtifactPreviewText(data.artifact) ??
       data.summary
     );
   }
 
   return (
+    readArtifactPreviewText(data.artifact) ??
     readMetadataString(data.artifact.metadata?.preview) ??
     readMetadataString(data.artifact.metadata?.text) ??
     readMetadataString(data.artifact.metadata?.content) ??
     data.summary
   );
+}
+
+function readArtifactPreviewText(
+  artifact: ArtifactLikeNodeProps["data"]["artifact"]
+) {
+  return (
+    readMetadataString(artifact.preview) ??
+    readMetadataString(artifact.metadata?.preview) ??
+    readMetadataString(artifact.metadata?.markdown) ??
+    readMetadataString(artifact.metadata?.text) ??
+    readMetadataString(artifact.metadata?.content) ??
+    readMetadataString(artifact.summary)
+  );
+}
+
+function readMeaningfulSummary(
+  summary: string | undefined,
+  title: string | undefined
+) {
+  const normalized = summary?.trim();
+  if (!normalized || normalized === title?.trim()) {
+    return undefined;
+  }
+  return normalized;
+}
+
+function summarizeArtifactPreview(preview: string | undefined) {
+  return preview?.trim() ? summarizeMarkdownForCanvasNode(preview) : undefined;
+}
+
+function shouldLoadArtifactCardPreview(
+  data: ArtifactLikeNodeProps["data"],
+  inlinePreview: string | undefined,
+  contentUrl: string | undefined
+) {
+  if (!contentUrl || !isTextualArtifact(data)) {
+    return false;
+  }
+  if (data.kind !== "document" && data.kind !== "toolResult") {
+    return false;
+  }
+
+  const normalizedPreview = inlinePreview?.trim();
+  return !normalizedPreview || normalizedPreview === data.title.trim();
 }
 
 function getArtifactContentUrl(artifact: ArtifactLikeNodeProps["data"]["artifact"]) {
@@ -5078,7 +5176,7 @@ const CODE_MIME_LANGUAGE_ALIASES: Record<string, BundledLanguage> = {
 };
 
 function getCodeBlockLanguage(data: CodeNodeData): BundledLanguage {
-  const mimeType = readMetadataString(data.artifact.metadata?.mimeType)?.toLowerCase();
+  const mimeType = readArtifactMimeType(data.artifact);
   const candidates = [
     data.language,
     readMetadataString(data.artifact.metadata?.language),
@@ -5130,9 +5228,10 @@ function readProjectIdFromContentRef(value: string | undefined) {
 }
 
 function isTextualArtifact(data: ArtifactLikeNodeProps["data"]) {
-  const mimeType = readMetadataString(data.artifact.metadata?.mimeType)?.toLowerCase();
+  const mimeType = readArtifactMimeType(data.artifact);
   return (
     data.kind === "code" ||
+    data.kind === "document" ||
     data.kind === "markdown" ||
     data.kind === "toolResult" ||
     data.kind === "webpage" ||
@@ -5273,7 +5372,7 @@ function getArtifactDownloadName(data: ArtifactLikeNodeProps["data"]) {
 }
 
 function getArtifactDownloadExtension(data: ArtifactLikeNodeProps["data"]) {
-  const mimeType = readMetadataString(data.artifact.metadata?.mimeType)?.toLowerCase();
+  const mimeType = readArtifactMimeType(data.artifact);
   if (data.kind === "code") {
     return readMetadataString(data.artifact.metadata?.language) ?? "txt";
   }
@@ -5290,6 +5389,13 @@ function getArtifactDownloadExtension(data: ArtifactLikeNodeProps["data"]) {
     return "pdf";
   }
   return "txt";
+}
+
+function readArtifactMimeType(artifact: ArtifactLikeNodeProps["data"]["artifact"]) {
+  return (
+    readMetadataString(artifact.mimeType) ??
+    readMetadataString(artifact.metadata?.mimeType)
+  )?.toLowerCase();
 }
 
 function MarkdownNode({
@@ -5585,6 +5691,9 @@ function ImageResultNode({
             <img src={data.image.url} alt={data.image.title ?? "Generated result"} />
           ) : (
             <div className="result-placeholder" aria-label={data.image.title}>
+              {status === "loading" && (
+                <LoadingIndicator ariaLabel="图片生成中" size={35} />
+              )}
               <span>{status === "error" ? "生成失败" : "生成中"}</span>
               {requestLabel && <small>{requestLabel}</small>}
             </div>

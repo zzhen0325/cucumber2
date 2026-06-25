@@ -1,7 +1,6 @@
 import { motion } from "framer-motion";
 import {
   CheckmarkIcon as Check,
-  SpinnerIcon as Loader2,
   PencilIcon as Pencil,
   AddIcon as Plus,
   DeleteIcon as Trash2,
@@ -10,6 +9,7 @@ import {
 import { useState } from "react";
 import type { FormEvent } from "react";
 
+import { LoadingIndicator } from "@/components/LoadingIndicator";
 import type { ProjectSummary } from "@/lib/project-storage";
 import { formatDate } from "@/lib/utils";
 
@@ -150,7 +150,11 @@ export function ProjectListPage({
                         aria-label="保存名称"
                         disabled={isRenaming || !editingTitle.trim()}
                       >
-                        {isRenaming ? <Loader2 size={13} /> : <Check size={13} />}
+                        {isRenaming ? (
+                          <LoadingIndicator ariaLabel="保存名称中" size={13} />
+                        ) : (
+                          <Check size={13} />
+                        )}
                       </button>
                       <button
                         type="button"

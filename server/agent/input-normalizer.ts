@@ -187,6 +187,9 @@ export function createInputNormalizerAgent() {
       "Use artifact.subtype for specific product shape such as sequenceDiagram, flowchart, prd, brief, poster, banner, table, or mindmap.",
       "Use artifact.format for output encoding such as markdown, mermaid, html, json, or png.",
       "The words visual, 视觉, H5, campaign, product, marketing, engineering usually describe domain or context. They do not imply artifact.kind=image by themselves.",
+      "Questions asking which tools, models, providers, APIs, SDKs, platforms, open-source/free resources, or callable services exist are plain answer tasks with artifact=null. Treat generation in phrases like 图片生成工具, 3D模型生成模型, or image generation API as the subject being asked about, not as a request to generate an image.",
+      "Questions about why/how image generation works, fails, costs, speed, models, APIs, code, implementation, or capability are not image creation requests unless the user explicitly asks to create/render a new image artifact.",
+      "Questions asking for an existing image node's generation information, generation parameters, original prompt, actual provider prompt, model, provider, seed, size, or source are metadata answer tasks with artifact=null. They must not call image understanding or image generation tools.",
       "Classify 流程时序图 / sequence diagram as operation=create, artifact.kind=diagram, artifact.subtype=sequenceDiagram, artifact.format=mermaid, requiredCapabilities including sequence-diagram and markdown-artifact, negativeCapabilities including image-generation.",
       "Classify 流程图 / flowchart as diagram/flowchart/mermaid unless the user asks for a poster or rendered image.",
       "Classify HTML pages, H5 pages, interactive prototypes, HTML demos, and HTML animations as operation=create, artifact.kind=webpage, artifact.format=html, requiredCapabilities including html-artifact, and negativeCapabilities including image-generation.",
@@ -195,11 +198,12 @@ export function createInputNormalizerAgent() {
       "Classify requests to edit, rewrite, polish, expand, shorten, remove parts from, or otherwise revise a prompt/text/description as operation=edit with artifact=null and negativeCapabilities including image-generation. Terse commands such as 取消标题, 去掉标题, 删除文案, or remove the title should revise the selected/upstream prompt text and must not generate images unless the user explicitly asks to generate/create/render an image now.",
       "Classify requests to analyze, evaluate, critique, summarize, or give suggestions for a visual/image/banner/poster/KV brief as operation=analyze or answer with no image artifact unless the user explicitly asks to generate/create/render the image now; include negativeCapabilities image-generation.",
       "Classify explicit long-form output requests such as detailed explanation, complete plan, roadmap, proposal, research analysis, report, 文档, 详细说明, 完整规划, 调研分析, or 长文 as operation=create or analyze with artifact.kind=document or markdown. Short QA remains artifact=null.",
-      "Classify image creation as artifact.kind=image with png format, and image upscaling/enhancement of an existing image as operation=transform, artifact.kind=image.",
+      "Infer image creation only when the request has both an image artifact target and a creation/rendering action, or when the explicit image composer mode already provided an image artifact. Classify image creation as artifact.kind=image with png format, and image upscaling/enhancement of an existing image as operation=transform, artifact.kind=image.",
       "Classify image canvas extension, outpainting, resizing to new pixel dimensions, expanding a reference image to new aspect ratios, 扩图, 扩画布, 拓展尺寸, 延展画面 as operation=create, artifact.kind=image, requiredCapabilities including image-generation and image-outpaint. This is not upscale unless the user asks for 高清/超清/提升清晰度 only.",
       "Classify background removal, matting, transparent-background cutout, sticker/material extraction, or keep-only-subject requests as operation=transform, artifact.kind=image, artifact.format=png, requiredCapabilities including image-matting.",
       "Classify requests to decompose an actual selected/upstream image's style, composition, light, color, layout, or prompt clues as operation=analyze, artifact.kind=markdown, artifact.format=markdown, requiredCapabilities including image-decompose and markdown-artifact, negativeCapabilities including image-generation unless the user also explicitly asks to generate a new image.",
       "Classify requests to understand, describe, identify, summarize, judge, or extract information from an actual selected/upstream image as operation=analyze, artifact.kind=markdown, artifact.format=markdown, requiredCapabilities including media-analysis and markdown-artifact, negativeCapabilities including image-generation unless the user also explicitly asks to generate a new image.",
+      "For reference-image guided character/IP/mascot generation, include both media-analysis and image-generation so the Image Agent may inspect the selected/uploaded image before creating new image artifacts.",
       "For image artifacts, separate visual content from production controls such as count, aspect ratio, pixel dimensions, and usage.",
       "When the user lists multiple output dimensions, put them in image.variants as width/height pairs and set resultCount to the number of variants.",
       "contentPrompt must be a clean renderable image description. Remove batch-count phrases such as four images, 四张, 一组4张.",
@@ -230,21 +234,44 @@ export function finalizeNormalizedAgentInput(
   const raw = normalizeText(rawPrompt);
   const ruleBased = inferTaskProtocol(raw);
   const promptTextEdit = isPromptTextEditRequest(raw);
+  const toolOrModelInfoRequest =
+    isToolOrModelInformationRequest(raw) && !isLongFormDocumentRequest(raw);
+  const imageMetadataInfoRequest = isImageGenerationMetadataRequest(raw);
+  const imageGenerationMetaQuestion = isImageGenerationMetaQuestion(raw);
   const imageCanvasExpansion = isImageCanvasExpansionRequest(raw);
-  const artifact = promptTextEdit
+  const parsedArtifact =
+    parsed.artifact ??
+    (parsed.intent === "image.generate" && parsed.image
+      ? {
+          kind: "image" as const,
+          subtype: inferImageSubtype(raw),
+          format: "png" as const,
+        }
+      : undefined);
+  const artifact =
+    promptTextEdit || toolOrModelInfoRequest || imageMetadataInfoRequest
     ? null
-    : normalizeArtifact(raw, parsed.artifact ?? ruleBased.artifact);
+    : normalizeArtifact(raw, parsedArtifact ?? ruleBased.artifact);
   const operation = normalizeOperation(
     raw,
-    promptTextEdit ? "edit" : parsed.operation ?? ruleBased.operation ?? "answer",
+    promptTextEdit
+      ? "edit"
+      : toolOrModelInfoRequest || imageMetadataInfoRequest
+        ? "answer"
+        : parsed.operation ?? ruleBased.operation ?? "answer",
     artifact
   );
   const domain = parsed.domain ?? ruleBased.domain;
   const requiredCapabilities = uniqueCapabilityList([
     ...(ruleBased.requiredCapabilities ?? []),
     ...(parsed.requiredCapabilities ?? []),
+    ...(isImageArtifact(artifact) && operation === "create"
+      ? ["image-generation"]
+      : []),
   ]).filter(
     (capability) =>
+      !imageMetadataInfoRequest &&
+      !(imageGenerationMetaQuestion && !artifact) &&
       (!imageCanvasExpansion || capability !== "image-upscale") &&
       (!(isImageArtifact(artifact) && operation === "transform") ||
         capability !== "image-generation") &&
@@ -256,6 +283,9 @@ export function finalizeNormalizedAgentInput(
     ...(ruleBased.negativeCapabilities ?? []),
     ...(parsed.negativeCapabilities ?? []),
     ...(promptTextEdit ? ["image-generation"] : []),
+    ...(toolOrModelInfoRequest ? ["image-generation"] : []),
+    ...(imageMetadataInfoRequest ? ["image-generation"] : []),
+    ...(imageGenerationMetaQuestion && !artifact ? ["image-generation"] : []),
   ]);
   const intent = inferIntentFromProtocol({
     artifact,
@@ -439,6 +469,29 @@ function inferTaskProtocol(prompt: string): Pick<
       domain,
       negativeCapabilities: ["image-generation"],
       operation: "edit",
+      requiredCapabilities: [],
+    };
+  }
+
+  if (
+    isToolOrModelInformationRequest(prompt) &&
+    !isLongFormDocumentRequest(prompt)
+  ) {
+    return {
+      artifact: null,
+      domain,
+      negativeCapabilities: ["image-generation"],
+      operation: "answer",
+      requiredCapabilities: [],
+    };
+  }
+
+  if (isImageGenerationMetadataRequest(prompt)) {
+    return {
+      artifact: null,
+      domain,
+      negativeCapabilities: ["image-generation"],
+      operation: "answer",
       requiredCapabilities: [],
     };
   }
@@ -651,25 +704,6 @@ function inferTaskProtocol(prompt: string): Pick<
     };
   }
 
-  if (
-    hasExplicitImageCreationRequest(prompt) ||
-    /(生成|创建|画|出图|图片|图像|插画|海报|banner|kv|photo|image|illustration|poster)/i.test(
-      prompt
-    )
-  ) {
-    return {
-      artifact: {
-        kind: "image",
-        subtype: inferImageSubtype(prompt),
-        format: "png",
-      },
-      domain,
-      negativeCapabilities: [],
-      operation: "create",
-      requiredCapabilities: ["image-generation"],
-    };
-  }
-
   if (/(代码|函数|组件|脚本|diff|patch|code|function|component|script)/i.test(prompt)) {
     return {
       artifact: { kind: "code", format: "markdown" },
@@ -694,13 +728,27 @@ function inferTaskProtocol(prompt: string): Pick<
     };
   }
 
-  if (/(便签|形状|节点|画布)/.test(prompt)) {
+  if (/(便签|形状|节点|画布)/.test(prompt) && !shouldInferImageCreate(prompt)) {
     return {
       artifact: { kind: "canvas" },
       domain,
       negativeCapabilities: [],
       operation: "edit",
       requiredCapabilities: ["canvas-operation"],
+    };
+  }
+
+  if (shouldInferImageCreate(prompt)) {
+    return {
+      artifact: {
+        kind: "image",
+        subtype: inferImageSubtype(prompt),
+        format: "png",
+      },
+      domain,
+      negativeCapabilities: [],
+      operation: "create",
+      requiredCapabilities: ["image-generation"],
     };
   }
 
@@ -720,6 +768,15 @@ function normalizeArtifact(
   const inferred = inferTaskProtocol(rawPrompt).artifact;
   if (!artifact) {
     return inferred ?? null;
+  }
+  if (
+    isToolOrModelInformationRequest(rawPrompt) &&
+    !isLongFormDocumentRequest(rawPrompt)
+  ) {
+    return null;
+  }
+  if (isImageGenerationMetadataRequest(rawPrompt)) {
+    return null;
   }
   if (
     isImageMattingRequest(rawPrompt) ||
@@ -755,6 +812,12 @@ function normalizeArtifact(
       format: "html",
     };
   }
+  if (artifact.kind === "image" && inferred?.kind && inferred.kind !== "image") {
+    return inferred;
+  }
+  if (artifact.kind === "image" && isImageGenerationMetaQuestion(rawPrompt)) {
+    return null;
+  }
   return {
     kind: artifact.kind,
     subtype: artifact.subtype ?? inferred?.subtype ?? undefined,
@@ -768,6 +831,21 @@ function normalizeOperation(
   artifact: NormalizedAgentInput["artifact"] | null | undefined
 ): TaskOperation {
   if (isPromptTextEditRequest(rawPrompt)) {
+    return "edit";
+  }
+  if (
+    isToolOrModelInformationRequest(rawPrompt) &&
+    !isLongFormDocumentRequest(rawPrompt)
+  ) {
+    return "answer";
+  }
+  if (isImageGenerationMetadataRequest(rawPrompt)) {
+    return "answer";
+  }
+  if (isImageGenerationMetaQuestion(rawPrompt) && !artifact) {
+    return "answer";
+  }
+  if (artifact?.kind === "canvas") {
     return "edit";
   }
   if (isImageMattingRequest(rawPrompt)) {
@@ -998,7 +1076,11 @@ function isImageDecomposeThenGenerateRequest(prompt: string) {
 }
 
 function isAnalyzeThenGenerateRequest(prompt: string) {
-  return hasMediaAnalyzeSignal(prompt) && hasExplicitImageCreationRequest(prompt);
+  return (
+    hasExplicitImageCreationRequest(prompt) &&
+    (hasMediaAnalyzeSignal(prompt) ||
+      hasReferenceImageGuidedGenerationSignal(prompt))
+  );
 }
 
 function isImageDecomposeRequest(prompt: string) {
@@ -1022,13 +1104,72 @@ function hasMediaAnalyzeSignal(prompt: string) {
   if (!hasActualImageCue(prompt)) {
     return false;
   }
-  return /(看懂|识别|描述|总结|提取|判断|理解|解释|图里有什么|图中有什么|图片里有什么|表达了什么|关键信息|内容|元素|describe|identify|summari[sz]e|extract|understand)/i.test(
+  return /(分析|看懂|识别|描述|总结|提取|判断|理解|解释|特征|核心特征|造型|外观|表情|装饰|图里有什么|图中有什么|图片里有什么|表达了什么|关键信息|内容|元素|describe|identify|summari[sz]e|extract|understand|analy[sz]e)/i.test(
     prompt
   );
 }
 
 function hasActualImageCue(prompt: string) {
-  return /(这张图|这张图片|这张照片|此图|图里|图中|图片里|图片中|照片里|照片中|选中的图|选中图片|参考图|reference image|selected image|this image|this picture|photo)/i.test(
+  return /(这个图|这个图片|这张图|这张图片|这张照片|这幅图|这幅图片|此图|图里|图中|图片里|图片中|照片里|照片中|选中的图|选中图片|参考图|reference image|selected image|this image|this picture|photo)/i.test(
+    prompt
+  );
+}
+
+function hasReferenceImageGuidedGenerationSignal(prompt: string) {
+  const referenceCue =
+    /(根据|基于|参考|参照|照着|按|以|用).{0,16}(这个|这些|这张|上传|选中|参考图|原图|图片|图像|角色|IP|形象|reference|selected)|(参考图|原图|上传(?:的)?(?:图|图片|图像)|选中(?:的)?(?:图|图片|图像)|reference image|selected image)/i;
+  if (!referenceCue.test(prompt)) {
+    return false;
+  }
+  return /(角色|IP|形象|人物|头像|mascot|avatar|玩偶|公仔|毛绒|贴纸|造型|特征|风格|表情|服装|配色|装饰)/i.test(
+    prompt
+  );
+}
+
+export function isImageGenerationMetadataRequest(prompt: string) {
+  const hasImageReference =
+    hasActualImageCue(prompt) || /(图片|图像|image|picture|photo)/i.test(prompt);
+  if (!hasImageReference) {
+    return false;
+  }
+
+  if (
+    /(生成信息|生成参数|生成配置|生成设置|生成记录|生成来源|来源信息|原始提示词|原始\s*prompt|生成\s*prompt|实际\s*prompt|用(?:的|了)?什么模型|哪个模型|模型是什么|供应商|provider|model|seed|从哪(?:里)?来|怎么生成(?:的)?|如何生成(?:的)?)/i.test(
+      prompt
+    )
+  ) {
+    return true;
+  }
+
+  return (
+    /(是什么|是多少|多少|查看|看下|告诉我|查询|读取|what|which|show|inspect)/i.test(
+      prompt
+    ) && /(尺寸|分辨率|比例|width|height|size|aspect\s*ratio)/i.test(prompt)
+  );
+}
+
+function isToolOrModelInformationRequest(prompt: string) {
+  if (hasVisualOutputCreationRequest(prompt)) {
+    return false;
+  }
+
+  const asksForInformation =
+    /(有哪些|有什么|有没有|哪[些个家款]|推荐|列举|盘点|比较|对比|区别|优缺点|怎么|如何|能不能|能否|是否|可不可以|哪里|what|which|recommend|list|compare|how)/i.test(
+      prompt
+    );
+  if (!asksForInformation) {
+    return false;
+  }
+
+  const asksAboutTooling =
+    /(工具|模型|平台|服务|软件|库|框架|插件|资源|网站|API|SDK|接口|调用|开源|免费|可免费|free|open[-\s]?source|models?|tools?|libraries?|platforms?|services?|providers?)/i.test(
+      prompt
+    );
+  if (!asksAboutTooling) {
+    return false;
+  }
+
+  return /(生成|生图|文生图|图生图|3D\s*模型|三维模型|图片|图像|image\s*generation|model\s*generation|text[-\s]?to[-\s]?image|text[-\s]?to[-\s]?3d|api|sdk|调用|开源|免费|free|open[-\s]?source)/i.test(
     prompt
   );
 }
@@ -1059,7 +1200,47 @@ function isImageCanvasExpansionRequest(prompt: string) {
 }
 
 function hasExplicitImageCreationRequest(prompt: string) {
+  if (
+    isToolOrModelInformationRequest(prompt) ||
+    isImageGenerationMetaQuestion(prompt) ||
+    isImageGenerationMetadataRequest(prompt)
+  ) {
+    return false;
+  }
   return /((生成|创建|画|出图|渲染|产出|输出|制作).{0,16}(图片|图像|图|海报|banner|kv|主视觉)|(生成|创建|设计|制作|做|产出|输出|出).{0,24}(角色|IP|形象|头像|玩偶|公仔|毛绒|贴纸)|(图片|图像|海报|banner|kv|主视觉|角色|IP|形象|头像|玩偶|公仔|毛绒|贴纸).{0,24}(生成|创建|渲染|产出|输出|制作|设计)|\b(generate|create|render|make)\b.{0,48}\b(image|poster|banner|key visual|character|avatar|mascot)\b)/i.test(
+    prompt
+  );
+}
+
+function isImageGenerationMetaQuestion(prompt: string) {
+  return /(图片|图像|image).{0,16}(生成|generation).{0,32}(为什么|怎么|如何|失败|报错|流程|原理|接口|代码|实现|速度|成本|模型|能力)/i.test(
+    prompt
+  );
+}
+
+function shouldInferImageCreate(prompt: string) {
+  if (isImageGenerationMetaQuestion(prompt)) {
+    return false;
+  }
+  if (hasExplicitImageCreationRequest(prompt)) {
+    return true;
+  }
+
+  return (
+    /(生成|创建|画|出图|渲染|制作|设计|create|generate|render|make).{0,32}(图片|图像|插画|海报|banner|kv|主视觉|photo|image|illustration|poster)/i.test(
+      prompt
+    ) ||
+    /(图片|图像|插画|海报|banner|kv|主视觉|photo|image|illustration|poster).{0,32}(生成|创建|出图|渲染|制作|设计|create|generate|render|make)/i.test(
+      prompt
+    )
+  );
+}
+
+function hasVisualOutputCreationRequest(prompt: string) {
+  if (isImageGenerationMetaQuestion(prompt)) {
+    return false;
+  }
+  return /((生成|创建|画|绘制|出图|渲染|产出|输出|制作|设计|做).{0,24}(图片|图像|图|海报|banner|kv|主视觉|插画|角色|IP|形象|头像|玩偶|公仔|毛绒|贴纸)|(生成|创建|画|绘制|出图|渲染|产出|输出|制作|设计|做)\s*(?:一|1|二|两|2|三|3|四|4|\d{1,2})\s*(?:张|幅|款|版)|\b(generate|create|render|make|draw|paint)\b.{0,48}\b(image|poster|banner|key visual|illustration|character|avatar|mascot)\b)/i.test(
     prompt
   );
 }

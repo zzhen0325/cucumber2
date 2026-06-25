@@ -1,9 +1,31 @@
 import { describe, expect, it } from "vitest";
 
+import { listAgentCapabilityRoutes } from "../agent-capability-manifest.ts";
 import type { CucumberAgentContext } from "../context.ts";
-import { isSpecialistEnabledForContext } from "./registry.ts";
+import {
+  createSpecialistAgentRegistry,
+  isSpecialistEnabledForContext,
+} from "./registry.ts";
 
 describe("specialist agent registry", () => {
+  it("keeps specialist registry metadata aligned with the capability manifest", () => {
+    const registry = createSpecialistAgentRegistry();
+    const manifestRoutes = listAgentCapabilityRoutes().filter(
+      (route) => route.route !== "manager"
+    );
+
+    for (const manifestRoute of manifestRoutes) {
+      const specialist = registry.find((definition) =>
+        definition.enabledRoutes.includes(manifestRoute.route)
+      );
+      expect(specialist).toMatchObject({
+        name: manifestRoute.agentName,
+        producedArtifactTypes: manifestRoute.producedArtifactTypes,
+        requiredTools: manifestRoute.requiredTools,
+      });
+    }
+  });
+
   it("enables the document specialist from normalized document intents", () => {
     expect(
       isSpecialistEnabledForContext(
