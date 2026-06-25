@@ -1,0 +1,238 @@
+/* canvas nodes */
+.canvas-node {
+  --canvas-node-padding: var(--spacing-cuc-node-padding);
+  --canvas-node-gap: var(--spacing-cuc-node-gap);
+  --canvas-node-title-size: var(--text-cuc-node-title);
+  --canvas-node-title-line: var(--text-cuc-node-title--line-height);
+  --canvas-node-body-size: var(--text-cuc-node-body);
+  --canvas-node-body-line: var(--text-cuc-node-body--line-height);
+  --canvas-node-meta-size: var(--text-cuc-node-meta);
+  --canvas-node-meta-line: var(--text-cuc-node-meta--line-height);
+  width: var(--spacing-cuc-node);
+  border: 0.5px solid var(--color-cuc-node-border);
+  border-radius: var(--radius-cuc-node);
+  background: var(--color-cuc-node);
+  color: var(--color-cuc-text-strong);
+  box-shadow: none;
+  overflow: visible;
+}
+
+.canvas-node.selected {
+  border-color: var(--color-cuc-primary-border-active);
+  box-shadow:
+    0 0 0 3px var(--color-cuc-primary-glow),
+    0 4px 20px var(--color-cuc-primary-shadow);
+}
+
+.canvas-node .copyable-text,
+.canvas-node .copyable-region,
+.canvas-node .copyable-region :is(p, span, strong, small, pre, code, li, h1, h2, h3, h4, h5, h6) {
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.canvas-node-resizer-line {
+  border-color: transparent !important;
+  background: transparent !important;
+  opacity: 0 !important;
+}
+
+.canvas-node-resizer-handle {
+  width: 16px !important;
+  height: 16px !important;
+  border: 0 !important;
+  border-radius: 2px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: transparent !important;
+}
+
+.canvas-node-resizer-handle.top.left {
+  border-top-left-radius: var(--radius-cuc-card) !important;
+}
+
+.canvas-node-resizer-handle.top.right {
+  border-top-right-radius: var(--radius-cuc-card) !important;
+}
+
+.canvas-node-resizer-handle.bottom.left {
+  border-bottom-left-radius: var(--radius-cuc-card) !important;
+}
+
+.canvas-node-resizer-handle.bottom.right {
+  border-bottom-right-radius: var(--radius-cuc-card) !important;
+}
+
+.prompt-card {
+  height: 78px;
+  min-height: 78px;
+}
+
+.prompt-content {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  place-items: center;
+  padding: var(--canvas-node-padding) 26px;
+}
+
+.prompt-card p {
+  display: block;
+  overflow: visible;
+  margin: 0;
+  color: var(--color-cuc-ink);
+  font-size: var(--canvas-node-body-size);
+  line-height: var(--canvas-node-body-line);
+  text-align: left;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.prompt-node-input {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--color-cuc-ink);
+  font: inherit;
+  font-size: var(--canvas-node-body-size);
+  line-height: var(--canvas-node-body-line);
+  text-align: left;
+}
+
+.prompt-node-input::placeholder {
+  color: --alpha(var(--color-cuc-ink) / 42%);
+}
+
+.prompt-card.expanded .prompt-content {
+  place-items: start stretch;
+  overflow: auto;
+  padding: var(--canvas-node-padding) 26px;
+}
+
+.prompt-card.expanded p {
+  display: block;
+  overflow: visible;
+  text-align: left;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  -webkit-line-clamp: unset;
+}
+
+.sticky-note-card {
+  width: 220px;
+  height: 170px;
+  border-color: rgba(217, 207, 116, 0.48);
+  border-radius: var(--radius-cuc-node);
+  background: #fff8b8;
+  box-shadow: 0 6px 18px rgba(111, 93, 18, 0.07);
+}
+
+.sticky-note-card.green {
+  border-color: rgba(0, 0, 0, 0.24);
+  background: #eaffcf;
+}
+
+.sticky-note-card.blue {
+  border-color: rgba(74, 132, 195, 0.2);
+  background: #eaf4ff;
+}
+
+.sticky-note-card.pink {
+  border-color: rgba(212, 92, 142, 0.2);
+  background: #ffeef5;
+}
+
+.sticky-note-content {
+  height: 100%;
+  padding: var(--canvas-node-padding);
+}
+
+.sticky-note-input {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--color-cuc-text);
+  font: inherit;
+  font-size: var(--canvas-node-body-size);
+  line-height: var(--canvas-node-body-line);
+}
+
+.sticky-note-input::placeholder {
+  color: rgba(17, 17, 17, 0.42);
+}
+
+.shape-card {
+  width: 200px;
+  height: 140px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.shape-card.selected {
+  border-color: transparent;
+}
+
+.shape-content {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  place-items: stretch;
+}
+
+.shape-visual {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-cuc-node);
+  background: --alpha(var(--color-cuc-surface) / 88%);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+}
+
+.shape-card.ellipse .shape-visual {
+  border-radius: var(--radius-cuc-pill);
+}
+
+.shape-card.pill .shape-visual {
+  border-radius: var(--radius-cuc-pill);
+}
+
+.shape-card.diamond .shape-visual {
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  border-radius: 0;
+}
+
+.shape-card.triangle .shape-visual {
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  border-radius: 0;
+}
+
+.shape-card.frame .shape-visual {
+  border: 1.5px dashed var(--color-cuc-border-dashed);
+  background: --alpha(var(--color-cuc-surface) / 42%);
+}
+
+.shape-label-input {
+  width: min(80%, 140px);
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--color-cuc-text);
+  font: inherit;
+  font-size: var(--canvas-node-title-size);
+  line-height: var(--canvas-node-title-line);
+  text-align: center;
+}
+

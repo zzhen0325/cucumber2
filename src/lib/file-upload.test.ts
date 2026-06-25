@@ -99,7 +99,7 @@ describe("file upload canvas nodes", () => {
     const longMarkdown = [
       "# Agent Skill",
       "",
-      ...Array.from({ length: 120 }, (_, index) => `- step ${index}: keep this line`),
+      ...Array.from({ length: 500 }, (_, index) => `- step ${index}: keep this line`),
       "",
       "final line should remain visible",
     ].join("\n");
@@ -115,6 +115,7 @@ describe("file upload canvas nodes", () => {
     }
 
     expect(longMarkdown.length).toBeGreaterThan(900);
+    expect(longMarkdown.length).toBeGreaterThan(12_000);
     expect(node.data.content).toContain("final line should remain visible");
     expect(node.data.content).not.toContain("...内容已截断");
   });
@@ -133,6 +134,7 @@ describe("file upload canvas nodes", () => {
     expect(nodes[0]).toMatchObject({
       type: "codeNode",
       data: {
+        code: "export const ok = true;",
         kind: "code",
         language: "ts",
         summary: "export const ok = true;",

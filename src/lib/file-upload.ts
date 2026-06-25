@@ -49,7 +49,6 @@ const MARKDOWN_NODE_HEIGHT = 360;
 const ARTIFACT_NODE_HEIGHT = 132;
 const UPLOAD_NODE_GAP = 18;
 const UPLOAD_NODE_CLEARANCE = 24;
-const MARKDOWN_CONTENT_LIMIT = 12_000;
 const TEXT_PREVIEW_LIMIT = 900;
 
 const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "mdown", "mdx"]);
@@ -264,7 +263,7 @@ export async function prepareUploadedFile(
   const summary = getUploadSummary(file, kind, preview);
 
   return {
-    content: kind === "markdown" ? text : undefined,
+    content: text || undefined,
     dimensions,
     file,
     kind,
@@ -307,7 +306,7 @@ export function createCanvasNodeFromUploadedFile(
   if (upload.kind === "markdown") {
     const markdown = upload.content ?? upload.preview;
     const content = markdown.trim()
-      ? trimText(markdown, MARKDOWN_CONTENT_LIMIT)
+      ? markdown
       : `${upload.title}\n\n${upload.summary}`;
 
     return {
@@ -339,6 +338,7 @@ export function createCanvasNodeFromUploadedFile(
       position: { x: 0, y: 0 },
       data: {
         ...baseData,
+        code: upload.content,
         kind: "code",
         language: getFileExtension(upload.file.name) || undefined,
       },
@@ -352,6 +352,7 @@ export function createCanvasNodeFromUploadedFile(
       position: { x: 0, y: 0 },
       data: {
         ...baseData,
+        html: upload.content,
         kind: "webpage",
       },
     };

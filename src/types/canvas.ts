@@ -265,6 +265,7 @@ export type DocumentNodeData = ArtifactBackedNodeData & {
 
 export type CodeNodeData = ArtifactBackedNodeData & {
   kind: "code";
+  code?: string;
   language?: string;
 };
 

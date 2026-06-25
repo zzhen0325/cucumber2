@@ -4870,7 +4870,10 @@ function ArtifactPreviewDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const inlinePreview = getInlineArtifactPreview(data);
+  const inlinePreview =
+    data.kind === "code"
+      ? data.code ?? getInlineArtifactPreview(data)
+      : getInlineArtifactPreview(data);
   const shouldFetchText = Boolean(
     open &&
       contentUrl &&
@@ -4968,7 +4971,7 @@ function CodeNode({
   height,
 }: NodeProps<FlowNode<CodeNodeData, "codeNode">>) {
   const contentUrl = getArtifactContentUrl(data.artifact);
-  const inlinePreview = getInlineArtifactPreview(data);
+  const inlinePreview = data.code ?? getInlineArtifactPreview(data);
   const [isPreviewOpen, setPreviewOpen] = useState(false);
   const metaLine = getArtifactMetaLine(data);
   const language = getCodeBlockLanguage(data);
@@ -5710,12 +5713,7 @@ function MarkdownNode({
     text: string;
     url: string;
   } | null>(null);
-  const [fullContentRequested, setFullContentRequested] = useState(false);
-  const requestFullContent = useCallback(() => {
-    setFullContentRequested(true);
-  }, []);
-  const shouldLoadFullContent =
-    fullContentRequested && shouldLoadFullMarkdownContent(data, contentUrl);
+  const shouldLoadFullContent = shouldLoadFullMarkdownContent(data, contentUrl);
 
   useEffect(() => {
     if (!shouldLoadFullContent || !contentUrl) {
@@ -5780,15 +5778,11 @@ function MarkdownNode({
       <ArtifactFrame
         className="markdown-content"
         copyText={editorData.content}
-          data={data}
-          downloadText={editorData.content}
-          downloadUrl={contentUrl}
-        >
-        <div
-          className="blocknote-body nodrag nopan nowheel"
-          onFocusCapture={requestFullContent}
-          onPointerDownCapture={requestFullContent}
-        >
+        data={data}
+        downloadText={editorData.content}
+        downloadUrl={contentUrl}
+      >
+        <div className="blocknote-body nodrag nopan nowheel">
           <Suspense
             fallback={
               <pre className="markdown-plain-preview">{editorData.content}</pre>

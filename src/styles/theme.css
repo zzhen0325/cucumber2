@@ -1,0 +1,158 @@
+@theme {
+  --color-cuc-ink: #000000;
+  --color-cuc-surface: #ffffff;
+  --color-cuc-surface-warm: #f6f6f3;
+  --color-cuc-surface-subtle: #fbfbfa;
+  --color-cuc-surface-code: #f1f1ef;
+  --color-cuc-canvas: #f2f3f4;
+  --color-cuc-canvas-border: #f1f2f4;
+  --color-cuc-text: #111111;
+  --color-cuc-text-strong: #0a0a0a;
+  --color-cuc-text-heading: #171717;
+  --color-cuc-text-muted: #737373;
+  --color-cuc-text-secondary: #555555;
+  --color-cuc-text-soft: #8d95a5;
+  --color-cuc-text-subtle: #8a8a86;
+  --color-cuc-border: #e2e4e8;
+  --color-cuc-border-muted: #ebebeb;
+  --color-cuc-border-soft: #efefed;
+  --color-cuc-border-dashed: #d9d9d9;
+  --color-cuc-preview-border: #d7dbe2;
+  --color-cuc-node: #e8eaee;
+  --color-cuc-edge: #c6cad2;
+  --color-cuc-control-dark: #2d3139;
+  --color-cuc-control-border: #d4d7dd;
+  --color-cuc-control-surface: #f7f8fa;
+  --color-cuc-control-hover: #f1f3f5;
+  --color-cuc-checker: #d8d8d8;
+  --color-cuc-scrollbar-thumb: #00000010;
+  --color-cuc-primary: #29bf4e;
+  --color-cuc-primary-foreground: #06100a;
+  --color-cuc-accent: #f8ffbf;
+  --color-cuc-accent-foreground: #174222;
+  --color-cuc-run-text: #505430;
+  --color-cuc-run-text-muted: #a5ac72;
+  --color-cuc-run-border: #e1e9a5;
+  --color-cuc-danger: #e5484d;
+  --color-cuc-danger-strong: #cc2e33;
+  --color-cuc-danger-deep: #9d2025;
+  --color-cuc-success: #1b9a3a;
+  --color-cuc-success-strong: #1b7f35;
+  --color-cuc-primary-strong: #238c3c;
+  --color-cuc-canvas-glass: rgb(242 243 244 / 60%);
+  --color-cuc-node-border: rgb(141 149 165 / 24%);
+  --color-cuc-node-border-hover: rgb(141 149 165 / 28%);
+  --color-cuc-node-border-active: rgb(141 149 165 / 42%);
+  --color-cuc-primary-border: rgb(41 191 78 / 36%);
+  --color-cuc-primary-border-active: rgb(41 191 78 / 86%);
+  --color-cuc-primary-surface: rgb(41 191 78 / 12%);
+  --color-cuc-primary-surface-hover: rgb(41 191 78 / 18%);
+  --color-cuc-primary-glow: rgb(41 191 78 / 16%);
+  --color-cuc-primary-shadow: rgb(41 191 78 / 8%);
+  --color-cuc-danger-surface: rgb(229 72 77 / 8%);
+  --color-cuc-danger-border: rgb(229 72 77 / 20%);
+  --color-cuc-subtle-border: rgb(235 235 235 / 70%);
+
+  --radius-cuc-canvas: 6px;
+  --radius-cuc-card: 8px;
+  --radius-cuc-image: 10px;
+  --radius-cuc-control: 12px;
+  --radius-cuc-control-lg: 14px;
+  --radius-cuc-floating: 16px;
+  --radius-cuc-popover: 18px;
+  --radius-cuc-composer: 20px;
+  --radius-cuc-panel: 24px;
+  --radius-cuc-node: 28px;
+  --radius-cuc-pill: 999px;
+  --radius-cuc-round: 50%;
+
+  --shadow-cuc-subtle: 0 1px 3px rgb(0 0 0 / 4%);
+  --shadow-cuc-card: 0 4px 20px rgb(0 0 0 / 4%);
+  --shadow-cuc-card-hover: 0 8px 30px rgb(0 0 0 / 8%);
+  --shadow-cuc-accent-glow: 0 0 20px rgb(41 191 78 / 25%);
+  --shadow-cuc-composer: 0 6px 6px rgb(41 37 100 / 4%);
+  --shadow-cuc-popover: 0 4px 20px rgb(0 0 0 / 5%);
+  --shadow-cuc-dialog: 0 18px 50px rgb(0 0 0 / 14%);
+
+  --spacing-cuc-canvas-inset: 6px;
+  --spacing-cuc-floating-height: 48px;
+  --spacing-cuc-control: 32px;
+  --spacing-cuc-tool: 40px;
+  --spacing-cuc-toolbar-button: 30px;
+  --spacing-cuc-icon-button: 24px;
+  --spacing-cuc-composer-height: 53px;
+  --spacing-cuc-composer-image-height: 185px;
+  --spacing-cuc-node: 218px;
+  --spacing-cuc-node-padding: 23px;
+  --spacing-cuc-node-gap: 6px;
+
+  --text-cuc-node-title: 9px;
+  --text-cuc-node-title--line-height: 14px;
+  --text-cuc-node-body: 8px;
+  --text-cuc-node-body--line-height: 12.5px;
+  --text-cuc-node-meta: 7px;
+  --text-cuc-node-meta--line-height: 9px;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.75rem;
+  --background: #f3f1ee;
+  --foreground: var(--color-cuc-text);
+  --card: var(--color-cuc-surface);
+  --card-foreground: var(--color-cuc-text);
+  --popover: var(--color-cuc-surface);
+  --popover-foreground: var(--color-cuc-text);
+  --primary: var(--color-cuc-primary);
+  --primary-foreground: var(--color-cuc-primary-foreground);
+  --secondary: #f7f7f6;
+  --secondary-foreground: #222222;
+  --muted: var(--color-cuc-surface-code);
+  --muted-foreground: var(--color-cuc-text-muted);
+  --accent: var(--color-cuc-accent);
+  --accent-foreground: var(--color-cuc-accent-foreground);
+  --destructive: var(--color-cuc-danger);
+  --border: #e8e7e4;
+  --input: #e4e3df;
+  --ring: var(--color-cuc-primary);
+  --sidebar: #f3f1ee;
+  --cuc-width-composer: min(600px, calc(100vw - 48px));
+  --cuc-width-home-composer: min(600px, calc(100vw - 108px));
+  --cuc-width-page: min(1040px, calc(100vw - 108px));
+}
+
+@utility cuc-checkerboard {
+  background-color: var(--color-cuc-surface);
+  background-image:
+    linear-gradient(45deg, var(--color-cuc-checker) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--color-cuc-checker) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--color-cuc-checker) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--color-cuc-checker) 75%);
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-size: 16px 16px;
+}
