@@ -2,6 +2,12 @@
 
 本文记录 2026-06-11 Agent v2 正式切换后的变更。
 
+## 2026-06-25 Reusable Text Artifact Boundary
+
+- Input Normalizer 继续复用 artifact-first task protocol，不新增独立 Output Planner 或 `responseMode` 状态；可复用、可复制、可编辑的文本产物仍通过 `artifact.kind/subtype/format` 表达。
+- 模板、提示词模板、完整提示词、可复制/直接使用方案、设定稿、规范和 IP 三视图模板等生产型文本请求归一化为 `document/markdown` artifact，并由 Document Agent 通过 `create_text_artifact` 创建画布文档；明确要求生成真实图片/海报/插画时仍走 Image Agent。
+- 简单解释、为什么/是什么类问答继续保持 `artifact=null`，由 fast path、轻量 chat 或 Manager 在 Run 节点直接回复。
+
 ## 2026-06-24 Input Normalizer And Manager Boundary
 
 - `server/agent/input-normalizer.ts` 保持为 artifact-first task protocol 生成与确定性纠偏边界；specialist route 选择拆到 `server/agent/task-router.ts`，由 runtime、quick router、handoff registry、tool policy 和 skill retrieval 共用同一套 route/capability 判断。

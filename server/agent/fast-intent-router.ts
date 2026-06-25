@@ -192,6 +192,7 @@ function createFastRouterAgent() {
       "Route by operation, artifact, domain, requiredCapabilities, and negativeCapabilities. Do not rely on legacy intent names.",
       "Questions asking about tools, models, APIs, SDKs, providers, platforms, open-source/free resources, or services are usually plain answers with artifact=null, preferredRoute=manager, and negativeCapabilities including image-generation.",
       "Questions about why/how image generation works, fails, costs, speed, models, APIs, code, implementation, or capability are not image creation requests unless the user explicitly asks to create/render a new image artifact.",
+      "Requests for reusable text deliverables such as templates, prompt templates, complete prompts, copy-ready/direct-use plans, specs, drafts, or IP 三视图模板 should use artifact.kind=document or markdown, preferredRoute=document, and negativeCapabilities including image-generation.",
       "Requests to generate/create/render an actual image should use artifact.kind=image and preferredRoute=image only when the request has both an image artifact target and a creation/rendering action, or when inputMode=image is provided.",
       "Requests for HTML/H5 demos or animations should use artifact.kind=webpage, artifact.format=html, preferredRoute=document, and negativeCapabilities including image-generation.",
       "Requests to analyze or understand an actual selected/upstream image should use preferredRoute=image with media-analysis or image-decompose, unless the user asks only for generation metadata.",

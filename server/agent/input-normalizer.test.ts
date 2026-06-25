@@ -635,6 +635,97 @@ describe("input normalizer", () => {
     expect(selectAgentRoute(normalized)).toBe("document");
   });
 
+  it("routes prompt templates to reusable document artifacts", () => {
+    const raw = "帮我写一个 IP 三视图提示词模板";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "answer",
+        artifact: null,
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "create",
+      artifact: { kind: "document", format: "markdown" },
+      requiredCapabilities: ["markdown-artifact"],
+      negativeCapabilities: ["image-generation"],
+      intent: "document.create",
+    });
+    expect(normalized.image).toBeUndefined();
+    expect(selectAgentRoute(normalized)).toBe("document");
+  });
+
+  it("corrects IP template requests away from image generation", () => {
+    const raw = "帮我生成一套 IP 三视图模板";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "create",
+        artifact: { kind: "image", format: "png" },
+        requiredCapabilities: ["image-generation"],
+        image: {
+          contentPrompt: raw,
+        },
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "create",
+      artifact: { kind: "document", format: "markdown" },
+      requiredCapabilities: ["markdown-artifact"],
+      negativeCapabilities: ["image-generation"],
+      intent: "document.create",
+    });
+    expect(normalized.image).toBeUndefined();
+    expect(selectAgentRoute(normalized)).toBe("document");
+  });
+
+  it("keeps explicit IP image creation on the image route", () => {
+    const raw = "生成一张 IP 三视图图片";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "answer",
+        artifact: null,
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "create",
+      artifact: { kind: "image", format: "png" },
+      requiredCapabilities: ["image-generation"],
+      intent: "image.generate",
+    });
+    expect(selectAgentRoute(normalized)).toBe("image");
+  });
+
+  it("keeps ordinary why questions as chat answers", () => {
+    const raw = "Agent 为什么启动慢？";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "answer",
+        artifact: null,
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "answer",
+      artifact: null,
+      intent: "text.answer",
+    });
+    expect(selectAgentRoute(normalized)).toBe("manager");
+  });
+
   it("keeps prompt text edits out of image generation even when the model proposes image generation", () => {
     const raw = "取消标题";
 

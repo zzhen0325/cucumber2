@@ -107,6 +107,37 @@ describe("fast intent router", () => {
     expect(route.normalizedInput?.image).toBeUndefined();
   });
 
+  it("accepts reusable prompt templates as document artifact routes", () => {
+    const route = finalizeFastRouteDecision(
+      {
+        operation: "create",
+        artifact: { kind: "document", format: "markdown" },
+        domain: "visual-design",
+        requiredCapabilities: ["markdown-artifact"],
+        negativeCapabilities: ["image-generation"],
+        preferredRoute: "document",
+        candidateTools: ["create_text_artifact"],
+        confidence: 0.9,
+        needsFullNormalization: false,
+      },
+      input({ message: "帮我写一个 IP 三视图提示词模板" })
+    );
+
+    expect(route).toMatchObject({
+      route: "complex_agent_task",
+      routerSource: "fast-intent-router",
+      requiresModelNormalization: false,
+      preferredRoute: "document",
+      normalizedInput: {
+        artifact: { kind: "document", format: "markdown" },
+        negativeCapabilities: ["image-generation"],
+        requiredCapabilities: ["markdown-artifact"],
+        intent: "document.create",
+      },
+    });
+    expect(route.normalizedInput?.image).toBeUndefined();
+  });
+
   it("falls back when confidence is low", () => {
     const route = finalizeFastRouteDecision(
       {

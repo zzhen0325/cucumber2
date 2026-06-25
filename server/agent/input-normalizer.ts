@@ -195,6 +195,7 @@ export function createInputNormalizerAgent() {
       "Classify HTML pages, H5 pages, interactive prototypes, HTML demos, and HTML animations as operation=create, artifact.kind=webpage, artifact.format=html, requiredCapabilities including html-artifact, and negativeCapabilities including image-generation.",
       "HTML animation requests such as 30秒 HTML 动画 are webpage/html artifacts, not image artifacts, unless the user explicitly asks to generate a raster image/poster/banner.",
       "Classify PRD, brief,方案,说明,邮件草稿,纪要 as document or markdown artifacts.",
+      "Classify reusable text deliverables such as 模板, 提示词模板, 完整提示词, 可复制/直接使用方案, 设定稿, 规范, IP 三视图模板 as document or markdown artifacts with markdown-artifact. These are text products even if they mention images, IP, characters, or visual design.",
       "Classify requests to edit, rewrite, polish, expand, shorten, remove parts from, or otherwise revise a prompt/text/description as operation=edit with artifact=null and negativeCapabilities including image-generation. Terse commands such as 取消标题, 去掉标题, 删除文案, or remove the title should revise the selected/upstream prompt text and must not generate images unless the user explicitly asks to generate/create/render an image now.",
       "Classify requests to analyze, evaluate, critique, summarize, or give suggestions for a visual/image/banner/poster/KV brief as operation=analyze or answer with no image artifact unless the user explicitly asks to generate/create/render the image now; include negativeCapabilities image-generation.",
       "Classify explicit long-form output requests such as detailed explanation, complete plan, roadmap, proposal, research analysis, report, 文档, 详细说明, 完整规划, 调研分析, or 长文 as operation=create or analyze with artifact.kind=document or markdown. Short QA remains artifact=null.",
@@ -493,6 +494,20 @@ function inferTaskProtocol(prompt: string): Pick<
       negativeCapabilities: ["image-generation"],
       operation: "answer",
       requiredCapabilities: [],
+    };
+  }
+
+  if (isReusableTextArtifactRequest(prompt)) {
+    return {
+      artifact: {
+        kind: /markdown|md/i.test(prompt) ? "markdown" : "document",
+        subtype: inferLongFormDocumentSubtype(prompt),
+        format: "markdown",
+      },
+      domain,
+      negativeCapabilities: ["image-generation"],
+      operation: inferEditOperation(prompt) ? "edit" : "create",
+      requiredCapabilities: inferLongFormDocumentCapabilities(prompt),
     };
   }
 
@@ -911,6 +926,9 @@ function inferEditOperation(prompt: string) {
 }
 
 function isLongFormDocumentRequest(prompt: string) {
+  if (isReusableTextArtifactRequest(prompt)) {
+    return true;
+  }
   if (hasExplicitImageCreationRequest(prompt)) {
     return false;
   }
@@ -930,6 +948,40 @@ function isLongFormDocumentRequest(prompt: string) {
     /(说明|解释|讲解|规划|计划|方案|调研|研究|分析|总结|复盘|对比|proposal|plan|report|brief)/i;
 
   return longFormCue.test(prompt) && longFormTarget.test(prompt);
+}
+
+function isReusableTextArtifactRequest(prompt: string) {
+  const promptTemplate =
+    /(提示词|prompt).{0,24}(模板|完整|文档|可复制|直接使用|复用|套用)|(模板|完整|文档|可复制|直接使用|复用|套用).{0,24}(提示词|prompt)/i.test(
+      prompt
+    );
+  const copyReady =
+    /(可复制|复制使用|直接使用|拿去用|复用|套用|copy[-\s]?ready|reusable)/i.test(
+      prompt
+    ) &&
+    /(方案|计划|提示词|模板|文档|报告|规范|设定|prompt|plan|template|document|report|spec)/i.test(
+      prompt
+    );
+  const reusableTemplate =
+    /(模板|template|设定稿|规范|三视图模板)/i.test(prompt) &&
+    /(帮我|请|给我|写|生成|创建|输出|整理|制定|做|产出|撰写|设计|make|create|write|draft|produce)/i.test(
+      prompt
+    );
+  const concreteRasterOutput =
+    /(图片|图像|出图|渲染|一张|[0-9一二两三四五六七八九十]\s*张|海报|banner|KV|主视觉|插画|photo|image|poster)/i.test(
+      prompt
+    );
+
+  if (
+    concreteRasterOutput &&
+    hasExplicitImageCreationRequest(prompt) &&
+    !promptTemplate &&
+    !copyReady
+  ) {
+    return false;
+  }
+
+  return promptTemplate || copyReady || reusableTemplate;
 }
 
 function inferLongFormDocumentSubtype(
