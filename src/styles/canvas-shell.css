@@ -1,0 +1,480 @@
+.app-shell {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  padding: var(--spacing-cuc-canvas-inset);
+  background: var(--color-cuc-surface);
+}
+
+.agent-canvas {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid var(--color-cuc-canvas-border);
+  border-radius: var(--radius-cuc-canvas);
+  background: var(--color-cuc-canvas);
+  --xy-selection-background-color: rgba(200, 201, 204, 0.1);
+  --xy-selection-border: 1px solid rgba(200, 201, 204, 0.2);
+  --xy-edge-stroke-default: var(--color-cuc-edge);
+  --xy-edge-stroke-width-default: 0.75;
+  --xy-edge-stroke-selected-default: var(--color-cuc-text-soft);
+}
+
+.agent-canvas .react-flow__background {
+  opacity: 0;
+}
+
+.agent-canvas .react-flow__pane {
+  cursor: default;
+}
+
+.agent-canvas .react-flow__pane.selection {
+  cursor: default;
+}
+
+.agent-canvas .react-flow__pane.draggable {
+  cursor: grab;
+}
+
+.agent-canvas .react-flow__pane.dragging {
+  cursor: grabbing;
+}
+
+.agent-canvas.canvas-tool-hand .react-flow__pane {
+  cursor: grab;
+}
+
+.agent-canvas.canvas-tool-hand .react-flow__pane:active {
+  cursor: grabbing;
+}
+
+.agent-canvas.canvas-tool-hand .react-flow__pane.selection {
+  cursor: grabbing;
+}
+
+.agent-canvas.canvas-tool-create .react-flow__pane {
+  cursor: crosshair;
+}
+
+.canvas-creation-preview {
+  position: absolute;
+  z-index: 18;
+  display: grid;
+  min-width: 8px;
+  min-height: 8px;
+  place-items: center;
+  border: 1px solid rgba(0, 0, 0, 0.76);
+  border-radius: var(--radius-cuc-popover);
+  background: --alpha(var(--color-cuc-ink) / 8%);
+  box-shadow: 0 0 0 3px --alpha(var(--color-cuc-ink) / 8%);
+  color: rgba(23, 66, 34, 0.78);
+  font-size: 11px;
+  line-height: 14px;
+  pointer-events: none;
+}
+
+.canvas-creation-preview span {
+  max-width: 86px;
+  overflow: hidden;
+  padding: 2px 6px;
+  border-radius: var(--radius-cuc-pill);
+  background: --alpha(var(--color-cuc-surface) / 72%);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-canvas .react-flow__selection,
+.agent-canvas .react-flow__nodesselection-rect {
+  box-shadow: 0 0 0 1px --alpha(var(--color-cuc-ink) / 10%);
+}
+
+.agent-canvas .react-flow__handle {
+  width: 1px;
+  height: 1px;
+  border: 0;
+  background: transparent;
+  opacity: 0;
+}
+
+.agent-canvas .react-flow__edge-path {
+  stroke: var(--color-cuc-edge);
+  stroke-width: 0.75;
+  stroke-dasharray: 3 3;
+}
+
+.agent-canvas .react-flow__controls,
+.canvas-minimap {
+  display: none;
+}
+
+.top-bar {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--spacing-cuc-floating-height);
+  padding: 8px;
+  border-radius: var(--radius-cuc-floating);
+  background: var(--color-cuc-canvas-glass);
+  color: var(--color-cuc-text-strong);
+  font-size: 13px;
+  font-weight: 400;
+  backdrop-filter: blur(8px);
+}
+
+.top-bar-main {
+  display: flex;
+  width: 271px;
+  height: var(--spacing-cuc-control);
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.top-back-button {
+  display: grid;
+  width: var(--spacing-cuc-icon-button);
+  height: var(--spacing-cuc-icon-button);
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-cuc-card);
+  background: transparent;
+  color: var(--color-cuc-text-secondary);
+  cursor: pointer;
+}
+
+.top-back-button:hover {
+  color: var(--color-cuc-text);
+  background: var(--color-cuc-surface);
+}
+
+.brand-mark {
+  display: grid;
+  width: var(--spacing-cuc-control);
+  height: var(--spacing-cuc-control);
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--radius-cuc-control);
+  color: var(--color-cuc-control-dark);
+}
+
+.brand-mark img {
+  width: 20px;
+  height: 20px;
+}
+
+.top-bar-divider {
+  width: 1px;
+  height: 12px;
+  margin: 0 8px;
+  flex: 0 0 auto;
+  background: var(--color-cuc-edge);
+}
+
+.top-title-button,
+.top-icon-button {
+  display: grid;
+  height: var(--spacing-cuc-control);
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--color-cuc-text-heading);
+  cursor: pointer;
+}
+
+.top-title-button {
+  width: 150px;
+  grid-template-columns: minmax(0, 1fr) 12px;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: var(--radius-cuc-control);
+  text-align: left;
+}
+
+.top-title-button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.top-icon-button {
+  width: var(--spacing-cuc-control);
+  border-radius: var(--radius-cuc-control);
+}
+
+.top-title-button:hover,
+.top-icon-button:hover,
+.top-back-button:hover {
+  background: --alpha(var(--color-cuc-surface) / 72%);
+  color: var(--color-cuc-text-heading);
+}
+
+.tool-rail {
+  position: absolute;
+  top: 50%;
+  left: 14px;
+  z-index: 20;
+  display: flex;
+  width: 56px;
+  transform: translateY(-50%);
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8.5px;
+  border: 0.5px solid var(--color-cuc-border);
+  border-radius: var(--radius-cuc-composer);
+  background: var(--color-cuc-surface);
+}
+
+.tool-rail button,
+.viewport-controls button {
+  display: grid;
+  place-items: center;
+  border: 0;
+  color: #5c5c5c;
+  background: transparent;
+  cursor: pointer;
+}
+
+.tool-rail button {
+  width: var(--spacing-cuc-tool);
+  height: var(--spacing-cuc-tool);
+  border-radius: var(--radius-cuc-floating);
+}
+
+.tool-rail button:hover:not(:disabled),
+.viewport-controls button:hover:not(:disabled),
+.tool-rail button.active,
+.viewport-controls button.active {
+  background: var(--color-cuc-surface-warm);
+  color: var(--color-cuc-text);
+}
+
+.tool-rail button:disabled,
+.viewport-controls button:disabled {
+  cursor: default;
+  opacity: 0.38;
+}
+
+.viewport-controls {
+  position: absolute;
+  top: 14px;
+  right: 20px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--spacing-cuc-floating-height);
+  padding: 0 8px;
+  border-radius: var(--radius-cuc-floating);
+  background: var(--color-cuc-canvas-glass);
+  backdrop-filter: blur(8px);
+}
+
+.viewport-controls button {
+  height: var(--spacing-cuc-control);
+  border-radius: var(--radius-cuc-control);
+}
+
+.viewport-controls button:disabled {
+  opacity: 1;
+}
+
+.viewport-controls > button:not(.viewport-zoom-button, .viewport-workbench-button) {
+  width: var(--spacing-cuc-control);
+}
+
+.viewport-zoom-button {
+  display: flex !important;
+  width: 69px;
+  grid-auto-flow: column;
+  grid-template-columns: auto auto;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 8px;
+}
+
+.viewport-workbench-button {
+  display: flex !important;
+  width: 87px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 8px;
+  color: var(--color-cuc-text-heading);
+}
+
+.viewport-workbench-button span {
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewport-workbench-button span:last-child {
+  flex: 0 0 auto;
+}
+
+.viewport-controls .divider {
+  width: 1px;
+  height: 12px;
+  margin: 0 4px;
+  background: var(--color-cuc-edge);
+}
+
+.zoom-label {
+  width: 37px;
+  color: var(--color-cuc-text-heading);
+  font-size: 13px;
+  line-height: 20px;
+  text-align: center;
+}
+
+.empty-state {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transform: translate(-50%, -50%);
+  color: var(--color-cuc-text-subtle);
+  font-size: 13px;
+  pointer-events: none;
+}
+
+.file-drop-overlay {
+  position: absolute;
+  z-index: 35;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.file-drop-overlay.active {
+  background: --alpha(var(--color-cuc-ink) / 6%);
+}
+
+.file-drop-overlay.active::before {
+  position: absolute;
+  inset: 14px;
+  border: 1px dashed rgba(0, 0, 0, 0.52);
+  border-radius: var(--radius-cuc-node);
+  content: "";
+}
+
+.file-drop-overlay.error {
+  align-items: start;
+  padding-top: 66px;
+}
+
+.file-drop-card {
+  position: relative;
+  display: inline-flex;
+  max-width: min(360px, calc(100vw - 32px));
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  padding: 0 12px;
+  border: 1px solid --alpha(var(--color-cuc-ink) / 28%);
+  border-radius: var(--radius-cuc-pill);
+  background: --alpha(var(--color-cuc-surface) / 96%);
+  color: var(--color-cuc-ink);
+  font-size: 12px;
+  line-height: 16px;
+  box-shadow: 0 8px 24px --alpha(var(--color-cuc-ink) / 5%);
+  pointer-events: none;
+}
+
+.file-drop-overlay.error .file-drop-card {
+  border-color: rgba(229, 72, 77, 0.22);
+  background: rgba(255, 255, 255, 0.98);
+  color: var(--color-cuc-danger-strong);
+  pointer-events: auto;
+}
+
+.file-drop-icon {
+  display: grid;
+  width: var(--spacing-cuc-icon-button);
+  height: var(--spacing-cuc-icon-button);
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--radius-cuc-round);
+  background: var(--color-cuc-accent);
+  color: var(--color-cuc-ink);
+}
+
+.file-drop-overlay.error .file-drop-icon {
+  background: var(--color-cuc-danger-surface);
+  color: var(--color-cuc-danger-strong);
+}
+
+.file-drop-card > span:last-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-drop-card button {
+  display: grid;
+  width: var(--spacing-cuc-icon-button);
+  height: var(--spacing-cuc-icon-button);
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-cuc-round);
+  background: transparent;
+  color: currentColor;
+  cursor: pointer;
+}
+
+.file-drop-card button:hover {
+  background: var(--color-cuc-surface-warm);
+}
+
+@media (max-width: 760px) {
+  .tool-rail {
+    left: 12px;
+    width: 48px;
+    padding: 6px;
+  }
+
+  .tool-rail button {
+    width: 36px;
+    height: 36px;
+  }
+
+  .viewport-controls {
+    top: 68px;
+    right: 12px;
+    max-width: calc(100vw - 118px);
+    overflow: hidden;
+  }
+
+  .viewport-workbench-button {
+    width: 76px;
+  }
+
+  .top-bar {
+    left: 12px;
+    max-width: calc(100vw - 24px);
+    overflow: hidden;
+  }
+
+  .top-bar-main {
+    width: min(271px, calc(100vw - 88px));
+  }
+
+  .top-title-button {
+    width: min(150px, calc(100vw - 210px));
+  }
+}

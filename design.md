@@ -1,6 +1,6 @@
 # Design
 
-本文件是本仓库的 UI 设计规范。新增或调整任何 UI 元素前，先看实际代码中的 `src/index.css`、`src/App.css` 和本文件；当文档与代码不一致时，先以代码为准，再更新本文档。
+本文件是本仓库的 UI 设计规范。新增或调整任何 UI 元素前，先看实际代码中的 `src/index.css`、`src/styles/theme.css`、对应 `src/styles/*.css` 和本文件；当文档与代码不一致时，先以代码为准，再更新本文档。
 
 ## Design Direction
 
@@ -11,9 +11,26 @@
 
 ## Design Tokens
 
-- 稳定、重复使用的颜色、尺寸、圆角和阴影统一维护在 `src/index.css` 的 `--cuc-*` token 中。
-- `src/App.css` 只保留组件结构、布局和局部一次性状态值；新增重复样式先补 token，再引用 token。
-- token 命名参考 Geist 的分层格式，但数值以当前 Cucumber/Flowith 画布视觉为准，不直接套用 Geist 数值。
+- Tailwind v4 是 CSS-first：稳定、重复使用的颜色、尺寸、圆角、阴影和节点字号统一维护在 `src/styles/theme.css` 的 `@theme` 中，使用官方 namespace：`--color-*`、`--radius-*`、`--shadow-*`、`--spacing-*`、`--text-*`。
+- `src/index.css` 是唯一 Tailwind CSS entry；产品样式按域拆到 `src/styles/*.css`，并在 Tailwind 后置引入以保留现有视觉级联。
+- `:root` 只保留 shadcn/ui 语义变量和运行时组件变量，例如 `--cuc-width-composer`；新增重复视觉值先补 `@theme` token，再引用 token。
+- token 组织只参考 Geist 的分层格式，数值以当前 Cucumber/Flowith 画布视觉为准，不直接套用 Geist 数值。
+
+## Style Architecture
+
+- `src/index.css` 按顺序引入 Tailwind、动画库、`src/styles/theme.css` 和产品样式文件；不要在 `src/App.tsx` 或其他组件里重新引入全局样式入口。
+- 产品样式文件保持后置普通 CSS import，不使用 `layer(components)` 包裹现有复杂样式；否则 JSX 中已有 Tailwind utilities 会覆盖 `.home-*`、`.composer-*`、`.canvas-node` 等产品 class，造成视觉回退。
+- `src/styles/base.css` 只放 `html`、`body`、`#root`、字体、滚动条和基础表单继承。
+- `src/styles/workspace-pages.css` 管理 `home-*`、`project-*`、`skills-*`、`workspace-*`、`app-state-*`。
+- `src/styles/canvas-shell.css` 管理 `app-shell`、`agent-canvas`、`top-bar`、`tool-rail`、`viewport-controls`、`file-drop-*`、`replay-banner`。
+- `src/styles/composer.css` 管理 `composer-*`、图像模式 controls、inline token、skill menu。
+- `src/styles/canvas-nodes.css` 管理 `canvas-node`、resizer、prompt、sticky、shape 基础节点。
+- `src/styles/run-node.css` 管理 `run-*`、`agent-*`、`tool-call-*`、`tool-json-*`。
+- `src/styles/artifacts.css` 管理 image / markdown / code / html artifact、preview dialog、BlockNote 覆盖和透明棋盘格。
+- `src/styles/trace-panel.css` 管理 `run-trace-*`、`trace-*` 和 replay banner。
+- 不新增 `common.css`、`responsive.css` 这类垃圾桶文件；media query 跟随所属产品域文件。
+- 简单新增 UI 可以直接使用 Tailwind utility，例如 `bg-cuc-surface rounded-cuc-card border border-cuc-border`；React Flow、BlockNote、伪元素、复杂后代选择器继续留在对应 CSS 文件。
+- `@utility` 只用于 Tailwind theme token 不能自然表达的能力，目前仅保留 `cuc-checkerboard`；阴影、颜色、尺寸、圆角优先放进 `@theme`。
 
 ## Color
 

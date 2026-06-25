@@ -5691,7 +5691,7 @@ function MarkdownNode({
             <FileText size={14} />
           </span>
           <div>
-            <span>Markdown</span>
+          
             <strong className="copyable-text nodrag nopan" title={data.title}>
               {data.title}
             </strong>

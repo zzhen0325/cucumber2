@@ -7,7 +7,6 @@ import { LoadingScreen } from "@/components/LoadingScreen";
 import { WorkspaceShell } from "@/components/WorkspaceShell";
 import { getCurrentUser, logout, type AppUser } from "@/lib/auth-storage";
 
-import "./App.css";
 
 type SessionStatus = "loading" | "ready" | "error";
 
