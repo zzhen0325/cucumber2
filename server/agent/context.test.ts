@@ -106,6 +106,27 @@ describe("agent context", () => {
     expect(buildCucumberAgentContext(input).imageProvider).toBe("seed5_duotu_zz");
   });
 
+  it("carries a forced skill selection into the agent context", () => {
+    const input = buildAgentRunInput({
+      userId: "user-1",
+      projectId: "project-1",
+      runNodeId: "run-2",
+      canvasContext: {
+        forcedSkillId: "00000000-0000-4000-8000-000000000001",
+        forcedSkillName: "visual-prompt-cookbook",
+        prompt: "生成图片",
+        promptNodeId: "prompt-2",
+        selectedNodeId: null,
+      },
+      projectSnapshot: snapshot(),
+    });
+
+    expect(buildCucumberAgentContext(input)).toMatchObject({
+      forcedSkillId: "00000000-0000-4000-8000-000000000001",
+      forcedSkillName: "visual-prompt-cookbook",
+    });
+  });
+
   it("normalizes explicit image composer controls into an image task", () => {
     const input = buildAgentRunInput({
       userId: "user-1",

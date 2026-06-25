@@ -326,6 +326,56 @@ describe("skill retrieval", () => {
     expect(candidates[0]?.name).toBe("research-notes");
     expect(mocks.listAgentSkillDefinitions).toHaveBeenCalledTimes(1);
   });
+
+  it("pins a forced skill even when normal retrieval would skip", async () => {
+    mocks.listAgentSkillDefinitions.mockResolvedValue([
+      skill({
+        id: "skill-forced",
+        name: "forced-skill",
+        triggers: { canvasKinds: [], keywords: [] },
+      }),
+      skill({
+        id: "skill-other",
+        name: "other-skill",
+        triggers: { canvasKinds: [], keywords: [] },
+      }),
+    ]);
+
+    const candidates = await retrieveRelevantAgentSkills(
+      input({
+        forcedSkillId: "skill-forced",
+        message: "hello",
+        normalizedInput: {
+          rawPrompt: "hello",
+          userGoal: "hello",
+          operation: "answer",
+          artifact: null,
+          requiredCapabilities: [],
+          negativeCapabilities: [],
+        },
+      })
+    );
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({
+      id: "skill-forced",
+      reasons: ["forced"],
+    });
+  });
+
+  it("fails when a forced skill is not enabled or missing", async () => {
+    mocks.listAgentSkillDefinitions.mockResolvedValue([
+      skill({
+        id: "skill-disabled",
+        enabled: false,
+        name: "disabled-skill",
+      }),
+    ]);
+
+    await expect(
+      retrieveRelevantAgentSkills(input({ forcedSkillId: "skill-disabled" }))
+    ).rejects.toThrow("Selected skill is not available.");
+  });
 });
 
 function input(overrides: Partial<AgentRunInput> = {}): AgentRunInput {

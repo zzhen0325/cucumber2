@@ -10,9 +10,9 @@ describe("task router", () => {
     expect(
       selectAgentRoute({
         rawPrompt: "分析这张图",
-        operation: "analyze",
-        artifact: { kind: "markdown", format: "markdown" },
-        requiredCapabilities: ["media-analysis", "markdown-artifact"],
+        operation: "answer",
+        artifact: null,
+        requiredCapabilities: ["media-analysis"],
         negativeCapabilities: ["image-generation"],
       })
     ).toBe("image");

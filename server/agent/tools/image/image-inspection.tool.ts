@@ -23,16 +23,6 @@ const decomposeImageInputSchema = z.object({
   title: z.string().trim().min(1).max(160).optional(),
 });
 
-const analyzeMediaInputSchema = z.object({
-  answer: z.string().trim().min(1),
-  extractedInfo: stringListSchema,
-  limitations: stringListSchema,
-  nextSteps: stringListSchema,
-  observations: stringListSchema,
-  question: z.string().trim().min(1).optional(),
-  title: z.string().trim().min(1).max(160).optional(),
-});
-
 const decomposeImageJsonSchema = {
   type: "object",
   additionalProperties: false,
@@ -78,48 +68,6 @@ const decomposeImageJsonSchema = {
   required: ["styleSummary", "promptStructure"],
 } as const;
 
-const analyzeMediaJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    answer: {
-      type: "string",
-      description: "Direct answer to the user's media-understanding request.",
-    },
-    extractedInfo: {
-      type: "array",
-      items: { type: "string" },
-      description: "Key information extracted from trusted context.",
-    },
-    limitations: {
-      type: "array",
-      items: { type: "string" },
-      description:
-        "What could not be confirmed from available trusted context. Do not hide missing pixel-level access.",
-    },
-    nextSteps: {
-      type: "array",
-      items: { type: "string" },
-      description: "Concrete follow-up actions the user can take.",
-    },
-    observations: {
-      type: "array",
-      items: { type: "string" },
-      description: "Concise observations that support the answer.",
-    },
-    question: {
-      type: "string",
-      description: "Optional restatement of the user question.",
-    },
-    title: {
-      type: "string",
-      maxLength: 160,
-      description: "Optional artifact title.",
-    },
-  },
-  required: ["answer"],
-} as const;
-
 export const decomposeImageTool = tool({
   name: "decompose_image",
   description:
@@ -162,48 +110,6 @@ export const decomposeImageTool = tool({
   },
 });
 
-export const analyzeMediaTool = tool({
-  name: "analyze_media",
-  description:
-    "Create a markdown artifact that answers a selected/upstream image understanding request. Use for 看懂图片, 识别/描述/总结图片内容, 判断画面元素, or extracting key image information. Do not claim unobserved pixel details; state limitations explicitly.",
-  parameters: analyzeMediaJsonSchema as never,
-  strict: false,
-  errorFunction: null,
-  async execute(rawArgs, runContext) {
-    const context = requireCucumberContext(runContext?.context);
-    assertImageInspectionToolAllowed(context, "analyze_media", "media-analysis");
-    const parsed = analyzeMediaInputSchema.safeParse(rawArgs);
-    if (!parsed.success) {
-      return {
-        error: `invalid_analyze_media_input: ${parsed.error.issues
-          .map((issue) => `${issue.path.join(".")} ${issue.message}`)
-          .join("; ")}`,
-      };
-    }
-    const source = await resolveSingleSourceImage(
-      context,
-      "请选择一张图片后再执行图片理解。"
-    );
-    const content = buildAnalyzeContent(parsed.data, source, context.prompt);
-    const artifact = await storeImageTextArtifact({
-      content,
-      context,
-      metadata: {
-        operation: "analyze_media",
-        sourceNodeId: source.nodeId,
-      },
-      title: parsed.data.title ?? "图片理解结果",
-      toolName: "analyze_media",
-    });
-
-    return {
-      artifactId: artifact.id,
-      note: "Media analysis artifact created and rendered to the canvas.",
-      title: artifact.title,
-    };
-  },
-});
-
 function buildDecomposeContent(
   input: z.infer<typeof decomposeImageInputSchema>,
   source: ResolvedImageSource,
@@ -230,31 +136,6 @@ function buildDecomposeContent(
     "## 可复用 Prompt 结构",
     input.promptStructure,
     "",
-    formatList("## 限制", input.limitations),
-    formatList("## 下一步建议", input.nextSteps),
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
-function buildAnalyzeContent(
-  input: z.infer<typeof analyzeMediaInputSchema>,
-  source: ResolvedImageSource,
-  userRequest: string
-) {
-  return [
-    `# ${input.title ?? "图片理解结果"}`,
-    "",
-    `用户需求：${input.question ?? userRequest}`,
-    "",
-    "## 输入",
-    formatSource(source),
-    "",
-    "## 结论",
-    input.answer,
-    "",
-    formatList("## 观察依据", input.observations),
-    formatList("## 提取信息", input.extractedInfo),
     formatList("## 限制", input.limitations),
     formatList("## 下一步建议", input.nextSteps),
   ]
@@ -291,7 +172,7 @@ async function storeImageTextArtifact({
   context: CucumberAgentContext;
   metadata?: Record<string, unknown>;
   title: string;
-  toolName: "analyze_media" | "decompose_image";
+    toolName: "decompose_image";
 }) {
   const artifact = await storeTextArtifactContent({
     content,
@@ -311,7 +192,7 @@ async function storeImageTextArtifact({
 function emitArtifactCreated(
   context: CucumberAgentContext,
   artifact: ArtifactRef,
-  toolName: "analyze_media" | "decompose_image"
+  toolName: "decompose_image"
 ) {
   const event = {
     type: "artifact_created" as const,

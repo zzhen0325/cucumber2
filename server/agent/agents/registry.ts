@@ -133,7 +133,7 @@ function shouldEnableImageHandoff(context: CucumberAgentContext) {
       skill.agentScope === "image" ||
       skill.bindings.agents.some((agent) => /image/i.test(agent)) ||
       skill.bindings.tools.some((toolName) =>
-        /analyze_media|decompose_image|generate_image|image_matting|upscale_image/i.test(
+        /decompose_image|generate_image|image_matting|upscale_image/i.test(
           toolName
         )
       )

@@ -141,6 +141,8 @@ const imageResultCountSchema = z.union([
 ]);
 
 const canvasContextSchema = z.object({
+  forcedSkillId: z.string().uuid().optional(),
+  forcedSkillName: z.string().trim().min(1).max(120).optional(),
   imageAspectRatio: imageAspectRatioSchema.optional(),
   imageResultCount: imageResultCountSchema.optional(),
   imageProvider: z.enum(["byteartist", "seed5_duotu_zz"]).optional(),

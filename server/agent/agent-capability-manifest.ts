@@ -98,14 +98,13 @@ const routeCapabilities = [
     negativeCapabilities: [],
     producedArtifactTypes: ["image", "doc"],
     requiredTools: [
-      "analyze_media",
       "decompose_image",
       "generate_image",
       "image_matting",
       "upscale_image",
     ],
     description:
-      "Image specialist for image generation, outpainting, matting/background removal, image decomposition, media understanding, and upscaling.",
+      "Image specialist for image generation, outpainting, matting/background removal, image decomposition, native multimodal media understanding, and upscaling.",
   },
 ] satisfies AgentCapabilityRoute[];
 

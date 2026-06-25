@@ -587,7 +587,6 @@ function getPendingAgentText(
 function getToolName(toolPart: CanvasToolPart) {
   const names: Record<string, string> = {
     "tool-expand_image_prompt": "扩写提示词",
-    "tool-analyze_media": "理解图片",
     "tool-decompose_image": "拆解图片",
     "tool-read_skill_resource": "读取技能资源",
     "tool-render_visual_style_prompt": "风格提示词",

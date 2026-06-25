@@ -330,7 +330,7 @@ describe("input normalizer", () => {
     expect(selectAgentRoute(normalized)).toBe("image");
   });
 
-  it("routes media understanding to Image Agent markdown analysis", () => {
+  it("routes media understanding to Image Agent multimodal answer", () => {
     const raw = "这张图里有什么，帮我提取关键信息";
 
     const normalized = finalizeNormalizedAgentInput(
@@ -343,9 +343,9 @@ describe("input normalizer", () => {
     );
 
     expect(normalized).toMatchObject({
-      operation: "analyze",
-      artifact: { kind: "markdown", format: "markdown" },
-      requiredCapabilities: ["media-analysis", "markdown-artifact"],
+      operation: "answer",
+      artifact: null,
+      requiredCapabilities: ["media-analysis"],
       negativeCapabilities: ["image-generation"],
       intent: "media.analyze",
     });
@@ -430,7 +430,7 @@ describe("input normalizer", () => {
         rawPrompt: raw,
         operation: "analyze",
         artifact: { kind: "markdown", format: "markdown" },
-        requiredCapabilities: ["media-analysis", "markdown-artifact"],
+        requiredCapabilities: ["media-analysis"],
         intent: "media.analyze",
       },
       raw

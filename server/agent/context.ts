@@ -27,6 +27,8 @@ export type CanvasSnapshot = {
 };
 
 export type AgentRunRequestContext = {
+  forcedSkillId?: string;
+  forcedSkillName?: string;
   imageAspectRatio?: ImageAspectRatioSelection;
   imageResultCount?: ImageResultCountSelection;
   imageProvider?: ImageProviderSelection;
@@ -46,6 +48,8 @@ export type AgentRunInput = {
   canvasId: string;
   runNodeId: string;
   message: string;
+  forcedSkillId?: string;
+  forcedSkillName?: string;
   imageAspectRatio?: ImageAspectRatioSelection;
   imageResultCount?: ImageResultCountSelection;
   imageProvider?: ImageProviderSelection;
@@ -220,6 +224,8 @@ export type CucumberAgentContext = {
   pendingEvents: PendingCucumberEvent[];
   pushLiveEvent?: (event: PendingCucumberEvent) => void;
   skillCandidates: AgentSkillCard[];
+  forcedSkillId?: string;
+  forcedSkillName?: string;
   prompt: string;
   imageAspectRatio?: ImageAspectRatioSelection;
   imageResultCount?: ImageResultCountSelection;
@@ -344,6 +350,8 @@ export function buildAgentRunInput({
       edges: projectSnapshot.edges,
     },
     message: canvasContext.prompt,
+    forcedSkillId: canvasContext.forcedSkillId,
+    forcedSkillName: canvasContext.forcedSkillName,
     imageAspectRatio: canvasContext.imageAspectRatio,
     imageResultCount: canvasContext.imageResultCount,
     imageProvider: canvasContext.imageProvider,
@@ -544,6 +552,8 @@ export function buildCucumberAgentContext(input: AgentRunInput): CucumberAgentCo
     selectedNodeIds: input.selectedNodeIds,
     signal: input.signal,
     skillCandidates: [],
+    forcedSkillId: input.forcedSkillId,
+    forcedSkillName: input.forcedSkillName,
     contextSummary: input.contextSummary,
     upstreamContext: input.upstreamContext,
     userId: input.userId,

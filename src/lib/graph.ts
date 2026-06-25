@@ -957,7 +957,7 @@ function contextItemsFromNode(
 function hasArtifactProducingTool(data: RunNodeData) {
   const toolParts = data.toolParts ?? (data.toolPart ? [data.toolPart] : []);
   return toolParts.some((part) =>
-    /(?:analyze_media|decompose_image|generate_image|image_matting|upscale_image|create_text_artifact|fetch_webpage|research)/.test(
+    /(?:decompose_image|generate_image|image_matting|upscale_image|create_text_artifact|fetch_webpage|research)/.test(
       part.type
     )
   );

@@ -223,9 +223,7 @@ vi.mock("../../../storage.ts", () => ({
 // Imported after the mock is registered.
 const { generateImageTool } = await import("./generate-image.tool.ts");
 const { imageMattingTool } = await import("./image-matting.tool.ts");
-const { analyzeMediaTool, decomposeImageTool } = await import(
-  "./image-inspection.tool.ts"
-);
+const { decomposeImageTool } = await import("./image-inspection.tool.ts");
 const { upscaleImageTool } = await import("./upscale-image.tool.ts");
 const { SEEDREAM_PROMPT_MAX_LENGTH, toSeedreamUpstreamContext } = await import(
   "./generate-image.request.ts"
@@ -980,42 +978,6 @@ describe("generate_image tool", () => {
     ]);
   });
 
-  it("creates a markdown artifact for media analysis", async () => {
-    const context = buildContext({
-      normalizedInput: {
-        rawPrompt: "这张图里有什么",
-        userGoal: "这张图里有什么",
-        operation: "analyze",
-        artifact: { kind: "markdown", format: "markdown" },
-        requiredCapabilities: ["media-analysis", "markdown-artifact"],
-        negativeCapabilities: ["image-generation"],
-      },
-      selectedNodeId: "image-1",
-      upstreamContext: [
-        {
-          imageUrl: "https://cdn.example/ref.png",
-          nodeId: "image-1",
-          summary: "一张家居场景图片",
-          type: "image",
-        },
-      ],
-    });
-
-    const result = await invokeAnalyzeMediaTool(context, {
-      answer: "这是一张家居场景图片。",
-      observations: ["上游摘要提供了家居场景信息。"],
-    });
-
-    expect(result.artifactId).toBe("text-analyze_media");
-    expect(storeTextArtifactContent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("这是一张家居场景图片。"),
-        sourceToolName: "analyze_media",
-        title: "图片理解结果",
-        type: "doc",
-      })
-    );
-  });
 });
 
 async function invokeUpscaleTool(context: CucumberAgentContext, input: unknown) {
@@ -1033,14 +995,5 @@ async function invokeMattingTool(context: CucumberAgentContext, input: unknown) 
 async function invokeDecomposeTool(context: CucumberAgentContext, input: unknown) {
   const runContext = new RunContext(context);
   const raw = await decomposeImageTool.invoke(runContext, JSON.stringify(input));
-  return typeof raw === "string" ? JSON.parse(raw) : raw;
-}
-
-async function invokeAnalyzeMediaTool(
-  context: CucumberAgentContext,
-  input: unknown
-) {
-  const runContext = new RunContext(context);
-  const raw = await analyzeMediaTool.invoke(runContext, JSON.stringify(input));
   return typeof raw === "string" ? JSON.parse(raw) : raw;
 }

@@ -216,7 +216,7 @@ describe("agent event graph projection", () => {
       ]);
   });
 
-  it("does not project failed image nodes when image analysis fails before generation starts", () => {
+  it("does not project failed image nodes when image decomposition fails before generation starts", () => {
     const projection = projectRunTraceToCanvas({
       runNodeId: "run-1",
       events: [
@@ -229,7 +229,7 @@ describe("agent event graph projection", () => {
             rawPrompt: "分析参考图中的 IP 形象并生成 4 张图片",
             operation: "create",
             artifact: { kind: "image", format: "png" },
-            requiredCapabilities: ["media-analysis", "image-generation"],
+            requiredCapabilities: ["image-decompose", "image-generation"],
             intent: "image.generate",
             image: {
               contentPrompt: "基于参考图中的 IP 形象生成图片",
@@ -240,23 +240,23 @@ describe("agent event graph projection", () => {
         }),
         event(
           "tool.error",
-          "analyze_media",
+          "decompose_image",
           {
-            toolCallId: "call-analysis",
-            toolName: "analyze_media",
+            toolCallId: "call-decompose",
+            toolName: "decompose_image",
             errorText:
-              "tool_policy_rejected: analyze_media requires media-analysis.",
+              "tool_policy_rejected: decompose_image requires image-decompose.",
           },
-          "tool_policy_rejected: analyze_media requires media-analysis."
+          "tool_policy_rejected: decompose_image requires image-decompose."
         ),
         event(
           "run.failed",
           "run",
           {
             errorText:
-              "tool_policy_rejected: analyze_media requires media-analysis.",
+              "tool_policy_rejected: decompose_image requires image-decompose.",
           },
-          "tool_policy_rejected: analyze_media requires media-analysis."
+          "tool_policy_rejected: decompose_image requires image-decompose."
         ),
       ],
     });
@@ -269,7 +269,7 @@ describe("agent event graph projection", () => {
       status: "error",
       toolParts: [
         expect.objectContaining({
-          type: "tool-analyze_media",
+          type: "tool-decompose_image",
           state: "output-error",
         }),
       ],

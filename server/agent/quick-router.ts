@@ -8,6 +8,7 @@ import {
 } from "./input-normalizer.ts";
 import {
   isImageArtifactTask,
+  selectAgentRoute,
 } from "./task-router.ts";
 
 export type AgentRunRoute =
@@ -298,7 +299,10 @@ function isSimpleImageFastPathInput(
 }
 
 function routeForNormalizedInput(normalizedInput: NormalizedAgentInput) {
-  return isImageArtifactTask(normalizedInput) ? "image_task" : "complex_agent_task";
+  return isImageArtifactTask(normalizedInput) ||
+    selectAgentRoute(normalizedInput) === "image"
+    ? "image_task"
+    : "complex_agent_task";
 }
 
 function buildImageGenerationMetadataResponse(input: AgentRunInput) {

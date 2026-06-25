@@ -1,9 +1,9 @@
-import { Agent, Runner } from "@openai/agents";
+import { Agent, Runner, type AgentInputItem } from "@openai/agents";
 
 import type { AgentEvent } from "../../src/types/runtime.ts";
 import type { CanvasOperation } from "../../src/types/runtime.ts";
+import type { UpstreamContextItem } from "../../src/types/canvas.ts";
 import { createDocumentAgent } from "./agents/document.agent.ts";
-import { createFastImageAgent } from "./agents/image.agent.ts";
 import { createImageAgent } from "./agents/image.agent.ts";
 import { createManagerAgent } from "./agents/manager.agent.ts";
 import { createResearchAgent } from "./agents/research.agent.ts";
@@ -15,6 +15,7 @@ import {
   hydrateAgentRunInputArtifacts,
   type AgentRunInput,
   type AgentRuntime,
+  type CucumberAgentContext,
   type CucumberRunEvent,
   type CucumberTextDeltaSource,
   type ExecuteAgentRunInput,
@@ -32,10 +33,7 @@ import {
   prewarmFastIntentRouter,
   routeAgentRunFast,
 } from "./fast-intent-router.ts";
-import {
-  hasNegativeCapability,
-  selectAgentRoute,
-} from "./task-router.ts";
+import { selectAgentRoute } from "./task-router.ts";
 import {
   materializeAgentRunSnapshot,
   shouldBlockRunForMaterialization,
@@ -44,6 +42,9 @@ import {
 import { getAgentRunnerConfig } from "./model-config.ts";
 import { retrieveRelevantAgentSkills } from "./skills/skill-retrieval.ts";
 import { getAgentSkillRegistryCacheState } from "./skills/skill-registry.ts";
+import type { ActivatedAgentSkill } from "./skills/types.ts";
+import { resolveStorageBackedImageContext } from "../storage.ts";
+import { getAgentSkillDefinition } from "../supabase.ts";
 import { buildRunPlan } from "./run-plan.ts";
 import { redactTraceValue } from "./trace-redaction.ts";
 import { getToolTraceMetadata } from "./tool-registry.ts";
@@ -57,6 +58,8 @@ import { validateCanvasOperations } from "./policy/canvas-operation-policy.ts";
 let runner: Runner | undefined;
 let simpleChatRunner: Runner | undefined;
 let simpleChatAgent: Agent | undefined;
+
+const MAX_RUN_INPUT_IMAGES = 4;
 
 type RunPhase = "prepare" | "route" | "execute" | "materialize";
 
@@ -75,52 +78,60 @@ export class OpenAIAgentsRuntime implements AgentRuntime {
       (await normalizeAgentInput(input, { signal: input.signal }));
     const normalizedRunInput = { ...input, normalizedInput };
     const context = buildCucumberAgentContext(normalizedRunInput);
-    const useFastImageAgent = shouldUseFastImageAgent(normalizedRunInput);
     const skillPhase = startRunPhase(
       "skills.retrieve",
       "检索可用技能",
       "route"
     );
     const skillRegistryWasCached = getAgentSkillRegistryCacheState().cached;
-    const skillTask = useFastImageAgent
-      ? null
-      : settlePromise(retrieveRelevantAgentSkills(normalizedRunInput));
+    const skillTask = settlePromise(retrieveRelevantAgentSkills(normalizedRunInput));
 
-    if (skillTask) {
-      yield runPhaseStarted(skillPhase);
-      try {
-        const skillResult = await skillTask;
-        if (skillResult.status === "rejected") {
-          throw skillResult.reason;
-        }
-        context.skillCandidates = skillResult.value;
-        yield runPhaseCompleted(skillPhase, {
-          cacheHit: skillRegistryWasCached,
-          candidateCount: context.skillCandidates.length,
-        });
-      } catch (error) {
-        yield runPhaseFailed(skillPhase, error);
-        throw error;
+    yield runPhaseStarted(skillPhase);
+    try {
+      const skillResult = await skillTask;
+      if (skillResult.status === "rejected") {
+        throw skillResult.reason;
       }
-      yield { type: "skill_retrieved", candidates: context.skillCandidates };
+      context.skillCandidates = skillResult.value;
+      yield runPhaseCompleted(skillPhase, {
+        cacheHit: skillRegistryWasCached,
+        candidateCount: context.skillCandidates.length,
+      });
+    } catch (error) {
+      yield runPhaseFailed(skillPhase, error);
+      throw error;
     }
-    const startAgent = createStartingAgentForRun(normalizedInput, {
-      fastImage: useFastImageAgent,
-    });
+    yield { type: "skill_retrieved", candidates: context.skillCandidates };
+    const forcedSkill = await activateForcedSkillForRun(context);
+    if (forcedSkill) {
+      yield {
+        type: "skill_activated",
+        skill: {
+          agentScope: forcedSkill.agentScope,
+          id: forcedSkill.id,
+          name: forcedSkill.name,
+          purpose: forcedSkill.purpose,
+          scripts: forcedSkill.scripts,
+          tags: forcedSkill.tags,
+        },
+      };
+    }
+    const startAgent = createStartingAgentForRun(normalizedInput);
 
     const agentStartPhase = startRunPhase(
       "agent.start",
       "启动 Agent Runner",
       "route"
     );
-    const maxTurns = useFastImageAgent ? 2 : 8;
+    const maxTurns = 8;
     yield runPhaseStarted(agentStartPhase, {
       agentName: startAgent.name,
-      fastPath: useFastImageAgent || undefined,
     });
     let stream;
     try {
-      stream = await getAgentRunner().run(startAgent, buildManagerRunPrompt(normalizedRunInput), {
+      const prompt = buildManagerRunPrompt(normalizedRunInput);
+      const runnerInput = await buildAgentRunnerInput(normalizedRunInput, prompt);
+      stream = await getAgentRunner().run(startAgent, runnerInput, {
         context,
         maxTurns,
         signal: input.signal,
@@ -128,13 +139,11 @@ export class OpenAIAgentsRuntime implements AgentRuntime {
       });
       yield runPhaseCompleted(agentStartPhase, {
         agentName: startAgent.name,
-        fastPath: useFastImageAgent || undefined,
         maxTurns,
       });
     } catch (error) {
       yield runPhaseFailed(agentStartPhase, error, {
         agentName: startAgent.name,
-        fastPath: useFastImageAgent || undefined,
         maxTurns,
       });
       throw error;
@@ -191,7 +200,6 @@ export function prewarmAgentRuntimeWorld() {
   getSimpleChatAgent();
   prewarmFastIntentRouter();
   createManagerAgent();
-  createFastImageAgent();
   createImageAgent();
   createDocumentAgent();
   createResearchAgent();
@@ -286,14 +294,13 @@ function elapsedRunPhaseMs(timer: RunPhaseTimer) {
 }
 
 function createStartingAgentForRun(
-  normalizedInput: NonNullable<AgentRunInput["normalizedInput"]>,
-  options: { fastImage?: boolean } = {}
+  normalizedInput: NonNullable<AgentRunInput["normalizedInput"]>
 ) {
   switch (selectAgentRoute(normalizedInput)) {
     case "document":
       return createDocumentAgent();
     case "image":
-      return options.fastImage ? createFastImageAgent() : createImageAgent();
+      return createImageAgent();
     case "research":
       return createResearchAgent();
     case "web":
@@ -312,6 +319,41 @@ async function settlePromise<T>(promise: Promise<T>) {
   }
 }
 
+async function activateForcedSkillForRun(
+  context: CucumberAgentContext
+): Promise<ActivatedAgentSkill | null> {
+  if (!context.forcedSkillId) {
+    return null;
+  }
+
+  const candidate = context.skillCandidates.find(
+    (skill) => skill.id === context.forcedSkillId
+  );
+  if (!candidate) {
+    throw new Error("Selected skill was not retrieved.");
+  }
+
+  const fullSkill = await getAgentSkillDefinition(candidate.id);
+  if (!fullSkill || !fullSkill.enabled) {
+    throw new Error("Selected skill is not available.");
+  }
+
+  const activated: ActivatedAgentSkill = {
+    ...candidate,
+    body: fullSkill.body,
+    frontmatter: fullSkill.frontmatter,
+    packageBucket: fullSkill.packageBucket,
+    packagePath: fullSkill.packagePath,
+    packageSha256: fullSkill.packageSha256,
+    packageSizeBytes: fullSkill.packageSizeBytes,
+    scripts: fullSkill.scripts,
+    skillMd: fullSkill.skillMd,
+    tags: fullSkill.tags,
+  };
+  context.activatedSkills.push(activated);
+  return activated;
+}
+
 function shouldWriteRunPlan(route: AgentRunRoute, itemCount: number) {
   return route === "complex_agent_task" || route === "image_task" || itemCount > 0;
 }
@@ -324,33 +366,78 @@ function routeForRuntimeNormalizedInput(
     : "complex_agent_task";
 }
 
-function shouldUseFastImageAgent(input: AgentRunInput) {
-  const normalizedInput = input.normalizedInput;
-  if (!normalizedInput || input.retryFrom) {
-    return false;
+function applyForcedSkillRoute(
+  input: AgentRunInput,
+  route: QuickAgentRunRoute
+): QuickAgentRunRoute {
+  if (!input.forcedSkillId) {
+    return route;
   }
-  if (selectAgentRoute(normalizedInput) !== "image") {
-    return false;
+
+  return {
+    ...route,
+    canvasOperations: undefined,
+    directResponse: undefined,
+    fallbackReason: route.fallbackReason ?? "forced_skill",
+    route: route.normalizedInput
+      ? routeForRuntimeNormalizedInput(route.normalizedInput)
+      : "complex_agent_task",
+    skippedSteps: route.normalizedInput ? ["input.normalize"] : [],
+  };
+}
+
+export async function buildAgentRunnerInput(
+  input: AgentRunInput,
+  prompt: string
+): Promise<string | AgentInputItem[]> {
+  const images = await resolveModelInputImages(input.upstreamContext, input.selectedNodeIds);
+  if (!images.length) {
+    return prompt;
   }
-  if (
-    normalizedInput.operation !== "create" &&
-    normalizedInput.intent !== "image.generate"
-  ) {
-    return false;
+
+  return [
+    {
+      role: "user",
+      content: [
+        { type: "input_text", text: prompt },
+        ...images.map((image) => ({
+          type: "input_image" as const,
+          image: image.imageUrl,
+          detail: "auto",
+        })),
+      ],
+    },
+  ];
+}
+
+async function resolveModelInputImages(
+  upstreamContext: UpstreamContextItem[],
+  selectedNodeIds: string[]
+) {
+  const selectedNodeIdSet = new Set(selectedNodeIds);
+  const imageItems = upstreamContext
+    .filter((item): item is UpstreamContextItem & { type: "image" } =>
+      item.type === "image"
+    )
+    .sort((left, right) => {
+      const leftSelected = selectedNodeIdSet.has(left.nodeId) ? 0 : 1;
+      const rightSelected = selectedNodeIdSet.has(right.nodeId) ? 0 : 1;
+      return leftSelected - rightSelected || (left.priority ?? 0) - (right.priority ?? 0);
+    })
+    .slice(0, MAX_RUN_INPUT_IMAGES);
+  if (!imageItems.length) {
+    return [];
   }
-  if (normalizedInput.artifact?.kind !== "image") {
-    return false;
-  }
-  if (hasNegativeCapability(normalizedInput, "image-generation")) {
-    return false;
-  }
-  if (input.upstreamContext.length || input.selectedNodeIds.length) {
-    return false;
-  }
-  const requiredCapabilities = normalizedInput.requiredCapabilities ?? [];
-  return requiredCapabilities.every((capability) =>
-    ["image-generation"].includes(capability)
+
+  const resolved = await resolveStorageBackedImageContext(imageItems);
+  return resolved.filter(
+    (item): item is UpstreamContextItem & { type: "image"; imageUrl: string } =>
+      item.type === "image" && isModelReadableImageUrl(item.imageUrl)
   );
+}
+
+function isModelReadableImageUrl(value: string | undefined) {
+  return Boolean(value && /^(https?:\/\/|data:image\/)/i.test(value));
 }
 
 export async function executeAgentRun({
@@ -497,6 +584,7 @@ export async function executeAgentRun({
         signal: input.signal,
       });
     }
+    quickRoute = applyForcedSkillRoute(agentInput, quickRoute);
     await writeRunEvent({
       projectId: input.projectId,
       runNodeId: input.runNodeId,

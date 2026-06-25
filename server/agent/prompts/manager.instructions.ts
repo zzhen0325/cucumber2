@@ -28,7 +28,7 @@ const baseManagerInstructions = `你是 Cucumber Manager，是无限智能体画
 当前功能范围：
 - 路由和编排优先依据 normalized_input.operation、normalized_input.artifact 和 capabilities，不依据关键词猜测。
 - artifact.kind=image 的图片生成、图片创建、基于参考图继续生成、扩图/扩画布/拓展尺寸、抠图/去背景/透明底素材、图片高清/超清/4K/8K 放大或提升清晰度请求属于 Cucumber Image Agent。若此类 handoff 已开放，必须转交；你自己不得执行图片生成或图片处理。
-- requiredCapabilities 包含 image-decompose 或 media-analysis 的图片拆解、图片理解、图片信息提取请求属于 Cucumber Image Agent；这类任务会产出 markdown artifact 或作为后续图片生成的中间步骤。
+- requiredCapabilities 包含 image-decompose 或 media-analysis 的图片拆解、图片理解、图片信息提取请求属于 Cucumber Image Agent；media-analysis 使用模型多模态输入直接回答，image-decompose 才产出 markdown artifact。
 - artifact.kind 为 markdown、document、diagram、webpage 或 code 的 Markdown、文档、PRD、方案、brief、说明、会议纪要、邮件草稿、Mermaid 图表、HTML 页面/动画/demo 和结构化文本资产生成/改写请求属于 Cucumber Document Agent。若此类 handoff 已开放，必须转交；你自己不得创建内容 artifact。
 - “视觉”“H5”“营销”“产品”通常是 domain 或上下文；只有 artifact.kind=image 才代表图片产物。流程图、时序图默认是 diagram/mermaid 文档产物，不是图片生成任务。
 - “HTML 动画”“H5 页面”“交互 demo”“网页原型”默认是 artifact.kind=webpage、format=html，不是图片生成任务。
@@ -57,7 +57,7 @@ function buildNormalizedInputInstructions(context?: CucumberAgentContext) {
     `normalized_input: ${JSON.stringify(context.normalizedInput)}`,
     "- 你只处理当前已经落到 Manager route 的任务；不要重新做首轮全局路由。",
     "- 执行优先依据 normalized_input.operation、artifact、requiredCapabilities、negativeCapabilities。",
-    "- artifact.kind=image 属于 Cucumber Image Agent；requiredCapabilities 包含 image-decompose/media-analysis 也属于 Cucumber Image Agent；如果 negativeCapabilities 包含 image-generation，禁止图片生成。",
+    "- artifact.kind=image 属于 Cucumber Image Agent；requiredCapabilities 包含 image-decompose/media-analysis 也属于 Cucumber Image Agent；media-analysis 直接回答，不要求工具；如果 negativeCapabilities 包含 image-generation，禁止图片生成。",
     "- requiredCapabilities 包含 image-outpaint 表示扩图/扩画布/拓展尺寸；若 Image Agent handoff 已开放，应转交 Image Agent 使用 generate_image，不按高清放大处理。",
     "- operation=edit 且 artifact=null 的提示词/文本修改任务直接最终回复修改后的文本，不调用工具、不 handoff。",
     "- artifact.kind=diagram/markdown/document/webpage/code 属于 Cucumber Document Agent；webpage/html 生成任务不要转交给 Image Agent。",
@@ -113,7 +113,9 @@ function buildSkillInstructions(context?: CucumberAgentContext) {
   return [
     "Agent OS 技能规则：",
     "- 本轮只可使用下面 skill cards 中列出的候选技能。",
-    "- 使用任何技能前必须先调用 activate_skill；不要凭候选摘要直接执行技能细节。",
+    activated.length
+      ? "- activated_skills 已由运行时激活，必须优先遵循；使用其它候选技能前仍必须先调用 activate_skill。"
+      : "- 使用任何技能前必须先调用 activate_skill；不要凭候选摘要直接执行技能细节。",
     "- activate_skill 返回完整 SKILL.md instructions 后，后续回答和工具调用必须严格遵循已激活技能。",
     "- 如果已激活技能的 instructions 提到 references/、styles/、assets/、scripts/ 或其他随包资源，先用 read_skill_resource 列出资源，再读取当前任务需要的文本资源；不要凭文件名猜测资源内容。",
     "- 每轮最多激活 3 个技能；没有相关技能时直接按当前能力边界回答。",

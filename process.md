@@ -25,9 +25,9 @@
 
 - Image Agent 扩展为图片生成、抠图、拆解、理解和高清处理的统一 specialist；Manager 继续只做编排，工具只创建 artifact 和事件，不直接写画布节点。
 - 新增 `image_matting` 本地工具，通过统一 matting provider 接口和可信上游图片解析生成抠图/透明底优先素材；当前默认 provider 为 ByteArtist `image_matting_lemo`，不再依赖本地 rembg CLI；`image-generation` negative capability 仍阻止新图生成，但不阻止抠图和高清这类图片处理。
-- 新增 `decompose_image` 和 `analyze_media` 本地工具，把图片风格拆解、prompt 线索、内容理解和信息提取保存为 Markdown/doc artifact；没有像素级可见信息时必须在 artifact 限制里说明，不能伪造看见的细节。
-- 输入归一化新增 `image.matting`、`image.decompose` 和 `media.analyze` intent 兼容摘要，实际路由仍以 `operation + artifact + requiredCapabilities + negativeCapabilities` 为准；`image-decompose` / `media-analysis` 的 Markdown 产物也路由到 Image Agent。
-- Tool Registry 新增 `tool.image.matting`、`tool.image.decompose` 和 `tool.media.analyze` scope；Run plan、Run 节点工具摘要、错误来源摘要和 artifact 投影路径同步识别 `image_matting`、`decompose_image`、`analyze_media`。
+- 新增 `decompose_image` 本地工具，把图片风格拆解、prompt 线索保存为 Markdown/doc artifact；图片内容理解不再走工具，Agent 模型通过多模态输入直接回答。
+- 输入归一化新增 `image.matting`、`image.decompose` 和 `media.analyze` intent 兼容摘要，实际路由仍以 `operation + artifact + requiredCapabilities + negativeCapabilities` 为准；`image-decompose` 的 Markdown 产物和 `media-analysis` 的直接看图回答都路由到 Image Agent。
+- Tool Registry 新增 `tool.image.matting` 和 `tool.image.decompose` scope；Run plan、Run 节点工具摘要、错误来源摘要和 artifact 投影路径同步识别 `image_matting`、`decompose_image`。
 
 ## 2026-06-18 R2 Object Storage
 
@@ -53,10 +53,10 @@
 
 - `/api/agent-run` 入口保持 AI SDK HTTP stream 不变；最初的 `Quick Router` 本地规则层后来收缩为确定性 preflight，复杂语义路由见 2026-06-24 的 Fast Capability-Aware Router。Trace 仍在 `run.created` / `input.normalized` payload 中写入 route、routerSource、skippedSteps 和路由诊断字段。
 - `smalltalk` 直接写 Trace、流式文本和 `run.completed`；`simple_chat` 使用缓存的轻量 chat Agent/Runner，不加载 skills、handoff 或动态计划；`simple_canvas` 只处理确定性的安全画布操作，并继续通过 canvas policy 写 `canvas.operation.*`。
-- `image_task` 可在 `input.normalized` 后由投影层先创建 loading 图片结果节点；完整图片 artifact 由 `generate_image`、`image_matting` 或 `upscale_image` 产生并按 artifact id 幂等物化，不重复生成结果节点；图片拆解/理解则由 `decompose_image` / `analyze_media` 创建 Markdown artifact 节点。
+- `image_task` 可在 `input.normalized` 后由投影层先创建 loading 图片结果节点；完整图片 artifact 由 `generate_image`、`image_matting` 或 `upscale_image` 产生并按 artifact id 幂等物化，不重复生成结果节点；图片拆解由 `decompose_image` 创建 Markdown artifact 节点，图片理解直接在 Run 节点回复。
 - `complex_agent_task` 才进入完整 Agent Runner；compact context、skill retrieval 和 tool prepare 在依赖允许时并行。`plan.build` 只在复杂、图片或非空动态计划时写 Trace，简单任务不再写空计划步骤。
-- Agent world 进程级缓存 Manager、Document/Web/Research/Image/Image Fast agents、handoff registry、normalizer Agent、Runner 和 simple chat Runner；per-run instructions/context 仍从 `runContext` 注入，不写入单例。
-- `generate_image` 是 Image Agent 本地 function tool；无上游引用、无重试、仅需 image-generation 的简单生图请求走 Image Fast Agent，不检索 skills，不加载 style-library，也不做 prompt expansion。复杂图片任务仍可检索技能并按需使用风格库或扩写工具。
+- Agent world 进程级缓存 Manager、Document/Web/Research/Image agents、handoff registry、normalizer Agent、Runner 和 simple chat Runner；per-run instructions/context 仍从 `runContext` 注入，不写入单例。
+- `generate_image` 是 Image Agent 本地 function tool；简单生图和复杂图片任务统一进入 Image Agent。简单任务可直接调用 `generate_image`，需要风格系统、prompt 扩写、knowledge 或资源脚本时再按需调用对应工具。
 - API server 启动成功后服务端 fire-and-forget 预热 model provider、Agent world 和 skill registry；打开项目成功后也会补触发同一预热。预热失败只记录日志，不阻塞服务或画布加载。
 
 ## 2026-06-16 Artifact-First Routing
@@ -69,7 +69,7 @@
 - Manager 作为通用 fallback 与复合任务编排者：短问答、概念解释、轻量分析和简短总结保持 `artifact=null`，优先由 fast path/轻量 chat 或 Manager route 直接回复；明确要求详细说明、完整规划、长篇方案、调研分析、报告或文档时归一化为 document/markdown artifact，交由 Document Agent 创建可沉淀的长文本产物。
 - Skill frontmatter 新增可选 `capabilities`、`produces`、`uses` 和 `notFor`；skill retrieval 先按 artifact/capability 打分，再看关键词、canvas kind 和 token overlap，并会按 `negativeCapabilities` 抑制不应出现的 image skill。
 - 新增 seed skill `sequence-diagram`，声明 `diagram/sequenceDiagram/mermaid` 能力，Document Agent 可激活后用 `create_text_artifact` 创建包含 Mermaid fenced block 的 Markdown artifact。
-- 工具入口新增 task artifact policy：图片 prompt/generation 工具只允许 image artifact task，`image-generation` negative capability 会阻止新图生成；`image_matting` 仍要求 image artifact task 但不视为新图生成；`decompose_image` / `analyze_media` 要求对应 image inspection capability，可产出 markdown/document 分析 artifact；`create_text_artifact` 只允许 markdown/document/diagram/code/webpage 文本类 artifact task，Mermaid diagram 必须包含 mermaid fenced block，webpage artifact 必须是完整 HTML document。
+- 工具入口新增 task artifact policy：图片 prompt/generation 工具只允许 image artifact task，`image-generation` negative capability 会阻止新图生成；`image_matting` 仍要求 image artifact task 但不视为新图生成；`decompose_image` 要求对应 image inspection capability，可产出 markdown/document 分析 artifact；`create_text_artifact` 只允许 markdown/document/diagram/code/webpage 文本类 artifact task，Mermaid diagram 必须包含 mermaid fenced block，webpage artifact 必须是完整 HTML document。
 
 ## 2026-06-16 Dynamic Run Plan
 
@@ -163,7 +163,7 @@
 
 - Agent Run 在 Manager 启动前通过 `server/agent/input-normalizer.ts` 生成结构化 `normalizedInput`，并写入 `input.normalized` Trace。
 - 图片生成请求会单独抽取 `contentPrompt`、`resultCount`、`aspectRatio`、`dimensions` 或 `variants`；`variants` 表示同一参考图/同一 prompt 输出多组目标尺寸，`generate_image` 会按尺寸拆成 provider request 并由投影层创建对应 pending 图片结果节点。扩图、扩画布、拓展尺寸和 outpaint 归一化为 `image.generate + image-outpaint`，不是 `image.upscale`；只有纯高清、超清、4K/8K 或提升清晰度才进入 `upscale_image`。
-- 分析、评估或给建议类视觉 brief（如图片、海报、banner、KV 需求）默认归一化为 `text.answer`；只有用户明确要求生成、创建或渲染图片时才进入 `image.generate`。如果请求明确指向选中/上游实际图片，风格拆解归一化为 `image.decompose`，内容理解/信息提取归一化为 `media.analyze`，抠图/去背景归一化为 `image.matting`。
+- 分析、评估或给建议类视觉 brief（如图片、海报、banner、KV 需求）默认归一化为 `text.answer`；只有用户明确要求生成、创建或渲染图片时才进入 `image.generate`。如果请求明确指向选中/上游实际图片，风格拆解归一化为 `image.decompose`，内容理解/信息提取归一化为 `media.analyze` 并由 Image Agent 直接看图回答，抠图/去背景归一化为 `image.matting`。
 
 ## 2026-06-13 Multi Node References
 

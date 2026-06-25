@@ -202,7 +202,7 @@ export function createInputNormalizerAgent() {
       "Classify image canvas extension, outpainting, resizing to new pixel dimensions, expanding a reference image to new aspect ratios, 扩图, 扩画布, 拓展尺寸, 延展画面 as operation=create, artifact.kind=image, requiredCapabilities including image-generation and image-outpaint. This is not upscale unless the user asks for 高清/超清/提升清晰度 only.",
       "Classify background removal, matting, transparent-background cutout, sticker/material extraction, or keep-only-subject requests as operation=transform, artifact.kind=image, artifact.format=png, requiredCapabilities including image-matting.",
       "Classify requests to decompose an actual selected/upstream image's style, composition, light, color, layout, or prompt clues as operation=analyze, artifact.kind=markdown, artifact.format=markdown, requiredCapabilities including image-decompose and markdown-artifact, negativeCapabilities including image-generation unless the user also explicitly asks to generate a new image.",
-      "Classify requests to understand, describe, identify, summarize, judge, or extract information from an actual selected/upstream image as operation=analyze, artifact.kind=markdown, artifact.format=markdown, requiredCapabilities including media-analysis and markdown-artifact, negativeCapabilities including image-generation unless the user also explicitly asks to generate a new image.",
+      "Classify requests to understand, describe, identify, summarize, judge, or extract information from an actual selected/upstream image as operation=answer, artifact=null, requiredCapabilities including media-analysis, negativeCapabilities including image-generation unless the user also explicitly asks to generate a new image.",
       "For reference-image guided character/IP/mascot generation, include both media-analysis and image-generation so the Image Agent may inspect the selected/uploaded image before creating new image artifacts.",
       "For image artifacts, separate visual content from production controls such as count, aspect ratio, pixel dimensions, and usage.",
       "When the user lists multiple output dimensions, put them in image.variants as width/height pairs and set resultCount to the number of variants.",
@@ -546,11 +546,11 @@ function inferTaskProtocol(prompt: string): Pick<
 
   if (isMediaAnalyzeRequest(prompt)) {
     return {
-      artifact: { kind: "markdown", format: "markdown" },
+      artifact: null,
       domain,
       negativeCapabilities: ["image-generation"],
-      operation: "analyze",
-      requiredCapabilities: ["media-analysis", "markdown-artifact"],
+      operation: "answer",
+      requiredCapabilities: ["media-analysis"],
     };
   }
 
@@ -851,8 +851,11 @@ function normalizeOperation(
   if (isImageMattingRequest(rawPrompt)) {
     return "transform";
   }
-  if (isImageDecomposeRequest(rawPrompt) || isMediaAnalyzeRequest(rawPrompt)) {
+  if (isImageDecomposeRequest(rawPrompt)) {
     return "analyze";
+  }
+  if (isMediaAnalyzeRequest(rawPrompt)) {
+    return "answer";
   }
   if (isVisualBriefAnalysisRequest(rawPrompt)) {
     return "analyze";

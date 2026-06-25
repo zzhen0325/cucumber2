@@ -16,14 +16,20 @@ const imageIntentPattern =
 export async function retrieveRelevantAgentSkills(
   input: AgentRunInput
 ): Promise<AgentSkillCard[]> {
-  if (shouldSkipSkillRetrieval(input)) {
+  const skills = (await listCachedAgentSkillDefinitions()).filter((skill) => skill.enabled);
+  const forcedSkill = input.forcedSkillId
+    ? skills.find((skill) => skill.id === input.forcedSkillId)
+    : undefined;
+  if (input.forcedSkillId && !forcedSkill) {
+    throw new Error("Selected skill is not available.");
+  }
+  if (shouldSkipSkillRetrieval(input) && !forcedSkill) {
     return [];
   }
 
-  const skills = (await listCachedAgentSkillDefinitions()).filter((skill) => skill.enabled);
   const query = buildSkillRetrievalQuery(input);
 
-  return skills
+  const candidates = skills
     .map((skill) => scoreSkill(skill, query))
     .filter((skill) => skill.score > 0)
     .sort((left, right) => {
@@ -31,8 +37,19 @@ export async function retrieveRelevantAgentSkills(
         return right.score - left.score;
       }
       return left.name.localeCompare(right.name);
-    })
-    .slice(0, MAX_SKILL_CANDIDATES);
+    });
+
+  if (!forcedSkill) {
+    return candidates.slice(0, MAX_SKILL_CANDIDATES);
+  }
+
+  return [
+    toSkillCard(forcedSkill, {
+      reasons: ["forced"],
+      score: Number.MAX_SAFE_INTEGER,
+    }),
+    ...candidates.filter((skill) => skill.id !== forcedSkill.id),
+  ].slice(0, MAX_SKILL_CANDIDATES);
 }
 
 function shouldSkipSkillRetrieval(input: AgentRunInput) {

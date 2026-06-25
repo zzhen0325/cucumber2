@@ -107,8 +107,7 @@ export function buildRunPlan(input: AgentRunInput): RuntimeRunPlanItem[] {
       return [
         step("media-source", "确认要理解的图片", "prepare"),
         step("image-agent", "进入 Image Agent", "route"),
-        step("media-analyze", "生成图片理解内容", "execute"),
-        step("media-materialize", "投影理解结果节点", "materialize"),
+        step("media-answer", "回答图片理解问题", "execute"),
       ];
     case "canvas.operation":
       return [

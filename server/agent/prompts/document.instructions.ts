@@ -86,7 +86,9 @@ function buildSkillInstructions(context?: CucumberAgentContext) {
     "可用 Document/Diagram 技能：",
     `skill_cards: ${JSON.stringify(candidates)}`,
     activated.length ? `activated_skills: ${JSON.stringify(activated)}` : "",
-    "使用技能前必须先 activate_skill；只激活与 normalized_input.artifact 和 requiredCapabilities 匹配的技能。若技能说明提到 references/scripts/assets，先用 read_skill_resource 查看当前任务需要的文本资源。",
+    activated.length
+      ? "activated_skills 已由运行时激活，必须优先遵循；使用其它候选技能前仍必须先 activate_skill。若技能说明提到 references/scripts/assets，先用 read_skill_resource 查看当前任务需要的文本资源。"
+      : "使用技能前必须先 activate_skill；只激活与 normalized_input.artifact 和 requiredCapabilities 匹配的技能。若技能说明提到 references/scripts/assets，先用 read_skill_resource 查看当前任务需要的文本资源。",
   ]
     .filter(Boolean)
     .join("\n");

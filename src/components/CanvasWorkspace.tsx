@@ -44,6 +44,7 @@ import {
   NoteIcon as StickyNote,
   TextIcon as Type,
   TriangleIcon as Triangle,
+  CancelIcon as X,
 } from "@proicons/react";
 import {
   createContext,
@@ -116,6 +117,10 @@ import {
   ProjectVersionConflictError,
   type SaveProjectCanvasPatchInput,
 } from "@/lib/project-storage";
+import {
+  loadAgentSkills,
+  type AgentSkillDefinitionSummary,
+} from "@/lib/skill-storage";
 import {
   hasNodeContentChanged,
   toPersistableEdges,
@@ -222,6 +227,8 @@ type AgentRunRequestBody = {
   runNodeId: string;
   canvasPatch?: Omit<SaveProjectCanvasPatchInput, "projectId">;
   canvasContext: {
+    forcedSkillId?: string;
+    forcedSkillName?: string;
     imageAspectRatio?: ImageAspectRatioSelection;
     imageResultCount?: ImageResultCountSelection;
     imageProvider?: ImageProviderSelection;
@@ -449,6 +456,13 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const [imageProvider, setImageProviderState] = useState<ImageProviderSelection>(
     () => readStoredImageProvider()
   );
+  const [skillOptions, setSkillOptions] = useState<AgentSkillDefinitionSummary[]>([]);
+  const [skillOptionsStatus, setSkillOptionsStatus] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
+  const [skillOptionsError, setSkillOptionsError] = useState<string | null>(null);
+  const [forcedSkill, setForcedSkill] =
+    useState<AgentSkillDefinitionSummary | null>(null);
   const isReplayMode = Boolean(replaySnapshot);
   const isHandTool = canvasTool === "hand";
   const activeManualTemplate = getManualNodeTemplateForTool(canvasTool);
@@ -1110,6 +1124,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const canSubmit =
     canEditComposer &&
     !hasLocalUploadNodes;
+  const skillSlashQuery = getSkillSlashQuery(prompt);
+  const showSkillMenu =
+    skillSlashQuery !== null && canEditComposer && !isBusy && !isReplayMode;
   const canUploadFiles =
     Boolean(loadedProjectId) &&
     storageStatus !== "loading" &&
@@ -1620,9 +1637,48 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     window.localStorage.setItem(IMAGE_PROVIDER_STORAGE_KEY, provider);
   }, []);
 
+  const loadComposerSkills = useCallback(async () => {
+    if (skillOptionsStatus === "loading" || skillOptionsStatus === "ready") {
+      return;
+    }
+    setSkillOptionsStatus("loading");
+    setSkillOptionsError(null);
+    try {
+      const { skills } = await loadAgentSkills();
+      setSkillOptions(skills.filter((skill) => skill.enabled));
+      setSkillOptionsStatus("ready");
+    } catch (nextError: unknown) {
+      setSkillOptionsStatus("error");
+      setSkillOptionsError(getClientError(nextError));
+    }
+  }, [skillOptionsStatus]);
+
+  const handleSelectForcedSkill = useCallback(
+    (skill: AgentSkillDefinitionSummary) => {
+      setForcedSkill(skill);
+      setPrompt((current) => removeLeadingSkillSlashCommand(current));
+    },
+    []
+  );
+
+  const handleClearForcedSkill = useCallback(() => {
+    setForcedSkill(null);
+  }, []);
+
+  const handleComposerPromptChange = useCallback(
+    (value: string) => {
+      setPrompt(value);
+      if (getSkillSlashQuery(value) !== null) {
+        void loadComposerSkills();
+      }
+    },
+    [loadComposerSkills]
+  );
+
   const startAgentRun = useCallback(
     async ({
       clearComposer = false,
+      forcedSkill: requestedForcedSkill = null,
       inputMode = composerMode,
       imageAspectRatio: requestedImageAspectRatio = imageAspectRatio,
       imageResultCount: requestedImageResultCount = imageResultCount,
@@ -1632,6 +1688,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       selectedNodeIds = selectedNodeId ? [selectedNodeId] : [],
     }: {
       clearComposer?: boolean;
+      forcedSkill?: AgentSkillDefinitionSummary | null;
       promptText: string;
       retryFrom?: AgentRunRequestBody["canvasContext"]["retryFrom"];
       inputMode?: ComposerMode;
@@ -1673,6 +1730,12 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         projectId,
         runNodeId: draft.runNode.id,
         canvasContext: {
+          ...(requestedForcedSkill
+            ? {
+                forcedSkillId: requestedForcedSkill.id,
+                forcedSkillName: requestedForcedSkill.name,
+              }
+            : {}),
           ...(inputMode === "image"
             ? {
                 imageAspectRatio: requestedImageAspectRatio,
@@ -1731,6 +1794,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
       if (clearComposer) {
         setPrompt("");
+        setForcedSkill(null);
       }
 
       try {
@@ -2575,6 +2639,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       const value = (message.text || prompt).trim();
       await startAgentRun({
         clearComposer: true,
+        forcedSkill,
         inputMode: composerMode,
         imageAspectRatio,
         imageResultCount,
@@ -2585,6 +2650,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     },
     [
       composerMode,
+      forcedSkill,
       imageAspectRatio,
       imageResultCount,
       prompt,
@@ -2939,6 +3005,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         canSubmit={canSubmit}
         composerMode={composerMode}
         contextCount={contextCount}
+        forcedSkill={forcedSkill}
         hasFailedUpload={hasFailedLocalUploadNodes}
         hasUploading={hasUploadingLocalNodes}
         imageAspectRatio={imageAspectRatio}
@@ -2956,8 +3023,15 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         setImageAspectRatio={setImageAspectRatio}
         setImageProvider={setImageProvider}
         setImageResultCount={setImageResultCount}
-        setPrompt={setPrompt}
+        setPrompt={handleComposerPromptChange}
+        showSkillMenu={showSkillMenu}
+        skillOptions={skillOptions}
+        skillOptionsError={skillOptionsError}
+        skillOptionsStatus={skillOptionsStatus}
+        skillSlashQuery={skillSlashQuery ?? ""}
         stop={handleStop}
+        onClearForcedSkill={handleClearForcedSkill}
+        onSelectForcedSkill={handleSelectForcedSkill}
         onSubmit={handleSubmit}
       />
     </main>
@@ -3757,6 +3831,7 @@ function Composer({
   canSubmit,
   composerMode,
   contextCount,
+  forcedSkill,
   hasFailedUpload,
   hasUploading,
   imageAspectRatio,
@@ -3775,7 +3850,14 @@ function Composer({
   setImageProvider,
   setImageResultCount,
   setPrompt,
+  showSkillMenu,
+  skillOptions,
+  skillOptionsError,
+  skillOptionsStatus,
+  skillSlashQuery,
   stop,
+  onClearForcedSkill,
+  onSelectForcedSkill,
   onSubmit,
 }: {
   busy: boolean;
@@ -3783,6 +3865,7 @@ function Composer({
   canSubmit: boolean;
   composerMode: ComposerMode;
   contextCount: number;
+  forcedSkill: AgentSkillDefinitionSummary | null;
   hasFailedUpload: boolean;
   hasUploading: boolean;
   imageAspectRatio: ImageAspectRatioSelection;
@@ -3801,7 +3884,14 @@ function Composer({
   setImageProvider: (value: ImageProviderSelection) => void;
   setImageResultCount: (value: ImageResultCountSelection) => void;
   setPrompt: (value: string) => void;
+  showSkillMenu: boolean;
+  skillOptions: AgentSkillDefinitionSummary[];
+  skillOptionsError: string | null;
+  skillOptionsStatus: "idle" | "loading" | "ready" | "error";
+  skillSlashQuery: string;
   stop: () => void;
+  onClearForcedSkill: () => void;
+  onSelectForcedSkill: (skill: AgentSkillDefinitionSummary) => void;
   onSubmit: (
     message: PromptInputMessage,
     event?: FormEvent<HTMLFormElement>
@@ -3809,7 +3899,7 @@ function Composer({
 }) {
   const hasReference = Boolean(referenceNode);
   const hasMultipleReferences = referenceNodeCount > 1;
-  const hasSelectedTokens = selectedNodes.length > 0;
+  const hasSelectedTokens = selectedNodes.length > 0 || Boolean(forcedSkill);
   const referenceNodeIdSet = useMemo(
     () => new Set(referenceNodeIds),
     [referenceNodeIds]
@@ -3850,6 +3940,14 @@ function Composer({
         value={composerMode}
         onChange={setComposerMode}
       />
+      <ComposerSkillMenu
+        error={skillOptionsError}
+        loading={skillOptionsStatus === "loading" || skillOptionsStatus === "idle"}
+        open={showSkillMenu}
+        query={skillSlashQuery}
+        skills={skillOptions}
+        onSelect={onSelectForcedSkill}
+      />
       <PromptInput
         attachmentsEnabled={false}
         className="composer"
@@ -3859,9 +3957,11 @@ function Composer({
       >
         <PromptInputBody className="composer-body">
           <div className="composer-input-stack">
-            <ComposerReferenceTokens
+            <ComposerInlineTokens
+              forcedSkill={forcedSkill}
               nodes={selectedNodes}
               referenceNodeIdSet={referenceNodeIdSet}
+              onClearForcedSkill={onClearForcedSkill}
             />
             <PromptInputTextarea
               disabled={!canEdit && !busy}
@@ -3953,14 +4053,18 @@ function ComposerModeSwitch({
   );
 }
 
-function ComposerReferenceTokens({
+function ComposerInlineTokens({
+  forcedSkill,
   nodes,
+  onClearForcedSkill,
   referenceNodeIdSet,
 }: {
+  forcedSkill: AgentSkillDefinitionSummary | null;
   nodes: AgentCanvasNode[];
+  onClearForcedSkill: () => void;
   referenceNodeIdSet: Set<string>;
 }) {
-  if (!nodes.length) {
+  if (!forcedSkill && !nodes.length) {
     return null;
   }
 
@@ -3968,7 +4072,25 @@ function ComposerReferenceTokens({
   const hiddenCount = nodes.length - visibleNodes.length;
 
   return (
-    <div aria-label="选中节点" className="composer-reference-tokens">
+    <div aria-label="输入上下文" className="composer-reference-tokens">
+      {forcedSkill ? (
+        <span
+          className="composer-reference-token composer-skill-token"
+          title={`强制使用 ${forcedSkill.name}`}
+        >
+          <span className="composer-reference-token-kind">技能</span>
+          <span className="composer-reference-token-label">{forcedSkill.name}</span>
+          <button
+            aria-label={`移除技能 ${forcedSkill.name}`}
+            className="composer-skill-token-remove"
+            onClick={onClearForcedSkill}
+            title="移除技能"
+            type="button"
+          >
+            <X size={12} />
+          </button>
+        </span>
+      ) : null}
       {visibleNodes.map((node) => {
         const referenceable = referenceNodeIdSet.has(node.id);
         const label = getCanvasNodeTokenLabel(node);
@@ -3991,6 +4113,60 @@ function ComposerReferenceTokens({
           +{hiddenCount}
         </span>
       ) : null}
+    </div>
+  );
+}
+
+function ComposerSkillMenu({
+  error,
+  loading,
+  open,
+  query,
+  skills,
+  onSelect,
+}: {
+  error: string | null;
+  loading: boolean;
+  open: boolean;
+  query: string;
+  skills: AgentSkillDefinitionSummary[];
+  onSelect: (skill: AgentSkillDefinitionSummary) => void;
+}) {
+  const visibleSkills = useMemo(
+    () => filterComposerSkills(skills, query).slice(0, 8),
+    [query, skills]
+  );
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div className="composer-skill-menu" role="listbox">
+      {loading ? (
+        <div className="composer-skill-menu-state">加载技能...</div>
+      ) : error ? (
+        <div className="composer-skill-menu-state">技能加载失败</div>
+      ) : visibleSkills.length ? (
+        visibleSkills.map((skill) => (
+          <button
+            aria-selected={false}
+            className="composer-skill-option"
+            key={skill.id}
+            onClick={() => onSelect(skill)}
+            role="option"
+            title={skill.description || skill.name}
+            type="button"
+          >
+            <span className="composer-skill-option-name">{skill.name}</span>
+            <span className="composer-skill-option-meta">
+              {[skill.agentScope, skill.purpose].filter(Boolean).join(" · ")}
+            </span>
+          </button>
+        ))
+      ) : (
+        <div className="composer-skill-menu-state">没有匹配技能</div>
+      )}
     </div>
   );
 }
@@ -4167,6 +4343,38 @@ function truncateTokenLabel(value: string) {
     return normalized;
   }
   return `${normalized.slice(0, 27)}...`;
+}
+
+function getSkillSlashQuery(value: string) {
+  const match = value.match(/^\s*\/([^\s]*)/);
+  return match ? match[1].toLowerCase() : null;
+}
+
+function removeLeadingSkillSlashCommand(value: string) {
+  return value.replace(/^\s*\/\S*\s?/, "").trimStart();
+}
+
+function filterComposerSkills(
+  skills: AgentSkillDefinitionSummary[],
+  query: string
+) {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) {
+    return skills;
+  }
+
+  return skills.filter((skill) =>
+    [
+      skill.name,
+      skill.description,
+      skill.agentScope,
+      skill.purpose,
+      ...skill.tags,
+    ]
+      .join(" ")
+      .toLowerCase()
+      .includes(normalizedQuery)
+  );
 }
 
 function readStoredComposerMode(): ComposerMode {

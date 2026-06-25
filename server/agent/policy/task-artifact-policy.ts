@@ -47,7 +47,7 @@ export function assertTextArtifactToolAllowed(context: CucumberAgentContext) {
 export function assertImageInspectionToolAllowed(
   context: CucumberAgentContext,
   toolName: string,
-  requiredCapability: "image-decompose" | "media-analysis"
+  requiredCapability: "image-decompose"
 ) {
   const normalizedInput = context.normalizedInput;
   if (!normalizedInput) {
