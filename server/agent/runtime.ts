@@ -670,9 +670,10 @@ export async function executeAgentRun({
       const modelNormalizedInput = agentInput.normalizedInput;
       await writeRunPhaseEvent(
         runPhaseCompleted(normalizePhase, {
-          intent: modelNormalizedInput?.intent,
-          operation: modelNormalizedInput?.operation,
-          artifactKind: modelNormalizedInput?.artifact?.kind,
+          intent: modelNormalizedInput?.task.intent,
+          action: modelNormalizedInput?.task.action,
+          domain: modelNormalizedInput?.task.domain,
+          primaryAgent: modelNormalizedInput?.routing.primaryAgent,
           route: quickRoute.route,
           routerSource: quickRoute.routerSource,
           routeFallbackReason: quickRoute.fallbackReason,

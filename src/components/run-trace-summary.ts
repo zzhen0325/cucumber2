@@ -334,39 +334,38 @@ function summarizeNormalizedInput(event: RunStepTraceEvent | undefined) {
     return undefined;
   }
 
-  const intent = readString(normalized.intent) ?? "unknown";
-  const image = readRecord(normalized.image);
-  const count = readNumber(image?.resultCount);
-  const aspectRatio = readString(image?.aspectRatio);
-  const dimensions = readRecord(image?.dimensions);
-  const variants = readArray(image?.variants)
-    .map(readRecord)
-    .filter(Boolean);
-  const width = readNumber(dimensions?.width);
-  const height = readNumber(dimensions?.height);
+  const task = readRecord(normalized.task);
+  const intent = readString(task?.intent) ?? readString(task?.domain) ?? "unknown";
   const parts = [intent];
-  if (count) {
+
+  const constraints = readRecord(normalized.constraints);
+  const explicit = readArray(constraints?.explicit)
+    .map(readRecord)
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+  const countEntry = explicit.find((entry) => readString(entry.key) === "output_count");
+  const count = countEntry ? Number.parseInt(readString(countEntry.value) ?? "", 10) : NaN;
+  if (Number.isInteger(count) && count > 0) {
     parts.push(`${count} 张`);
   }
-  if (variants.length) {
-    const firstVariant = variants[0];
-    const firstWidth = readNumber(firstVariant?.width);
-    const firstHeight = readNumber(firstVariant?.height);
-    parts.push(
-      firstWidth && firstHeight
-        ? `${variants.length} 个尺寸 · ${firstWidth}x${firstHeight}…`
-        : `${variants.length} 个尺寸`
-    );
-  } else if (width && height) {
-    parts.push(`${width}x${height}`);
-  } else if (aspectRatio) {
-    parts.push(aspectRatio);
+
+  const dimensions = explicit.filter((entry) => readString(entry.key) === "dimension");
+  if (dimensions.length > 1) {
+    parts.push(`${dimensions.length} 个尺寸 · ${readString(dimensions[0].value)}…`);
+  } else if (dimensions.length === 1) {
+    parts.push(readString(dimensions[0].value) ?? "");
+  } else {
+    const aspectRatio = explicit.find((entry) => readString(entry.key) === "aspect_ratio");
+    if (aspectRatio) {
+      parts.push(readString(aspectRatio.value) ?? "");
+    }
   }
-  const prompt = readString(image?.contentPrompt);
-  if (prompt) {
-    parts.push(truncate(prompt, 80));
+
+  const goal = readRecord(normalized.userGoal);
+  const goalText = readString(goal?.normalized);
+  if (goalText) {
+    parts.push(truncate(goalText, 80));
   }
-  return parts.join(" · ");
+  return parts.filter(Boolean).join(" · ");
 }
 
 function isTraceArtifact(value: unknown): value is { id: string; type: string; title?: string } {

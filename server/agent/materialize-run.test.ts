@@ -33,10 +33,12 @@ describe("agent run materializer", () => {
         }),
         event("input.normalized", {
           normalizedInput: {
-            rawPrompt: "写一份 PRD",
-            operation: "create",
-            artifact: { kind: "document", subtype: "prd", format: "markdown" },
-            intent: "document.create",
+            rawInput: "写一份 PRD",
+            task: { domain: "text", intent: "document.create", action: "create", confidence: 1 },
+            routing: { primaryAgent: "document_agent", candidateAgents: [] },
+            inputs: { text: "写一份 PRD", images: [], files: [] },
+            constraints: { explicit: [], inferred: [] },
+            ambiguities: [],
           },
         }),
       ],

@@ -378,15 +378,47 @@ function buildExplicitImageModeInput(
     return undefined;
   }
 
+  const explicit: Array<{ key: string; value: string; sourceText: string }> = [];
+  if (canvasContext.imageResultCount) {
+    explicit.push({
+      key: "output_count",
+      value: String(canvasContext.imageResultCount),
+      sourceText: "image composer count",
+    });
+  }
+  if (canvasContext.imageAspectRatio) {
+    explicit.push({
+      key: "aspect_ratio",
+      value: canvasContext.imageAspectRatio,
+      sourceText: "image composer aspect ratio",
+    });
+  }
+
   return finalizeNormalizedAgentInput(
     {
-      rawPrompt: canvasContext.prompt,
-      userGoal: canvasContext.prompt,
-      operation: "create",
-      artifact: { kind: "image", format: "png" },
-      domain: "visual-design",
-      requiredCapabilities: ["image-generation"],
-      negativeCapabilities: [],
+      rawInput: canvasContext.prompt,
+      task: {
+        domain: "image",
+        intent: "image.generate",
+        action: "create",
+        confidence: 1,
+      },
+      userGoal: {
+        original: canvasContext.prompt,
+        normalized: canvasContext.prompt,
+      },
+      routing: {
+        primaryAgent: "image_agent",
+        candidateAgents: [],
+        reason: "explicit image composer mode",
+      },
+      inputs: {
+        text: canvasContext.prompt,
+        images: [],
+        files: [],
+      },
+      constraints: { explicit, inferred: [] },
+      ambiguities: [],
     },
     canvasContext.prompt
   );

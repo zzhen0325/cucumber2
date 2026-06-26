@@ -1030,17 +1030,18 @@ function readExpectedArtifactRequests(
 ): PendingArtifactRequest[] {
   const inputEvent = events.findLast((event) => event.type === "input.normalized");
   const normalizedInput = readRecord(inputEvent?.payload.normalizedInput);
-  const artifact = readRecord(normalizedInput?.artifact);
-  const kind = readString(artifact?.kind);
-  if (!kind || kind === "image" || kind === "canvas") {
+  const task = readRecord(normalizedInput?.task);
+  const domain = readString(task?.domain);
+  if (!domain || domain === "image" || domain === "canvas") {
     return [];
   }
 
+  const kind = domain === "code" ? "code" : "document";
   const request = pendingRequestFromNormalizedArtifact({
-    format: readString(artifact?.format),
+    format: kind === "code" ? "markdown" : "markdown",
     kind,
     prompt,
-    subtype: readString(artifact?.subtype),
+    subtype: undefined,
   });
   return request ? [request] : [];
 }
@@ -1149,42 +1150,83 @@ function readNormalizedImageRequest(
 } | null {
   const inputEvent = events.findLast((event) => event.type === "input.normalized");
   const normalizedInput = readRecord(inputEvent?.payload.normalizedInput);
-  const artifact = readRecord(normalizedInput?.artifact);
-  if (readString(artifact?.kind) !== "image") {
+  const task = readRecord(normalizedInput?.task);
+  if (readString(task?.domain) !== "image") {
     return null;
   }
-  const image = readRecord(normalizedInput?.image);
-  const dimensions = readRecord(image?.dimensions);
-  const width = readNumber(dimensions?.width);
-  const height = readNumber(dimensions?.height);
-  const aspectRatio = readString(image?.aspectRatio);
-  const prompt = readString(image?.contentPrompt) ?? readString(normalizedInput?.rawPrompt) ?? "";
-  const variantPreviews = readImageVariantPreviews(image?.variants);
-  const count = Math.max(
-    1,
-    Math.floor(variantPreviews.length || readNumber(image?.resultCount) || 1)
-  );
-  if (variantPreviews.length) {
+  const constraints = readConstraintMap(normalizedInput);
+  const dimensionVariants = readConstraintDimensionVariants(normalizedInput);
+  const prompt =
+    readString(normalizedInput?.inputs && readRecord(normalizedInput?.inputs)?.text) ??
+    readString(normalizedInput?.rawInput) ??
+    "";
+
+  if (dimensionVariants.length > 1) {
     return {
-      count: variantPreviews.length,
-      preview: variantPreviews[0],
-      previews: variantPreviews,
+      count: dimensionVariants.length,
+      preview: dimensionVariants[0],
+      previews: dimensionVariants,
     };
   }
 
+  const dimension = dimensionVariants[0];
+  const aspectRatio = constraints.get("aspect_ratio");
+  const countValue = constraints.get("output_count");
+  const count = Math.max(1, Math.floor(Number.parseInt(countValue ?? "", 10) || 1));
+
   return {
     count,
-    preview:
-      width && height
-        ? {
-            width,
-            height,
-            aspectRatio: simplifyAspectRatio(width, height),
-          }
-        : aspectRatio
-          ? { aspectRatio }
-          : readImageRequestPreview(prompt),
+    preview: dimension
+      ? {
+          width: dimension.width,
+          height: dimension.height,
+          aspectRatio: simplifyAspectRatio(dimension.width, dimension.height),
+        }
+      : aspectRatio
+        ? { aspectRatio }
+        : readImageRequestPreview(prompt),
   };
+}
+
+function readConstraintMap(normalizedInput: Record<string, unknown> | null) {
+  const map = new Map<string, string>();
+  const constraints = readRecord(normalizedInput?.constraints);
+  for (const entry of readArray(constraints?.explicit)) {
+    const record = readRecord(entry);
+    const key = readString(record?.key);
+    const value = readString(record?.value);
+    if (key && value && !map.has(key)) {
+      map.set(key, value);
+    }
+  }
+  return map;
+}
+
+function readConstraintDimensionVariants(
+  normalizedInput: Record<string, unknown> | null
+): Array<{ width: number; height: number }> {
+  const constraints = readRecord(normalizedInput?.constraints);
+  const variants: Array<{ width: number; height: number }> = [];
+  const seen = new Set<string>();
+  for (const entry of readArray(constraints?.explicit)) {
+    const record = readRecord(entry);
+    if (readString(record?.key) !== "dimension") {
+      continue;
+    }
+    const value = readString(record?.value);
+    const match = value?.match(/^(\d{2,5})\s*(?:x|×|\*|-|–|—)\s*(\d{2,5})$/i);
+    if (!match) {
+      continue;
+    }
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+    const key = `${width}x${height}`;
+    if (width > 0 && height > 0 && !seen.has(key)) {
+      seen.add(key);
+      variants.push({ width, height });
+    }
+  }
+  return variants;
 }
 
 function readImageRequestPreview(

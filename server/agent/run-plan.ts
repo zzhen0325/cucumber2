@@ -1,8 +1,8 @@
 import type { AgentRunInput } from "./context.ts";
 import {
-  inferIntentFromProtocol,
-  isPromptTextEditRequest,
-  type NormalizedIntent,
+  getExplicitConstraint,
+  getExplicitConstraints,
+  type NormalizedAgentInput,
 } from "./input-normalizer.ts";
 
 export type RunPlanPhase = "prepare" | "route" | "execute" | "materialize";
@@ -13,14 +13,34 @@ export type RuntimeRunPlanItem = {
   phase: RunPlanPhase;
 };
 
-const ALWAYS_PLAN_INTENTS = new Set<NormalizedIntent>([
+// Coarse plan intents derived from the Task Frame for step-skeleton selection only.
+type PlanIntent =
+  | "image.generate"
+  | "image.matting"
+  | "image.decompose"
+  | "image.upscale"
+  | "media.analyze"
+  | "document.create"
+  | "document.edit"
+  | "web.fetch"
+  | "webpage.create"
+  | "research.answer"
+  | "canvas.operation"
+  | "code.create"
+  | "data.analyze"
+  | "workflow.plan"
+  | "prompt.edit"
+  | "text.answer"
+  | "unsupported";
+
+const ALWAYS_PLAN_INTENTS = new Set<PlanIntent>([
   "research.answer",
   "web.fetch",
   "webpage.create",
   "workflow.plan",
 ]);
 
-const IMAGE_INTENTS = new Set<NormalizedIntent>([
+const IMAGE_INTENTS = new Set<PlanIntent>([
   "image.generate",
   "image.matting",
   "image.decompose",
@@ -156,12 +176,8 @@ function shouldCreateRunPlan(input: AgentRunInput) {
     return true;
   }
 
-  if (isPromptTextEditRun(input)) {
-    return false;
-  }
-
   const intent = getPlanIntent(input);
-  if (intent === "unsupported") {
+  if (intent === "unsupported" || intent === "prompt.edit") {
     return false;
   }
   if (IMAGE_INTENTS.has(intent)) {
@@ -174,28 +190,64 @@ function shouldCreateRunPlan(input: AgentRunInput) {
   return hasComplexitySignal(input);
 }
 
-function isPromptTextEditRun(input: AgentRunInput) {
-  return (
-    input.normalizedInput?.operation === "edit" &&
-    !input.normalizedInput.artifact &&
-    isPromptTextEditRequest(input.message)
-  );
-}
-
-function getPlanIntent(input: AgentRunInput): NormalizedIntent {
+function getPlanIntent(input: AgentRunInput): PlanIntent {
   const normalizedInput = input.normalizedInput;
   if (!normalizedInput) {
     return "text.answer";
   }
-  if (normalizedInput.operation) {
-    return inferIntentFromProtocol({
-      artifact: normalizedInput.artifact,
-      operation: normalizedInput.operation,
-      rawPrompt: normalizedInput.rawPrompt ?? input.message,
-      requiredCapabilities: normalizedInput.requiredCapabilities,
-    });
+  return derivePlanIntent(normalizedInput);
+}
+
+function derivePlanIntent(input: NormalizedAgentInput): PlanIntent {
+  const intent = input.task.intent.toLowerCase();
+  const { domain, action } = input.task;
+
+  if (domain === "image") {
+    if (/matting|抠图|去背景|透明底/.test(intent)) {
+      return "image.matting";
+    }
+    if (/decompose|拆解/.test(intent)) {
+      return "image.decompose";
+    }
+    if (/upscale|高清|超清|放大/.test(intent) || action === "upscale") {
+      return "image.upscale";
+    }
+    if (/media\.analyze|media-analysis|理解|识别/.test(intent) || action === "analyze" || action === "extract") {
+      return "media.analyze";
+    }
+    return "image.generate";
   }
-  return normalizedInput.intent ?? "text.answer";
+
+  if (domain === "canvas") {
+    return "canvas.operation";
+  }
+
+  if (domain === "code") {
+    return "code.create";
+  }
+
+  if (/prompt\.edit/.test(intent) || (domain === "text" && action === "edit")) {
+    return "prompt.edit";
+  }
+  if (/web\.fetch|fetch/.test(intent)) {
+    return "web.fetch";
+  }
+  if (/webpage\.create|html|webpage|h5/.test(intent)) {
+    return "webpage.create";
+  }
+  if (/research/.test(intent)) {
+    return "research.answer";
+  }
+  if (/data\.analyze|dataset|表格/.test(intent)) {
+    return "data.analyze";
+  }
+  if (/workflow|plan|规划|计划/.test(intent)) {
+    return "workflow.plan";
+  }
+  if (/document/.test(intent) || (domain === "text" && (action === "create" || action === "transform"))) {
+    return action === "edit" ? "document.edit" : "document.create";
+  }
+  return "text.answer";
 }
 
 function hasComplexitySignal(input: AgentRunInput) {
@@ -209,7 +261,7 @@ function hasComplexitySignal(input: AgentRunInput) {
   return hasExplicitContextCue(prompt);
 }
 
-function shouldPlanImageRun(input: AgentRunInput, intent: NormalizedIntent) {
+function shouldPlanImageRun(input: AgentRunInput, intent: PlanIntent) {
   if (intent !== "image.generate") {
     return false;
   }
@@ -244,45 +296,23 @@ function hasImageBatchCue(prompt: string) {
 }
 
 function getImageOutputCount(input: AgentRunInput) {
-  return input.imageResultCount ?? inferImageOutputCount(input.message) ?? 1;
+  const constraintCount = readConstraintCount(input.normalizedInput);
+  const variantCount = getExplicitConstraints(input.normalizedInput, "dimension").length;
+  return (
+    constraintCount ??
+    (variantCount > 1 ? variantCount : undefined) ??
+    input.imageResultCount ??
+    1
+  );
 }
 
-function inferImageOutputCount(prompt: string) {
-  const groupedArabicMatch = prompt.match(
-    /(?:一|1)\s*组\s*(\d{1,2})\s*(?:张|幅|个|款|版|images?|imgs?|pictures?|results?)/i
-  );
-  if (groupedArabicMatch) {
-    return Number(groupedArabicMatch[1]);
+function readConstraintCount(input: NormalizedAgentInput | undefined) {
+  const value = getExplicitConstraint(input, "output_count");
+  if (!value) {
+    return undefined;
   }
-  const arabicMatch = prompt.match(
-    /(?:生成|出|要|做|给我|create|generate|make)?\s*(\d{1,2})\s*(?:张|幅|个|款|版|组|images?|imgs?|pictures?|results?)/i
-  );
-  if (arabicMatch) {
-    return Number(arabicMatch[1]);
-  }
-  const chineseMatch = prompt.match(
-    /(?:一|1)\s*组\s*([一二两三四五六七八九十])\s*(?:张|幅|个|款|版|图片|图|结果)|(?:生成|出|要|做|给我)?\s*([一二两三四五六七八九十])\s*(?:张|幅|个|款|版|组|图片|图|结果)/
-  );
-  const chineseValue = chineseMatch?.[1] ?? chineseMatch?.[2];
-  return chineseValue ? chineseImageCountToNumber(chineseValue) : null;
-}
-
-function chineseImageCountToNumber(value: string) {
-  const numbers: Record<string, number> = {
-    一: 1,
-    二: 2,
-    两: 2,
-    三: 3,
-    四: 4,
-    五: 5,
-    六: 6,
-    七: 7,
-    八: 8,
-    九: 9,
-    十: 10,
-  };
-
-  return numbers[value] ?? null;
+  const count = Number.parseInt(value, 10);
+  return Number.isInteger(count) && count > 0 ? count : undefined;
 }
 
 function getReferenceImageCount(input: AgentRunInput) {

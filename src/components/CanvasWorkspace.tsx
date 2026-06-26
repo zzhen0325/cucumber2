@@ -6217,7 +6217,7 @@ function ImageResultNode({
           ) : (
             <div className="result-placeholder" aria-label={data.image.title}>
               {status === "loading" && (
-                <LoadingIndicator ariaLabel="图片生成中" size={35} />
+                <LoadingIndicator ariaLabel="图片生成中" size={20} />
               )}
               <span>{status === "error" ? "生成失败" : "生成中"}</span>
               {requestLabel && <small>{requestLabel}</small>}

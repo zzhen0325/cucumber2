@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CucumberAgentContext } from "../../context.ts";
 import type { UpstreamContextItem } from "../../../../src/types/canvas.ts";
+import { makeTaskFrame } from "../../test-task-frame.ts";
 
 const generateSeedreamImage = vi.fn();
 const generateCozeImage = vi.fn();
@@ -430,7 +431,34 @@ describe("generate_image tool", () => {
     ).toEqual(["小狗的图", "小狗的图", "小狗的图", "小狗的图"]);
   });
 
-  it("infers image parameters from run context when the Image Agent omits them", async () => {
+  it("uses Image Agent supplied parameters without inferring from raw text", async () => {
+    isSeedreamConfigured.mockReturnValue(true);
+    generateSeedreamImage.mockResolvedValue({ images: [] });
+
+    const context = buildContext({
+      imageProvider: "seedream",
+      prompt: "生成两张 2048x1024 的产品海报",
+    });
+    // Zero fallback: with no tool args, count defaults to 1 and no dimensions
+    // are parsed out of the run prompt. The Image Agent must pass them explicitly.
+    await invokeTool(context, {
+      prompt: "产品海报",
+      resultCount: 2,
+      width: 2048,
+      height: 1024,
+    });
+
+    const callArg = generateSeedreamImage.mock.calls[0][0];
+    expect(callArg.totalRequestedImageCount).toBe(2);
+    expect(callArg.requests).toHaveLength(2);
+    expect(callArg.requests[0].body).toMatchObject({
+      prompt: "产品海报",
+      width: 2048,
+      height: 1024,
+    });
+  });
+
+  it("does not infer count or dimensions from the raw prompt (zero fallback)", async () => {
     isSeedreamConfigured.mockReturnValue(true);
     generateSeedreamImage.mockResolvedValue({ images: [] });
 
@@ -441,13 +469,10 @@ describe("generate_image tool", () => {
     await invokeTool(context, {});
 
     const callArg = generateSeedreamImage.mock.calls[0][0];
-    expect(callArg.totalRequestedImageCount).toBe(2);
-    expect(callArg.requests).toHaveLength(2);
-    expect(callArg.requests[0].body).toMatchObject({
-      prompt: "产品海报",
-      width: 2048,
-      height: 1024,
-    });
+    expect(callArg.totalRequestedImageCount).toBe(1);
+    expect(callArg.requests).toHaveLength(1);
+    expect(callArg.requests[0].body.width).toBeUndefined();
+    expect(callArg.requests[0].body.height).toBeUndefined();
   });
 
   it("forwards normalized aspect ratio and count to Seedream requests", async () => {
@@ -890,14 +915,13 @@ describe("generate_image tool", () => {
       provider: "rembg-cli",
     });
     const context = buildContext({
-      normalizedInput: {
-        rawPrompt: "给这张图去背景",
-        userGoal: "给这张图去背景",
-        operation: "transform",
-        artifact: { kind: "image", format: "png" },
-        requiredCapabilities: ["image-matting"],
-        negativeCapabilities: [],
-      },
+      normalizedInput: makeTaskFrame({
+        rawInput: "给这张图去背景",
+        domain: "image",
+        intent: "image.matting",
+        action: "transform",
+        primaryAgent: "image_agent",
+      }),
       selectedNodeId: "image-1",
       upstreamContext: [
         {
@@ -954,14 +978,13 @@ describe("generate_image tool", () => {
 
   it("creates a markdown artifact for image decomposition", async () => {
     const context = buildContext({
-      normalizedInput: {
-        rawPrompt: "分析这张图的风格",
-        userGoal: "分析这张图的风格",
-        operation: "analyze",
-        artifact: { kind: "markdown", format: "markdown" },
-        requiredCapabilities: ["image-decompose", "markdown-artifact"],
-        negativeCapabilities: ["image-generation"],
-      },
+      normalizedInput: makeTaskFrame({
+        rawInput: "分析这张图的风格",
+        domain: "image",
+        intent: "image.decompose",
+        action: "analyze",
+        primaryAgent: "image_agent",
+      }),
       selectedNodeId: "image-1",
       upstreamContext: [
         {

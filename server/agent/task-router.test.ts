@@ -1,54 +1,82 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isImageGenerationTask,
+  isImageInspectionTask,
+  isTextArtifactTask,
   selectAgentRoute,
   selectAgentRoutesForTask,
 } from "./task-router.ts";
+import { makeTaskFrame } from "./test-task-frame.ts";
 
 describe("task router", () => {
-  it("routes image capabilities through the capability manifest", () => {
+  it("routes by routing.primaryAgent", () => {
     expect(
-      selectAgentRoute({
-        rawPrompt: "分析这张图",
-        operation: "answer",
-        artifact: null,
-        requiredCapabilities: ["media-analysis"],
-        negativeCapabilities: ["image-generation"],
-      })
+      selectAgentRoute(makeTaskFrame({ primaryAgent: "image_agent", domain: "image" }))
     ).toBe("image");
-  });
-
-  it("routes generated webpage artifacts to document unless web-fetch is required", () => {
     expect(
-      selectAgentRoute({
-        rawPrompt: "做个 HTML 动画",
-        operation: "create",
-        artifact: { kind: "webpage", subtype: "animation", format: "html" },
-        requiredCapabilities: ["html-artifact", "animation"],
-        negativeCapabilities: ["image-generation"],
-      })
+      selectAgentRoute(makeTaskFrame({ primaryAgent: "document_agent", domain: "text" }))
     ).toBe("document");
-
     expect(
-      selectAgentRoute({
-        rawPrompt: "读取 https://example.com",
-        operation: "create",
-        artifact: { kind: "webpage", format: "html" },
-        requiredCapabilities: ["web-fetch"],
-        negativeCapabilities: [],
-      })
+      selectAgentRoute(makeTaskFrame({ primaryAgent: "web_agent" }))
     ).toBe("web");
+    expect(
+      selectAgentRoute(makeTaskFrame({ primaryAgent: "research_agent" }))
+    ).toBe("research");
+    expect(
+      selectAgentRoute(makeTaskFrame({ primaryAgent: "manager_agent" }))
+    ).toBe("manager");
   });
 
-  it("routes composite source-to-document work to all required specialists", () => {
+  it("falls back to manager when no frame is provided", () => {
+    expect(selectAgentRoute(undefined)).toBe("manager");
+    expect(selectAgentRoute(null)).toBe("manager");
+  });
+
+  it("collects candidate specialist routes for composite tasks", () => {
     expect(
-      selectAgentRoutesForTask({
-        rawPrompt: "把这个页面总结成带引用的文档",
-        operation: "transform",
-        artifact: { kind: "document", format: "markdown" },
-        requiredCapabilities: ["web-fetch", "citations", "markdown-artifact"],
-        negativeCapabilities: [],
-      })
+      selectAgentRoutesForTask(
+        makeTaskFrame({
+          primaryAgent: "web_agent",
+          candidateAgents: ["research_agent", "document_agent", "manager_agent"],
+        })
+      )
     ).toEqual(["web", "research", "document"]);
+  });
+
+  it("classifies image generation vs inspection by action", () => {
+    expect(
+      isImageGenerationTask(
+        makeTaskFrame({ domain: "image", action: "create", intent: "image.generate" })
+      )
+    ).toBe(true);
+    expect(
+      isImageInspectionTask(
+        makeTaskFrame({ domain: "image", action: "analyze", intent: "media.analyze" })
+      )
+    ).toBe(true);
+    expect(
+      isImageGenerationTask(
+        makeTaskFrame({ domain: "image", action: "analyze", intent: "media.analyze" })
+      )
+    ).toBe(false);
+  });
+
+  it("classifies text/code artifact tasks", () => {
+    expect(
+      isTextArtifactTask(
+        makeTaskFrame({ domain: "text", action: "create", intent: "document.create" })
+      )
+    ).toBe(true);
+    expect(
+      isTextArtifactTask(
+        makeTaskFrame({ domain: "code", action: "create", intent: "code.create" })
+      )
+    ).toBe(true);
+    expect(
+      isTextArtifactTask(
+        makeTaskFrame({ domain: "image", action: "create", intent: "image.generate" })
+      )
+    ).toBe(false);
   });
 });

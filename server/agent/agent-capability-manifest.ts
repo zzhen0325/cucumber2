@@ -1,12 +1,11 @@
 import type { ArtifactType } from "../../src/types/canvas.ts";
-import type { NormalizedAgentInput } from "./input-normalizer.ts";
 import type { SpecialistRoute } from "./task-router.ts";
 import { listToolRegistryEntries } from "./tool-registry.ts";
 
 export type AgentCapabilityRoute = {
   route: SpecialistRoute;
   agentName: string;
-  artifactKinds: NonNullable<NormalizedAgentInput["artifact"]>["kind"][];
+  artifactKinds: string[];
   requiredCapabilities: string[];
   negativeCapabilities: string[];
   producedArtifactTypes: ArtifactType[];

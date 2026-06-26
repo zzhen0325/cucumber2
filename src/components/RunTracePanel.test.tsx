@@ -93,13 +93,19 @@ describe("run trace summary", () => {
       }),
       event("input.normalized", {
         normalizedInput: {
-          rawPrompt: "生成一张 16:9 黄瓜海报",
-          intent: "image.generate",
-          image: {
-            contentPrompt: "黄瓜海报",
-            resultCount: 1,
-            aspectRatio: "16:9",
+          rawInput: "生成一张 16:9 黄瓜海报",
+          task: { domain: "image", intent: "image.generate", action: "create", confidence: 1 },
+          routing: { primaryAgent: "image_agent", candidateAgents: [] },
+          userGoal: { original: "生成一张 16:9 黄瓜海报", normalized: "黄瓜海报" },
+          inputs: { text: "生成一张 16:9 黄瓜海报", images: [], files: [] },
+          constraints: {
+            explicit: [
+              { key: "output_count", value: "1", sourceText: "一张" },
+              { key: "aspect_ratio", value: "16:9", sourceText: "16:9" },
+            ],
+            inferred: [],
           },
+          ambiguities: [],
         },
         contextSummary: {
           selectedNodes: [{ id: "image-1", kind: "imageResult", label: "参考图" }],

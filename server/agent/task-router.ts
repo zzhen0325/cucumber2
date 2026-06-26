@@ -1,5 +1,8 @@
-import type { NormalizedAgentInput } from "./input-normalizer.ts";
-import { getAgentCapabilityRoute } from "./agent-capability-manifest.ts";
+import type {
+  NormalizedAgentInput,
+  PrimaryAgent,
+  TaskAction,
+} from "./input-normalizer.ts";
 
 export type SpecialistRoute =
   | "document"
@@ -8,56 +11,21 @@ export type SpecialistRoute =
   | "research"
   | "web";
 
-export function isImageArtifactTask(input?: NormalizedAgentInput | null) {
-  return input?.artifact?.kind === "image";
-}
-
-export function isDocumentArtifactTask(input?: NormalizedAgentInput | null) {
-  const artifact = input?.artifact;
-  const documentRoute = getRouteDefinition("document");
-  return Boolean(
-    artifact &&
-      documentRoute.artifactKinds.includes(artifact.kind) &&
-      ["diagram", "document", "markdown"].includes(artifact.kind)
-  );
-}
-
-export function isTextArtifactTask(input?: NormalizedAgentInput | null) {
-  const kind = input?.artifact?.kind;
-  const documentRoute = getRouteDefinition("document");
-  return Boolean(
-    kind &&
-      documentRoute.artifactKinds.includes(kind) &&
-      ["diagram", "document", "markdown", "code", "webpage"].includes(kind)
-  );
-}
-
-export function isWebArtifactTask(input?: NormalizedAgentInput | null) {
-  return input?.artifact?.kind === "webpage";
-}
-
-export function isResearchAnswerTask(input?: NormalizedAgentInput | null) {
-  const capabilities = new Set(input?.requiredCapabilities ?? []);
-  return (
-    input?.operation === "answer" &&
-    (capabilities.has("source-based-answer") ||
-      capabilities.has("citations") ||
-      capabilities.has("research"))
-  );
-}
-
-export function hasNegativeCapability(
-  input: NormalizedAgentInput | null | undefined,
-  capability: string
-) {
-  return (input?.negativeCapabilities ?? []).includes(capability);
-}
+const PRIMARY_AGENT_ROUTE: Record<PrimaryAgent, SpecialistRoute> = {
+  image_agent: "image",
+  document_agent: "document",
+  web_agent: "web",
+  research_agent: "research",
+  manager_agent: "manager",
+};
 
 export function selectAgentRoute(
   input?: NormalizedAgentInput | null
 ): SpecialistRoute {
-  const routes = selectAgentRoutesForTask(input);
-  return routes.length === 1 ? routes[0] : "manager";
+  if (!input) {
+    return "manager";
+  }
+  return PRIMARY_AGENT_ROUTE[input.routing.primaryAgent] ?? "manager";
 }
 
 export function selectAgentRoutesForTask(
@@ -66,77 +34,67 @@ export function selectAgentRoutesForTask(
   if (!input) {
     return [];
   }
-  const routes: Exclude<SpecialistRoute, "manager">[] = [];
-  const imageRoute = getRouteDefinition("image");
-  const webRoute = getRouteDefinition("web");
-  const researchRoute = getRouteDefinition("research");
-  if (hasAnyCapability(input, ["image-decompose", "media-analysis"])) {
-    routes.push("image");
-    return routes;
-  }
-  if (isImageArtifactTask(input)) {
-    routes.push("image");
-    return routes;
-  }
-  if (input.artifact?.kind === "webpage") {
-    routes.push(
-      hasAnyCapability(input, webRoute.requiredCapabilities) ? "web" : "document"
-    );
-    return routes;
-  }
-  if (input.artifact?.kind === "code") {
-    routes.push("document");
-    return routes;
-  }
-  if (
-    (input.requiredCapabilities ?? []).some((capability) =>
-      [
-        ...researchRoute.requiredCapabilities,
-        ...webRoute.requiredCapabilities,
-      ].includes(capability)
-    ) &&
-    isDocumentArtifactTask(input)
-  ) {
-    if (hasAnyCapability(input, webRoute.requiredCapabilities)) {
-      routes.push("web");
+  const routes = new Set<Exclude<SpecialistRoute, "manager">>();
+  for (const agent of [
+    input.routing.primaryAgent,
+    ...input.routing.candidateAgents,
+  ]) {
+    const route = PRIMARY_AGENT_ROUTE[agent];
+    if (route && route !== "manager") {
+      routes.add(route);
     }
-    if (hasAnyCapability(input, researchRoute.requiredCapabilities)) {
-      routes.push("research");
-    }
-    routes.push("document");
-    return routes;
   }
-  if (isDocumentArtifactTask(input)) {
-    routes.push("document");
-    return routes;
-  }
-  if (isWebArtifactTask(input)) {
-    routes.push("web");
-    return routes;
-  }
-  if (isResearchAnswerTask(input)) {
-    routes.push("research");
-    return routes;
-  }
-  if (hasAnyCapability(input, imageRoute.requiredCapabilities)) {
-    routes.push("image");
-    return routes;
-  }
-  return routes;
+  return [...routes];
 }
 
-function getRouteDefinition(route: SpecialistRoute) {
-  const definition = getAgentCapabilityRoute(route);
-  if (!definition) {
-    throw new Error(`Missing agent capability route: ${route}`);
-  }
-  return definition;
+export function isImageTask(input?: NormalizedAgentInput | null) {
+  return input?.task.domain === "image";
 }
 
-function hasAnyCapability(
-  input: NormalizedAgentInput | null | undefined,
-  capabilities: string[]
+export function isImageGenerationTask(input?: NormalizedAgentInput | null) {
+  return (
+    isImageTask(input) &&
+    !isImageInspectionAction(input?.task.action, input?.task.intent)
+  );
+}
+
+export function isImageInspectionTask(input?: NormalizedAgentInput | null) {
+  return (
+    isImageTask(input) &&
+    isImageInspectionAction(input?.task.action, input?.task.intent)
+  );
+}
+
+export function isImageDecomposeTask(input?: NormalizedAgentInput | null) {
+  return isImageTask(input) && /decompose|拆解/i.test(input?.task.intent ?? "");
+}
+
+export function isMediaAnalyzeTask(input?: NormalizedAgentInput | null) {
+  return (
+    isImageTask(input) &&
+    /media\.analyze|media-analysis|理解|识别/i.test(input?.task.intent ?? "")
+  );
+}
+
+export function isTextArtifactTask(input?: NormalizedAgentInput | null) {
+  const domain = input?.task.domain;
+  if (domain !== "text" && domain !== "code") {
+    return false;
+  }
+  return input?.task.action === "create" ||
+    input?.task.action === "edit" ||
+    input?.task.action === "transform" ||
+    input?.task.action === "analyze";
+}
+
+function isImageInspectionAction(
+  action: TaskAction | undefined,
+  intent: string | undefined
 ) {
-  const present = new Set(input?.requiredCapabilities ?? []);
-  return capabilities.some((capability) => present.has(capability));
+  if (action === "analyze" || action === "extract") {
+    return true;
+  }
+  return /decompose|拆解|media\.analyze|media-analysis|理解|识别/i.test(
+    intent ?? ""
+  );
 }

@@ -3,105 +3,149 @@ import { z } from "zod";
 
 import { getInputNormalizerRunnerConfig } from "./model-config.ts";
 
-export const taskOperationValues = [
+// Task Frame domain/action/route vocabularies. The frame is intent-classification
+// and routing only. No domain-specific tool parameters live here; each sub-agent
+// derives its own final parameters from constraints.
+export const taskDomainValues = [
+  "image",
+  "text",
+  "code",
+  "canvas",
+  "figma",
+  "unknown",
+] as const;
+
+export const taskActionValues = [
   "create",
   "edit",
   "analyze",
-  "answer",
   "transform",
+  "extract",
+  "upscale",
+  "unknown",
 ] as const;
 
-export const taskArtifactKindValues = [
-  "image",
-  "markdown",
-  "document",
-  "diagram",
-  "code",
-  "webpage",
-  "data",
-  "canvas",
+// Real specialist agents in the registry. canvas/code/general fold into
+// manager_agent (general coordinator) and document_agent (code/diagram text).
+export const primaryAgentValues = [
+  "image_agent",
+  "document_agent",
+  "web_agent",
+  "research_agent",
+  "manager_agent",
 ] as const;
 
-export const taskArtifactSubtypeValues = [
-  "sequenceDiagram",
-  "flowchart",
-  "prd",
-  "brief",
-  "poster",
-  "banner",
-  "table",
-  "mindmap",
-  "animation",
+export const imageRoleValues = [
+  "target",
+  "reference",
+  "style_reference",
+  "unknown",
 ] as const;
 
-export const taskArtifactFormatValues = [
-  "markdown",
-  "mermaid",
-  "html",
-  "json",
-  "png",
-] as const;
+export const ambiguitySeverityValues = ["low", "medium", "high"] as const;
 
-export const taskDomainValues = [
-  "visual-design",
-  "product",
-  "engineering",
-  "marketing",
-  "general",
-] as const;
-
-const taskOperationSchema = z.enum(taskOperationValues);
-const taskArtifactKindSchema = z.enum(taskArtifactKindValues);
-const taskArtifactSubtypeSchema = z.enum(taskArtifactSubtypeValues);
-const taskArtifactFormatSchema = z.enum(taskArtifactFormatValues);
 const taskDomainSchema = z.enum(taskDomainValues);
+const taskActionSchema = z.enum(taskActionValues);
+const primaryAgentSchema = z.enum(primaryAgentValues);
+const imageRoleSchema = z.enum(imageRoleValues);
+const ambiguitySeveritySchema = z.enum(ambiguitySeverityValues);
 
-const normalizedIntentSchema = z.enum([
-  "document.create",
-  "document.edit",
-  "web.fetch",
-  "webpage.create",
-  "research.answer",
-  "code.create",
-  "data.analyze",
-  "workflow.plan",
-  "image.generate",
-  "image.matting",
-  "image.decompose",
-  "image.upscale",
-  "media.analyze",
-  "text.answer",
-  "canvas.operation",
-  "unsupported",
-]);
+const taskSchema = z.object({
+  domain: taskDomainSchema,
+  intent: z.string().trim().min(1),
+  action: taskActionSchema,
+  confidence: z.number().min(0).max(1),
+});
 
-const normalizedArtifactSchema = z.object({
-  kind: taskArtifactKindSchema,
-  subtype: taskArtifactSubtypeSchema.nullable().optional(),
-  format: taskArtifactFormatSchema.nullable().optional(),
+const userGoalSchema = z.object({
+  original: z.string(),
+  normalized: z.string(),
+});
+
+const routingSchema = z.object({
+  primaryAgent: primaryAgentSchema,
+  candidateAgents: z.array(primaryAgentSchema).optional(),
+  reason: z.string().trim().min(1).optional(),
+});
+
+const inputImageSchema = z.object({
+  id: z.string(),
+  role: imageRoleSchema.optional(),
+});
+
+const inputFileSchema = z.object({
+  id: z.string(),
+  type: z.string(),
+});
+
+const inputsSchema = z.object({
+  text: z.string(),
+  images: z.array(inputImageSchema).optional(),
+  files: z.array(inputFileSchema).optional(),
+});
+
+// constraint.value is string-encoded so the structured-output schema stays
+// concrete and reliable (e.g. "4", "1080x1440", "3:4"). Sub-agents parse it.
+const explicitConstraintSchema = z.object({
+  key: z.string().trim().min(1),
+  value: z.string(),
+  sourceText: z.string(),
+});
+
+const inferredConstraintSchema = z.object({
+  key: z.string().trim().min(1),
+  value: z.string(),
+  reason: z.string(),
+});
+
+const constraintsSchema = z.object({
+  explicit: z.array(explicitConstraintSchema).optional(),
+  inferred: z.array(inferredConstraintSchema).optional(),
+});
+
+const ambiguitySchema = z.object({
+  issue: z.string().trim().min(1),
+  options: z.array(z.string()).optional(),
+  severity: ambiguitySeveritySchema,
 });
 
 export const normalizedAgentInputSchema = z.object({
-  rawPrompt: z.string(),
-  userGoal: z.string().trim().min(1).optional(),
-  operation: taskOperationSchema.optional(),
-  artifact: normalizedArtifactSchema.nullable().optional(),
-  domain: taskDomainSchema.optional(),
-  requiredCapabilities: z.array(z.string().trim().min(1)).optional(),
-  negativeCapabilities: z.array(z.string().trim().min(1)).optional(),
-  // Kept as a derived compatibility field for existing Trace/UI summaries.
-  // Runtime routing must use operation/artifact/capability helpers instead.
-  intent: normalizedIntentSchema.optional(),
-  notes: z.string().trim().min(1).nullable().optional(),
+  rawInput: z.string().optional(),
+  task: taskSchema,
+  userGoal: userGoalSchema,
+  routing: routingSchema,
+  inputs: inputsSchema,
+  constraints: constraintsSchema.optional(),
+  ambiguities: z.array(ambiguitySchema).optional(),
 });
 
-export type NormalizedAgentInput = z.infer<typeof normalizedAgentInputSchema>;
-export type NormalizedIntent = z.infer<typeof normalizedIntentSchema>;
-export type TaskOperation = z.infer<typeof taskOperationSchema>;
-export type TaskArtifactKind = z.infer<typeof taskArtifactKindSchema>;
-export type TaskArtifactSubtype = z.infer<typeof taskArtifactSubtypeSchema>;
-export type TaskArtifactFormat = z.infer<typeof taskArtifactFormatSchema>;
+export type NormalizedAgentInput = {
+  rawInput: string;
+  task: z.infer<typeof taskSchema>;
+  userGoal: z.infer<typeof userGoalSchema>;
+  routing: {
+    primaryAgent: PrimaryAgent;
+    candidateAgents: PrimaryAgent[];
+    reason?: string;
+  };
+  inputs: {
+    text: string;
+    images: Array<z.infer<typeof inputImageSchema>>;
+    files: Array<z.infer<typeof inputFileSchema>>;
+  };
+  constraints: {
+    explicit: Array<z.infer<typeof explicitConstraintSchema>>;
+    inferred: Array<z.infer<typeof inferredConstraintSchema>>;
+  };
+  ambiguities: Array<z.infer<typeof ambiguitySchema>>;
+};
+
 export type TaskDomain = z.infer<typeof taskDomainSchema>;
+export type TaskAction = z.infer<typeof taskActionSchema>;
+export type PrimaryAgent = z.infer<typeof primaryAgentSchema>;
+export type ImageRole = z.infer<typeof imageRoleSchema>;
+export type ExplicitConstraint = z.infer<typeof explicitConstraintSchema>;
+export type InferredConstraint = z.infer<typeof inferredConstraintSchema>;
 
 type NormalizeInput = {
   message: string;
@@ -143,46 +187,36 @@ export async function normalizeAgentInput(
     throw new Error("Input normalization did not produce a structured result.");
   }
 
-  return finalizeNormalizedAgentInput(result.finalOutput, input.message, {
-    maxOutputImages: options.maxOutputImages,
-  });
+  return finalizeNormalizedAgentInput(result.finalOutput, input.message);
 }
 
 export function createInputNormalizerAgent() {
   normalizerAgent ??= new Agent({
     name: "Cucumber Input Normalizer",
     instructions: [
-      "Normalize the user's request into a compact artifact-first task object.",
-      "Do not execute the task. Classify intent and routing only; do not extract domain-specific tool parameters.",
-      "Required top-level shape: userGoal, operation, artifact, domain, requiredCapabilities, negativeCapabilities, notes.",
-      "operation must be one of create, edit, analyze, answer, transform.",
-      "artifact.kind must be one of image, markdown, document, diagram, code, webpage, data, canvas, or null when the task is a plain answer.",
-      "Use artifact.subtype for specific product shape such as sequenceDiagram, flowchart, prd, brief, poster, banner, table, or mindmap.",
-      "Use artifact.format for output encoding such as markdown, mermaid, html, json, or png.",
-      "The words visual, 视觉, H5, campaign, product, marketing, engineering usually describe domain or context. They do not imply artifact.kind=image by themselves.",
-      "Questions asking which tools, models, providers, APIs, SDKs, platforms, open-source/free resources, or callable services exist are plain answer tasks with artifact=null. Treat generation in phrases like 图片生成工具, 3D模型生成模型, or image generation API as the subject being asked about, not as a request to generate an image.",
-      "Questions about why/how image generation works, fails, costs, speed, models, APIs, code, implementation, or capability are not image creation requests unless the user explicitly asks to create/render a new image artifact.",
-      "Questions asking for an existing image node's generation information, generation parameters, original prompt, actual provider prompt, model, provider, seed, size, or source are metadata answer tasks with artifact=null. They must not call image understanding or image generation tools.",
-      "Classify 流程时序图 / sequence diagram as operation=create, artifact.kind=diagram, artifact.subtype=sequenceDiagram, artifact.format=mermaid, requiredCapabilities including sequence-diagram and markdown-artifact, negativeCapabilities including image-generation.",
-      "Classify 流程图 / flowchart as diagram/flowchart/mermaid unless the user asks for a poster or rendered image.",
-      "Classify HTML pages, H5 pages, interactive prototypes, HTML demos, and HTML animations as operation=create, artifact.kind=webpage, artifact.format=html, requiredCapabilities including html-artifact, and negativeCapabilities including image-generation.",
-      "HTML animation requests such as 30秒 HTML 动画 are webpage/html artifacts, not image artifacts, unless the user explicitly asks to generate a raster image/poster/banner.",
-      "Classify PRD, brief,方案,说明,邮件草稿,纪要 as document or markdown artifacts.",
-      "Classify web search, 搜索, 查找资料, 调研, 研究, research, sources, or citation requests as operation=answer, artifact=null, requiredCapabilities including research, source-based-answer, and citations.",
-      "Classify reusable text deliverables such as 模板, 提示词模板, 完整提示词, 可复制/直接使用方案, 设定稿, 规范, IP 三视图模板 as document or markdown artifacts with markdown-artifact. These are text products even if they mention images, IP, characters, or visual design.",
-      "Classify requests to edit, rewrite, polish, expand, shorten, remove parts from, or otherwise revise a prompt/text/description as operation=edit with artifact=null and negativeCapabilities including image-generation. Terse commands such as 取消标题, 去掉标题, 删除文案, or remove the title should revise the selected/upstream prompt text and must not generate images unless the user explicitly asks to generate/create/render an image now.",
-      "Classify requests to analyze, evaluate, critique, summarize, or give suggestions for a visual/image/banner/poster/KV brief as operation=analyze or answer with no image artifact unless the user explicitly asks to generate/create/render the image now; include negativeCapabilities image-generation.",
-      "Classify explicit long-form output requests such as detailed explanation, complete plan, roadmap, proposal, research analysis, report, 文档, 详细说明, 完整规划, 调研分析, or 长文 as operation=create or analyze with artifact.kind=document or markdown. Short QA remains artifact=null.",
-      "Infer image creation only when the request has both an image artifact target and a creation/rendering action, or when the explicit image composer mode already provided an image artifact. Classify image creation as artifact.kind=image with png format, and image upscaling/enhancement of an existing image as operation=transform, artifact.kind=image.",
-      "Classify image canvas extension, outpainting, resizing to new pixel dimensions, expanding a reference image to new aspect ratios, 扩图, 扩画布, 拓展尺寸, 延展画面 as operation=create, artifact.kind=image, requiredCapabilities including image-generation and image-outpaint. This is not upscale unless the user asks for 高清/超清/提升清晰度 only.",
-      "Classify background removal, matting, transparent-background cutout, sticker/material extraction, or keep-only-subject requests as operation=transform, artifact.kind=image, artifact.format=png, requiredCapabilities including image-matting.",
-      "Classify requests to decompose an actual selected/upstream image's style, composition, light, color, layout, or prompt clues as operation=analyze, artifact.kind=markdown, artifact.format=markdown, requiredCapabilities including image-decompose and markdown-artifact, negativeCapabilities including image-generation unless the user also explicitly asks to generate a new image.",
-      "Classify requests to understand, describe, identify, summarize, judge, or extract information from an actual selected/upstream image as operation=answer, artifact=null, requiredCapabilities including media-analysis, negativeCapabilities including image-generation unless the user also explicitly asks to generate a new image.",
-      "For reference-image guided character/IP/mascot generation, include both media-analysis and image-generation so the Image Agent may inspect the selected/uploaded image before creating new image artifacts.",
-      "For image artifacts, only classify routing fields. Do not emit image.contentPrompt, resultCount, aspectRatio, dimensions, variants, style, subject, scene, or usage.",
-      "Production controls such as image count, aspect ratio, pixel dimensions, variants, style, and render prompt are completed by the Image Agent.",
-      "Keep reference image URLs out of the output. Canvas image references are handled by runtime, not by the model.",
-      "Do not rely on legacy intent. If you include it, it must be consistent with operation/artifact and is only a compatibility summary.",
+      "You are the Cucumber Input Normalizer. Convert the user's request into a compact Task Frame for routing.",
+      "Do not execute the task. Classify and route only. Never emit domain-specific tool parameters (no resultCount, dimensions, aspectRatio, prompt text, variants). Each sub-agent derives its own final parameters from constraints.",
+      "Output shape: task{domain,intent,action,confidence}, userGoal{original,normalized}, routing{primaryAgent,candidateAgents,reason}, inputs{text,images,files}, constraints{explicit,inferred}, ambiguities.",
+      "task.domain is one of image, text, code, canvas, figma, unknown.",
+      "task.action is one of create, edit, analyze, transform, extract, upscale, unknown.",
+      "task.intent is a short free-text label such as image.generate, image.matting, image.decompose, image.upscale, media.analyze, document.create, document.edit, webpage.create, web.fetch, research.answer, code.create, data.analyze, canvas.operation, prompt.edit, text.answer.",
+      "task.confidence is 0..1 self-assessed classification confidence.",
+      "routing.primaryAgent is one of image_agent, document_agent, web_agent, research_agent, manager_agent. routing.candidateAgents lists other plausible agents.",
+      "Route image generation, outpainting/canvas expansion, matting/background removal, image decomposition, media understanding, and upscaling to image_agent.",
+      "Route markdown, documents, diagrams (sequence/flowchart -> mermaid), HTML/H5/webpage demos, code drafts, PRDs, briefs, summaries, and reusable text templates to document_agent.",
+      "Route single public webpage fetch/read/summarize to web_agent. Route web-search-backed cited research/comparison to research_agent.",
+      "Route plain answers, smalltalk, prompt/text edits, image-metadata questions, canvas node/shape operations, and anything ambiguous to manager_agent.",
+      "The words visual, 视觉, H5, campaign, product, marketing usually describe domain or context. They do not by themselves make the task image generation.",
+      "Questions asking which tools, models, providers, APIs, SDKs, platforms, or open-source/free resources exist are plain answers: domain=text, action=analyze, intent=text.answer, primaryAgent=manager_agent. The phrase 图片生成工具 / image generation API is the subject being asked about, not a request to generate an image.",
+      "Questions asking why/how image generation works, fails, costs, or which model/provider/seed/size an existing image used are answers (domain=text or image, action=analyze, intent=text.answer or media.analyze), never image creation.",
+      "Requests to edit, rewrite, polish, expand, shorten, or remove parts of a prompt/text/description are domain=text, action=edit, intent=prompt.edit, primaryAgent=manager_agent. Terse commands such as 取消标题 / 去掉标题 revise the selected text and must not generate images unless the user explicitly asks to generate a new image now.",
+      "Requests to analyze/critique/evaluate a visual brief or image are action=analyze with no image creation unless the user explicitly asks to render an image now.",
+      "Infer image creation only when the request has both an image artifact target and a create/render action, or when explicit image-composer mode is active.",
+      "constraints.explicit: extract user-stated hard constraints verbatim from the request, each as {key, value, sourceText}. Use string-encoded values. Examples: count '4 张' -> {key:'output_count', value:'4', sourceText:'4 张'}; size '1080x1440' -> {key:'dimension', value:'1080x1440', sourceText:'1080x1440'}; ratio '16:9' -> {key:'aspect_ratio', value:'16:9', sourceText:'16:9'}; style/format/language/tone constraints likewise. Do not invent constraints the user did not state.",
+      "constraints.inferred: optional soft defaults you suggest, each as {key, value, reason}. Keep these minimal; sub-agents make final calls.",
+      "inputs.text is the cleaned user instruction. inputs.images and inputs.files are best-effort role hints only; the runtime owns trusted image references, so never rely on these ids for resolution and never fabricate image URLs.",
+      "ambiguities: list genuine unresolved choices with options and severity. Leave empty when the request is clear.",
+      "userGoal.original is the raw request; userGoal.normalized is a one-line restatement of the goal.",
     ].join("\n"),
     outputType: normalizedAgentInputSchema,
   });
@@ -202,86 +236,63 @@ function getNormalizerRunner() {
   return normalizerRunner;
 }
 
+// Zero-fallback finalize: validate the model output and normalize text only.
+// No rule-based intent/artifact correction. The Task Frame is what the model said.
 export function finalizeNormalizedAgentInput(
   candidate: unknown,
-  rawPrompt: string,
-  options: { maxOutputImages?: number } = {}
+  rawInput: string
 ): NormalizedAgentInput {
-  void options;
   const parsed = normalizedAgentInputSchema.parse(candidate);
-  const raw = normalizeText(rawPrompt);
-  const ruleBased = inferTaskProtocol(raw);
-  const promptTextEdit = isPromptTextEditRequest(raw);
-  const toolOrModelInfoRequest =
-    isToolOrModelInformationRequest(raw) && !isLongFormDocumentRequest(raw);
-  const imageMetadataInfoRequest = isImageGenerationMetadataRequest(raw);
-  const imageGenerationMetaQuestion = isImageGenerationMetaQuestion(raw);
-  const imageCanvasExpansion = isImageCanvasExpansionRequest(raw);
-  const parsedArtifact =
-    parsed.artifact ??
-    (parsed.intent === "image.generate"
-      ? {
-          kind: "image" as const,
-          subtype: inferImageSubtype(raw),
-          format: "png" as const,
-        }
-      : undefined);
-  const artifact =
-    promptTextEdit || toolOrModelInfoRequest || imageMetadataInfoRequest
-    ? null
-    : normalizeArtifact(raw, parsedArtifact ?? ruleBased.artifact);
-  const operation = normalizeOperation(
-    raw,
-    promptTextEdit
-      ? "edit"
-      : toolOrModelInfoRequest || imageMetadataInfoRequest
-        ? "answer"
-        : parsed.operation ?? ruleBased.operation ?? "answer",
-    artifact
-  );
-  const domain = parsed.domain ?? ruleBased.domain;
-  const requiredCapabilities = uniqueCapabilityList([
-    ...(ruleBased.requiredCapabilities ?? []),
-    ...(parsed.requiredCapabilities ?? []),
-    ...(isImageArtifact(artifact) && operation === "create"
-      ? ["image-generation"]
-      : []),
-  ]).filter(
-    (capability) =>
-      !imageMetadataInfoRequest &&
-      !(imageGenerationMetaQuestion && !artifact) &&
-      (!imageCanvasExpansion || capability !== "image-upscale") &&
-      (!(isImageArtifact(artifact) && operation === "transform") ||
-        capability !== "image-generation") &&
-      (isImageArtifact(artifact) ||
-        isImageInspectionCapability(capability) ||
-        !isImageTaskCapability(capability))
-  );
-  const negativeCapabilities = uniqueCapabilityList([
-    ...(ruleBased.negativeCapabilities ?? []),
-    ...(parsed.negativeCapabilities ?? []),
-    ...(promptTextEdit ? ["image-generation"] : []),
-    ...(toolOrModelInfoRequest ? ["image-generation"] : []),
-    ...(imageMetadataInfoRequest ? ["image-generation"] : []),
-    ...(imageGenerationMetaQuestion && !artifact ? ["image-generation"] : []),
-  ]);
-  const intent = inferIntentFromProtocol({
-    artifact,
-    operation,
-    rawPrompt: raw,
-    requiredCapabilities,
-  });
+  const raw = normalizeText(rawInput);
+
   return {
-    rawPrompt: raw,
-    userGoal: normalizeNullableText(parsed.userGoal) ?? raw,
-    operation,
-    artifact,
-    domain,
-    requiredCapabilities,
-    negativeCapabilities,
-    intent,
-    notes: normalizeNullableText(parsed.notes) ?? undefined,
+    rawInput: raw,
+    task: {
+      domain: parsed.task.domain,
+      intent: normalizeText(parsed.task.intent) || parsed.task.intent,
+      action: parsed.task.action,
+      confidence: parsed.task.confidence,
+    },
+    userGoal: {
+      original: normalizeNullableText(parsed.userGoal.original) ?? raw,
+      normalized: normalizeNullableText(parsed.userGoal.normalized) ?? raw,
+    },
+    routing: {
+      primaryAgent: parsed.routing.primaryAgent,
+      candidateAgents: uniqueAgents(parsed.routing.candidateAgents ?? []),
+      reason: normalizeNullableText(parsed.routing.reason) ?? undefined,
+    },
+    inputs: {
+      text: normalizeNullableText(parsed.inputs.text) ?? raw,
+      images: parsed.inputs.images ?? [],
+      files: parsed.inputs.files ?? [],
+    },
+    constraints: {
+      explicit: parsed.constraints?.explicit ?? [],
+      inferred: parsed.constraints?.inferred ?? [],
+    },
+    ambiguities: (parsed.ambiguities ?? []).map((ambiguity) => ({
+      issue: ambiguity.issue,
+      options: ambiguity.options ?? [],
+      severity: ambiguity.severity,
+    })),
   };
+}
+
+export function getExplicitConstraint(
+  input: NormalizedAgentInput | null | undefined,
+  key: string
+): string | undefined {
+  return input?.constraints.explicit.find((entry) => entry.key === key)?.value;
+}
+
+export function getExplicitConstraints(
+  input: NormalizedAgentInput | null | undefined,
+  key: string
+): string[] {
+  return (input?.constraints.explicit ?? [])
+    .filter((entry) => entry.key === key)
+    .map((entry) => entry.value);
 }
 
 function buildNormalizerPrompt(input: NormalizeInput, maxOutputImages?: number) {
@@ -306,936 +317,8 @@ function buildNormalizerPrompt(input: NormalizeInput, maxOutputImages?: number) 
   ].filter(Boolean).join("\n\n");
 }
 
-export function inferIntentFromProtocol({
-  artifact,
-  operation,
-  rawPrompt,
-  requiredCapabilities,
-}: {
-  artifact?: NormalizedAgentInput["artifact"];
-  operation: TaskOperation;
-  rawPrompt: string;
-  requiredCapabilities?: string[];
-}): NormalizedIntent {
-  const capabilities = new Set(requiredCapabilities ?? []);
-  if (capabilities.has("image-matting")) {
-    return "image.matting";
-  }
-  if (capabilities.has("image-decompose") && !capabilities.has("image-generation")) {
-    return "image.decompose";
-  }
-  if (capabilities.has("media-analysis") && !capabilities.has("image-generation")) {
-    return "media.analyze";
-  }
-  if (isImageArtifact(artifact)) {
-    return operation === "transform" ? "image.upscale" : "image.generate";
-  }
-  if (artifact?.kind === "webpage") {
-    return /(https?:\/\/|抓取|读取|fetch|read|save|保存)/i.test(rawPrompt)
-      ? "web.fetch"
-      : "webpage.create";
-  }
-  if (artifact?.kind === "diagram" || artifact?.kind === "document" || artifact?.kind === "markdown") {
-    return operation === "edit" ? "document.edit" : "document.create";
-  }
-  if (artifact?.kind === "code") {
-    return "code.create";
-  }
-  if (artifact?.kind === "data") {
-    return "data.analyze";
-  }
-  if (artifact?.kind === "canvas") {
-    return "canvas.operation";
-  }
-  if (isResearchRequest(rawPrompt)) {
-    return "research.answer";
-  }
-  if (/(计划|拆解任务|workflow|checkpoint|plan)/i.test(rawPrompt)) {
-    return "workflow.plan";
-  }
-  return "text.answer";
-}
-
-function inferTaskProtocol(prompt: string): Pick<
-  NormalizedAgentInput,
-  | "artifact"
-  | "domain"
-  | "negativeCapabilities"
-  | "operation"
-  | "requiredCapabilities"
-> {
-  const domain = inferDomain(prompt);
-
-  if (isPromptTextEditRequest(prompt)) {
-    return {
-      artifact: null,
-      domain,
-      negativeCapabilities: ["image-generation"],
-      operation: "edit",
-      requiredCapabilities: [],
-    };
-  }
-
-  if (
-    isToolOrModelInformationRequest(prompt) &&
-    !isLongFormDocumentRequest(prompt)
-  ) {
-    return {
-      artifact: null,
-      domain,
-      negativeCapabilities: ["image-generation"],
-      operation: "answer",
-      requiredCapabilities: [],
-    };
-  }
-
-  if (isImageGenerationMetadataRequest(prompt)) {
-    return {
-      artifact: null,
-      domain,
-      negativeCapabilities: ["image-generation"],
-      operation: "answer",
-      requiredCapabilities: [],
-    };
-  }
-
-  if (isReusableTextArtifactRequest(prompt)) {
-    return {
-      artifact: {
-        kind: /markdown|md/i.test(prompt) ? "markdown" : "document",
-        subtype: inferLongFormDocumentSubtype(prompt),
-        format: "markdown",
-      },
-      domain,
-      negativeCapabilities: ["image-generation"],
-      operation: inferEditOperation(prompt) ? "edit" : "create",
-      requiredCapabilities: inferLongFormDocumentCapabilities(prompt),
-    };
-  }
-
-  if (isResearchRequest(prompt)) {
-    return {
-      artifact: null,
-      domain,
-      negativeCapabilities: ["image-generation"],
-      operation: "answer",
-      requiredCapabilities: ["research", "source-based-answer", "citations"],
-    };
-  }
-
-  if (isImageMattingRequest(prompt)) {
-    return {
-      artifact: { kind: "image", format: "png" },
-      domain,
-      negativeCapabilities: [],
-      operation: "transform",
-      requiredCapabilities: ["image-matting"],
-    };
-  }
-
-  if (isImageDecomposeThenGenerateRequest(prompt)) {
-    return {
-      artifact: {
-        kind: "image",
-        subtype: inferImageSubtype(prompt),
-        format: "png",
-      },
-      domain,
-      negativeCapabilities: [],
-      operation: "create",
-      requiredCapabilities: ["image-decompose", "image-generation"],
-    };
-  }
-
-  if (isAnalyzeThenGenerateRequest(prompt)) {
-    return {
-      artifact: {
-        kind: "image",
-        subtype: inferImageSubtype(prompt),
-        format: "png",
-      },
-      domain,
-      negativeCapabilities: [],
-      operation: "create",
-      requiredCapabilities: ["media-analysis", "image-generation"],
-    };
-  }
-
-  if (isImageDecomposeRequest(prompt)) {
-    return {
-      artifact: { kind: "markdown", format: "markdown" },
-      domain: "visual-design",
-      negativeCapabilities: ["image-generation"],
-      operation: "analyze",
-      requiredCapabilities: ["image-decompose", "markdown-artifact"],
-    };
-  }
-
-  if (isMediaAnalyzeRequest(prompt)) {
-    return {
-      artifact: null,
-      domain,
-      negativeCapabilities: ["image-generation"],
-      operation: "answer",
-      requiredCapabilities: ["media-analysis"],
-    };
-  }
-
-  if (isVisualBriefAnalysisRequest(prompt)) {
-    return {
-      artifact: null,
-      domain,
-      negativeCapabilities: ["image-generation"],
-      operation: "analyze",
-      requiredCapabilities: [],
-    };
-  }
-
-  if (isImageCanvasExpansionRequest(prompt)) {
-    return {
-      artifact: {
-        kind: "image",
-        subtype: inferImageSubtype(prompt),
-        format: "png",
-      },
-      domain: domain === "general" ? "visual-design" : domain,
-      negativeCapabilities: [],
-      operation: "create",
-      requiredCapabilities: ["image-generation", "image-outpaint"],
-    };
-  }
-
-  if (/(流程\s*时序图|时序图|sequence\s*diagram)/i.test(prompt)) {
-    return {
-      artifact: {
-        kind: "diagram",
-        subtype: "sequenceDiagram",
-        format: "mermaid",
-      },
-      domain,
-      negativeCapabilities: ["image-generation"],
-      operation: inferEditOperation(prompt) ? "edit" : "create",
-      requiredCapabilities: ["sequence-diagram", "markdown-artifact"],
-    };
-  }
-
-  if (/(流程图|flowchart|流程\s*图)/i.test(prompt) && !hasExplicitImageCreationRequest(prompt)) {
-    return {
-      artifact: {
-        kind: "diagram",
-        subtype: "flowchart",
-        format: "mermaid",
-      },
-      domain,
-      negativeCapabilities: ["image-generation"],
-      operation: inferEditOperation(prompt) ? "edit" : "create",
-      requiredCapabilities: ["flowchart", "markdown-artifact"],
-    };
-  }
-
-  if (isHtmlArtifactCreationRequest(prompt)) {
-    return {
-      artifact: {
-        kind: "webpage",
-        subtype: inferHtmlArtifactSubtype(prompt),
-        format: "html",
-      },
-      domain,
-      negativeCapabilities: ["image-generation"],
-      operation: inferEditOperation(prompt) ? "edit" : "create",
-      requiredCapabilities: inferHtmlArtifactCapabilities(prompt),
-    };
-  }
-
-  if (
-    /(PRD|产品需求文档|需求文档)/i.test(prompt)
-  ) {
-    return {
-      artifact: {
-        kind: "document",
-        subtype: "prd",
-        format: "markdown",
-      },
-      domain: "product",
-      negativeCapabilities: [],
-      operation: inferEditOperation(prompt) ? "edit" : "create",
-      requiredCapabilities: ["markdown-artifact"],
-    };
-  }
-
-  if (/(抓取|读取|总结|概括|整理).*(网页|页面|网址|链接|URL)|(网页|页面).*(总结|概括|整理|文档)|\b(fetch|read|summarize)\b.*\b(webpage|page|url|link)\b/i.test(prompt)) {
-    return {
-      artifact: {
-        kind: /(总结|summarize|整理|概括).*(文档|document|markdown|md)|文档/i.test(prompt)
-          ? "document"
-          : "webpage",
-        format: /(总结|summarize|整理|概括).*(文档|document|markdown|md)|文档/i.test(prompt)
-          ? "markdown"
-          : "html",
-      },
-      domain,
-      negativeCapabilities: [],
-      operation: /(总结|summarize|整理|概括)/i.test(prompt) ? "transform" : "create",
-      requiredCapabilities: [
-        "web-fetch",
-        ...(/(文档|document|markdown|md)/i.test(prompt) ? ["markdown-artifact"] : []),
-      ],
-    };
-  }
-
-  if (isLongFormDocumentRequest(prompt)) {
-    return {
-      artifact: {
-        kind: /markdown|md/i.test(prompt) ? "markdown" : "document",
-        subtype: inferLongFormDocumentSubtype(prompt),
-        format: "markdown",
-      },
-      domain,
-      negativeCapabilities: ["image-generation"],
-      operation: inferEditOperation(prompt) ? "edit" : "create",
-      requiredCapabilities: inferLongFormDocumentCapabilities(prompt),
-    };
-  }
-
-  if (/(brief|方案|说明|邮件|纪要|提纲|大纲|稿|文档|markdown|md)/i.test(prompt)) {
-    return {
-      artifact: {
-        kind: /markdown|md/i.test(prompt) ? "markdown" : "document",
-        subtype: /(brief|方案)/i.test(prompt) ? "brief" : undefined,
-        format: "markdown",
-      },
-      domain,
-      negativeCapabilities: [],
-      operation: inferEditOperation(prompt) ? "edit" : "create",
-      requiredCapabilities: ["markdown-artifact"],
-    };
-  }
-
-  if (/(放大|高清|超清|提升清晰|upscale|enhance)/i.test(prompt)) {
-    return {
-      artifact: { kind: "image", format: "png" },
-      domain,
-      negativeCapabilities: [],
-      operation: "transform",
-      requiredCapabilities: ["image-upscale"],
-    };
-  }
-
-  if (hasNegatedImageGenerationRequest(prompt)) {
-    return {
-      artifact: null,
-      domain,
-      negativeCapabilities: ["image-generation"],
-      operation: "answer",
-      requiredCapabilities: [],
-    };
-  }
-
-  if (/(代码|函数|组件|脚本|diff|patch|code|function|component|script)/i.test(prompt)) {
-    return {
-      artifact: { kind: "code", format: "markdown" },
-      domain: "engineering",
-      negativeCapabilities: [],
-      operation: inferEditOperation(prompt) ? "edit" : "create",
-      requiredCapabilities: [],
-    };
-  }
-
-  if (/(csv|表格|数据|JSON|分析数据|dataset|spreadsheet|analy[sz]e data)/i.test(prompt)) {
-    return {
-      artifact: {
-        kind: "data",
-        subtype: /表格|table|spreadsheet/i.test(prompt) ? "table" : undefined,
-        format: /json/i.test(prompt) ? "json" : undefined,
-      },
-      domain,
-      negativeCapabilities: [],
-      operation: /分析|analy[sz]e/i.test(prompt) ? "analyze" : "create",
-      requiredCapabilities: [],
-    };
-  }
-
-  if (/(便签|形状|节点|画布)/.test(prompt) && !shouldInferImageCreate(prompt)) {
-    return {
-      artifact: { kind: "canvas" },
-      domain,
-      negativeCapabilities: [],
-      operation: "edit",
-      requiredCapabilities: ["canvas-operation"],
-    };
-  }
-
-  if (shouldInferImageCreate(prompt)) {
-    return {
-      artifact: {
-        kind: "image",
-        subtype: inferImageSubtype(prompt),
-        format: "png",
-      },
-      domain,
-      negativeCapabilities: [],
-      operation: "create",
-      requiredCapabilities: ["image-generation"],
-    };
-  }
-
-  return {
-    artifact: null,
-    domain,
-    negativeCapabilities: [],
-    operation: "answer",
-    requiredCapabilities: [],
-  };
-}
-
-function normalizeArtifact(
-  rawPrompt: string,
-  artifact: NormalizedAgentInput["artifact"] | null | undefined
-): NormalizedAgentInput["artifact"] {
-  const inferred = inferTaskProtocol(rawPrompt).artifact;
-  if (!artifact) {
-    return inferred ?? null;
-  }
-  if (
-    isToolOrModelInformationRequest(rawPrompt) &&
-    !isLongFormDocumentRequest(rawPrompt)
-  ) {
-    return null;
-  }
-  if (isImageGenerationMetadataRequest(rawPrompt)) {
-    return null;
-  }
-  if (
-    isImageMattingRequest(rawPrompt) ||
-    isImageDecomposeThenGenerateRequest(rawPrompt) ||
-    isAnalyzeThenGenerateRequest(rawPrompt) ||
-    isImageDecomposeRequest(rawPrompt) ||
-    isMediaAnalyzeRequest(rawPrompt)
-  ) {
-    return inferred ?? null;
-  }
-  if (isVisualBriefAnalysisRequest(rawPrompt) && artifact.kind === "image") {
-    return null;
-  }
-  if (hasNegatedImageGenerationRequest(rawPrompt) && artifact.kind === "image") {
-    return null;
-  }
-  if (isImageCanvasExpansionRequest(rawPrompt)) {
-    return inferred ?? { kind: "image", format: "png" };
-  }
-  if (/(流程\s*时序图|时序图|sequence\s*diagram)/i.test(rawPrompt)) {
-    return { kind: "diagram", subtype: "sequenceDiagram", format: "mermaid" };
-  }
-  if (
-    /(流程图|flowchart|流程\s*图)/i.test(rawPrompt) &&
-    !hasExplicitImageCreationRequest(rawPrompt)
-  ) {
-    return { kind: "diagram", subtype: "flowchart", format: "mermaid" };
-  }
-  if (isHtmlArtifactCreationRequest(rawPrompt)) {
-    return {
-      kind: "webpage",
-      subtype: inferHtmlArtifactSubtype(rawPrompt),
-      format: "html",
-    };
-  }
-  if (artifact.kind === "image" && inferred?.kind && inferred.kind !== "image") {
-    return inferred;
-  }
-  if (artifact.kind === "image" && isImageGenerationMetaQuestion(rawPrompt)) {
-    return null;
-  }
-  return {
-    kind: artifact.kind,
-    subtype: artifact.subtype ?? inferred?.subtype ?? undefined,
-    format: artifact.format ?? inferred?.format ?? undefined,
-  };
-}
-
-function normalizeOperation(
-  rawPrompt: string,
-  operation: TaskOperation,
-  artifact: NormalizedAgentInput["artifact"] | null | undefined
-): TaskOperation {
-  if (isPromptTextEditRequest(rawPrompt)) {
-    return "edit";
-  }
-  if (
-    isToolOrModelInformationRequest(rawPrompt) &&
-    !isLongFormDocumentRequest(rawPrompt)
-  ) {
-    return "answer";
-  }
-  if (isImageGenerationMetadataRequest(rawPrompt)) {
-    return "answer";
-  }
-  if (isImageGenerationMetaQuestion(rawPrompt) && !artifact) {
-    return "answer";
-  }
-  if (artifact?.kind === "canvas") {
-    return "edit";
-  }
-  if (isImageMattingRequest(rawPrompt)) {
-    return "transform";
-  }
-  if (isImageDecomposeRequest(rawPrompt)) {
-    return "analyze";
-  }
-  if (isMediaAnalyzeRequest(rawPrompt)) {
-    return "answer";
-  }
-  if (isVisualBriefAnalysisRequest(rawPrompt)) {
-    return "analyze";
-  }
-  if (isImageArtifact(artifact) && isImageCanvasExpansionRequest(rawPrompt)) {
-    return "create";
-  }
-  if (isImageArtifact(artifact) && /(放大|高清|超清|提升清晰|upscale|enhance)/i.test(rawPrompt)) {
-    return "transform";
-  }
-  if (isImageArtifact(artifact) && operation === "answer") {
-    return "create";
-  }
-  if (isDocumentArtifactKind(artifact) && operation === "answer") {
-    return "create";
-  }
-  return operation;
-}
-
-function isImageArtifact(
-  artifact: NormalizedAgentInput["artifact"] | null | undefined
-): artifact is NonNullable<NormalizedAgentInput["artifact"]> & { kind: "image" } {
-  return artifact?.kind === "image";
-}
-
-function isDocumentArtifactKind(
-  artifact: NormalizedAgentInput["artifact"] | null | undefined
-) {
-  return Boolean(
-    artifact &&
-      ["diagram", "document", "markdown"].includes(artifact.kind)
-  );
-}
-
-function inferDomain(prompt: string): TaskDomain {
-  if (/(视觉|H5|HTML|网页|页面|动画|动效|海报|banner|KV|主视觉|画面|构图|风格|色彩|poster|visual|animation|motion)/i.test(prompt)) {
-    return "visual-design";
-  }
-  if (/(PRD|产品|需求|用户|roadmap|feature)/i.test(prompt)) {
-    return "product";
-  }
-  if (/(代码|函数|组件|架构|技术|engineering|code|api|database)/i.test(prompt)) {
-    return "engineering";
-  }
-  if (/(营销|campaign|增长|投放|广告|marketing)/i.test(prompt)) {
-    return "marketing";
-  }
-  return "general";
-}
-
-function inferEditOperation(prompt: string) {
-  return /(改写|润色|重写|编辑|更新|修改|rewrite|edit|update|revise)/i.test(prompt);
-}
-
-function isLongFormDocumentRequest(prompt: string) {
-  if (isReusableTextArtifactRequest(prompt)) {
-    return true;
-  }
-  if (hasExplicitImageCreationRequest(prompt)) {
-    return false;
-  }
-
-  const explicitLongForm =
-    /(长文|长篇|详细说明|详细解释|完整说明|完整规划|深度分析|深入分析|全面分析|调研分析|研究分析|调研报告|研究报告|分析报告|规划方案|执行计划|路线图|roadmap|whitepaper|report|write-?up)/i;
-  if (explicitLongForm.test(prompt)) {
-    return true;
-  }
-  if (/(给我|帮我|做|制定|输出|生成|创建|写|整理).{0,20}(规划|计划|roadmap|路线图)/i.test(prompt)) {
-    return true;
-  }
-
-  const longFormCue =
-    /(详细|完整|系统|深入|深度|全面|展开|一份|一篇|报告|文档|markdown|md|撰写|写|生成|创建|输出|整理成)/i;
-  const longFormTarget =
-    /(说明|解释|讲解|规划|计划|方案|调研|研究|分析|总结|复盘|对比|proposal|plan|report|brief)/i;
-
-  return longFormCue.test(prompt) && longFormTarget.test(prompt);
-}
-
-function isReusableTextArtifactRequest(prompt: string) {
-  const promptTemplate =
-    /(提示词|prompt).{0,24}(模板|完整|文档|可复制|直接使用|复用|套用)|(模板|完整|文档|可复制|直接使用|复用|套用).{0,24}(提示词|prompt)/i.test(
-      prompt
-    );
-  const copyReady =
-    /(可复制|复制使用|直接使用|拿去用|复用|套用|copy[-\s]?ready|reusable)/i.test(
-      prompt
-    ) &&
-    /(方案|计划|提示词|模板|文档|报告|规范|设定|prompt|plan|template|document|report|spec)/i.test(
-      prompt
-    );
-  const reusableTemplate =
-    /(模板|template|设定稿|规范|三视图模板)/i.test(prompt) &&
-    /(帮我|请|给我|写|生成|创建|输出|整理|制定|做|产出|撰写|设计|make|create|write|draft|produce)/i.test(
-      prompt
-    );
-  const concreteRasterOutput =
-    /(图片|图像|出图|渲染|一张|[0-9一二两三四五六七八九十]\s*张|海报|banner|KV|主视觉|插画|photo|image|poster)/i.test(
-      prompt
-    );
-
-  if (
-    concreteRasterOutput &&
-    hasExplicitImageCreationRequest(prompt) &&
-    !promptTemplate &&
-    !copyReady
-  ) {
-    return false;
-  }
-
-  return promptTemplate || copyReady || reusableTemplate;
-}
-
-function inferLongFormDocumentSubtype(
-  prompt: string
-): TaskArtifactSubtype | undefined {
-  if (/(brief|方案|规划|计划|roadmap|路线图|proposal)/i.test(prompt)) {
-    return "brief";
-  }
-  return undefined;
-}
-
-function inferLongFormDocumentCapabilities(prompt: string) {
-  return uniqueCapabilityList([
-    "markdown-artifact",
-    ...(/https?:\/\//i.test(prompt) ? ["web-fetch"] : []),
-    ...(/引用|来源|出处|citation|citations|sources?/i.test(prompt)
-      ? ["source-based-answer", "citations"]
-      : []),
-  ]);
-}
-
-function isResearchRequest(prompt: string) {
-  return /(调研|研究|搜索|查找资料|联网查|引用来源|来源出处|引用|出处|web\s*search|research|sources?|citations?)/i.test(prompt);
-}
-
-function isHtmlArtifactCreationRequest(prompt: string) {
-  if (hasExplicitImageCreationRequest(prompt)) {
-    return false;
-  }
-  if (/(抓取|读取|总结|概括|整理|fetch|read|summari[sz]e)/i.test(prompt)) {
-    return false;
-  }
-
-  const hasHtmlSurface =
-    /\bhtml\b|网页|网页文件|web\s?page|webpage|页面|H5|h5/i.test(prompt);
-  if (!hasHtmlSurface) {
-    return false;
-  }
-
-  const asksToCreate =
-    /(做|制作|生成|创建|写|产出|输出|实现|开发|搭建|build|create|make|write|implement)/i.test(
-      prompt
-    );
-  const htmlOutput =
-    /(动画|动效|交互|互动|demo|演示|原型|prototype|页面|网页|webpage|website|landing|H5|h5)/i.test(
-      prompt
-    );
-
-  return asksToCreate && htmlOutput;
-}
-
-function inferHtmlArtifactSubtype(prompt: string): TaskArtifactSubtype | undefined {
-  if (/(动画|动效|motion|animation|30秒|60fps|视频素材)/i.test(prompt)) {
-    return "animation";
-  }
-  return undefined;
-}
-
-function inferHtmlArtifactCapabilities(prompt: string) {
-  return uniqueCapabilityList([
-    "html-artifact",
-    ...(inferHtmlArtifactSubtype(prompt) === "animation" ? ["animation"] : []),
-  ]);
-}
-
-function isImageTaskCapability(capability: string) {
-  return /image|图片|图像|upscale|outpaint|视觉风格|prompt[-_ ]?expansion/i.test(capability);
-}
-
-function isImageInspectionCapability(capability: string) {
-  return capability === "image-decompose" || capability === "media-analysis";
-}
-
-export function isPromptTextEditRequest(prompt: string) {
-  if (
-    hasExplicitImageCreationRequest(prompt) ||
-    /(放大|高清|超清|提升清晰|upscale|enhance)/i.test(prompt)
-  ) {
-    return false;
-  }
-
-  const editVerb =
-    /(修改|改写|润色|重写|编辑|更新|调整|优化|扩写|精简|缩短|删除|去掉|移除|取消|不要|替换|保留|rewrite|revise|edit|polish|optimi[sz]e|expand|shorten|remove|delete|drop|without)/i;
-  const promptTarget =
-    /(提示词|prompt|指令|文本|文案|描述|这段|上面这段|当前内容|原文|description|copy|text)/i;
-
-  if (
-    new RegExp(`${editVerb.source}.{0,32}${promptTarget.source}`, "i").test(prompt) ||
-    new RegExp(`${promptTarget.source}.{0,32}${editVerb.source}`, "i").test(prompt)
-  ) {
-    return true;
-  }
-
-  return /^(?:把|请|帮我|麻烦)?\s*(?:取消|去掉|删除|移除|不要|隐藏|删掉|remove|delete|drop)\s*(?:所有|全部|主|大)?\s*(?:标题|副标题|字幕|文案|文字|title|headline|caption)s?\s*$/i.test(
-    prompt
-  );
-}
-
-function inferImageSubtype(prompt: string): TaskArtifactSubtype | undefined {
-  if (/(海报|poster)/i.test(prompt)) {
-    return "poster";
-  }
-  if (/(banner|KV|主视觉|key visual)/i.test(prompt)) {
-    return "banner";
-  }
-  return undefined;
-}
-
-function uniqueCapabilityList(values: string[]) {
-  return [
-    ...new Set(
-      values
-        .map((value) => value.trim())
-        .filter(Boolean)
-    ),
-  ];
-}
-
-function isVisualBriefAnalysisRequest(prompt: string) {
-  if (isLongFormDocumentRequest(prompt)) {
-    return false;
-  }
-
-  const asksForAnalysis =
-    /(分析|评估|评价|判断|拆解|解读|梳理|诊断|优化建议|给(?:我)?(?:一些)?建议|review|analy[sz]e|critique|evaluate|assess)/i.test(
-      prompt
-    );
-  if (!asksForAnalysis) {
-    return false;
-  }
-
-  const aboutVisualBrief =
-    /(需求|主题|brief|方案|方向|画面|视觉|图片|图像|照片|这张图|此图|海报|banner|kv|主视觉|构图|背景|字体|元素|风格|色彩|氛围)/i.test(
-      prompt
-    );
-  if (!aboutVisualBrief) {
-    return false;
-  }
-
-  return !hasExplicitImageCreationRequest(prompt);
-}
-
-function isImageMattingRequest(prompt: string) {
-  return /(抠图|去背景|去除背景|移除背景|删除背景|透明底|透明背景|只要人物|只要主体|提取主体|主体提取|做贴纸|贴纸素材|素材提取|remove\s+background|transparent\s+background|cutout|matting)/i.test(
-    prompt
-  );
-}
-
-function isImageDecomposeThenGenerateRequest(prompt: string) {
-  return hasImageDecomposeSignal(prompt) && hasExplicitImageCreationRequest(prompt);
-}
-
-function isAnalyzeThenGenerateRequest(prompt: string) {
-  return (
-    hasExplicitImageCreationRequest(prompt) &&
-    (hasMediaAnalyzeSignal(prompt) ||
-      hasReferenceImageGuidedGenerationSignal(prompt))
-  );
-}
-
-function isImageDecomposeRequest(prompt: string) {
-  return hasImageDecomposeSignal(prompt) && !hasExplicitImageCreationRequest(prompt);
-}
-
-function isMediaAnalyzeRequest(prompt: string) {
-  return hasMediaAnalyzeSignal(prompt) && !hasExplicitImageCreationRequest(prompt);
-}
-
-function hasImageDecomposeSignal(prompt: string) {
-  if (!hasActualImageCue(prompt)) {
-    return false;
-  }
-  return /(拆|拆解|分析|提取|总结).{0,24}(风格|构图|光影|配色|色彩|镜头|版式|布局|prompt|提示词|视觉线索)|(风格|构图|光影|配色|色彩|镜头|版式|布局|prompt|提示词|视觉线索).{0,24}(拆|拆解|分析|提取|总结)/i.test(
-    prompt
-  );
-}
-
-function hasMediaAnalyzeSignal(prompt: string) {
-  if (!hasActualImageCue(prompt)) {
-    return false;
-  }
-  return /(分析|看懂|识别|描述|总结|提取|判断|理解|解释|特征|核心特征|造型|外观|表情|装饰|图里有什么|图中有什么|图片里有什么|表达了什么|关键信息|内容|元素|describe|identify|summari[sz]e|extract|understand|analy[sz]e)/i.test(
-    prompt
-  );
-}
-
-function hasActualImageCue(prompt: string) {
-  return /(这个图|这个图片|这张图|这张图片|这张照片|这幅图|这幅图片|此图|图里|图中|图片里|图片中|照片里|照片中|选中的图|选中图片|参考图|reference image|selected image|this image|this picture|photo)/i.test(
-    prompt
-  );
-}
-
-function hasReferenceImageGuidedGenerationSignal(prompt: string) {
-  const referenceCue =
-    /(根据|基于|参考|参照|照着|按|以|用).{0,16}(这个|这些|这张|上传|选中|参考图|原图|图片|图像|角色|IP|形象|reference|selected)|(参考图|原图|上传(?:的)?(?:图|图片|图像)|选中(?:的)?(?:图|图片|图像)|reference image|selected image)/i;
-  if (!referenceCue.test(prompt)) {
-    return false;
-  }
-  return /(角色|IP|形象|人物|头像|mascot|avatar|玩偶|公仔|毛绒|贴纸|造型|特征|风格|表情|服装|配色|装饰)/i.test(
-    prompt
-  );
-}
-
-export function isImageGenerationMetadataRequest(prompt: string) {
-  const hasImageReference =
-    hasActualImageCue(prompt) || /(图片|图像|image|picture|photo)/i.test(prompt);
-  if (!hasImageReference) {
-    return false;
-  }
-
-  if (
-    /(生成信息|生成参数|生成配置|生成设置|生成记录|生成来源|来源信息|原始提示词|原始\s*prompt|生成\s*prompt|实际\s*prompt|用(?:的|了)?什么模型|哪个模型|模型是什么|供应商|provider|model|seed|从哪(?:里)?来|怎么生成(?:的)?|如何生成(?:的)?)/i.test(
-      prompt
-    )
-  ) {
-    return true;
-  }
-
-  return (
-    /(是什么|是多少|多少|查看|看下|告诉我|查询|读取|what|which|show|inspect)/i.test(
-      prompt
-    ) && /(尺寸|分辨率|比例|width|height|size|aspect\s*ratio)/i.test(prompt)
-  );
-}
-
-function isToolOrModelInformationRequest(prompt: string) {
-  if (hasVisualOutputCreationRequest(prompt)) {
-    return false;
-  }
-
-  const asksForInformation =
-    /(有哪些|有什么|有没有|哪[些个家款]|推荐|列举|盘点|比较|对比|区别|优缺点|怎么|如何|能不能|能否|是否|可不可以|哪里|what|which|recommend|list|compare|how)/i.test(
-      prompt
-    );
-  if (!asksForInformation) {
-    return false;
-  }
-
-  const asksAboutTooling =
-    /(工具|模型|平台|服务|软件|库|框架|插件|资源|网站|API|SDK|接口|调用|开源|免费|可免费|free|open[-\s]?source|models?|tools?|libraries?|platforms?|services?|providers?)/i.test(
-      prompt
-    );
-  if (!asksAboutTooling) {
-    return false;
-  }
-
-  return /(生成|生图|文生图|图生图|3D\s*模型|三维模型|图片|图像|image\s*generation|model\s*generation|text[-\s]?to[-\s]?image|text[-\s]?to[-\s]?3d|api|sdk|调用|开源|免费|free|open[-\s]?source)/i.test(
-    prompt
-  );
-}
-
-function isImageCanvasExpansionRequest(prompt: string) {
-  const hasExpansionCue =
-    /(扩图|扩画布|扩边|补边|外扩|外延|延展|拓展|扩展|拓宽|扩充|outpaint|outpainting|extend(?:\s+the)?\s+canvas|canvas\s+extension|expand(?:\s+the)?\s+image)/i.test(
-      prompt
-    );
-  const hasDimensionResizeCue =
-    /(拓展|扩展|扩图|调整|改成|转成|resize|尺寸|版位|比例|aspect\s*ratio).{0,24}(尺寸|画布|比例|版位|\d{3,5}\s*(?:x|×|\*|-|–|—)\s*\d{3,5})/i.test(
-      prompt
-    );
-  const hasDimensionList = findDimensionVariants(prompt).length > 0;
-  return (
-    (hasExpansionCue || hasDimensionResizeCue) &&
-    (hasActualImageCue(prompt) || hasDimensionList)
-  );
-}
-
-function hasExplicitImageCreationRequest(prompt: string) {
-  if (
-    isToolOrModelInformationRequest(prompt) ||
-    isImageGenerationMetaQuestion(prompt) ||
-    isImageGenerationMetadataRequest(prompt)
-  ) {
-    return false;
-  }
-  return /((生成|创建|画|出图|渲染|产出|输出|制作).{0,16}(图片|图像|图|海报|banner|kv|主视觉)|(生成|创建|设计|制作|做|产出|输出|出).{0,24}(角色|IP|形象|头像|玩偶|公仔|毛绒|贴纸)|(图片|图像|海报|banner|kv|主视觉|角色|IP|形象|头像|玩偶|公仔|毛绒|贴纸).{0,24}(生成|创建|渲染|产出|输出|制作|设计)|\b(generate|create|render|make)\b.{0,48}\b(image|poster|banner|key visual|character|avatar|mascot)\b)/i.test(
-    prompt
-  );
-}
-
-function isImageGenerationMetaQuestion(prompt: string) {
-  return /(图片|图像|image).{0,16}(生成|generation).{0,32}(为什么|怎么|如何|失败|报错|流程|原理|接口|代码|实现|速度|成本|模型|能力)/i.test(
-    prompt
-  );
-}
-
-function shouldInferImageCreate(prompt: string) {
-  if (isImageGenerationMetaQuestion(prompt)) {
-    return false;
-  }
-  if (hasExplicitImageCreationRequest(prompt)) {
-    return true;
-  }
-
-  return (
-    /(生成|创建|画|出图|渲染|制作|设计|create|generate|render|make).{0,32}(图片|图像|插画|海报|banner|kv|主视觉|photo|image|illustration|poster)/i.test(
-      prompt
-    ) ||
-    /(图片|图像|插画|海报|banner|kv|主视觉|photo|image|illustration|poster).{0,32}(生成|创建|出图|渲染|制作|设计|create|generate|render|make)/i.test(
-      prompt
-    )
-  );
-}
-
-function hasVisualOutputCreationRequest(prompt: string) {
-  if (isImageGenerationMetaQuestion(prompt)) {
-    return false;
-  }
-  return /((生成|创建|画|绘制|出图|渲染|产出|输出|制作|设计|做).{0,24}(图片|图像|图|海报|banner|kv|主视觉|插画|角色|IP|形象|头像|玩偶|公仔|毛绒|贴纸)|(生成|创建|画|绘制|出图|渲染|产出|输出|制作|设计|做)\s*(?:一|1|二|两|2|三|3|四|4|\d{1,2})\s*(?:张|幅|款|版)|\b(generate|create|render|make|draw|paint)\b.{0,48}\b(image|poster|banner|key visual|illustration|character|avatar|mascot)\b)/i.test(
-    prompt
-  );
-}
-
-function hasNegatedImageGenerationRequest(prompt: string) {
-  return /((不要|不用|无需|不需要|别|禁止|别再|不要再)\s*(?:生成|创建|画|出图|渲染|产出|输出|制作)?\s*(?:任何|新的|一张|这些|此)?\s*(?:图片|图像|图|海报|banner|kv)|(?:不|别|禁止)\s*(?:生成|创建|画|出图|渲染|产出|输出|制作)\s*(?:任何|新的|一张|这些|此)?\s*(?:图片|图像|图|海报|banner|kv)|(?:no|not|without|don't|do not)\s*(?:image\s*generation|generate\s+image|create\s+image|images?|pictures?|posters?))/i.test(
-    prompt
-  );
-}
-
-function findDimensionVariants(prompt: string) {
-  const variants: Array<{ width: number; height: number; label?: string }> = [];
-  const seen = new Set<string>();
-  const dimensionPattern =
-    /(^|[^\d])(\d{3,5})\s*(?:x|×|\*|-|–|—)\s*(\d{3,5})(?=$|[^\d])/gi;
-  for (const match of prompt.matchAll(dimensionPattern)) {
-    const width = Number(match[2]);
-    const height = Number(match[3]);
-    if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
-      continue;
-    }
-    const key = `${width}x${height}`;
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    variants.push({
-      width,
-      height,
-      label: `${width}x${height}`,
-    });
-  }
-  return variants;
+function uniqueAgents(agents: PrimaryAgent[]): PrimaryAgent[] {
+  return [...new Set(agents)];
 }
 
 function normalizeNullableText(value: string | null | undefined) {
@@ -1245,7 +328,7 @@ function normalizeNullableText(value: string | null | undefined) {
   return normalizeText(value) || null;
 }
 
-function normalizeText(value: string) {
+export function normalizeText(value: string) {
   return Array.from(value, (char) => {
     const code = char.charCodeAt(0);
     return code < 32 || code === 127 ? " " : char;

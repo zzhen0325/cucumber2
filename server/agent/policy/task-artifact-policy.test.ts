@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { CucumberAgentContext } from "../context.ts";
+import { makeTaskFrame } from "../test-task-frame.ts";
 import {
   assertImageInspectionToolAllowed,
   assertImageToolAllowed,
@@ -8,46 +9,34 @@ import {
 } from "./task-artifact-policy.ts";
 
 describe("task artifact policy", () => {
-  it("rejects image generation for diagram tasks with negative capability", () => {
+  it("rejects image generation for non-image (diagram/text) tasks", () => {
     expect(() =>
       assertImageToolAllowed(
         context({
-          normalizedInput: {
-            rawPrompt: "帮我创建一个视觉 H5 需求的流程时序图",
-            userGoal: "帮我创建一个视觉 H5 需求的流程时序图",
-            operation: "create",
-            artifact: {
-              kind: "diagram",
-              subtype: "sequenceDiagram",
-              format: "mermaid",
-            },
-            domain: "visual-design",
-            requiredCapabilities: ["sequence-diagram", "markdown-artifact"],
-            negativeCapabilities: ["image-generation"],
-          },
+          normalizedInput: makeTaskFrame({
+            rawInput: "帮我创建一个视觉 H5 需求的流程时序图",
+            domain: "text",
+            intent: "document.create",
+            action: "create",
+            primaryAgent: "document_agent",
+          }),
         }),
         "generate_image"
       )
     ).toThrow("tool_policy_rejected");
   });
 
-  it("allows text artifacts for diagram tasks", () => {
+  it("allows text artifacts for text-domain diagram tasks", () => {
     expect(() =>
       assertTextArtifactToolAllowed(
         context({
-          normalizedInput: {
-            rawPrompt: "生成一个流程时序图",
-            userGoal: "生成一个流程时序图",
-            operation: "create",
-            artifact: {
-              kind: "diagram",
-              subtype: "sequenceDiagram",
-              format: "mermaid",
-            },
-            domain: "general",
-            requiredCapabilities: ["sequence-diagram", "markdown-artifact"],
-            negativeCapabilities: ["image-generation"],
-          },
+          normalizedInput: makeTaskFrame({
+            rawInput: "生成一个流程时序图",
+            domain: "text",
+            intent: "document.create",
+            action: "create",
+            primaryAgent: "document_agent",
+          }),
         })
       )
     ).not.toThrow();
@@ -57,19 +46,13 @@ describe("task artifact policy", () => {
     expect(() =>
       assertTextArtifactToolAllowed(
         context({
-          normalizedInput: {
-            rawPrompt: "做个 30 秒 HTML 动画",
-            userGoal: "做个 30 秒 HTML 动画",
-            operation: "create",
-            artifact: {
-              kind: "webpage",
-              subtype: "animation",
-              format: "html",
-            },
-            domain: "visual-design",
-            requiredCapabilities: ["html-artifact", "animation"],
-            negativeCapabilities: ["image-generation"],
-          },
+          normalizedInput: makeTaskFrame({
+            rawInput: "做个 30 秒 HTML 动画",
+            domain: "text",
+            intent: "webpage.create",
+            action: "create",
+            primaryAgent: "document_agent",
+          }),
         })
       )
     ).not.toThrow();
@@ -79,19 +62,13 @@ describe("task artifact policy", () => {
     expect(() =>
       assertImageToolAllowed(
         context({
-          normalizedInput: {
-            rawPrompt: "做个 30 秒 HTML 动画",
-            userGoal: "做个 30 秒 HTML 动画",
-            operation: "create",
-            artifact: {
-              kind: "webpage",
-              subtype: "animation",
-              format: "html",
-            },
-            domain: "visual-design",
-            requiredCapabilities: ["html-artifact", "animation"],
-            negativeCapabilities: ["image-generation"],
-          },
+          normalizedInput: makeTaskFrame({
+            rawInput: "做个 30 秒 HTML 动画",
+            domain: "text",
+            intent: "webpage.create",
+            action: "create",
+            primaryAgent: "document_agent",
+          }),
         }),
         "generate_image"
       )
@@ -102,52 +79,63 @@ describe("task artifact policy", () => {
     expect(() =>
       assertTextArtifactToolAllowed(
         context({
-          normalizedInput: {
-            rawPrompt: "生成一张流程图风格海报",
-            userGoal: "生成一张流程图风格海报",
-            operation: "create",
-            artifact: { kind: "image", subtype: "poster", format: "png" },
-            domain: "visual-design",
-            requiredCapabilities: ["image-generation"],
-            negativeCapabilities: [],
-          },
+          normalizedInput: makeTaskFrame({
+            rawInput: "生成一张流程图风格海报",
+            domain: "image",
+            intent: "image.generate",
+            action: "create",
+            primaryAgent: "image_agent",
+          }),
         })
       )
     ).toThrow("tool_policy_rejected");
   });
 
-  it("allows image matting even when image generation is blocked", () => {
+  it("blocks image generation for image analysis tasks", () => {
     expect(() =>
       assertImageToolAllowed(
         context({
-          normalizedInput: {
-            rawPrompt: "给这张图去背景",
-            userGoal: "给这张图去背景",
-            operation: "transform",
-            artifact: { kind: "image", format: "png" },
-            domain: "visual-design",
-            requiredCapabilities: ["image-matting"],
-            negativeCapabilities: ["image-generation"],
-          },
+          normalizedInput: makeTaskFrame({
+            rawInput: "分析这张图的风格",
+            domain: "image",
+            intent: "media.analyze",
+            action: "analyze",
+            primaryAgent: "image_agent",
+          }),
+        }),
+        "generate_image"
+      )
+    ).toThrow("tool_policy_rejected");
+  });
+
+  it("allows image matting for image transform tasks", () => {
+    expect(() =>
+      assertImageToolAllowed(
+        context({
+          normalizedInput: makeTaskFrame({
+            rawInput: "给这张图去背景",
+            domain: "image",
+            intent: "image.matting",
+            action: "transform",
+            primaryAgent: "image_agent",
+          }),
         }),
         "image_matting"
       )
     ).not.toThrow();
   });
 
-  it("allows image inspection tools for markdown image analysis tasks", () => {
+  it("allows image inspection tools for image analysis tasks", () => {
     expect(() =>
       assertImageInspectionToolAllowed(
         context({
-          normalizedInput: {
-            rawPrompt: "分析这张图的风格",
-            userGoal: "分析这张图的风格",
-            operation: "analyze",
-            artifact: { kind: "markdown", format: "markdown" },
-            domain: "visual-design",
-            requiredCapabilities: ["image-decompose", "markdown-artifact"],
-            negativeCapabilities: ["image-generation"],
-          },
+          normalizedInput: makeTaskFrame({
+            rawInput: "分析这张图的风格",
+            domain: "image",
+            intent: "image.decompose",
+            action: "analyze",
+            primaryAgent: "image_agent",
+          }),
         }),
         "decompose_image",
         "image-decompose"

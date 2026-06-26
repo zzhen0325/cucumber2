@@ -1,9 +1,16 @@
 import type { CucumberAgentContext } from "../context.ts";
 import {
-  hasNegativeCapability,
-  isImageArtifactTask,
+  isImageDecomposeTask,
+  isImageInspectionTask,
+  isImageTask,
   isTextArtifactTask,
 } from "../task-router.ts";
+
+const IMAGE_GENERATION_TOOLS = new Set([
+  "generate_image",
+  "expand_image_prompt",
+  "render_visual_style_prompt",
+]);
 
 export function assertImageToolAllowed(
   context: CucumberAgentContext,
@@ -14,19 +21,17 @@ export function assertImageToolAllowed(
     return;
   }
 
-  if (
-    hasNegativeCapability(normalizedInput, "image-generation") &&
-    toolName !== "upscale_image" &&
-    toolName !== "image_matting"
-  ) {
+  if (!isImageTask(normalizedInput)) {
     throw new Error(
-      `tool_policy_rejected: ${toolName} is blocked because this task forbids image-generation.`
+      `tool_policy_rejected: ${toolName} can only run for image-domain tasks.`
     );
   }
 
-  if (!isImageArtifactTask(normalizedInput)) {
+  // Generation tools must not run for image analysis/decomposition tasks.
+  // upscale_image and image_matting operate on an existing image and stay allowed.
+  if (IMAGE_GENERATION_TOOLS.has(toolName) && isImageInspectionTask(normalizedInput)) {
     throw new Error(
-      `tool_policy_rejected: ${toolName} can only run for artifact.kind=image tasks.`
+      `tool_policy_rejected: ${toolName} is blocked because this task is image analysis, not image generation.`
     );
   }
 }
@@ -39,7 +44,7 @@ export function assertTextArtifactToolAllowed(context: CucumberAgentContext) {
 
   if (!isTextArtifactTask(normalizedInput)) {
     throw new Error(
-      "tool_policy_rejected: create_text_artifact can only run for markdown, document, diagram, code, or webpage artifact tasks."
+      "tool_policy_rejected: create_text_artifact can only run for text or code domain tasks."
     );
   }
 }
@@ -49,21 +54,15 @@ export function assertImageInspectionToolAllowed(
   toolName: string,
   requiredCapability: "image-decompose"
 ) {
+  void requiredCapability;
   const normalizedInput = context.normalizedInput;
   if (!normalizedInput) {
     return;
   }
 
-  if (!(normalizedInput.requiredCapabilities ?? []).includes(requiredCapability)) {
+  if (!isImageDecomposeTask(normalizedInput) && !isImageInspectionTask(normalizedInput)) {
     throw new Error(
-      `tool_policy_rejected: ${toolName} requires ${requiredCapability}.`
-    );
-  }
-
-  const kind = normalizedInput.artifact?.kind;
-  if (kind && !["image", "markdown", "document"].includes(kind)) {
-    throw new Error(
-      `tool_policy_rejected: ${toolName} can only run for image, markdown, or document artifact tasks.`
+      `tool_policy_rejected: ${toolName} requires an image analysis/decomposition task.`
     );
   }
 }

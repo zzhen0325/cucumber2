@@ -3,11 +3,13 @@ import type { CanvasOperation } from "../../src/types/runtime.ts";
 import type { AgentRunInput } from "./context.ts";
 import {
   finalizeNormalizedAgentInput,
-  isImageGenerationMetadataRequest,
   type NormalizedAgentInput,
+  type PrimaryAgent,
+  type TaskAction,
+  type TaskDomain,
 } from "./input-normalizer.ts";
 import {
-  isImageArtifactTask,
+  isImageTask,
   selectAgentRoute,
 } from "./task-router.ts";
 
@@ -63,19 +65,7 @@ export function skippedStepsForNormalizedRoute(route: AgentRunRoute) {
 export function routeAgentRunQuick(input: AgentRunInput): QuickAgentRunRoute {
   const prompt = normalizeText(input.message);
 
-  if (isImageGenerationMetadataRequest(prompt)) {
-    return {
-      normalizedInput: buildDirectAnswerNormalizedInput(input, {
-        negativeCapabilities: ["image-generation"],
-      }),
-      requiresModelNormalization: false,
-      route: "chat_agent_task",
-      routerSource: "quick-router",
-      skippedSteps: chatAgentSkippedSteps,
-    };
-  }
-
-  if (input.normalizedInput && isImageArtifactTask(input.normalizedInput)) {
+  if (input.normalizedInput && isImageTask(input.normalizedInput)) {
     return {
       normalizedInput: input.normalizedInput,
       requiresModelNormalization: false,
@@ -128,21 +118,53 @@ export function routeAgentRunQuick(input: AgentRunInput): QuickAgentRunRoute {
   };
 }
 
-function buildDirectAnswerNormalizedInput(
+function buildTaskFrame(
   input: AgentRunInput,
-  options: { negativeCapabilities?: string[] } = {}
-) {
+  frame: {
+    domain: TaskDomain;
+    intent: string;
+    action: TaskAction;
+    primaryAgent: PrimaryAgent;
+    confidence?: number;
+  }
+): NormalizedAgentInput {
   return finalizeNormalizedAgentInput(
     {
-      rawPrompt: input.message,
-      userGoal: input.message,
-      operation: "answer",
-      artifact: null,
-      requiredCapabilities: [],
-      negativeCapabilities: options.negativeCapabilities ?? [],
+      rawInput: input.message,
+      task: {
+        domain: frame.domain,
+        intent: frame.intent,
+        action: frame.action,
+        confidence: frame.confidence ?? 1,
+      },
+      userGoal: {
+        original: input.message,
+        normalized: input.message,
+      },
+      routing: {
+        primaryAgent: frame.primaryAgent,
+        candidateAgents: [],
+        reason: "quick-router",
+      },
+      inputs: {
+        text: input.message,
+        images: [],
+        files: [],
+      },
+      constraints: { explicit: [], inferred: [] },
+      ambiguities: [],
     },
     input.message
   );
+}
+
+function buildDirectAnswerNormalizedInput(input: AgentRunInput) {
+  return buildTaskFrame(input, {
+    domain: "text",
+    intent: "text.answer",
+    action: "analyze",
+    primaryAgent: "manager_agent",
+  });
 }
 
 function routeForSpecialistRoute(route: ReturnType<typeof selectAgentRoute>): AgentRunRoute {
@@ -162,17 +184,12 @@ function routeForSpecialistRoute(route: ReturnType<typeof selectAgentRoute>): Ag
 }
 
 function buildCanvasOperationNormalizedInput(input: AgentRunInput) {
-  return finalizeNormalizedAgentInput(
-    {
-      rawPrompt: input.message,
-      userGoal: input.message,
-      operation: "create",
-      artifact: { kind: "canvas" },
-      requiredCapabilities: ["canvas-operation"],
-      negativeCapabilities: [],
-    },
-    input.message
-  );
+  return buildTaskFrame(input, {
+    domain: "canvas",
+    intent: "canvas.operation",
+    action: "create",
+    primaryAgent: "manager_agent",
+  });
 }
 
 function isSmalltalk(prompt: string) {
@@ -306,21 +323,13 @@ function isSimpleImageFastPathInput(
   if (input.retryFrom || input.upstreamContext.length || input.selectedNodeIds.length) {
     return false;
   }
-  if (
-    normalizedInput.operation !== "create" &&
-    normalizedInput.intent !== "image.generate"
-  ) {
+  if (normalizedInput.task.domain !== "image") {
     return false;
   }
-  if (normalizedInput.artifact?.kind !== "image") {
+  if (normalizedInput.task.action !== "create") {
     return false;
   }
-  if (normalizedInput.negativeCapabilities?.includes("image-generation")) {
-    return false;
-  }
-  return (normalizedInput.requiredCapabilities ?? []).every(
-    (capability) => capability === "image-generation"
-  );
+  return /image\.generate|generate|生成|出图/i.test(normalizedInput.task.intent);
 }
 
 function isChatAgentRun(
@@ -331,13 +340,16 @@ function isChatAgentRun(
   if (input.retryFrom) {
     return false;
   }
-  if (normalizedInput.artifact || selectAgentRoute(normalizedInput) !== "manager") {
+  if (selectAgentRoute(normalizedInput) !== "manager") {
     return false;
   }
-  if (normalizedInput.operation !== "answer") {
+  if (normalizedInput.task.domain !== "text" && normalizedInput.task.domain !== "unknown") {
     return false;
   }
-  if ((normalizedInput.requiredCapabilities ?? []).length) {
+  if (
+    normalizedInput.task.action !== "analyze" &&
+    normalizedInput.task.action !== "unknown"
+  ) {
     return false;
   }
   return prompt.length <= 160;

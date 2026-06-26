@@ -183,15 +183,18 @@ describe("agent event graph projection", () => {
         event("run.created", "run", { prompt: "生成两张 16:9 海报", promptNodeId: "prompt-1" }),
         event("input.normalized", "input", {
           normalizedInput: {
-            rawPrompt: "生成两张 16:9 海报",
-            operation: "create",
-            artifact: { kind: "image", subtype: "poster", format: "png" },
-            intent: "image.generate",
-            image: {
-              contentPrompt: "海报",
-              resultCount: 2,
-              aspectRatio: "16:9",
+            rawInput: "生成两张 16:9 海报",
+            task: { domain: "image", intent: "image.generate", action: "create", confidence: 1 },
+            routing: { primaryAgent: "image_agent", candidateAgents: [] },
+            inputs: { text: "生成两张 16:9 海报", images: [], files: [] },
+            constraints: {
+              explicit: [
+                { key: "output_count", value: "2", sourceText: "两张" },
+                { key: "aspect_ratio", value: "16:9", sourceText: "16:9" },
+              ],
+              inferred: [],
             },
+            ambiguities: [],
           },
         }),
       ],
@@ -218,19 +221,18 @@ describe("agent event graph projection", () => {
         }),
         event("input.normalized", "input", {
           normalizedInput: {
-            rawPrompt: "把这个图拓展两个尺寸",
-            operation: "create",
-            artifact: { kind: "image", format: "png" },
-            requiredCapabilities: ["image-generation", "image-outpaint"],
-            intent: "image.generate",
-            image: {
-              contentPrompt: "基于参考图扩展画布",
-              resultCount: 2,
-              variants: [
-                { width: 1125, height: 450 },
-                { width: 900, height: 1200 },
+            rawInput: "把这个图拓展两个尺寸",
+            task: { domain: "image", intent: "image.generate image-outpaint", action: "create", confidence: 1 },
+            routing: { primaryAgent: "image_agent", candidateAgents: [] },
+            inputs: { text: "把这个图拓展两个尺寸", images: [], files: [] },
+            constraints: {
+              explicit: [
+                { key: "dimension", value: "1125x450", sourceText: "1125x450" },
+                { key: "dimension", value: "900x1200", sourceText: "900x1200" },
               ],
+              inferred: [],
             },
+            ambiguities: [],
           },
         }),
       ],
@@ -314,10 +316,12 @@ describe("agent event graph projection", () => {
         event("run.created", "run", { prompt: "写一份 PRD", promptNodeId: "prompt-1" }),
         event("input.normalized", "input", {
           normalizedInput: {
-            rawPrompt: "写一份 PRD",
-            operation: "create",
-            artifact: { kind: "document", subtype: "prd", format: "markdown" },
-            intent: "document.create",
+            rawInput: "写一份 PRD",
+            task: { domain: "text", intent: "document.create", action: "create", confidence: 1 },
+            routing: { primaryAgent: "document_agent", candidateAgents: [] },
+            inputs: { text: "写一份 PRD", images: [], files: [] },
+            constraints: { explicit: [], inferred: [] },
+            ambiguities: [],
           },
         }),
       ],
@@ -351,10 +355,12 @@ describe("agent event graph projection", () => {
         event("run.created", "run", { prompt: "写一份 PRD", promptNodeId: "prompt-1" }),
         event("input.normalized", "input", {
           normalizedInput: {
-            rawPrompt: "写一份 PRD",
-            operation: "create",
-            artifact: { kind: "document", subtype: "prd", format: "markdown" },
-            intent: "document.create",
+            rawInput: "写一份 PRD",
+            task: { domain: "text", intent: "document.create", action: "create", confidence: 1 },
+            routing: { primaryAgent: "document_agent", candidateAgents: [] },
+            inputs: { text: "写一份 PRD", images: [], files: [] },
+            constraints: { explicit: [], inferred: [] },
+            ambiguities: [],
           },
         }),
         event("artifact.created", "create_text_artifact", {
@@ -400,10 +406,12 @@ describe("agent event graph projection", () => {
         }),
         event("input.normalized", "input", {
           normalizedInput: {
-            rawPrompt: "帮我分析描述这个 IP 形象的特征",
-            operation: "create",
-            artifact: { kind: "document", format: "markdown" },
-            intent: "document.create",
+            rawInput: "帮我分析描述这个 IP 形象的特征",
+            task: { domain: "text", intent: "document.create", action: "create", confidence: 1 },
+            routing: { primaryAgent: "document_agent", candidateAgents: [] },
+            inputs: { text: "帮我分析描述这个 IP 形象的特征", images: [], files: [] },
+            constraints: { explicit: [], inferred: [] },
+            ambiguities: [],
           },
         }),
         event("artifact.created", "create_text_artifact", {

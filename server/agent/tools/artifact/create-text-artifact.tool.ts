@@ -64,8 +64,9 @@ export const createTextArtifactTool = tool({
     const artifactType = getArtifactTypeForContext(context, parsed.data.format);
     const content = normalizeArtifactContent(parsed.data.content, parsed.data.format);
     if (
-      context.normalizedInput?.artifact?.kind === "diagram" &&
-      context.normalizedInput.artifact.format === "mermaid" &&
+      /diagram|mermaid|时序图|流程图|sequence|flowchart/i.test(
+        context.normalizedInput?.task.intent ?? ""
+      ) &&
       !/```mermaid[\s\S]+```/i.test(content)
     ) {
       throw new Error(
@@ -108,11 +109,13 @@ function getArtifactTypeForContext(
   context: CucumberAgentContext,
   requestedFormat: z.infer<typeof createTextArtifactInputSchema>["format"]
 ) {
-  const kind = context.normalizedInput?.artifact?.kind;
-  if (kind === "webpage" || requestedFormat === "html") {
+  if (requestedFormat === "html") {
     return "webpage" as const;
   }
-  if (kind === "code" || requestedFormat === "code") {
+  if (requestedFormat === "code") {
+    return "code" as const;
+  }
+  if (context.normalizedInput?.task.domain === "code") {
     return "code" as const;
   }
   return "doc" as const;

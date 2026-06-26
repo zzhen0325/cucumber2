@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { listAgentCapabilityRoutes } from "../agent-capability-manifest.ts";
 import type { CucumberAgentContext } from "../context.ts";
+import { makeTaskFrame } from "../test-task-frame.ts";
 import {
   createSpecialistAgentRegistry,
   isSpecialistEnabledForContext,
@@ -26,7 +27,7 @@ describe("specialist agent registry", () => {
     }
   });
 
-  it("enables the document specialist from normalized document intents", () => {
+  it("enables the document specialist from document routing", () => {
     expect(
       isSpecialistEnabledForContext(
         {
@@ -34,21 +35,19 @@ describe("specialist agent registry", () => {
           handoffPolicy: () => false,
         },
         agentContext({
-          normalizedInput: {
-            rawPrompt: "写一份 PRD",
-            userGoal: "写一份 PRD",
-            operation: "create",
-            artifact: { kind: "document", subtype: "prd", format: "markdown" },
-            domain: "product",
-            requiredCapabilities: ["markdown-artifact"],
-            negativeCapabilities: [],
-          },
+          normalizedInput: makeTaskFrame({
+            rawInput: "写一份 PRD",
+            domain: "text",
+            intent: "document.create",
+            action: "create",
+            primaryAgent: "document_agent",
+          }),
         })
       )
     ).toBe(true);
   });
 
-  it("keeps a specialist disabled when neither intent nor policy matches", () => {
+  it("keeps a specialist disabled when routing does not match", () => {
     expect(
       isSpecialistEnabledForContext(
         {
@@ -56,21 +55,19 @@ describe("specialist agent registry", () => {
           handoffPolicy: () => false,
         },
         agentContext({
-          normalizedInput: {
-            rawPrompt: "解释一下这个概念",
-            userGoal: "解释一下这个概念",
-            operation: "answer",
-            artifact: null,
-            domain: "general",
-            requiredCapabilities: [],
-            negativeCapabilities: [],
-          },
+          normalizedInput: makeTaskFrame({
+            rawInput: "解释一下这个概念",
+            domain: "text",
+            intent: "text.answer",
+            action: "analyze",
+            primaryAgent: "manager_agent",
+          }),
         })
       )
     ).toBe(false);
   });
 
-  it("does not let fallback policy override a normalized non-matching intent", () => {
+  it("does not let fallback policy override routing", () => {
     expect(
       isSpecialistEnabledForContext(
         {
@@ -78,21 +75,19 @@ describe("specialist agent registry", () => {
           handoffPolicy: () => true,
         },
         agentContext({
-          normalizedInput: {
-            rawPrompt: "帮我分析这个视觉需求",
-            userGoal: "帮我分析这个视觉需求",
-            operation: "analyze",
-            artifact: null,
-            domain: "visual-design",
-            requiredCapabilities: [],
-            negativeCapabilities: ["image-generation"],
-          },
+          normalizedInput: makeTaskFrame({
+            rawInput: "帮我分析这个视觉需求",
+            domain: "text",
+            intent: "text.answer",
+            action: "analyze",
+            primaryAgent: "manager_agent",
+          }),
         })
       )
     ).toBe(false);
   });
 
-  it("uses fallback policy only before normalized intent exists", () => {
+  it("uses fallback policy only before routing exists", () => {
     expect(
       isSpecialistEnabledForContext(
         {
@@ -104,7 +99,7 @@ describe("specialist agent registry", () => {
     ).toBe(true);
   });
 
-  it("enables the web specialist from normalized web intent", () => {
+  it("enables the web specialist from web routing", () => {
     expect(
       isSpecialistEnabledForContext(
         {
@@ -112,31 +107,27 @@ describe("specialist agent registry", () => {
           handoffPolicy: () => false,
         },
         agentContext({
-          normalizedInput: {
-            rawPrompt: "读取 https://example.com",
-            userGoal: "读取 https://example.com",
-            operation: "create",
-            artifact: { kind: "webpage", format: "html" },
-            domain: "general",
-            requiredCapabilities: ["web-fetch"],
-            negativeCapabilities: [],
-          },
+          normalizedInput: makeTaskFrame({
+            rawInput: "读取 https://example.com",
+            domain: "text",
+            intent: "web.fetch",
+            action: "create",
+            primaryAgent: "web_agent",
+          }),
         })
       )
     ).toBe(true);
   });
 
-  it("routes generated webpage artifacts to the document specialist, not the fetch specialist", () => {
+  it("routes generated webpage artifacts to the document specialist via routing", () => {
     const context = agentContext({
-      normalizedInput: {
-        rawPrompt: "做个 30 秒 HTML 动画",
-        userGoal: "做个 30 秒 HTML 动画",
-        operation: "create",
-        artifact: { kind: "webpage", subtype: "animation", format: "html" },
-        domain: "visual-design",
-        requiredCapabilities: ["html-artifact", "animation"],
-        negativeCapabilities: ["image-generation"],
-      },
+      normalizedInput: makeTaskFrame({
+        rawInput: "做个 30 秒 HTML 动画",
+        domain: "text",
+        intent: "webpage.create",
+        action: "create",
+        primaryAgent: "document_agent",
+      }),
     });
 
     expect(
@@ -153,7 +144,7 @@ describe("specialist agent registry", () => {
     ).toBe(false);
   });
 
-  it("enables the research specialist from normalized research intent", () => {
+  it("enables the research specialist from research routing", () => {
     expect(
       isSpecialistEnabledForContext(
         {
@@ -161,15 +152,13 @@ describe("specialist agent registry", () => {
           handoffPolicy: () => false,
         },
         agentContext({
-          normalizedInput: {
-            rawPrompt: "调研 https://example.com 并引用来源",
-            userGoal: "调研 https://example.com 并引用来源",
-            operation: "answer",
-            artifact: null,
-            domain: "general",
-            requiredCapabilities: ["source-based-answer", "citations"],
-            negativeCapabilities: [],
-          },
+          normalizedInput: makeTaskFrame({
+            rawInput: "调研 https://example.com 并引用来源",
+            domain: "text",
+            intent: "research.answer",
+            action: "analyze",
+            primaryAgent: "research_agent",
+          }),
         })
       )
     ).toBe(true);
@@ -177,15 +166,14 @@ describe("specialist agent registry", () => {
 
   it("enables document and web handoffs for a composite webpage-to-document task", () => {
     const context = agentContext({
-      normalizedInput: {
-        rawPrompt: "把这个页面总结成文档",
-        userGoal: "把这个页面总结成文档",
-        operation: "transform",
-        artifact: { kind: "document", format: "markdown" },
-        domain: "general",
-        requiredCapabilities: ["web-fetch", "markdown-artifact"],
-        negativeCapabilities: [],
-      },
+      normalizedInput: makeTaskFrame({
+        rawInput: "把这个页面总结成文档",
+        domain: "text",
+        intent: "web.fetch",
+        action: "transform",
+        primaryAgent: "web_agent",
+        candidateAgents: ["document_agent"],
+      }),
     });
 
     expect(

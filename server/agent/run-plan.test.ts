@@ -2,13 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import type { AgentRunInput } from "./context.ts";
 import { buildRunPlan } from "./run-plan.ts";
+import { makeTaskFrame } from "./test-task-frame.ts";
 
 describe("buildRunPlan", () => {
   it("skips simple short text runs", () => {
     const plan = buildRunPlan(
       input({
         message: "你好",
-        normalizedInput: { intent: "text.answer", rawPrompt: "你好" },
+        normalizedInput: makeTaskFrame({
+          rawInput: "你好",
+          domain: "text",
+          intent: "text.answer",
+          action: "analyze",
+        }),
       })
     );
 
@@ -19,13 +25,12 @@ describe("buildRunPlan", () => {
     const plan = buildRunPlan(
       input({
         message: "取消标题",
-        normalizedInput: {
-          artifact: null,
-          intent: "text.answer",
-          negativeCapabilities: ["image-generation"],
-          operation: "edit",
-          rawPrompt: "取消标题",
-        },
+        normalizedInput: makeTaskFrame({
+          rawInput: "取消标题",
+          domain: "text",
+          intent: "prompt.edit",
+          action: "edit",
+        }),
         upstreamContext: [
           {
             nodeId: "prompt-source",
@@ -44,7 +49,13 @@ describe("buildRunPlan", () => {
       buildRunPlan(
         input({
           message: "写一段产品说明",
-          normalizedInput: { intent: "document.create", rawPrompt: "写一段产品说明" },
+          normalizedInput: makeTaskFrame({
+            rawInput: "写一段产品说明",
+            domain: "text",
+            intent: "document.create",
+            action: "create",
+            primaryAgent: "document_agent",
+          }),
         })
       )
     ).toEqual([]);
@@ -52,7 +63,13 @@ describe("buildRunPlan", () => {
     const plan = buildRunPlan(
       input({
         message: "写一份完整规划方案文档",
-        normalizedInput: { intent: "document.create", rawPrompt: "写一份完整规划方案文档" },
+        normalizedInput: makeTaskFrame({
+          rawInput: "写一份完整规划方案文档",
+          domain: "text",
+          intent: "document.create",
+          action: "create",
+          primaryAgent: "document_agent",
+        }),
       })
     );
 
@@ -68,10 +85,13 @@ describe("buildRunPlan", () => {
     const plan = buildRunPlan(
       input({
         message: "做个 30 秒 HTML 动画",
-        normalizedInput: {
+        normalizedInput: makeTaskFrame({
+          rawInput: "做个 30 秒 HTML 动画",
+          domain: "text",
           intent: "webpage.create",
-          rawPrompt: "做个 30 秒 HTML 动画",
-        },
+          action: "create",
+          primaryAgent: "document_agent",
+        }),
       })
     );
 
@@ -83,42 +103,18 @@ describe("buildRunPlan", () => {
     ]);
   });
 
-  it("derives plans from artifact protocol before compatibility intent", () => {
-    const plan = buildRunPlan(
-      input({
-        message: "做个 30 秒 HTML 动画",
-        normalizedInput: {
-          intent: "image.generate",
-          operation: "create",
-          artifact: { kind: "webpage", subtype: "animation", format: "html" },
-          requiredCapabilities: ["html-artifact", "animation"],
-          negativeCapabilities: ["image-generation"],
-          rawPrompt: "做个 30 秒 HTML 动画",
-        },
-      })
-    );
-
-    expect(plan).toContainEqual({
-      id: "html-create",
-      label: "创建 HTML 页面",
-      phase: "execute",
-    });
-    expect(plan).not.toContainEqual({
-      id: "image-generate",
-      label: "生成图片",
-      phase: "execute",
-    });
-  });
-
   it("skips simple single-image plans but plans multi-image work", () => {
     expect(
       buildRunPlan(
         input({
           message: "生成一张黄瓜海报",
-          normalizedInput: {
+          normalizedInput: makeTaskFrame({
+            rawInput: "生成一张黄瓜海报",
+            domain: "image",
             intent: "image.generate",
-            rawPrompt: "生成一张黄瓜海报",
-          },
+            action: "create",
+            primaryAgent: "image_agent",
+          }),
         })
       )
     ).toEqual([]);
@@ -127,10 +123,16 @@ describe("buildRunPlan", () => {
       buildRunPlan(
         input({
           message: "生成一组 3 张黄瓜海报",
-          normalizedInput: {
+          normalizedInput: makeTaskFrame({
+            rawInput: "生成一组 3 张黄瓜海报",
+            domain: "image",
             intent: "image.generate",
-            rawPrompt: "生成一组 3 张黄瓜海报",
-          },
+            action: "create",
+            primaryAgent: "image_agent",
+            explicit: [
+              { key: "output_count", value: "3", sourceText: "3 张" },
+            ],
+          }),
         })
       )
     ).toContainEqual({
@@ -145,7 +147,13 @@ describe("buildRunPlan", () => {
       buildRunPlan(
         input({
           message: "抠出主体",
-          normalizedInput: { intent: "image.matting", rawPrompt: "抠出主体" },
+          normalizedInput: makeTaskFrame({
+            rawInput: "抠出主体",
+            domain: "image",
+            intent: "image.matting",
+            action: "transform",
+            primaryAgent: "image_agent",
+          }),
           selectedNodeIds: ["image-1"],
           upstreamContext: [{ nodeId: "image-1", type: "image", summary: "参考图" }],
         })
@@ -156,7 +164,13 @@ describe("buildRunPlan", () => {
       buildRunPlan(
         input({
           message: "高清放大这张图",
-          normalizedInput: { intent: "image.upscale", rawPrompt: "高清放大这张图" },
+          normalizedInput: makeTaskFrame({
+            rawInput: "高清放大这张图",
+            domain: "image",
+            intent: "image.upscale",
+            action: "upscale",
+            primaryAgent: "image_agent",
+          }),
           selectedNodeIds: ["image-1"],
           upstreamContext: [{ nodeId: "image-1", type: "image", summary: "参考图" }],
         })
@@ -167,10 +181,13 @@ describe("buildRunPlan", () => {
       buildRunPlan(
         input({
           message: "参考这些图生成海报",
-          normalizedInput: {
+          normalizedInput: makeTaskFrame({
+            rawInput: "参考这些图生成海报",
+            domain: "image",
             intent: "image.generate",
-            rawPrompt: "参考这些图生成海报",
-          },
+            action: "create",
+            primaryAgent: "image_agent",
+          }),
           upstreamContext: [
             { nodeId: "image-1", type: "image", summary: "参考图 1" },
             { nodeId: "image-2", type: "image", summary: "参考图 2" },
@@ -189,7 +206,12 @@ describe("buildRunPlan", () => {
       buildRunPlan(
         input({
           message: "总结一下",
-          normalizedInput: { intent: "text.answer", rawPrompt: "总结一下" },
+          normalizedInput: makeTaskFrame({
+            rawInput: "总结一下",
+            domain: "text",
+            intent: "text.answer",
+            action: "analyze",
+          }),
           selectedNodeIds: ["doc-1"],
           upstreamContext: [{ nodeId: "doc-1", type: "doc", summary: "文档" }],
         })
@@ -200,7 +222,12 @@ describe("buildRunPlan", () => {
       buildRunPlan(
         input({
           message: "基于这个节点回答",
-          normalizedInput: { intent: "text.answer", rawPrompt: "基于这个节点回答" },
+          normalizedInput: makeTaskFrame({
+            rawInput: "基于这个节点回答",
+            domain: "text",
+            intent: "text.answer",
+            action: "analyze",
+          }),
           selectedNodeIds: ["doc-1"],
           upstreamContext: [{ nodeId: "doc-1", type: "doc", summary: "文档" }],
         })
@@ -215,7 +242,12 @@ describe("buildRunPlan", () => {
       buildRunPlan(
         input({
           message: "总结一下",
-          normalizedInput: { intent: "text.answer", rawPrompt: "总结一下" },
+          normalizedInput: makeTaskFrame({
+            rawInput: "总结一下",
+            domain: "text",
+            intent: "text.answer",
+            action: "analyze",
+          }),
           selectedNodeIds: ["doc-1", "doc-2"],
           upstreamContext: [
             { nodeId: "doc-1", type: "doc", summary: "文档 1" },
@@ -234,7 +266,13 @@ describe("buildRunPlan", () => {
     const plan = buildRunPlan(
       input({
         message: "重试",
-        normalizedInput: { intent: "image.generate", rawPrompt: "重试" },
+        normalizedInput: makeTaskFrame({
+          rawInput: "重试",
+          domain: "image",
+          intent: "image.generate",
+          action: "create",
+          primaryAgent: "image_agent",
+        }),
         retryFrom: {
           failedRunNodeId: "run-old",
           label: "generate_image",

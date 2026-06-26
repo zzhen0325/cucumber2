@@ -6,6 +6,7 @@ import {
   routeNormalizedAgentRun,
   skippedStepsForNormalizedRoute,
 } from "./quick-router.ts";
+import { makeTaskFrame } from "./test-task-frame.ts";
 
 describe("quick agent run router", () => {
   it("routes greetings to the chat agent without slow prep", () => {
@@ -47,7 +48,7 @@ describe("quick agent run router", () => {
     expect(route.normalizedInput).toBeUndefined();
   });
 
-  it("routes selected image generation metadata to the chat agent", () => {
+  it("defers selected image generation metadata to the LLM normalizer", () => {
     const route = routeAgentRunQuick(
       input({
         message: "这个图片的生成信息是什么",
@@ -55,20 +56,6 @@ describe("quick agent run router", () => {
         selectedNodeIds: ["image-1"],
         upstreamContext: [
           {
-            artifact: {
-              id: "artifact-1",
-              metadata: {
-                height: 1024,
-                model: "seed5_duotu_zz",
-                prompt: "开源免费 3D 模型生成工具科普信息图",
-                provider: "byteartist",
-                sourcePrompt: "有哪些开源免费调用的3D模型生成",
-                sourceToolName: "generate_image",
-                width: 1536,
-              },
-              type: "image",
-            },
-            imageUrl: "/api/projects/project-1/artifacts/artifact-1/content",
             nodeId: "image-1",
             prompt: "有哪些开源免费调用的3D模型生成",
             summary: "Generated image",
@@ -79,19 +66,11 @@ describe("quick agent run router", () => {
     );
 
     expect(route).toMatchObject({
-      route: "chat_agent_task",
-      requiresModelNormalization: false,
-      normalizedInput: {
-        operation: "answer",
-        artifact: null,
-        negativeCapabilities: ["image-generation"],
-      },
+      route: "manager_task",
+      routerSource: "quick-router",
+      requiresModelNormalization: true,
     });
-    expect(route.skippedSteps).toEqual([
-      "input.normalize",
-      "plan.build",
-      "skills.retrieve",
-    ]);
+    expect(route.normalizedInput).toBeUndefined();
   });
 
   it("defers explicit image generation to the LLM normalizer", () => {
@@ -110,16 +89,13 @@ describe("quick agent run router", () => {
       input({
         inputMode: "image",
         message: "黄瓜",
-        normalizedInput: {
-          rawPrompt: "黄瓜",
-          userGoal: "黄瓜",
-          operation: "create",
-          artifact: { kind: "image", format: "png" },
-          domain: "visual-design",
-          requiredCapabilities: ["image-generation"],
-          negativeCapabilities: [],
+        normalizedInput: makeTaskFrame({
+          rawInput: "黄瓜",
+          domain: "image",
           intent: "image.generate",
-        },
+          action: "create",
+          primaryAgent: "image_agent",
+        }),
       })
     );
 
@@ -127,10 +103,9 @@ describe("quick agent run router", () => {
       route: "image_task",
       requiresModelNormalization: false,
       normalizedInput: {
-        artifact: { kind: "image", format: "png" },
+        task: { domain: "image" },
       },
     });
-    expect(route.normalizedInput).not.toHaveProperty("image");
   });
 
   it("defers selected-image character IP figure requests to the LLM normalizer", () => {
@@ -215,15 +190,13 @@ describe("quick agent run router", () => {
   it("routes normalized short answers without starting the full agent path", () => {
     const route = routeNormalizedAgentRun(
       input({ message: "解释一下 React Flow 是什么" }),
-      {
-        rawPrompt: "解释一下 React Flow 是什么",
-        userGoal: "解释一下 React Flow 是什么",
-        operation: "answer",
-        artifact: null,
-        requiredCapabilities: [],
-        negativeCapabilities: [],
+      makeTaskFrame({
+        rawInput: "解释一下 React Flow 是什么",
+        domain: "text",
         intent: "text.answer",
-      }
+        action: "analyze",
+        primaryAgent: "manager_agent",
+      })
     );
 
     expect(route).toBe("chat_agent_task");
@@ -236,15 +209,13 @@ describe("quick agent run router", () => {
   it("keeps normalized short answers on the full path when simple chat is disabled", () => {
     const route = routeNormalizedAgentRun(
       input({ message: "解释一下 React Flow 是什么" }),
-      {
-        rawPrompt: "解释一下 React Flow 是什么",
-        userGoal: "解释一下 React Flow 是什么",
-        operation: "answer",
-        artifact: null,
-        requiredCapabilities: [],
-        negativeCapabilities: [],
+      makeTaskFrame({
+        rawInput: "解释一下 React Flow 是什么",
+        domain: "text",
         intent: "text.answer",
-      },
+        action: "analyze",
+        primaryAgent: "manager_agent",
+      }),
       { allowSimpleChat: false }
     );
 
@@ -252,61 +223,61 @@ describe("quick agent run router", () => {
   });
 
   it("routes normalized image artifacts to image tasks", () => {
-    const route = routeNormalizedAgentRun(input({ message: "生成一张黄瓜海报" }), {
-      rawPrompt: "生成一张黄瓜海报",
-      userGoal: "生成一张黄瓜海报",
-      operation: "create",
-      artifact: { kind: "image", subtype: "poster", format: "png" },
-      domain: "visual-design",
-      requiredCapabilities: ["image-generation"],
-      negativeCapabilities: [],
-      intent: "image.generate",
-    });
+    const route = routeNormalizedAgentRun(
+      input({ message: "生成一张黄瓜海报" }),
+      makeTaskFrame({
+        rawInput: "生成一张黄瓜海报",
+        domain: "image",
+        intent: "image.generate",
+        action: "create",
+        primaryAgent: "image_agent",
+      })
+    );
 
     expect(route).toBe("image_task");
   });
 
   it("routes normalized document artifacts to document tasks", () => {
-    const route = routeNormalizedAgentRun(input({ message: "写一份 PRD" }), {
-      rawPrompt: "写一份 PRD",
-      userGoal: "写一份 PRD",
-      operation: "create",
-      artifact: { kind: "document", subtype: "prd", format: "markdown" },
-      domain: "product",
-      requiredCapabilities: ["markdown-artifact"],
-      negativeCapabilities: [],
-      intent: "document.create",
-    });
+    const route = routeNormalizedAgentRun(
+      input({ message: "写一份 PRD" }),
+      makeTaskFrame({
+        rawInput: "写一份 PRD",
+        domain: "text",
+        intent: "document.create",
+        action: "create",
+        primaryAgent: "document_agent",
+      })
+    );
 
     expect(route).toBe("document_task");
   });
 
   it("routes normalized research answers to research tasks", () => {
-    const route = routeNormalizedAgentRun(input({ message: "调研一下 Agent SDK" }), {
-      rawPrompt: "调研一下 Agent SDK",
-      userGoal: "调研一下 Agent SDK",
-      operation: "answer",
-      artifact: null,
-      domain: "engineering",
-      requiredCapabilities: ["research", "source-based-answer", "citations"],
-      negativeCapabilities: [],
-      intent: "research.answer",
-    });
+    const route = routeNormalizedAgentRun(
+      input({ message: "调研一下 Agent SDK" }),
+      makeTaskFrame({
+        rawInput: "调研一下 Agent SDK",
+        domain: "text",
+        intent: "research.answer",
+        action: "analyze",
+        primaryAgent: "research_agent",
+      })
+    );
 
     expect(route).toBe("research_task");
   });
 
   it("routes normalized public URL fetches to web tasks", () => {
-    const route = routeNormalizedAgentRun(input({ message: "读取 https://example.com" }), {
-      rawPrompt: "读取 https://example.com",
-      userGoal: "读取 https://example.com",
-      operation: "create",
-      artifact: { kind: "webpage", format: "html" },
-      domain: "general",
-      requiredCapabilities: ["web-fetch"],
-      negativeCapabilities: [],
-      intent: "web.fetch",
-    });
+    const route = routeNormalizedAgentRun(
+      input({ message: "读取 https://example.com" }),
+      makeTaskFrame({
+        rawInput: "读取 https://example.com",
+        domain: "text",
+        intent: "web.fetch",
+        action: "create",
+        primaryAgent: "web_agent",
+      })
+    );
 
     expect(route).toBe("web_task");
   });

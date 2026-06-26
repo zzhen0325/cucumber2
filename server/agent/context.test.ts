@@ -144,14 +144,14 @@ describe("agent context", () => {
     });
 
     expect(input.normalizedInput).toMatchObject({
-      artifact: { kind: "image", format: "png" },
-      intent: "image.generate",
-      image: {
-        aspectRatio: "9:16",
-        contentPrompt: "黄瓜",
-        resultCount: 3,
+      task: { domain: "image", intent: "image.generate", action: "create" },
+      routing: { primaryAgent: "image_agent" },
+      constraints: {
+        explicit: [
+          { key: "output_count", value: "3" },
+          { key: "aspect_ratio", value: "9:16" },
+        ],
       },
-      requiredCapabilities: ["image-generation"],
     });
     expect(buildCucumberAgentContext(input)).toMatchObject({
       imageAspectRatio: "9:16",

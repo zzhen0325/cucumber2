@@ -2,6 +2,7 @@ import { RunContext } from "@openai/agents";
 import { describe, expect, it, vi } from "vitest";
 
 import type { CucumberAgentContext } from "../../context.ts";
+import { makeTaskFrame } from "../../test-task-frame.ts";
 
 const mocks = vi.hoisted(() => ({
   storeTextArtifactContent: vi.fn(),
@@ -83,15 +84,13 @@ describe("create_text_artifact tool", () => {
       type: "webpage",
     });
     const context = agentContext({
-      normalizedInput: {
-        rawPrompt: "用 huashu skill 帮我做个 30 秒的 HTML 动画",
-        userGoal: "用 huashu skill 帮我做个 30 秒的 HTML 动画",
-        operation: "create",
-        artifact: { kind: "webpage", subtype: "animation", format: "html" },
-        domain: "visual-design",
-        requiredCapabilities: ["html-artifact", "animation"],
-        negativeCapabilities: ["image-generation"],
-      },
+      normalizedInput: makeTaskFrame({
+        rawInput: "用 huashu skill 帮我做个 30 秒的 HTML 动画",
+        domain: "text",
+        intent: "webpage.create",
+        action: "create",
+        primaryAgent: "document_agent",
+      }),
     });
 
     const raw = await createTextArtifactTool.invoke(

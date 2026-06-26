@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentRunInput } from "../context.ts";
+import { makeTaskFrame } from "../test-task-frame.ts";
 
 const mocks = vi.hoisted(() => ({
   listAgentSkillDefinitions: vi.fn(),
@@ -178,28 +179,20 @@ describe("skill retrieval", () => {
     const candidates = await retrieveRelevantAgentSkills(
       input({
         message: "帮我创建一个视觉 H5 需求的流程时序图",
-        normalizedInput: {
-          rawPrompt: "帮我创建一个视觉 H5 需求的流程时序图",
-          userGoal: "帮我创建一个视觉 H5 需求的流程时序图",
-          operation: "create",
-          artifact: {
-            kind: "diagram",
-            subtype: "sequenceDiagram",
-            format: "mermaid",
-          },
-          domain: "visual-design",
-          requiredCapabilities: ["sequence-diagram", "markdown-artifact"],
-          negativeCapabilities: ["image-generation"],
-        },
+        normalizedInput: makeTaskFrame({
+          rawInput: "帮我创建一个视觉 H5 需求的流程时序图",
+          domain: "text",
+          intent: "document.create sequence-diagram",
+          action: "create",
+          primaryAgent: "document_agent",
+        }),
       })
     );
 
     expect(candidates[0]).toMatchObject({
       name: "sequence-diagram",
       reasons: expect.arrayContaining([
-        "artifact.kind:diagram",
-        "artifact.subtype:sequenceDiagram",
-        "artifact.format:mermaid",
+        "domain:text",
         "capability:sequence-diagram",
       ]),
     });
@@ -271,24 +264,20 @@ describe("skill retrieval", () => {
     const candidates = await retrieveRelevantAgentSkills(
       input({
         message: "用huashu skill 帮我做个30秒的HTML动画，讲agent怎么工作",
-        normalizedInput: {
-          rawPrompt: "用 huashu skill 帮我做个30 秒的 HTML 动画，讲 agent 怎么工作",
-          userGoal: "用 huashu skill 帮我做个30 秒的 HTML 动画，讲 agent 怎么工作",
-          operation: "create",
-          artifact: { kind: "webpage", subtype: "animation", format: "html" },
-          domain: "visual-design",
-          requiredCapabilities: ["html-artifact", "animation"],
-          negativeCapabilities: ["image-generation"],
-        },
+        normalizedInput: makeTaskFrame({
+          rawInput: "用 huashu skill 帮我做个30 秒的 HTML 动画，讲 agent 怎么工作",
+          domain: "text",
+          intent: "webpage.create html-artifact animation",
+          action: "create",
+          primaryAgent: "document_agent",
+        }),
       })
     );
 
     expect(candidates[0]).toMatchObject({
       name: "huashu-design",
       reasons: expect.arrayContaining([
-        "artifact.kind:webpage",
-        "artifact.subtype:animation",
-        "artifact.format:html",
+        "domain:text",
         "capability:html-artifact",
       ]),
     });
@@ -312,14 +301,13 @@ describe("skill retrieval", () => {
     const candidates = await retrieveRelevantAgentSkills(
       input({
         message: "帮我调研一下这个功能",
-        normalizedInput: {
-          rawPrompt: "帮我调研一下这个功能",
-          userGoal: "帮我调研一下这个功能",
-          operation: "answer",
-          artifact: null,
-          requiredCapabilities: [],
-          negativeCapabilities: [],
-        },
+        normalizedInput: makeTaskFrame({
+          rawInput: "帮我调研一下这个功能",
+          domain: "text",
+          intent: "research.answer",
+          action: "analyze",
+          primaryAgent: "research_agent",
+        }),
       })
     );
 
@@ -345,14 +333,13 @@ describe("skill retrieval", () => {
       input({
         forcedSkillId: "skill-forced",
         message: "hello",
-        normalizedInput: {
-          rawPrompt: "hello",
-          userGoal: "hello",
-          operation: "answer",
-          artifact: null,
-          requiredCapabilities: [],
-          negativeCapabilities: [],
-        },
+        normalizedInput: makeTaskFrame({
+          rawInput: "hello",
+          domain: "text",
+          intent: "text.answer",
+          action: "analyze",
+          primaryAgent: "manager_agent",
+        }),
       })
     );
 
