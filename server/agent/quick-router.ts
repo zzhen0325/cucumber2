@@ -20,17 +20,13 @@ export type AgentRunRoute =
 
 export type AgentRunRouterSource =
   | "quick-router"
-  | "fast-intent-router"
   | "llm-normalizer";
 
 export type QuickAgentRunRoute = {
   canvasOperations?: CanvasOperation[];
-  candidateTools?: string[];
-  confidence?: number;
   directResponse?: string;
   fallbackReason?: string;
   normalizedInput?: NormalizedAgentInput;
-  preferredRoute?: string;
   requiresModelNormalization: boolean;
   route: AgentRunRoute;
   routerSource: AgentRunRouterSource;
@@ -46,6 +42,27 @@ const slowPrepSteps = [
 
 const routeOnlySkippedSteps = ["input.normalize"];
 const simpleImageSkippedSteps = ["input.normalize", "skills.retrieve"];
+
+export function routeNormalizedAgentRun(
+  input: AgentRunInput,
+  normalizedInput: NormalizedAgentInput,
+  options: { allowSimpleChat?: boolean } = {}
+): AgentRunRoute {
+  if (
+    isImageArtifactTask(normalizedInput) ||
+    selectAgentRoute(normalizedInput) === "image"
+  ) {
+    return "image_task";
+  }
+  if (options.allowSimpleChat !== false && isSimpleChatRun(input, normalizedInput)) {
+    return "simple_chat";
+  }
+  return "complex_agent_task";
+}
+
+export function skippedStepsForNormalizedRoute(route: AgentRunRoute) {
+  return route === "simple_chat" ? ["plan.build", "skills.retrieve"] : [];
+}
 
 export function routeAgentRunQuick(input: AgentRunInput): QuickAgentRunRoute {
   const prompt = normalizeText(input.message);
@@ -98,12 +115,13 @@ export function routeAgentRunQuick(input: AgentRunInput): QuickAgentRunRoute {
   }
 
   if (input.normalizedInput) {
+    const route = routeNormalizedAgentRun(input, input.normalizedInput);
     return {
       normalizedInput: input.normalizedInput,
       requiresModelNormalization: false,
-      route: routeForNormalizedInput(input.normalizedInput),
+      route,
       routerSource: "quick-router",
-      skippedSteps: routeOnlySkippedSteps,
+      skippedSteps: [...routeOnlySkippedSteps, ...skippedStepsForNormalizedRoute(route)],
     };
   }
 
@@ -298,13 +316,6 @@ function isSimpleImageFastPathInput(
   );
 }
 
-function routeForNormalizedInput(normalizedInput: NormalizedAgentInput) {
-  return isImageArtifactTask(normalizedInput) ||
-    selectAgentRoute(normalizedInput) === "image"
-    ? "image_task"
-    : "complex_agent_task";
-}
-
 function buildImageGenerationMetadataResponse(input: AgentRunInput) {
   const prompt = normalizeText(input.message);
   if (!isImageGenerationMetadataRequest(prompt)) {
@@ -366,6 +377,23 @@ function buildImageGenerationMetadataResponse(input: AgentRunInput) {
   }
 
   return lines.join("\n");
+}
+
+function isSimpleChatRun(
+  input: AgentRunInput,
+  normalizedInput: NormalizedAgentInput
+) {
+  const prompt = normalizeText(input.message);
+  if (input.retryFrom || input.selectedNodeIds.length || input.upstreamContext.length) {
+    return false;
+  }
+  if (normalizedInput.artifact || selectAgentRoute(normalizedInput) !== "manager") {
+    return false;
+  }
+  if (normalizedInput.operation !== "answer") {
+    return false;
+  }
+  return prompt.length <= 160;
 }
 
 function readMetadataString(value: unknown) {

@@ -31,6 +31,7 @@ type AgentModelProviderProfile = {
 };
 
 let cachedProfile: AgentModelProviderProfile | undefined;
+let cachedInputNormalizerProfile: AgentModelProviderProfile | undefined;
 
 export function configureAgentModelProvider() {
   getAgentModelProviderProfile();
@@ -38,6 +39,15 @@ export function configureAgentModelProvider() {
 
 export function getAgentRunnerConfig() {
   const profile = getAgentModelProviderProfile();
+  return {
+    model: profile.model,
+    modelProvider: profile.modelProvider,
+    tracingDisabled: profile.tracingDisabled,
+  };
+}
+
+export function getInputNormalizerRunnerConfig() {
+  const profile = getInputNormalizerModelProviderProfile();
   return {
     model: profile.model,
     modelProvider: profile.modelProvider,
@@ -75,6 +85,31 @@ function getAgentModelProviderProfile(): AgentModelProviderProfile {
 
   cachedProfile = profile;
   return profile;
+}
+
+function getInputNormalizerModelProviderProfile(): AgentModelProviderProfile {
+  if (cachedInputNormalizerProfile !== undefined) {
+    return cachedInputNormalizerProfile;
+  }
+
+  const arkKey = process.env.ARK_API_KEY?.trim();
+  if (!arkKey) {
+    throw new Error("Input normalizer model is not configured. Set ARK_API_KEY.");
+  }
+
+  const model = "doubao-seed-2-0-mini-260428";
+  const client = new OpenAI({
+    apiKey: arkKey,
+    baseURL: readArkOpenAICompatibleBaseUrl(),
+  });
+  setTracingDisabled(true);
+  cachedInputNormalizerProfile = {
+    provider: "ark",
+    model,
+    modelProvider: new StaticModelProvider(new OpenAIResponsesModel(client, model)),
+    tracingDisabled: true,
+  };
+  return cachedInputNormalizerProfile;
 }
 
 function readAgentModelProviderProfile(): AgentModelProviderProfile | null {

@@ -14,12 +14,12 @@
 - Manager prompt 收窄为通用 fallback 与复合任务编排：运行时已经先完成可信上下文重建、快速路由和输入归一化；明确的单一 specialist 任务直接启动对应 Agent，只有短答 fallback、提示词/文本改写、knowledge 问答、受限画布操作和复合任务才由 Manager 处理。
 - Run plan 的 route 文案从“委派 XX Agent”调整为“进入 XX Agent”，覆盖直接启动 specialist 和 Manager handoff 两种路径，避免把单一任务误读成一定经过 Manager。
 
-## 2026-06-24 Fast Capability-Aware Router
+## 2026-06-24 Input Routing Boundary
 
-- Agent Run 路由收敛为三层：`Quick Router` 只做确定性 preflight（寒暄、图片生成元信息直返、简单 canvas operation、已有 normalized image-mode input）；其余请求先进入 `Fast Intent Router`，低置信或冲突时再进入完整 Input Normalizer。
-- 新增内部 `agent-capability-manifest`，集中描述 Manager、Document、Web、Research 和 Image route 的 agent 名称、产物类型、required tools、核心 capabilities 和负能力边界；specialist registry、task-router 和 fast router 共用该清单，减少 prompt/工具/route 配置漂移。
-- `Fast Intent Router` 使用当前 Agents SDK `Agent + Runner` 结构化输出，`maxTurns=1`，输入只包含用户 prompt、可信上游摘要、图像控制项和压缩 capability manifest。输出候选协议字段后仍交给 `finalizeNormalizedAgentInput` 做确定性协议化，不绕过 runtime policy。
-- `routerSource` 新增 `fast-intent-router`；`run.created`、`quick.route` 和 `input.normalized` Trace payload 记录 fast route confidence、preferredRoute、fallbackReason 和 candidateTools。没有新增数据库 schema，也没有改变客户端提交合同。
+- Agent Run 路由当前收敛为两层：`Quick Router` 只做确定性 preflight（寒暄、图片生成元信息直返、简单 canvas operation、已有 normalized image-mode input）；其余请求直接进入唯一 LLM Input Normalizer，不再串行跑第二个语义路由模型。
+- 内部 `agent-capability-manifest` 集中描述 Manager、Document、Web、Research 和 Image route 的 agent 名称、产物类型、required tools、核心 capabilities 和负能力边界；specialist registry、task-router 和 skill retrieval 共用该清单，减少 prompt/工具/route 配置漂移。
+- Input Normalizer 使用当前 Agents SDK `Agent + Runner` 结构化输出，`maxTurns=1`，固定 Ark `doubao-seed-2-0-mini-260428`，输出协议字段后仍交给 `finalizeNormalizedAgentInput` 做确定性协议化，不绕过 runtime policy。
+- `routerSource` 当前只区分 `quick-router` 和 `llm-normalizer`；`run.created`、`quick.route` 和 `input.normalized` Trace payload 记录 route、skippedSteps、prompt、可信上游摘要和归一化结果。没有新增数据库 schema，也没有改变客户端提交合同。
 - `run-plan` 优先从 normalized protocol 派生兼容 intent，避免模型或旧测试直接写入的 `intent` 覆盖 artifact/capability 事实。
 
 ## 2026-06-23 Run Node Conversation Flow

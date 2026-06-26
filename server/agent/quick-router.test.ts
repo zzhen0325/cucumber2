@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import type { AgentRunInput } from "./context.ts";
-import { routeAgentRunQuick } from "./quick-router.ts";
+import {
+  routeAgentRunQuick,
+  routeNormalizedAgentRun,
+  skippedStepsForNormalizedRoute,
+} from "./quick-router.ts";
 
 describe("quick agent run router", () => {
   it("routes smalltalk to a direct response without slow prep", () => {
@@ -18,7 +22,7 @@ describe("quick agent run router", () => {
     );
   });
 
-  it("defers short ordinary questions to the model route scorer", () => {
+  it("defers short ordinary questions to the LLM normalizer", () => {
     const route = routeAgentRunQuick(input({ message: "解释一下 React Flow 是什么" }));
 
     expect(route).toMatchObject({
@@ -29,7 +33,7 @@ describe("quick agent run router", () => {
     expect(route.normalizedInput).toBeUndefined();
   });
 
-  it("defers generation-tool questions to the model route scorer", () => {
+  it("defers generation-tool questions to the LLM normalizer", () => {
     const route = routeAgentRunQuick(
       input({ message: "有哪些开源免费调用的3D模型生成" })
     );
@@ -90,7 +94,7 @@ describe("quick agent run router", () => {
     );
   });
 
-  it("defers explicit image generation to the model route scorer", () => {
+  it("defers explicit image generation to the LLM normalizer", () => {
     const route = routeAgentRunQuick(input({ message: "生成一张 16:9 黄瓜海报" }));
 
     expect(route).toMatchObject({
@@ -139,7 +143,7 @@ describe("quick agent run router", () => {
     expect(route.directResponse).toBeUndefined();
   });
 
-  it("defers selected-image character IP figure requests to the model route scorer", () => {
+  it("defers selected-image character IP figure requests to the LLM normalizer", () => {
     const route = routeAgentRunQuick(
       input({
         message: "根据这个帮我出这个角色的毛绒IP形象",
@@ -157,7 +161,7 @@ describe("quick agent run router", () => {
     expect(route.normalizedInput).toBeUndefined();
   });
 
-  it("defers HTML animation creation to the model route scorer", () => {
+  it("defers HTML animation creation to the LLM normalizer", () => {
     const route = routeAgentRunQuick(
       input({ message: "用huashu skill 帮我做个30秒的HTML动画，讲agent怎么工作" })
     );
@@ -170,7 +174,7 @@ describe("quick agent run router", () => {
     expect(route.normalizedInput).toBeUndefined();
   });
 
-  it("defers diagram requests to the model route scorer", () => {
+  it("defers diagram requests to the LLM normalizer", () => {
     const route = routeAgentRunQuick(
       input({ message: "帮我创建一个视觉 H5 需求的流程时序图" })
     );
@@ -216,6 +220,64 @@ describe("quick agent run router", () => {
       routerSource: "quick-router",
       requiresModelNormalization: true,
     });
+  });
+
+  it("routes normalized short answers without starting the full agent path", () => {
+    const route = routeNormalizedAgentRun(
+      input({ message: "解释一下 React Flow 是什么" }),
+      {
+        rawPrompt: "解释一下 React Flow 是什么",
+        userGoal: "解释一下 React Flow 是什么",
+        operation: "answer",
+        artifact: null,
+        requiredCapabilities: [],
+        negativeCapabilities: [],
+        intent: "text.answer",
+      }
+    );
+
+    expect(route).toBe("simple_chat");
+    expect(skippedStepsForNormalizedRoute(route)).toEqual([
+      "plan.build",
+      "skills.retrieve",
+    ]);
+  });
+
+  it("keeps normalized short answers on the full path when simple chat is disabled", () => {
+    const route = routeNormalizedAgentRun(
+      input({ message: "解释一下 React Flow 是什么" }),
+      {
+        rawPrompt: "解释一下 React Flow 是什么",
+        userGoal: "解释一下 React Flow 是什么",
+        operation: "answer",
+        artifact: null,
+        requiredCapabilities: [],
+        negativeCapabilities: [],
+        intent: "text.answer",
+      },
+      { allowSimpleChat: false }
+    );
+
+    expect(route).toBe("complex_agent_task");
+  });
+
+  it("routes normalized image artifacts to image tasks", () => {
+    const route = routeNormalizedAgentRun(input({ message: "生成一张黄瓜海报" }), {
+      rawPrompt: "生成一张黄瓜海报",
+      userGoal: "生成一张黄瓜海报",
+      operation: "create",
+      artifact: { kind: "image", subtype: "poster", format: "png" },
+      domain: "visual-design",
+      requiredCapabilities: ["image-generation"],
+      negativeCapabilities: [],
+      intent: "image.generate",
+      image: {
+        contentPrompt: "黄瓜海报",
+        resultCount: 1,
+      },
+    });
+
+    expect(route).toBe("image_task");
   });
 });
 

@@ -28,11 +28,8 @@ import { openAIStreamToCucumberEvents } from "./events/openai-stream-to-cucumber
 import { getAgentErrorMessage, isAbortError } from "./errors.ts";
 import {
   normalizeAgentInput,
+  prewarmInputNormalizer,
 } from "./input-normalizer.ts";
-import {
-  prewarmFastIntentRouter,
-  routeAgentRunFast,
-} from "./fast-intent-router.ts";
 import { selectAgentRoute } from "./task-router.ts";
 import {
   materializeAgentRunSnapshot,
@@ -50,6 +47,8 @@ import { redactTraceValue } from "./trace-redaction.ts";
 import { getToolTraceMetadata } from "./tool-registry.ts";
 import {
   routeAgentRunQuick,
+  routeNormalizedAgentRun,
+  skippedStepsForNormalizedRoute,
   type AgentRunRoute,
   type QuickAgentRunRoute,
 } from "./quick-router.ts";
@@ -198,7 +197,7 @@ export function prewarmAgentRuntimeWorld() {
   getAgentRunner();
   getSimpleChatRunner();
   getSimpleChatAgent();
-  prewarmFastIntentRouter();
+  prewarmInputNormalizer();
   createManagerAgent();
   createImageAgent();
   createDocumentAgent();
@@ -359,11 +358,11 @@ function shouldWriteRunPlan(route: AgentRunRoute, itemCount: number) {
 }
 
 function routeForRuntimeNormalizedInput(
-  normalizedInput: NonNullable<AgentRunInput["normalizedInput"]>
+  input: AgentRunInput,
+  normalizedInput: NonNullable<AgentRunInput["normalizedInput"]>,
+  options: { allowSimpleChat?: boolean } = {}
 ): AgentRunRoute {
-  return selectAgentRoute(normalizedInput) === "image"
-    ? "image_task"
-    : "complex_agent_task";
+  return routeNormalizedAgentRun(input, normalizedInput, options);
 }
 
 function applyForcedSkillRoute(
@@ -380,7 +379,9 @@ function applyForcedSkillRoute(
     directResponse: undefined,
     fallbackReason: route.fallbackReason ?? "forced_skill",
     route: route.normalizedInput
-      ? routeForRuntimeNormalizedInput(route.normalizedInput)
+      ? routeForRuntimeNormalizedInput(input, route.normalizedInput, {
+          allowSimpleChat: false,
+        })
       : "complex_agent_task",
     skippedSteps: route.normalizedInput ? ["input.normalize"] : [],
   };
@@ -579,11 +580,6 @@ export async function executeAgentRun({
     );
     agentInput = await hydrateAgentRunInputArtifacts(buildAgentRunInput(input));
     quickRoute = routeAgentRunQuick(agentInput);
-    if (quickRoute.requiresModelNormalization) {
-      quickRoute = await routeAgentRunFast(agentInput, {
-        signal: input.signal,
-      });
-    }
     quickRoute = applyForcedSkillRoute(agentInput, quickRoute);
     await writeRunEvent({
       projectId: input.projectId,
@@ -606,10 +602,7 @@ export async function executeAgentRun({
         route: quickRoute.route,
         routerSource: quickRoute.routerSource,
         skippedSteps: quickRoute.skippedSteps,
-        routeConfidence: quickRoute.confidence,
-        preferredRoute: quickRoute.preferredRoute,
         routeFallbackReason: quickRoute.fallbackReason,
-        candidateTools: quickRoute.candidateTools,
         runtime: "openai-agents-sdk",
       }),
     });
@@ -630,18 +623,13 @@ export async function executeAgentRun({
     await writeRunPhaseEvent(runPhaseStarted(routePhase, {
       route: quickRoute.route,
       routerSource: quickRoute.routerSource,
-      routeConfidence: quickRoute.confidence,
-      preferredRoute: quickRoute.preferredRoute,
     }));
     await writeRunPhaseEvent(
       runPhaseCompleted(routePhase, {
         route: quickRoute.route,
         routerSource: quickRoute.routerSource,
         skippedSteps: quickRoute.skippedSteps,
-        routeConfidence: quickRoute.confidence,
-        preferredRoute: quickRoute.preferredRoute,
         routeFallbackReason: quickRoute.fallbackReason,
-        candidateTools: quickRoute.candidateTools,
       })
     );
 
@@ -659,8 +647,6 @@ export async function executeAgentRun({
       await writeRunPhaseEvent(runPhaseStarted(normalizePhase, {
         route: quickRoute.route,
         routerSource: quickRoute.routerSource,
-        routeConfidence: quickRoute.confidence,
-        preferredRoute: quickRoute.preferredRoute,
         routeFallbackReason: quickRoute.fallbackReason,
       }));
       try {
@@ -671,10 +657,14 @@ export async function executeAgentRun({
           ...agentInput,
           normalizedInput,
         };
+        const route = routeForRuntimeNormalizedInput(agentInput, normalizedInput, {
+          allowSimpleChat: !agentInput.forcedSkillId,
+        });
         quickRoute = {
           ...quickRoute,
-          route: routeForRuntimeNormalizedInput(normalizedInput),
+          route,
           routerSource: "llm-normalizer",
+          skippedSteps: skippedStepsForNormalizedRoute(route),
         };
       } catch (error) {
         await writeRunPhaseEvent(runPhaseFailed(normalizePhase, error, {
@@ -691,8 +681,6 @@ export async function executeAgentRun({
           artifactKind: modelNormalizedInput?.artifact?.kind,
           route: quickRoute.route,
           routerSource: quickRoute.routerSource,
-          routeConfidence: quickRoute.confidence,
-          preferredRoute: quickRoute.preferredRoute,
           routeFallbackReason: quickRoute.fallbackReason,
         })
       );
@@ -721,10 +709,7 @@ export async function executeAgentRun({
         route: quickRoute.route,
         routerSource: quickRoute.routerSource,
         skippedSteps: quickRoute.skippedSteps,
-        routeConfidence: quickRoute.confidence,
-        preferredRoute: quickRoute.preferredRoute,
         routeFallbackReason: quickRoute.fallbackReason,
-        candidateTools: quickRoute.candidateTools,
         runtime: "openai-agents-sdk",
       }),
     });

@@ -1,7 +1,7 @@
 import { Agent, Runner } from "@openai/agents";
 import { z } from "zod";
 
-import { getAgentRunnerConfig } from "./model-config.ts";
+import { getInputNormalizerRunnerConfig } from "./model-config.ts";
 
 export const taskOperationValues = [
   "create",
@@ -218,10 +218,15 @@ export function createInputNormalizerAgent() {
   return normalizerAgent;
 }
 
+export function prewarmInputNormalizer() {
+  getNormalizerRunner();
+  createInputNormalizerAgent();
+}
+
 function getNormalizerRunner() {
   normalizerRunner ??= new Runner({
     workflowName: "Cucumber Input Normalizer",
-    ...getAgentRunnerConfig(),
+    ...getInputNormalizerRunnerConfig(),
   });
   return normalizerRunner;
 }
