@@ -187,7 +187,7 @@ export function summarizeTraceEvent(event: RunStepTraceEvent) {
   }
 
   if (event.type.startsWith("run.step.")) {
-    const label = readString(event.payload.label) ?? event.stepId;
+    const label = getRunStepDisplayLabel(event);
     const duration = formatDurationMs(readNumber(event.payload.durationMs));
     const error = event.errorText ?? readString(event.payload.errorText);
     return [label, duration, error]
@@ -233,7 +233,7 @@ function buildTraceSteps(events: RunStepTraceEvent[]) {
     }
     const toolName =
       event.type.startsWith("run.step.")
-        ? readString(event.payload.label) ?? event.stepId
+        ? getRunStepDisplayLabel(event)
         : event.type.startsWith("skill.script.")
         ? readString(event.payload.scriptName) ?? event.stepId
         : readString(event.payload.toolName) ?? event.stepId;
@@ -254,6 +254,13 @@ function buildTraceSteps(events: RunStepTraceEvent[]) {
     });
   }
   return [...steps.values()];
+}
+
+function getRunStepDisplayLabel(event: RunStepTraceEvent) {
+  if (event.stepId === "quick.route" || event.stepId === "input.normalize") {
+    return "整理用户需求";
+  }
+  return readString(event.payload.label) ?? event.stepId;
 }
 
 function readContextSummary(events: RunStepTraceEvent[]) {

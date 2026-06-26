@@ -617,7 +617,7 @@ export async function executeAgentRun({
 
     const routePhase = startRunPhase(
       "quick.route",
-      "快速路由",
+      "整理用户需求",
       "prepare"
     );
     await writeRunPhaseEvent(runPhaseStarted(routePhase, {
@@ -641,7 +641,7 @@ export async function executeAgentRun({
     } else {
       const normalizePhase = startRunPhase(
         "input.normalize",
-        "归一化用户输入",
+        "整理用户需求",
         "prepare"
       );
       await writeRunPhaseEvent(runPhaseStarted(normalizePhase, {

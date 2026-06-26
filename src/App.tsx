@@ -81,8 +81,8 @@ function App() {
       )}
 
       {sessionStatus === "error" && (
-        <main className="app-state-screen">
-          <div className="app-state-mark error" />
+        <main className="grid min-h-screen w-screen place-content-center gap-3 bg-cuc-surface-warm text-center text-[13px] text-cuc-text-muted">
+          <div className="mx-auto size-cuc-toolbar-button rounded-cuc-round bg-cuc-danger shadow-[0_4px_16px_rgba(0,0,0,0.18)]" />
           <span>{sessionError ?? "连接失败"}</span>
         </main>
       )}

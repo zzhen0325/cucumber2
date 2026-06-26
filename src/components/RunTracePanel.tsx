@@ -3,6 +3,7 @@ import { useMemo, type ReactNode } from "react";
 
 import { LoadingIndicator } from "@/components/LoadingIndicator";
 import type { RunStepTraceEvent } from "@/lib/graph-projection";
+import { cn } from "@/lib/utils";
 import {
   getEventLabel,
   shortId,
@@ -29,6 +30,33 @@ type AgentRunDebugPanelProps = {
   onClose: () => void;
 };
 
+const TRACE_PANEL_BASE_CLASS =
+  "absolute right-5 top-[66px] grid max-h-[calc(100vh-154px)] grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden rounded-[22px] border border-cuc-border-muted bg-white/[0.97] p-3.5 shadow-[0_10px_30px_rgb(0_0_0_/_6%)] max-[760px]:bottom-[86px] max-[760px]:right-3 max-[760px]:top-auto max-[760px]:max-h-[min(540px,calc(100vh-128px))] max-[760px]:w-[calc(100vw-24px)]";
+const TRACE_HEADER_CLASS =
+  "flex items-center justify-between gap-3";
+const TRACE_HEADER_TITLE_CLASS =
+  "grid min-w-0 gap-0.5";
+const TRACE_HEADER_STRONG_CLASS =
+  "text-sm font-semibold leading-[18px] text-cuc-text";
+const TRACE_HEADER_SUBTITLE_CLASS =
+  "overflow-hidden text-ellipsis whitespace-nowrap text-[11px] leading-[14px] text-cuc-text-muted";
+const TRACE_ACTIONS_CLASS =
+  "flex gap-1.5";
+const TRACE_ACTION_BUTTON_CLASS =
+  "grid size-cuc-toolbar-button cursor-pointer place-items-center rounded-cuc-round border border-cuc-border-muted bg-cuc-surface text-cuc-text-secondary hover:bg-cuc-surface-warm hover:text-cuc-text disabled:cursor-default disabled:opacity-[0.42]";
+const TRACE_STATE_CLASS =
+  "flex items-center justify-center gap-[7px] rounded-cuc-floating border border-dashed border-cuc-border-dashed p-3 text-xs leading-4 text-cuc-text-subtle";
+const TRACE_ERROR_CLASS =
+  "flex items-center gap-[7px] rounded-cuc-floating border border-cuc-danger-border bg-cuc-danger-surface p-3 text-xs leading-4 text-cuc-danger-strong";
+const TRACE_SECTIONS_CLASS =
+  "grid content-start gap-2.5 overflow-auto pr-0.5";
+const TRACE_SECTION_CLASS =
+  "grid gap-2 rounded-cuc-floating border border-cuc-border-muted bg-cuc-surface p-3";
+const TRACE_SECTION_TITLE_CLASS =
+  "m-0 text-xs font-semibold leading-[15px] text-cuc-text";
+const REPLAY_BANNER_CLASS =
+  "absolute left-1/2 top-[62px] z-[28] flex h-[34px] -translate-x-1/2 items-center gap-2 rounded-cuc-pill border border-black/30 bg-white/[0.96] py-0 pl-3 pr-[7px] text-xs text-cuc-ink shadow-[0_8px_24px_rgb(0_0_0_/_5%)] max-[760px]:top-[61px] max-[760px]:max-w-[calc(100vw-24px)]";
+
 export function RunTracePanel({
   error,
   events,
@@ -46,23 +74,23 @@ export function RunTracePanel({
   }
 
   return (
-    <aside className="run-trace-panel" aria-label="Run Trace">
-      <header className="run-trace-header">
-        <div>
-          <strong>Run Trace</strong>
-          <span>{runNodeId ? shortId(runNodeId) : "未选择 Run"}</span>
+    <aside className={cn(TRACE_PANEL_BASE_CLASS, "z-[26] w-[min(390px,calc(100vw-40px))]")} aria-label="Run Trace">
+      <header className={TRACE_HEADER_CLASS}>
+        <div className={TRACE_HEADER_TITLE_CLASS}>
+          <strong className={TRACE_HEADER_STRONG_CLASS}>Run Trace</strong>
+          <span className={TRACE_HEADER_SUBTITLE_CLASS}>{runNodeId ? shortId(runNodeId) : "未选择 Run"}</span>
         </div>
-        <div className="run-trace-actions">
+        <div className={TRACE_ACTIONS_CLASS}>
           {replayActive ? (
-            <button aria-label="退出回放" onClick={onExitReplay} title="退出回放" type="button">
+            <button className={TRACE_ACTION_BUTTON_CLASS} aria-label="退出回放" onClick={onExitReplay} title="退出回放" type="button">
               <X size={14} />
             </button>
           ) : (
-            <button aria-label="回放到只读画布" disabled={!events.length || loading} onClick={onReplay} title="回放" type="button">
+            <button className={TRACE_ACTION_BUTTON_CLASS} aria-label="回放到只读画布" disabled={!events.length || loading} onClick={onReplay} title="回放" type="button">
               <RotateCcw size={14} />
             </button>
           )}
-          <button aria-label="关闭 Trace 面板" onClick={onClose} title="关闭" type="button">
+          <button className={TRACE_ACTION_BUTTON_CLASS} aria-label="关闭 Trace 面板" onClick={onClose} title="关闭" type="button">
             <X size={14} />
           </button>
         </div>
@@ -70,7 +98,7 @@ export function RunTracePanel({
 
       {loading && <TraceState icon={<LoadingIndicator ariaLabel="读取 trace 中" size={15} />} label="读取 trace" />}
       {error && (
-        <div className="trace-error">
+        <div className={TRACE_ERROR_CLASS}>
           <CircleAlert size={14} />
           <span>{error}</span>
         </div>
@@ -80,7 +108,7 @@ export function RunTracePanel({
       )}
 
       {!loading && !error && events.length > 0 && (
-        <div className="trace-sections">
+        <div className={TRACE_SECTIONS_CLASS}>
           <TraceSection title="Run">
             <TraceKeyValue label="Status" value={summary.runStatus} />
             <TraceKeyValue label="Prompt" value={summary.prompt} />
@@ -174,16 +202,16 @@ export function AgentRunDebugPanel({
   }
 
   return (
-    <aside className="agent-run-debug-panel" aria-label="Agent Run 检查">
-      <header className="run-trace-header">
-        <div>
-          <strong>Agent Run 检查</strong>
-          <span>
+    <aside className={cn(TRACE_PANEL_BASE_CLASS, "z-[25] w-[min(460px,calc(100vw-40px))]")} aria-label="Agent Run 检查">
+      <header className={TRACE_HEADER_CLASS}>
+        <div className={TRACE_HEADER_TITLE_CLASS}>
+          <strong className={TRACE_HEADER_STRONG_CLASS}>Agent Run 检查</strong>
+          <span className={TRACE_HEADER_SUBTITLE_CLASS}>
             {runNodeId ? shortId(runNodeId) : "等待运行"} · {events.length} events
           </span>
         </div>
-        <div className="run-trace-actions">
-          <button aria-label="关闭 Agent Run 检查" onClick={onClose} title="关闭" type="button">
+        <div className={TRACE_ACTIONS_CLASS}>
+          <button className={TRACE_ACTION_BUTTON_CLASS} aria-label="关闭 Agent Run 检查" onClick={onClose} title="关闭" type="button">
             <X size={14} />
           </button>
         </div>
@@ -192,7 +220,7 @@ export function AgentRunDebugPanel({
       {!events.length ? (
         <TraceState icon={<ListTree size={15} />} label="等待 Agent Run 事件" />
       ) : (
-        <div className="agent-run-debug-body">
+        <div className={TRACE_SECTIONS_CLASS}>
           <TraceSection title="Outputs">
             <div className="agent-run-debug-output-list">
               {outputEvents.map((event) => (
@@ -224,10 +252,10 @@ export function ReplayBanner({ activeRunId, onExit }: { activeRunId: string | nu
     return null;
   }
   return (
-    <div className="replay-banner">
+    <div className={REPLAY_BANNER_CLASS}>
       <ListTree size={14} />
       <span>只读回放 · {shortId(activeRunId)}</span>
-      <button aria-label="退出回放" onClick={onExit} title="退出回放" type="button">
+      <button className={cn(TRACE_ACTION_BUTTON_CLASS, "size-cuc-icon-button")} aria-label="退出回放" onClick={onExit} title="退出回放" type="button">
         <X size={13} />
       </button>
     </div>
@@ -322,7 +350,7 @@ function getDebugEventKey(event: RunStepTraceEvent) {
 
 function TraceState({ icon, label }: { icon: ReactNode; label: string }) {
   return (
-    <div className="trace-state">
+    <div className={TRACE_STATE_CLASS}>
       {icon}
       <span>{label}</span>
     </div>
@@ -331,8 +359,8 @@ function TraceState({ icon, label }: { icon: ReactNode; label: string }) {
 
 function TraceSection({ children, title }: { children: ReactNode; title: string }) {
   return (
-    <section className="trace-section">
-      <h3>{title}</h3>
+    <section className={TRACE_SECTION_CLASS}>
+      <h3 className={TRACE_SECTION_TITLE_CLASS}>{title}</h3>
       {children}
     </section>
   );

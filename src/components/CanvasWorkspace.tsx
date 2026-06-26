@@ -342,6 +342,44 @@ const TOP_CONTROL_BUTTON_CLASS = cn(
   TOP_ICON_BUTTON_CLASS,
   "rounded-cuc-control"
 );
+const STORAGE_CHIP_CLASS =
+  "hidden h-cuc-icon-button items-center gap-1 bg-white/0 px-2 text-[11px] leading-none text-cuc-text-muted";
+const COMPOSER_WRAP_CLASS =
+  "absolute bottom-8 left-1/2 z-30 flex w-[var(--cuc-width-composer)] -translate-x-1/2 flex-col items-start gap-1 max-[760px]:bottom-4 max-[760px]:w-[calc(100vw-24px)]";
+const COMPOSER_FORM_CLASS =
+  "min-h-cuc-composer-height rounded-cuc-composer border-[0.5px] border-cuc-border bg-cuc-surface shadow-cuc-composer [&_[data-slot=input-group]]:min-h-[inherit] [&_[data-slot=input-group]]:items-center [&_[data-slot=input-group]]:overflow-hidden [&_[data-slot=input-group]]:rounded-cuc-composer [&_[data-slot=input-group]]:border-0 [&_[data-slot=input-group]]:bg-transparent [&_[data-slot=input-group]]:shadow-none";
+const COMPOSER_AGENT_FORM_CLASS =
+  "[&_[data-slot=input-group]]:grid [&_[data-slot=input-group]]:grid-cols-[minmax(0,1fr)_52px] max-[560px]:[&_[data-slot=input-group]]:grid-cols-[minmax(0,1fr)_50px]";
+const COMPOSER_IMAGE_FORM_CLASS =
+  "min-h-cuc-composer-image-height [&_[data-slot=input-group]]:flex [&_[data-slot=input-group]]:flex-col [&_[data-slot=input-group]]:items-stretch [&_[data-slot=input-group]]:justify-between";
+const COMPOSER_MODE_SWITCH_CLASS =
+  "inline-flex min-h-[41px] items-center gap-1 rounded-cuc-floating border-[0.5px] border-cuc-control-border bg-cuc-border p-[4.5px] shadow-[0_2px_20px_rgba(41,37,100,0.06)]";
+const COMPOSER_MODE_BUTTON_CLASS =
+  "inline-flex h-cuc-control min-w-cuc-control cursor-pointer items-center justify-center gap-1.5 rounded-cuc-control border-0 bg-transparent px-2 text-[13px] leading-5 text-cuc-control-dark disabled:cursor-not-allowed disabled:opacity-[0.58]";
+const COMPOSER_SKILL_MENU_CLASS =
+  "max-h-60 w-full overflow-auto rounded-cuc-floating border-[0.5px] border-cuc-border bg-cuc-surface p-1.5 shadow-[0_6px_18px_rgba(41,37,100,0.08)]";
+const COMPOSER_SKILL_OPTION_CLASS =
+  "grid min-h-cuc-tool w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 rounded-cuc-image border-0 bg-transparent px-2.5 text-left text-[13px] leading-[18px] text-cuc-text outline-0 hover:bg-cuc-control-hover focus-visible:bg-cuc-control-hover";
+const COMPOSER_TOKEN_CLASS =
+  "inline-flex max-w-44 min-w-0 items-center gap-[5px] rounded-cuc-pill border-[0.5px] border-cuc-control-border bg-[#f5f5f5] px-[7px] py-[3px] text-xs leading-4 text-cuc-control-dark";
+const COMPOSER_TOKEN_KIND_CLASS =
+  "flex-none text-[11px] text-cuc-text-soft";
+const COMPOSER_TOKEN_LABEL_CLASS =
+  "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap";
+const COMPOSER_FOOTER_BASE_CLASS =
+  "box-border h-cuc-composer-height justify-end border-0";
+const COMPOSER_FOOTER_AGENT_CLASS =
+  "w-[52px] p-0 pr-2.5 max-[560px]:w-[50px] max-[560px]:pr-2";
+const COMPOSER_FOOTER_IMAGE_CLASS =
+  "h-[52px] w-full justify-between p-2";
+const COMPOSER_TEXTAREA_BASE_CLASS =
+  "resize-none px-4 text-sm leading-5 text-cuc-text placeholder:text-cuc-text-soft";
+const COMPOSER_SUBMIT_BUTTON_CLASS =
+  "size-cuc-control min-w-cuc-control rounded-cuc-control bg-cuc-control-dark text-cuc-surface";
+const COMPOSER_SELECT_CONTENT_CLASS =
+  "border-cuc-border bg-cuc-surface text-cuc-text";
+const COMPOSER_SELECT_TRIGGER_CLASS =
+  "h-cuc-control rounded-cuc-control border-[0.5px] border-cuc-border bg-cuc-control-surface text-xs font-medium text-[#333842] shadow-none hover:bg-cuc-control-hover disabled:opacity-[0.58] data-[disabled]:opacity-[0.58] aria-disabled:opacity-[0.58]";
 
 function getSelectedNodeIds(nodes: AgentCanvasNode[]) {
   return nodes.filter((node) => node.selected).map((node) => node.id);
@@ -3774,7 +3812,12 @@ function TopBar({
           <Copy size={14} />
         </button>
         <span
-          className={`storage-chip ${storageStatus}`}
+          className={cn(
+            STORAGE_CHIP_CLASS,
+            storageStatus === "saved" && "text-[#B7B7B7]",
+            (storageStatus === "saving" || storageStatus === "loading") && "text-[#B8B8B8]",
+            storageStatus === "error" && "border-cuc-danger-border text-cuc-danger-strong"
+          )}
           title={storageError ?? getStorageStatusLabel(storageStatus)}
         >
           {getStorageStatusLabel(storageStatus)}
@@ -3986,7 +4029,7 @@ function Composer({
             : "输入需求，让 Agent 帮你实现...";
 
   return (
-    <div className="composer-wrap" data-mode={composerMode}>
+    <div className={COMPOSER_WRAP_CLASS} data-mode={composerMode}>
       <ComposerModeSwitch
         disabled={busy || replayActive}
         value={composerMode}
@@ -4002,13 +4045,24 @@ function Composer({
       />
       <PromptInput
         attachmentsEnabled={false}
-        className="composer"
+        className={cn(
+          COMPOSER_FORM_CLASS,
+          composerMode === "agent" && COMPOSER_AGENT_FORM_CLASS,
+          composerMode === "image" && COMPOSER_IMAGE_FORM_CLASS,
+          composerMode === "agent" && hasSelectedTokens && "min-h-[88px]"
+        )}
         data-mode={composerMode}
         data-has-tokens={hasSelectedTokens}
         onSubmit={(message, event) => onSubmit(message, event)}
       >
-        <PromptInputBody className="composer-body">
-          <div className="composer-input-stack">
+        <PromptInputBody>
+          <div
+            className={cn(
+              "flex min-w-0 flex-1 flex-col",
+              composerMode === "agent" && "min-h-[52px] justify-center",
+              composerMode === "image" && "min-h-[123px] pt-2.5"
+            )}
+          >
             <ComposerInlineTokens
               forcedSkill={forcedSkill}
               nodes={selectedNodes}
@@ -4016,6 +4070,12 @@ function Composer({
               onClearForcedSkill={onClearForcedSkill}
             />
             <PromptInputTextarea
+              className={cn(
+                COMPOSER_TEXTAREA_BASE_CLASS,
+                composerMode === "agent" && "h-[52px] min-h-[52px] max-h-[52px] pb-[15px] pt-4",
+                composerMode === "agent" && hasSelectedTokens && "h-[34px] min-h-[34px] max-h-[34px] pt-1",
+                composerMode === "image" && "h-[76px] min-h-[76px] max-h-24 pb-2 pt-1"
+              )}
               disabled={!canEdit && !busy}
               placeholder={placeholder}
               value={prompt}
@@ -4023,8 +4083,14 @@ function Composer({
             />
           </div>
         </PromptInputBody>
-        <PromptInputFooter className="composer-footer">
-          <div className="composer-footer-tools">
+        <PromptInputFooter
+          className={cn(
+            COMPOSER_FOOTER_BASE_CLASS,
+            composerMode === "agent" && COMPOSER_FOOTER_AGENT_CLASS,
+            composerMode === "image" && COMPOSER_FOOTER_IMAGE_CLASS
+          )}
+        >
+          <div className="flex min-w-0 items-center gap-1">
             {composerMode === "image" ? (
               <>
                 <ImageAspectRatioSelect
@@ -4054,6 +4120,7 @@ function Composer({
             )}
           </div>
           <PromptInputSubmit
+            className={COMPOSER_SUBMIT_BUTTON_CLASS}
             disabled={busy ? false : !prompt.trim() || !canSubmit}
             onStop={stop}
             status={busy ? "streaming" : "ready"}
@@ -4074,10 +4141,14 @@ function ComposerModeSwitch({
   onChange: (value: ComposerMode) => void;
 }) {
   return (
-    <div aria-label="输入模式" className="composer-mode-switch" role="tablist">
+    <div aria-label="输入模式" className={COMPOSER_MODE_SWITCH_CLASS} role="tablist">
       <button
         aria-label="Agent 模式"
         aria-selected={value === "agent"}
+        className={cn(
+          COMPOSER_MODE_BUTTON_CLASS,
+          value === "agent" ? "bg-cuc-ink text-cuc-surface" : "px-0"
+        )}
         data-active={value === "agent"}
         disabled={disabled}
         onClick={() => onChange("agent")}
@@ -4086,11 +4157,15 @@ function ComposerModeSwitch({
         type="button"
       >
         <Sparkles size={14} />
-        <span className="composer-mode-label">Agent</span>
+        <span className={value === "agent" ? undefined : "hidden"}>Agent</span>
       </button>
       <button
         aria-label="图像模式"
         aria-selected={value === "image"}
+        className={cn(
+          COMPOSER_MODE_BUTTON_CLASS,
+          value === "image" ? "bg-cuc-ink text-cuc-surface" : "px-0"
+        )}
         data-active={value === "image"}
         disabled={disabled}
         onClick={() => onChange("image")}
@@ -4099,7 +4174,7 @@ function ComposerModeSwitch({
         type="button"
       >
         <ImageIcon size={14} />
-        <span className="composer-mode-label">图像</span>
+        <span className={value === "image" ? undefined : "hidden"}>图像</span>
       </button>
     </div>
   );
@@ -4124,17 +4199,20 @@ function ComposerInlineTokens({
   const hiddenCount = nodes.length - visibleNodes.length;
 
   return (
-    <div aria-label="输入上下文" className="composer-reference-tokens">
+    <div aria-label="输入上下文" className="flex max-w-full flex-wrap gap-1.5 px-3.5 pb-1">
       {forcedSkill ? (
         <span
-          className="composer-reference-token composer-skill-token"
+          className={cn(
+            COMPOSER_TOKEN_CLASS,
+            "border-cuc-primary-border bg-[#edfff1] text-cuc-accent-foreground"
+          )}
           title={`强制使用 ${forcedSkill.name}`}
         >
-          <span className="composer-reference-token-kind">技能</span>
-          <span className="composer-reference-token-label">{forcedSkill.name}</span>
+          <span className={cn(COMPOSER_TOKEN_KIND_CLASS, "text-cuc-primary-strong")}>技能</span>
+          <span className={COMPOSER_TOKEN_LABEL_CLASS}>{forcedSkill.name}</span>
           <button
             aria-label={`移除技能 ${forcedSkill.name}`}
-            className="composer-skill-token-remove"
+            className="grid size-4 min-w-4 cursor-pointer place-items-center rounded-cuc-pill border-0 bg-cuc-primary-surface p-0 text-cuc-primary-strong hover:bg-cuc-primary-surface-hover"
             onClick={onClearForcedSkill}
             title="移除技能"
             type="button"
@@ -4148,20 +4226,23 @@ function ComposerInlineTokens({
         const label = getCanvasNodeTokenLabel(node);
         return (
           <span
-            className="composer-reference-token"
+            className={cn(
+              COMPOSER_TOKEN_CLASS,
+              !referenceable && "text-cuc-text-soft"
+            )}
             data-referenceable={referenceable}
             key={node.id}
             title={referenceable ? label : `${label} · 未引用`}
           >
-            <span className="composer-reference-token-kind">
+            <span className={COMPOSER_TOKEN_KIND_CLASS}>
               {getCanvasNodeKindLabel(node)}
             </span>
-            <span className="composer-reference-token-label">{label}</span>
+            <span className={COMPOSER_TOKEN_LABEL_CLASS}>{label}</span>
           </span>
         );
       })}
       {hiddenCount > 0 ? (
-        <span className="composer-reference-token composer-reference-token-more">
+        <span className={cn(COMPOSER_TOKEN_CLASS, "flex-none")}>
           +{hiddenCount}
         </span>
       ) : null}
@@ -4194,30 +4275,30 @@ function ComposerSkillMenu({
   }
 
   return (
-    <div className="composer-skill-menu" role="listbox">
+    <div className={COMPOSER_SKILL_MENU_CLASS} role="listbox">
       {loading ? (
-        <div className="composer-skill-menu-state">加载技能...</div>
+        <div className="px-2.5 py-2.5 text-xs leading-[18px] text-cuc-text-soft">加载技能...</div>
       ) : error ? (
-        <div className="composer-skill-menu-state">技能加载失败</div>
+        <div className="px-2.5 py-2.5 text-xs leading-[18px] text-cuc-text-soft">技能加载失败</div>
       ) : visibleSkills.length ? (
         visibleSkills.map((skill) => (
           <button
             aria-selected={false}
-            className="composer-skill-option"
+            className={COMPOSER_SKILL_OPTION_CLASS}
             key={skill.id}
             onClick={() => onSelect(skill)}
             role="option"
             title={skill.description || skill.name}
             type="button"
           >
-            <span className="composer-skill-option-name">{skill.name}</span>
-            <span className="composer-skill-option-meta">
+            <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{skill.name}</span>
+            <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-cuc-text-soft">
               {[skill.agentScope, skill.purpose].filter(Boolean).join(" · ")}
             </span>
           </button>
         ))
       ) : (
-        <div className="composer-skill-menu-state">没有匹配技能</div>
+        <div className="px-2.5 py-2.5 text-xs leading-[18px] text-cuc-text-soft">没有匹配技能</div>
       )}
     </div>
   );
@@ -4229,8 +4310,8 @@ function ComposerFooterStatus({
   label: string;
 }) {
   return (
-    <span className="composer-footer-status">
-      <span>{label}</span>
+    <span className="inline-flex items-center">
+      <span className="hidden">{label}</span>
     </span>
   );
 }
@@ -4254,12 +4335,15 @@ function ImageProviderSelect({
     >
       <SelectTrigger
         aria-label="选择生图模型"
-        className="composer-provider-select"
+        className={cn(
+          COMPOSER_SELECT_TRIGGER_CLASS,
+          "w-[132px] min-w-[132px] max-[560px]:w-[112px] max-[560px]:min-w-[112px] max-[560px]:px-2"
+        )}
         title="选择生图模型"
       >
         <SelectValue />
       </SelectTrigger>
-      <SelectContent align="end" className="composer-provider-menu">
+      <SelectContent align="end" className={COMPOSER_SELECT_CONTENT_CLASS}>
         <SelectItem value="byteartist">Lemo</SelectItem>
         <SelectItem value="seed5_duotu_zz">Seedream 5</SelectItem>
       </SelectContent>
@@ -4286,12 +4370,15 @@ function ImageAspectRatioSelect({
     >
       <SelectTrigger
         aria-label="选择图像比例"
-        className="composer-aspect-ratio-select"
+        className={cn(
+          COMPOSER_SELECT_TRIGGER_CLASS,
+          "w-[70px] min-w-[70px] max-[560px]:w-16 max-[560px]:min-w-16"
+        )}
         title="选择图像比例"
       >
         <SelectValue />
       </SelectTrigger>
-      <SelectContent align="start" className="composer-provider-menu">
+      <SelectContent align="start" className={COMPOSER_SELECT_CONTENT_CLASS}>
         <SelectItem value="1:1">1:1</SelectItem>
         <SelectItem value="16:9">16:9</SelectItem>
         <SelectItem value="9:16">9:16</SelectItem>
@@ -4321,12 +4408,15 @@ function ImageResultCountSelect({
     >
       <SelectTrigger
         aria-label="选择生成数量"
-        className="composer-count-select"
+        className={cn(
+          COMPOSER_SELECT_TRIGGER_CLASS,
+          "w-16 min-w-16 max-[560px]:w-[58px] max-[560px]:min-w-[58px] max-[560px]:px-2"
+        )}
         title="选择生成数量"
       >
         <SelectValue />
       </SelectTrigger>
-      <SelectContent align="end" className="composer-provider-menu">
+      <SelectContent align="end" className={COMPOSER_SELECT_CONTENT_CLASS}>
         <SelectItem value="1">1 张</SelectItem>
         <SelectItem value="2">2 张</SelectItem>
         <SelectItem value="3">3 张</SelectItem>

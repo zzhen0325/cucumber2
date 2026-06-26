@@ -83,7 +83,7 @@
 
 ## 2026-06-16 Dynamic Run Plan
 
-- `run.plan.created` 不再是所有运行都会写入的四步固定骨架；runtime 只在复杂任务、带上游/多图/长 prompt/显式计划分析类请求或重试运行时创建 plan。
+- `run.plan.created` 不再是所有运行都会写入的四步固定骨架；runtime 只在 research/web/webpage/workflow、重试、多图或多引用图片、长 prompt、显式长文/方案/模板类请求、多个上游节点或明确“基于/参考/对比”等上下文请求时创建 plan，单个上游节点和单步图片处理不单独触发 todo。
 - plan item 使用任务相关 id/label，并带 `phase` 用于投影状态；Run 节点按真实 item 展示 todo，不再强制截断为四项。
 - 简单短文本或单步请求依旧通过 agent、tool、artifact、canvas operation 和终态事件保持可见，不额外污染默认 UI。
 

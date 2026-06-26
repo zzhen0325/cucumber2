@@ -643,7 +643,8 @@ function buildStepTimeline(events: RunStepTraceEvent[]): RunStepTimelineItem[] {
       event.type === "run.step.failed"
     ) {
       const previous = timeline.get(event.stepId);
-      const label = readString(event.payload.label) ?? previous?.label ?? event.stepId;
+      const label =
+        getRunStepDisplayLabel(event) ?? previous?.label ?? event.stepId;
       timeline.set(event.stepId, {
         id: event.stepId,
         label,
@@ -731,6 +732,13 @@ function buildStepTimeline(events: RunStepTraceEvent[]): RunStepTimelineItem[] {
     }
     return step;
   });
+}
+
+function getRunStepDisplayLabel(event: RunStepTraceEvent) {
+  if (event.stepId === "quick.route" || event.stepId === "input.normalize") {
+    return "整理用户需求";
+  }
+  return readString(event.payload.label);
 }
 
 function buildRunPlanItems(

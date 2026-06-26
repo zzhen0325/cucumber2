@@ -46,6 +46,15 @@ describe("run trace summary", () => {
       event(
         "run.step.completed",
         {
+          durationMs: 20,
+          label: "快速路由",
+          phase: "prepare",
+        },
+        "quick.route"
+      ),
+      event(
+        "run.step.completed",
+        {
           durationMs: 1260,
           label: "归一化用户输入",
           phase: "prepare",
@@ -56,11 +65,17 @@ describe("run trace summary", () => {
 
     const summary = summarizeRunTrace(events);
     expect(summary.steps[0]).toMatchObject({
-      durationLabel: "1.3s",
-      label: "归一化用户输入",
+      durationLabel: "20ms",
+      label: "整理用户需求",
       status: "success",
     });
-    expect(summarizeTraceEvent(events[1])).toBe("归一化用户输入 · 1.3s");
+    expect(summary.steps[1]).toMatchObject({
+      durationLabel: "1.3s",
+      label: "整理用户需求",
+      status: "success",
+    });
+    expect(summarizeTraceEvent(events[1])).toBe("整理用户需求 · 20ms");
+    expect(summarizeTraceEvent(events[2])).toBe("整理用户需求 · 1.3s");
   });
 
   it("summarizes normalized input, context, skills, tool errors, and rejected operations", () => {

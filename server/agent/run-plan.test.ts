@@ -39,11 +39,20 @@ describe("buildRunPlan", () => {
     expect(plan).toEqual([]);
   });
 
-  it("creates task-specific document plans", () => {
+  it("skips ordinary document plans but plans long-form document work", () => {
+    expect(
+      buildRunPlan(
+        input({
+          message: "写一段产品说明",
+          normalizedInput: { intent: "document.create", rawPrompt: "写一段产品说明" },
+        })
+      )
+    ).toEqual([]);
+
     const plan = buildRunPlan(
       input({
-        message: "写一份产品说明文档",
-        normalizedInput: { intent: "document.create", rawPrompt: "写一份产品说明文档" },
+        message: "写一份完整规划方案文档",
+        normalizedInput: { intent: "document.create", rawPrompt: "写一份完整规划方案文档" },
       })
     );
 
@@ -130,6 +139,97 @@ describe("buildRunPlan", () => {
       id: "image-generate",
       label: "生成 3 张图片",
       phase: "execute",
+    });
+  });
+
+  it("skips single-step image transforms but plans multi-reference generation", () => {
+    expect(
+      buildRunPlan(
+        input({
+          message: "抠出主体",
+          normalizedInput: { intent: "image.matting", rawPrompt: "抠出主体" },
+          selectedNodeIds: ["image-1"],
+          upstreamContext: [{ nodeId: "image-1", type: "image", summary: "参考图" }],
+        })
+      )
+    ).toEqual([]);
+
+    expect(
+      buildRunPlan(
+        input({
+          message: "高清放大这张图",
+          normalizedInput: { intent: "image.upscale", rawPrompt: "高清放大这张图" },
+          selectedNodeIds: ["image-1"],
+          upstreamContext: [{ nodeId: "image-1", type: "image", summary: "参考图" }],
+        })
+      )
+    ).toEqual([]);
+
+    expect(
+      buildRunPlan(
+        input({
+          message: "参考这些图生成海报",
+          normalizedInput: {
+            intent: "image.generate",
+            image: { resultCount: 1 },
+            rawPrompt: "参考这些图生成海报",
+          },
+          upstreamContext: [
+            { nodeId: "image-1", type: "image", summary: "参考图 1" },
+            { nodeId: "image-2", type: "image", summary: "参考图 2" },
+          ],
+        })
+      )
+    ).toContainEqual({
+      id: "image-brief",
+      label: "整理画面要求和引用图",
+      phase: "prepare",
+    });
+  });
+
+  it("only uses upstream context as a plan signal when it is multi-node or explicit", () => {
+    expect(
+      buildRunPlan(
+        input({
+          message: "总结一下",
+          normalizedInput: { intent: "text.answer", rawPrompt: "总结一下" },
+          selectedNodeIds: ["doc-1"],
+          upstreamContext: [{ nodeId: "doc-1", type: "doc", summary: "文档" }],
+        })
+      )
+    ).toEqual([]);
+
+    expect(
+      buildRunPlan(
+        input({
+          message: "基于这个节点回答",
+          normalizedInput: { intent: "text.answer", rawPrompt: "基于这个节点回答" },
+          selectedNodeIds: ["doc-1"],
+          upstreamContext: [{ nodeId: "doc-1", type: "doc", summary: "文档" }],
+        })
+      )
+    ).toContainEqual({
+      id: "answer-context",
+      label: "梳理问题和上游素材",
+      phase: "prepare",
+    });
+
+    expect(
+      buildRunPlan(
+        input({
+          message: "总结一下",
+          normalizedInput: { intent: "text.answer", rawPrompt: "总结一下" },
+          selectedNodeIds: ["doc-1", "doc-2"],
+          upstreamContext: [
+            { nodeId: "doc-1", type: "doc", summary: "文档 1" },
+            { nodeId: "doc-2", type: "doc", summary: "文档 2" },
+          ],
+        })
+      )
+    ).toContainEqual({
+      id: "answer-context",
+      label: "梳理问题和上游素材",
+      phase: "prepare",
     });
   });
 

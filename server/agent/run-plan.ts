@@ -14,16 +14,16 @@ export type RuntimeRunPlanItem = {
 };
 
 const ALWAYS_PLAN_INTENTS = new Set<NormalizedIntent>([
-  "code.create",
-  "data.analyze",
-  "document.create",
-  "document.edit",
   "research.answer",
   "web.fetch",
   "webpage.create",
   "workflow.plan",
-  "image.decompose",
+]);
+
+const IMAGE_INTENTS = new Set<NormalizedIntent>([
+  "image.generate",
   "image.matting",
+  "image.decompose",
   "image.upscale",
   "media.analyze",
 ]);
@@ -161,11 +161,14 @@ function shouldCreateRunPlan(input: AgentRunInput) {
   }
 
   const intent = getPlanIntent(input);
-  if (ALWAYS_PLAN_INTENTS.has(intent)) {
-    return true;
-  }
   if (intent === "unsupported") {
     return false;
+  }
+  if (IMAGE_INTENTS.has(intent)) {
+    return shouldPlanImageRun(input, intent);
+  }
+  if (ALWAYS_PLAN_INTENTS.has(intent)) {
+    return true;
   }
 
   return hasComplexitySignal(input);
@@ -197,23 +200,67 @@ function getPlanIntent(input: AgentRunInput): NormalizedIntent {
 
 function hasComplexitySignal(input: AgentRunInput) {
   const prompt = normalizeText(input.message);
-  const imageCount =
+  if (hasLongTaskSignal(prompt)) {
+    return true;
+  }
+  if (hasMultiContext(input)) {
+    return true;
+  }
+  return hasExplicitContextCue(prompt);
+}
+
+function shouldPlanImageRun(input: AgentRunInput, intent: NormalizedIntent) {
+  if (intent !== "image.generate") {
+    return false;
+  }
+  return (
+    getImageOutputCount(input) > 1 ||
+    getReferenceImageCount(input) > 1 ||
+    hasImageBatchCue(normalizeText(input.message))
+  );
+}
+
+function hasLongTaskSignal(prompt: string) {
+  if (prompt.length >= 120) {
+    return true;
+  }
+  return /详细说明|详细解释|完整说明|完整规划|长文|长篇|深度分析|深入分析|全面分析|调研分析|研究分析|调研报告|研究报告|分析报告|执行计划|规划方案|方案|路线图|roadmap|report|whitepaper|可复制|复制使用|直接使用|拿去用|复用|套用|模板|template|reusable|copy[-\s]?ready/i.test(prompt);
+}
+
+function hasMultiContext(input: AgentRunInput) {
+  return (
+    input.upstreamContext.length > 1 ||
+    input.selectedNodeIds.length > 1 ||
+    (input.contextSummary?.selectedNodes.length ?? 0) > 1
+  );
+}
+
+function hasExplicitContextCue(prompt: string) {
+  return /基于|根据|参考|对比|批量|多张|系列|步骤/i.test(prompt);
+}
+
+function hasImageBatchCue(prompt: string) {
+  return /批量|多张|系列|一组|组图|套图|[2-9二两三四五六七八九十]\s*张/i.test(prompt);
+}
+
+function getImageOutputCount(input: AgentRunInput) {
+  return (
     input.normalizedInput?.image?.variants?.length ??
     input.normalizedInput?.image?.resultCount ??
-    1;
-  if (imageCount > 1) {
-    return true;
-  }
-  if (input.upstreamContext.length > 0 || input.selectedNodeIds.length > 0) {
-    return true;
-  }
-  if ((input.contextSummary?.selectedNodes.length ?? 0) > 1) {
-    return true;
-  }
-  if (prompt.length >= 80) {
-    return true;
-  }
-  return /计划|拆解|步骤|方案|对比|分析|总结|批量|多张|系列|参考|基于|根据|然后|同时|并且|以及|修改|改写|优化|扩写/i.test(prompt);
+    input.imageResultCount ??
+    1
+  );
+}
+
+function getReferenceImageCount(input: AgentRunInput) {
+  const upstreamImageIds = input.upstreamContext
+    .filter((item) => item.type === "image")
+    .map((item) => item.nodeId);
+  const referenceImageIds =
+    input.contextSummary?.referenceNodes
+      .filter((item) => item.kind === "imageResult")
+      .map((item) => item.id) ?? [];
+  return new Set([...upstreamImageIds, ...referenceImageIds]).size;
 }
 
 function retryPlan(input: AgentRunInput): RuntimeRunPlanItem[] {
@@ -227,10 +274,7 @@ function retryPlan(input: AgentRunInput): RuntimeRunPlanItem[] {
 }
 
 function getImageCountLabel(input: AgentRunInput) {
-  const count =
-    input.normalizedInput?.image?.variants?.length ??
-    input.normalizedInput?.image?.resultCount ??
-    1;
+  const count = getImageOutputCount(input);
   return count > 1 ? ` ${count} 张` : "";
 }
 

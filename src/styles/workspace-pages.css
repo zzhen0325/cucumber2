@@ -1,33 +1,3 @@
-/* workspace pages */
-.app-state-screen {
-  width: 100vw;
-  min-height: 100vh;
-  background: var(--color-cuc-surface-warm);
-  color: var(--color-cuc-text);
-}
-
-.app-state-screen {
-  display: grid;
-  place-content: center;
-  gap: 12px;
-  color: var(--color-cuc-text-muted);
-  font-size: 13px;
-  text-align: center;
-}
-
-.app-state-mark {
-  width: var(--spacing-cuc-toolbar-button);
-  height: var(--spacing-cuc-toolbar-button);
-  margin: 0 auto;
-  border-radius: var(--radius-cuc-round);
-  background: var(--color-cuc-ink);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
-}
-
-.app-state-mark.error {
-  background: var(--color-cuc-danger);
-}
-
 .cucumber-send-icon {
   display: block;
   width: 14px;
@@ -35,31 +5,4 @@
   background: currentColor;
   mask: url("../assets/cucumber-send-arrow.svg") center / contain no-repeat;
   -webkit-mask: url("../assets/cucumber-send-arrow.svg") center / contain no-repeat;
-}
-
-.storage-chip {
-  display: none;
-  align-items: center;
-  gap: 4px;
-  height: var(--spacing-cuc-icon-button);
-  margin-left: 4px;
-  padding: 0 8px;
-  background: rgba(255, 255, 255, 0);
-  color: var(--color-cuc-text-muted);
-  font-size: 11px;
-  line-height: 1;
-}
-
-.storage-chip.saved {
-  color: #B7B7B7;
-}
-
-.storage-chip.saving,
-.storage-chip.loading {
-  color: #B8B8B8;
-}
-
-.storage-chip.error {
-  border-color: rgba(229, 72, 77, 0.24);
-  color: var(--color-cuc-danger-strong);
 }

@@ -145,6 +145,37 @@ describe("agent event graph projection", () => {
     });
   });
 
+  it("uses requirement wording for routing and normalization run steps", () => {
+    const projection = projectRunTraceToCanvas({
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", { prompt: "生成图片", promptNodeId: "prompt-1" }),
+        event("run.step.completed", "quick.route", {
+          label: "快速路由",
+          phase: "prepare",
+        }),
+        event("run.step.started", "input.normalize", {
+          label: "归一化用户输入",
+          phase: "prepare",
+        }),
+      ],
+    });
+    const run = projection.nodes.find((node) => node.id === "run-1");
+
+    expect(run?.data).toMatchObject({
+      kind: "run",
+      currentStep: {
+        id: "input.normalize",
+        label: "整理用户需求",
+        status: "running",
+      },
+      stepTimeline: [
+        { id: "quick.route", label: "整理用户需求", status: "success" },
+        { id: "input.normalize", label: "整理用户需求", status: "running" },
+      ],
+    });
+  });
+
   it("projects pending image nodes from normalized image input before tool input", () => {
     const projection = projectRunTraceToCanvas({
       runNodeId: "run-1",

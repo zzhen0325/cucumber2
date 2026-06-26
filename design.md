@@ -12,7 +12,7 @@
 ## Design Tokens
 
 - Tailwind v4 是 CSS-first：稳定、重复使用的颜色、尺寸、圆角、阴影和节点字号统一维护在 `src/styles/theme.css` 的 `@theme` 中，使用官方 namespace：`--color-*`、`--radius-*`、`--shadow-*`、`--spacing-*`、`--text-*`。
-- `src/index.css` 是唯一 Tailwind CSS entry，只负责按顺序 `@import` Tailwind、动画库和 `src/styles/` 下仍需要全局选择器的样式文件；普通页面样式优先直接写在组件 `className`。
+- `src/index.css` 是唯一 Tailwind CSS entry，只负责按顺序 `@import` Tailwind、动画库和 `src/styles/` 下仍需要全局选择器的样式文件；普通页面、输入器和简单面板样式优先直接写在组件 `className`。
 - `:root` 只保留 shadcn/ui 语义变量和运行时组件变量，例如 `--cuc-width-composer`；新增重复视觉值先补 `@theme` token，再引用 token。
 - token 组织只参考 Geist 的分层格式，数值以当前 Cucumber/Flowith 画布视觉为准，不直接套用 Geist 数值。
 
@@ -21,15 +21,15 @@
 - `src/index.css` 只保留 `@import`（Tailwind、动画库、`src/styles/*`）、`@source` 和 `@custom-variant`，不直接写产品样式。
 - `src/styles/theme.css` 维护 `@theme`、`@theme inline`、`:root` 和需要 token 的 `@utility`（如 `cuc-checkerboard`）。
 - `src/styles/base.css` 用 `@layer base` 放 `html`、`body`、`#root`、字体、滚动条和基础表单继承，以及全局 `@keyframes` 和 `@utility` 动画（如 `animate-star-sparkle`）。
-- 产品样式按域拆分为独立文件：`canvas-shell.css`、`composer.css`、`run-node.css`、`artifacts.css`、`trace-panel.css`；普通页面和基础节点样式优先写在组件 `className`，不要在 `src/App.tsx` 或其他组件里重新引入全局样式入口。
-- 不要把完整产品域样式整体包进 `@layer components`，否则 JSX 中已有 Tailwind utilities 会覆盖 `.composer-*`、`.run-*` 等产品 class，造成视觉回退。
-- `workspace-pages.css` 只保留仍需要全局选择器或资源 mask 的 `app-state-*`、`cucumber-send-icon`、`storage-chip`；Home、Project、Skills 页面样式写在各自组件 `className`。
+- 产品样式按域拆分为独立文件：`canvas-shell.css`、`run-node.css`、`artifacts.css`、`trace-panel.css`；静态组件 UI 优先写在组件 `className`，CSS 只保留全局选择器、第三方覆盖、伪元素、keyframes、mask 和深层后代选择器，不要在 `src/App.tsx` 或其他组件里重新引入全局样式入口。
+- 不要把完整产品域样式整体包进 `@layer components`，否则 JSX 中已有 Tailwind utilities 会覆盖 `.run-*`、`.artifact-*` 等产品 class，造成视觉回退。
+- `workspace-pages.css` 只保留仍需要资源 mask 的 `cucumber-send-icon`；Home、Project、Skills 页面和 app loading/error 状态样式写在各自组件 `className`。
 - `canvas-shell.css` 只保留 React Flow 内部选择器（如 `.react-flow__pane`、selection、handle、edge）；shell、top bar、tool rail、viewport controls、file drop overlay 直接写在组件 `className`。
-- `composer.css` 管理 `composer-*`、图像模式 controls、inline token、skill menu。
+- 画布输入器、图像模式 controls、inline token 和 skill menu 样式写在 `CanvasWorkspace.tsx` 的局部 Tailwind className 常量中；不要恢复 `composer.css`。
 - 基础节点样式由 `src/components/ai-elements/node.tsx` 的 `Node` 和基础节点组件 className 管理，并继续提供 `--canvas-node-*` 变量给 `run-node.css` 与 `artifacts.css`。
 - `run-node.css` 管理 `run-*`、`agent-*`、`tool-call-*`、`tool-json-*`。
 - `artifacts.css` 管理 image / markdown / code / html artifact、preview dialog、BlockNote 覆盖和透明棋盘格。
-- `trace-panel.css` 管理 `run-trace-*`、`trace-*` 和 replay banner。
+- `trace-panel.css` 只保留 trace 事件列表、debug raw 输出和 chip 等深层/重复结构；Trace 面板外壳、header、actions、state、section 和 replay banner 写在 `RunTracePanel.tsx` 的局部 Tailwind className 常量中。
 - 不新增 `common.css`、`responsive.css` 这类垃圾桶文件；media query 跟随所属产品域文件。
 - 简单新增 UI 可以直接使用 Tailwind utility，例如 `bg-cuc-surface rounded-cuc-card border border-cuc-border`；React Flow、BlockNote、伪元素、复杂后代选择器继续留在对应 `src/styles/*` 文件。
 - `@utility` 只用于 Tailwind theme token 不能自然表达的能力，例如 `cuc-checkerboard`；阴影、颜色、尺寸、圆角优先放进 `@theme`。
