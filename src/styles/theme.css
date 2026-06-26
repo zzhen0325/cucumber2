@@ -39,7 +39,7 @@
   --color-cuc-success: #1b9a3a;
   --color-cuc-success-strong: #1b7f35;
   --color-cuc-primary-strong: #238c3c;
-  --color-cuc-canvas-glass: rgb(242 243 244 / 60%);
+  --color-cuc-canvas-glass: rgba(232 232 232 / 0.6);
   --color-cuc-node-border: rgb(141 149 165 / 24%);
   --color-cuc-node-border-hover: rgb(141 149 165 / 28%);
   --color-cuc-node-border-active: rgb(141 149 165 / 42%);

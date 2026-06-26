@@ -269,6 +269,11 @@ type CanvasWorkspaceProps = {
   onBack: () => void;
 };
 
+type CanvasFitRequest = {
+  token: number;
+  nodeIds?: string[];
+};
+
 type ManualCanvasTool = "prompt" | "stickyNote" | ShapeVariant;
 type CanvasTool = "select" | "hand" | ManualCanvasTool;
 type ManualNodeTemplate =
@@ -386,6 +391,44 @@ function getSelectedNodeIds(nodes: AgentCanvasNode[]) {
   return nodes.filter((node) => node.selected).map((node) => node.id);
 }
 
+function getNodePositionOrigin(nodes: AgentCanvasNode[]) {
+  return nodes.reduce(
+    (origin, node) => ({
+      x: Math.min(origin.x, node.position.x),
+      y: Math.min(origin.y, node.position.y),
+    }),
+    { x: Number.POSITIVE_INFINITY, y: Number.POSITIVE_INFINITY }
+  );
+}
+
+function anchorLayoutToOrigin(
+  layoutedNodes: AgentCanvasNode[],
+  origin: { x: number; y: number }
+) {
+  if (
+    !layoutedNodes.length ||
+    !Number.isFinite(origin.x) ||
+    !Number.isFinite(origin.y)
+  ) {
+    return layoutedNodes;
+  }
+
+  const layoutOrigin = getNodePositionOrigin(layoutedNodes);
+  if (!Number.isFinite(layoutOrigin.x) || !Number.isFinite(layoutOrigin.y)) {
+    return layoutedNodes;
+  }
+
+  const offsetX = origin.x - layoutOrigin.x;
+  const offsetY = origin.y - layoutOrigin.y;
+  return layoutedNodes.map((node) => ({
+    ...node,
+    position: {
+      x: node.position.x + offsetX,
+      y: node.position.y + offsetY,
+    },
+  }));
+}
+
 function hasPersistableNodeChanges(changes: NodeChange<AgentCanvasNode>[]) {
   return changes.some((change) => {
     if (change.type === "select") {
@@ -443,7 +486,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const [debugEvents, setDebugEvents] = useState<RunStepTraceEvent[]>([]);
   const [debugOpen, setDebugOpen] = useState(true);
   const [canvasTool, setCanvasTool] = useState<CanvasTool>("select");
-  const [layoutFitRequest, setLayoutFitRequest] = useState(0);
+  const [layoutFitRequest, setLayoutFitRequest] = useState<CanvasFitRequest>({
+    token: 0,
+  });
   const [replaySnapshot, setReplaySnapshot] = useState<{
     runNodeId: string;
     nodes: AgentCanvasNode[];
@@ -490,6 +535,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const imageProcessingInFlightRef = useRef(new Set<string>());
   const autoLayoutFrame = useRef<number | null>(null);
   const autoLayoutSignatureRef = useRef<string | null>(null);
+  const pendingRunFocusNodeIdsRef = useRef<string[] | null>(null);
   const flowInstance = useRef<ReactFlowInstance<
     AgentCanvasNode,
     AgentCanvasEdge
@@ -610,28 +656,57 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     [recordDirtyFromPatch, setEdges, setNodes]
   );
 
-  const handleAutoLayout = useCallback(() => {
-    if (isReplayModeRef.current || !nodesRef.current.length) {
-      return;
-    }
+  const requestCanvasFit = useCallback((nodeIds?: string[]) => {
+    setLayoutFitRequest((current) => ({
+      token: current.token + 1,
+      nodeIds: nodeIds?.length ? [...nodeIds] : undefined,
+    }));
+  }, []);
 
-    const layoutedNodes = layoutAgentCanvasGraph(
-      nodesRef.current,
-      edgesRef.current
-    );
-    autoLayoutSignatureRef.current = getCanvasLayoutSignature(
-      layoutedNodes,
-      edgesRef.current
-    );
-    commitCanvasMutation({
-      reason: "auto-layout",
-      patch: {
-        nodeUpserts: layoutedNodes,
-      },
-      persist: true,
-    });
-    setLayoutFitRequest((current) => current + 1);
-  }, [commitCanvasMutation]);
+  const handleAutoLayout = useCallback(
+    (options: { scopeSelection?: boolean } = {}) => {
+      if (isReplayModeRef.current || !nodesRef.current.length) {
+        return;
+      }
+
+      const selectedNodeIds = getSelectedNodeIds(nodesRef.current);
+      const shouldLayoutSelection =
+        options.scopeSelection === true && selectedNodeIds.length >= 2;
+      const selectedNodeIdSet = new Set(selectedNodeIds);
+      const layoutInputNodes = shouldLayoutSelection
+        ? nodesRef.current.filter((node) => selectedNodeIdSet.has(node.id))
+        : nodesRef.current;
+      const layoutInputEdges = shouldLayoutSelection
+        ? edgesRef.current.filter(
+            (edge) =>
+              selectedNodeIdSet.has(edge.source) && selectedNodeIdSet.has(edge.target)
+          )
+        : edgesRef.current;
+      const layoutedNodes = shouldLayoutSelection
+        ? anchorLayoutToOrigin(
+            layoutAgentCanvasGraph(layoutInputNodes, layoutInputEdges),
+            getNodePositionOrigin(layoutInputNodes)
+          )
+        : layoutAgentCanvasGraph(layoutInputNodes, layoutInputEdges);
+      const focusNodeIds = shouldLayoutSelection
+        ? selectedNodeIds
+        : pendingRunFocusNodeIdsRef.current ?? undefined;
+      pendingRunFocusNodeIdsRef.current = null;
+      autoLayoutSignatureRef.current = getCanvasLayoutSignature(
+        shouldLayoutSelection ? nodesRef.current : layoutedNodes,
+        edgesRef.current
+      );
+      commitCanvasMutation({
+        reason: "auto-layout",
+        patch: {
+          nodeUpserts: layoutedNodes,
+        },
+        persist: true,
+      });
+      requestCanvasFit(focusNodeIds);
+    },
+    [commitCanvasMutation, requestCanvasFit]
+  );
 
   const clearTraceReconcileTimers = useCallback(() => {
     for (const timer of traceReconcileTimers.current) {
@@ -1832,6 +1907,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         persist: true,
         lastRunId: draft.runNode.id,
       });
+      const runFocusNodeIds = [draft.promptNode.id, draft.runNode.id];
+      pendingRunFocusNodeIdsRef.current = runFocusNodeIds;
+      requestCanvasFit(runFocusNodeIds);
 
       const artifactSaveResults = await flushPendingArtifactContentSaves();
       if (artifactSaveResults.some((saved) => !saved)) {
@@ -1892,6 +1970,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       imageResultCount,
       isBusy,
       markRunError,
+      requestCanvasFit,
       sendMessage,
       showUploadError,
       storageError,
@@ -3043,7 +3122,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       <ToolRail activeTool={canvasTool} onToolChange={setCanvasTool} />
       <ViewportControls
         canAutoLayout={!isReplayMode && nodes.length > 0}
-        onAutoLayout={handleAutoLayout}
+        onAutoLayout={() => handleAutoLayout({ scopeSelection: true })}
       />
       <RunTracePanel
         error={traceError}
@@ -3116,10 +3195,11 @@ function CanvasAutoFit({
   fitRequest,
   nodeCount,
 }: {
-  fitRequest: number;
+  fitRequest: CanvasFitRequest;
   nodeCount: number;
 }) {
   const { fitView } = useReactFlow<AgentCanvasNode, AgentCanvasEdge>();
+  const { nodeIds, token } = fitRequest;
 
   useEffect(() => {
     if (!nodeCount) {
@@ -3127,11 +3207,16 @@ function CanvasAutoFit({
     }
 
     const frame = window.requestAnimationFrame(() => {
-      fitView({ duration: 180, maxZoom: 1, padding: 0.32 });
+      fitView({
+        duration: 180,
+        maxZoom: 1,
+        nodes: nodeIds?.map((id) => ({ id })),
+        padding: 0.32,
+      });
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [fitRequest, fitView, nodeCount]);
+  }, [fitView, nodeCount, nodeIds, token]);
 
   return null;
 }
