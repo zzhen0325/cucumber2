@@ -17,6 +17,24 @@
   box-shadow: 0 10px 30px --alpha(var(--color-cuc-ink) / 6%);
 }
 
+.agent-run-debug-panel {
+  position: absolute;
+  top: 66px;
+  right: 20px;
+  z-index: 25;
+  display: grid;
+  width: min(460px, calc(100vw - 40px));
+  max-height: calc(100vh - 154px);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  overflow: hidden;
+  padding: 14px;
+  border: 1px solid var(--color-cuc-border-muted);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 10px 30px --alpha(var(--color-cuc-ink) / 6%);
+}
+
 .run-trace-header {
   display: flex;
   align-items: center;
@@ -106,6 +124,14 @@
   padding-right: 2px;
 }
 
+.agent-run-debug-body {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
 .trace-section {
   display: grid;
   gap: 8px;
@@ -127,6 +153,66 @@
 .trace-event-list {
   display: grid;
   gap: 7px;
+}
+
+.agent-run-debug-output-list,
+.agent-run-debug-event-list {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-run-debug-output,
+.agent-run-debug-event {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  padding: 9px;
+  border: 1px solid var(--color-cuc-border-soft);
+  border-radius: var(--radius-cuc-control);
+  background: var(--color-cuc-surface-subtle);
+}
+
+.agent-run-debug-output {
+  border-color: var(--color-cuc-primary-border);
+  background: var(--color-cuc-primary-surface);
+}
+
+.agent-run-debug-output > div,
+.agent-run-debug-event > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.agent-run-debug-output strong,
+.agent-run-debug-event strong {
+  overflow: hidden;
+  color: var(--color-cuc-text);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-run-debug-output span,
+.agent-run-debug-event span,
+.agent-run-debug-event small {
+  color: var(--color-cuc-text-muted);
+  font-size: 10px;
+  line-height: 13px;
+}
+
+.agent-run-debug-output pre,
+.agent-run-debug-event pre {
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  color: var(--color-cuc-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .trace-step-row {
@@ -241,7 +327,8 @@
 }
 
 @media (max-width: 760px) {
-  .run-trace-panel {
+  .run-trace-panel,
+  .agent-run-debug-panel {
     top: auto;
     right: 12px;
     bottom: 86px;

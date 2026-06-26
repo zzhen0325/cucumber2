@@ -58,8 +58,15 @@ export function RunNodeView({
     () => normalizeAgentMessages(data.agentMessages),
     [data.agentMessages]
   );
-  const agentText =
-    data.agentText?.trim() || formatAgentMessagesForText(agentMessages);
+  const explicitAgentText = data.agentText?.trim();
+  const agentMessagesText = formatAgentMessagesForText(agentMessages);
+  const agentText = explicitAgentText || agentMessagesText;
+  const hasSeparateFinalOutput = Boolean(
+    explicitAgentText && agentMessagesText && explicitAgentText !== agentMessagesText
+  );
+  const showAgentMessages =
+    agentMessages.length > 0 &&
+    (!explicitAgentText || explicitAgentText === agentMessagesText);
   const summaryItems = useMemo(
     () => (data.summaryItems ?? []).filter((item) => item.kind !== "artifact"),
     [data.summaryItems]
@@ -250,16 +257,24 @@ export function RunNodeView({
           >
             <div className="run-conversation-flow">
               <div className="run-agent-text-region nodrag nopan nowheel">
-                {agentMessages.length ? (
+                {showAgentMessages ? (
                   <AgentMessageList messages={agentMessages} />
                 ) : agentText ? (
-                  <MessageResponse className="agent-text-output">
+                  <MessageResponse className="agent-text-output h-auto">
                     {agentText}
                   </MessageResponse>
                 ) : (
                   <Shimmer as="p" className="agent-text-output muted" duration={1.8}>
                     {pendingAgentText}
                   </Shimmer>
+                )}
+                {hasSeparateFinalOutput && (
+                  <details className="mt-[7px] grid min-w-0 gap-[7px] ">
+                    <summary className="cursor-pointer text-[8px] leading-3 text-cuc-text-muted marker:text-cuc-text-muted">
+                      过程
+                    </summary>
+                    <AgentMessageList messages={agentMessages} />
+                  </details>
                 )}
                 {hasAgentActivity && (
                   <div className="agent-activity-stack" aria-label="Agent 执行">
@@ -307,7 +322,7 @@ function AgentMessageList({ messages }: { messages: CanvasAgentMessage[] }) {
                 <span key={badge}>{badge}</span>
               ))}
             </div>
-            <MessageResponse className="agent-text-output">
+            <MessageResponse className="agent-text-output h-auto">
               {message.content}
             </MessageResponse>
           </div>

@@ -78,7 +78,11 @@ import { HtmlSourcePreview } from "@/components/HtmlSourcePreview";
 import { LoadingIndicator } from "@/components/LoadingIndicator";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { Node, NodeContent } from "@/components/ai-elements/node";
-import { ReplayBanner, RunTracePanel } from "@/components/RunTracePanel";
+import {
+  AgentRunDebugPanel,
+  ReplayBanner,
+  RunTracePanel,
+} from "@/components/RunTracePanel";
 import { RunNodeView } from "@/components/RunNodeView";
 import { useCanvasFileDrop } from "@/components/useCanvasFileDrop";
 import {
@@ -396,6 +400,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const [traceEvents, setTraceEvents] = useState<RunStepTraceEvent[]>([]);
   const [traceLoading, setTraceLoading] = useState(false);
   const [traceError, setTraceError] = useState<string | null>(null);
+  const [debugRunId, setDebugRunId] = useState<string | null>(null);
+  const [debugEvents, setDebugEvents] = useState<RunStepTraceEvent[]>([]);
+  const [debugOpen, setDebugOpen] = useState(true);
   const [canvasTool, setCanvasTool] = useState<CanvasTool>("select");
   const [layoutFitRequest, setLayoutFitRequest] = useState(0);
   const [replaySnapshot, setReplaySnapshot] = useState<{
@@ -690,6 +697,8 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         ...streamedRuntimeEvents.current.filter((event) => event.runNodeId !== runId),
         ...runtimeEvents,
       ];
+      setDebugRunId(runId);
+      setDebugEvents(runtimeEvents);
 
       const projectId = loadedProjectIdRef.current ?? undefined;
       const projection = projectRuntimeEventsToCanvas({
@@ -837,6 +846,8 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       if (traceRunIdRef.current === runId) {
         setTraceEvents(events);
       }
+      setDebugRunId(runId);
+      setDebugEvents(events);
 
       const hasTerminalEvent = hasTerminalRunEvent(events);
       if (hasTerminalEvent) {
@@ -1275,6 +1286,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         setTraceEvents([]);
         setTraceError(null);
         setTraceLoading(false);
+        setDebugRunId(null);
+        setDebugEvents([]);
+        setDebugOpen(true);
         setReplaySnapshot(null);
         const normalizedSnapshot = normalizeLoadedCanvasSnapshot({
           edges,
@@ -1728,6 +1742,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       const currentEdges = edgesRef.current;
       const draft = createRunDraft(value, selectedNodeIds, currentNodes, currentEdges);
       activeRunId.current = draft.runNode.id;
+      setDebugRunId(draft.runNode.id);
+      setDebugEvents([]);
+      setDebugOpen(true);
       activeRunMessageStartIndex.current = messagesRef.current.length;
       clearTraceReconcileTimers();
       streamedRuntimeEvents.current = streamedRuntimeEvents.current.filter(
@@ -2698,6 +2715,10 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     setTraceError(null);
   }, []);
 
+  const handleCloseAgentRunDebug = useCallback(() => {
+    setDebugOpen(false);
+  }, []);
+
   const scheduleMarkdownArtifactContentSave = useCallback(
     ({
       artifactId,
@@ -2995,6 +3016,12 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         onClose={handleCloseTrace}
         onExitReplay={handleExitReplay}
         onReplay={handleReplayTrace}
+      />
+      <AgentRunDebugPanel
+        events={debugEvents}
+        open={debugOpen && Boolean(debugRunId)}
+        runNodeId={debugRunId}
+        onClose={handleCloseAgentRunDebug}
       />
       <ReplayBanner
         activeRunId={replaySnapshot?.runNodeId ?? null}

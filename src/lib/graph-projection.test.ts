@@ -659,7 +659,7 @@ describe("agent event graph projection", () => {
     expect(run?.data).toMatchObject({
       kind: "run",
       status: "success",
-      agentText: "Image Agent\n已生成图片。",
+      agentText: "已生成图片。",
       agentMessages: [
         expect.objectContaining({
           content: "正在整理画面要求和参考图。",
@@ -670,6 +670,48 @@ describe("agent event graph projection", () => {
           kind: "assistant",
         }),
       ],
+    });
+  });
+
+  it("uses terminal final output instead of completed agent chatter", () => {
+    const projection = projectRunTraceToCanvas({
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", { prompt: "生成4张图片", promptNodeId: "prompt-1" }),
+        event("agent.message.completed", "agent-message", {
+          agentName: "Image Agent",
+          content: "我会先扩展描述，再调用图片生成工具。",
+          messageId: "message-1",
+          messageKind: "assistant",
+          role: "assistant",
+        }),
+        event("artifact.created", "generate_image", {
+          artifact: {
+            id: "artifact-1",
+            type: "image",
+            uri: "/api/projects/project-1/artifacts/artifact-1/content",
+          },
+        }),
+        event("agent.message.completed", "agent-message", {
+          agentName: "Image Agent",
+          content: "任务已完成，我将告知用户结果。图片已生成。",
+          messageId: "message-2",
+          messageKind: "assistant",
+          role: "assistant",
+        }),
+        event("run.completed", "run", {
+          artifactIds: ["artifact-1"],
+          finalOutput: "图片已生成，结果已展示在画布上。",
+        }),
+      ],
+    });
+    const run = projection.nodes.find((node) => node.id === "run-1");
+
+    expect(run?.data).toMatchObject({
+      kind: "run",
+      status: "success",
+      agentText: "图片已生成，结果已展示在画布上。",
+      outputKind: "artifact",
     });
   });
 

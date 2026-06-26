@@ -2,6 +2,10 @@
 
 本文记录 2026-06-11 Agent v2 正式切换后的变更。
 
+## 2026-06-26 Temporary Agent Run Debug Panel
+
+- 画布运行时新增临时 `Agent Run 检查` 浮层，自动展示当前/最近一次 Agent Run 的输出事件和完整 raw event JSON，方便排查实时流、tool、artifact、canvas operation、terminal output 和 error；该面板只消费现有 `agent_run_events` / AI SDK runtime events，不新增后端协议、数据库表或平行 Trace 状态。
+
 ## 2026-06-25 Reusable Text Artifact Boundary
 
 - Input Normalizer 继续复用 artifact-first task protocol，不新增独立 Output Planner 或 `responseMode` 状态；可复用、可复制、可编辑的文本产物仍通过 `artifact.kind/subtype/format` 表达。

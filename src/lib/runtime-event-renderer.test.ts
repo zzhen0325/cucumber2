@@ -109,7 +109,7 @@ describe("agent event renderer", () => {
     });
   });
 
-  it("keeps persisted agent messages above final output", () => {
+  it("keeps persisted agent messages while displaying final output", () => {
     const projection = projectRuntimeEventsToCanvas({
       projectId: "project-1",
       runNodeId: "run-1",
@@ -134,7 +134,7 @@ describe("agent event renderer", () => {
     expect(projection.nodes.find((node) => node.id === "run-1")?.data).toMatchObject({
       kind: "run",
       status: "success",
-      agentText: "Image Agent\n我会先整理提示词，然后调用图片工具。",
+      agentText: "图片已生成",
       agentMessages: [
         expect.objectContaining({
           agentName: "Image Agent",

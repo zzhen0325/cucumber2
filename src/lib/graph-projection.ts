@@ -1869,18 +1869,18 @@ function buildAgentText(
     events
   )
 ): string | undefined {
-  const assistantText = formatAgentMessageText(agentMessages, {
-    includeProgress: false,
-  });
-  if (assistantText) {
-    return assistantText;
-  }
-
   const finalOutput = readString(
     events.findLast((event) => event.type === "run.completed")?.payload.finalOutput
   );
   if (finalOutput) {
     return finalOutput;
+  }
+
+  const assistantText = formatAgentMessageText(agentMessages, {
+    includeProgress: false,
+  });
+  if (assistantText) {
+    return assistantText;
   }
 
   const persistedText = formatAgentMessageText(agentMessages);

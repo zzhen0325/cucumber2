@@ -22,6 +22,13 @@ type RunTracePanelProps = {
   onReplay: () => void;
 };
 
+type AgentRunDebugPanelProps = {
+  events: RunStepTraceEvent[];
+  open: boolean;
+  runNodeId: string | null;
+  onClose: () => void;
+};
+
 export function RunTracePanel({
   error,
   events,
@@ -152,6 +159,66 @@ export function RunTracePanel({
   );
 }
 
+export function AgentRunDebugPanel({
+  events,
+  open,
+  runNodeId,
+  onClose,
+}: AgentRunDebugPanelProps) {
+  const outputEvents = useMemo(
+    () => events.filter(isDebugOutputEvent),
+    [events]
+  );
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <aside className="agent-run-debug-panel" aria-label="Agent Run 检查">
+      <header className="run-trace-header">
+        <div>
+          <strong>Agent Run 检查</strong>
+          <span>
+            {runNodeId ? shortId(runNodeId) : "等待运行"} · {events.length} events
+          </span>
+        </div>
+        <div className="run-trace-actions">
+          <button aria-label="关闭 Agent Run 检查" onClick={onClose} title="关闭" type="button">
+            <X size={14} />
+          </button>
+        </div>
+      </header>
+
+      {!events.length ? (
+        <TraceState icon={<ListTree size={15} />} label="等待 Agent Run 事件" />
+      ) : (
+        <div className="agent-run-debug-body">
+          <TraceSection title="Outputs">
+            <div className="agent-run-debug-output-list">
+              {outputEvents.map((event) => (
+                <DebugOutputEvent event={event} key={getDebugEventKey(event)} />
+              ))}
+              {!outputEvents.length && <span className="trace-muted">暂无输出</span>}
+            </div>
+          </TraceSection>
+
+          <TraceSection title="All Events">
+            <div className="agent-run-debug-event-list">
+              {events.map((event, index) => (
+                <DebugRawEvent
+                  event={event}
+                  index={index}
+                  key={getDebugEventKey(event)}
+                />
+              ))}
+            </div>
+          </TraceSection>
+        </div>
+      )}
+    </aside>
+  );
+}
+
 export function ReplayBanner({ activeRunId, onExit }: { activeRunId: string | null; onExit: () => void }) {
   if (!activeRunId) {
     return null;
@@ -164,6 +231,92 @@ export function ReplayBanner({ activeRunId, onExit }: { activeRunId: string | nu
         <X size={13} />
       </button>
     </div>
+  );
+}
+
+function DebugOutputEvent({ event }: { event: RunStepTraceEvent }) {
+  const text = getDebugOutputText(event);
+  return (
+    <article className="agent-run-debug-output">
+      <div>
+        <strong>{getEventLabel(event)}</strong>
+        <span>{formatDebugEventTime(event.createdAt)}</span>
+      </div>
+      <pre>{text}</pre>
+    </article>
+  );
+}
+
+function DebugRawEvent({
+  event,
+  index,
+}: {
+  event: RunStepTraceEvent;
+  index: number;
+}) {
+  return (
+    <article className="agent-run-debug-event">
+      <div>
+        <strong>
+          {index + 1}. {getEventLabel(event)}
+        </strong>
+        <span>{[event.stepId, formatDebugEventTime(event.createdAt)].filter(Boolean).join(" · ")}</span>
+      </div>
+      <small>{summarizeTraceEvent(event)}</small>
+      <pre>{stringifyDebugEvent(event)}</pre>
+    </article>
+  );
+}
+
+function isDebugOutputEvent(event: RunStepTraceEvent) {
+  return (
+    event.type === "agent.message.delta" ||
+    event.type === "agent.message.completed" ||
+    event.type === "tool.output" ||
+    event.type === "tool.error" ||
+    event.type === "artifact.created" ||
+    event.type === "canvas.operation.applied" ||
+    event.type === "run.completed" ||
+    event.type === "run.failed"
+  );
+}
+
+function getDebugOutputText(event: RunStepTraceEvent) {
+  const payloadText =
+    readDebugString(event.payload.content) ??
+    readDebugString(event.payload.delta) ??
+    readDebugString(event.payload.finalOutput) ??
+    event.errorText;
+  if (payloadText) {
+    return payloadText;
+  }
+  return JSON.stringify(event.payload, null, 2);
+}
+
+function stringifyDebugEvent(event: RunStepTraceEvent) {
+  return JSON.stringify(event, null, 2);
+}
+
+function readDebugString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function formatDebugEventTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function getDebugEventKey(event: RunStepTraceEvent) {
+  return (
+    event.id ??
+    `${event.projectId}:${event.runNodeId}:${event.stepId}:${event.type}:${event.createdAt}`
   );
 }
 
