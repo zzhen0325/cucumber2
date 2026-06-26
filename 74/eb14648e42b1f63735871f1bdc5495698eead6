@@ -1,0 +1,18 @@
+src/styles/run-node.css
+  h_49a1fcd5ff42d1 215,223,495
+src/components/RunNodeView.tsx
+  h_49a1fcd5ff42d1 61-69,260,263,271-277,325
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "74eb14648e42b1f63735871f1bdc5495698eead6",
+  "prompts": {},
+  "humans": {
+    "h_49a1fcd5ff42d1": {
+      "author": "zzhen0325 <26629213+zzhen0325@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
