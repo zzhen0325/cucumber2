@@ -36,6 +36,7 @@ import {
   isLemoImagePrompt,
   rewritePromptWithReferenceImagesForTextOnlyModel,
 } from "./reference-image-prompt.ts";
+import { normalizeImageGenerationParameters } from "./image-generation-parameters.ts";
 
 const imageVariantInputSchema = z.object({
   height: z.number().int().positive(),
@@ -153,13 +154,17 @@ export async function executeGenerateImageTool({
     lemoRequested ? "byteartist" : context.imageProvider
   );
 
-  let prompt = normalizeSeedreamProviderPrompt(
-    parsed.data.prompt?.trim() || context.prompt?.trim() || ""
-  );
+  const imageParameters = normalizeImageGenerationParameters({
+    candidate: parsed.data,
+    defaultAspectRatio: context.imageAspectRatio,
+    defaultResultCount: context.imageResultCount,
+    rawPrompt: context.prompt,
+  });
+  let prompt = normalizeSeedreamProviderPrompt(imageParameters.prompt);
   if (!prompt) {
     return { error: "empty_prompt: no image prompt was provided." };
   }
-  const variants = normalizeImageToolVariants(parsed.data.variants);
+  const variants = normalizeImageToolVariants(imageParameters.variants);
   let providerPromptMetadata: Record<string, unknown> = {};
 
   const artifacts: ArtifactRef[] = [];
@@ -233,12 +238,12 @@ export async function executeGenerateImageTool({
         {
           prompt,
           resultCount: resolveImageResultCount(
-            parsed.data.resultCount,
+            imageParameters.resultCount,
             [prompt],
             config.maxOutputImages
           ),
-          width: parsed.data.width,
-          height: parsed.data.height,
+          width: imageParameters.width,
+          height: imageParameters.height,
           imageUrls,
           onImage: emitArtifact,
           signal: signal ?? context.signal,
@@ -288,11 +293,11 @@ export async function executeGenerateImageTool({
       buildGenerateImageByteArtistInput(
         {
           prompt,
-          requestedResultCount: parsed.data.resultCount,
-          aspectRatio: parsed.data.aspectRatio,
+          requestedResultCount: imageParameters.resultCount,
+          aspectRatio: imageParameters.aspectRatio,
           variants,
-          width: parsed.data.width,
-          height: parsed.data.height,
+          width: imageParameters.width,
+          height: imageParameters.height,
           upstreamContext: byteArtistUpstreamContext,
           onImage: emitArtifact,
           signal: signal ?? context.signal,
@@ -307,11 +312,11 @@ export async function executeGenerateImageTool({
       buildGenerateImageSeedreamInput(
         {
           prompt,
-          requestedResultCount: parsed.data.resultCount,
-          aspectRatio: parsed.data.aspectRatio,
+          requestedResultCount: imageParameters.resultCount,
+          aspectRatio: imageParameters.aspectRatio,
           variants,
-          width: parsed.data.width,
-          height: parsed.data.height,
+          width: imageParameters.width,
+          height: imageParameters.height,
           upstreamContext,
           onImage: emitArtifact,
           signal: signal ?? context.signal,

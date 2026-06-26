@@ -119,11 +119,6 @@ describe("quick agent run router", () => {
           requiredCapabilities: ["image-generation"],
           negativeCapabilities: [],
           intent: "image.generate",
-          image: {
-            contentPrompt: "黄瓜",
-            aspectRatio: "1:1",
-            resultCount: 2,
-          },
         },
       })
     );
@@ -133,13 +128,9 @@ describe("quick agent run router", () => {
       requiresModelNormalization: false,
       normalizedInput: {
         artifact: { kind: "image", format: "png" },
-        image: {
-          contentPrompt: "黄瓜",
-          aspectRatio: "1:1",
-          resultCount: 2,
-        },
       },
     });
+    expect(route.normalizedInput).not.toHaveProperty("image");
   });
 
   it("defers selected-image character IP figure requests to the LLM normalizer", () => {
@@ -270,10 +261,6 @@ describe("quick agent run router", () => {
       requiredCapabilities: ["image-generation"],
       negativeCapabilities: [],
       intent: "image.generate",
-      image: {
-        contentPrompt: "黄瓜海报",
-        resultCount: 1,
-      },
     });
 
     expect(route).toBe("image_task");

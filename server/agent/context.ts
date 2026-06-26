@@ -387,11 +387,6 @@ function buildExplicitImageModeInput(
       domain: "visual-design",
       requiredCapabilities: ["image-generation"],
       negativeCapabilities: [],
-      image: {
-        contentPrompt: canvasContext.prompt,
-        aspectRatio: canvasContext.imageAspectRatio,
-        resultCount: canvasContext.imageResultCount,
-      },
     },
     canvasContext.prompt
   );

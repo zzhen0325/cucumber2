@@ -117,7 +117,6 @@ describe("buildRunPlan", () => {
           message: "生成一张黄瓜海报",
           normalizedInput: {
             intent: "image.generate",
-            image: { resultCount: 1 },
             rawPrompt: "生成一张黄瓜海报",
           },
         })
@@ -130,7 +129,6 @@ describe("buildRunPlan", () => {
           message: "生成一组 3 张黄瓜海报",
           normalizedInput: {
             intent: "image.generate",
-            image: { resultCount: 3 },
             rawPrompt: "生成一组 3 张黄瓜海报",
           },
         })
@@ -171,7 +169,6 @@ describe("buildRunPlan", () => {
           message: "参考这些图生成海报",
           normalizedInput: {
             intent: "image.generate",
-            image: { resultCount: 1 },
             rawPrompt: "参考这些图生成海报",
           },
           upstreamContext: [

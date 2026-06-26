@@ -244,12 +244,45 @@ function hasImageBatchCue(prompt: string) {
 }
 
 function getImageOutputCount(input: AgentRunInput) {
-  return (
-    input.normalizedInput?.image?.variants?.length ??
-    input.normalizedInput?.image?.resultCount ??
-    input.imageResultCount ??
-    1
+  return input.imageResultCount ?? inferImageOutputCount(input.message) ?? 1;
+}
+
+function inferImageOutputCount(prompt: string) {
+  const groupedArabicMatch = prompt.match(
+    /(?:一|1)\s*组\s*(\d{1,2})\s*(?:张|幅|个|款|版|images?|imgs?|pictures?|results?)/i
   );
+  if (groupedArabicMatch) {
+    return Number(groupedArabicMatch[1]);
+  }
+  const arabicMatch = prompt.match(
+    /(?:生成|出|要|做|给我|create|generate|make)?\s*(\d{1,2})\s*(?:张|幅|个|款|版|组|images?|imgs?|pictures?|results?)/i
+  );
+  if (arabicMatch) {
+    return Number(arabicMatch[1]);
+  }
+  const chineseMatch = prompt.match(
+    /(?:一|1)\s*组\s*([一二两三四五六七八九十])\s*(?:张|幅|个|款|版|图片|图|结果)|(?:生成|出|要|做|给我)?\s*([一二两三四五六七八九十])\s*(?:张|幅|个|款|版|组|图片|图|结果)/
+  );
+  const chineseValue = chineseMatch?.[1] ?? chineseMatch?.[2];
+  return chineseValue ? chineseImageCountToNumber(chineseValue) : null;
+}
+
+function chineseImageCountToNumber(value: string) {
+  const numbers: Record<string, number> = {
+    一: 1,
+    二: 2,
+    两: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+    十: 10,
+  };
+
+  return numbers[value] ?? null;
 }
 
 function getReferenceImageCount(input: AgentRunInput) {

@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   finalizeNormalizedAgentInput,
-  normalizeImageRequestSlots,
 } from "./input-normalizer.ts";
 import { selectAgentRoute } from "./task-router.ts";
+import { normalizeImageGenerationParameters } from "./tools/image/image-generation-parameters.ts";
 
 describe("input normalizer", () => {
-  it("extracts image content, count, and aspect ratio from a compact Chinese brief", () => {
+  it("classifies image generation without extracting image tool parameters", () => {
     const raw = "日本家居banner KV 16:9主体是女生打扫家里的插画,四张";
 
     const normalized = finalizeNormalizedAgentInput(
@@ -29,27 +29,22 @@ describe("input normalizer", () => {
       domain: "visual-design",
       requiredCapabilities: ["image-generation"],
       intent: "image.generate",
-      image: {
-        contentPrompt: "日本家居 banner KV，主体是女生打扫家里的插画",
-        resultCount: 4,
-        aspectRatio: "16:9",
-        usage: "banner KV",
-      },
     });
+    expect(normalized).not.toHaveProperty("image");
   });
 
-  it("keeps explicit dimensions as structured geometry", () => {
-    const normalized = normalizeImageRequestSlots(
-      "生成两张 2048x1024 的产品海报",
-      undefined,
-      { maxOutputImages: 4 }
-    );
+  it("normalizes image generation parameters in the Image tool layer", () => {
+    const normalized = normalizeImageGenerationParameters({
+      rawPrompt: "生成两张 2048x1024 的产品海报",
+      maxOutputImages: 4,
+    });
 
     expect(normalized).toMatchObject({
       resultCount: 2,
-      dimensions: { width: 2048, height: 1024 },
+      width: 2048,
+      height: 1024,
       aspectRatio: "2:1",
-      contentPrompt: "产品海报",
+      prompt: "产品海报",
     });
   });
 
@@ -90,10 +85,6 @@ describe("input normalizer", () => {
         artifact: { kind: "image", format: "png" },
         requiredCapabilities: ["image-upscale"],
         intent: "image.upscale",
-        image: {
-          contentPrompt: "把这个图",
-          resultCount: 1,
-        },
       },
       raw,
       { maxOutputImages: 4 }
@@ -107,31 +98,21 @@ describe("input normalizer", () => {
       domain: "visual-design",
       requiredCapabilities: ["image-generation", "image-outpaint"],
       intent: "image.generate",
-      image: {
-        resultCount: 4,
-        contentPrompt:
-          "基于参考图扩展画布，保持原图主体、文字、风格、光影和构图一致，补全新增区域。",
-        variants: [
-          { width: 1125, height: 450, label: "1125x450" },
-          { width: 1125, height: 600, label: "1125x600" },
-          { width: 900, height: 1200, label: "900x1200" },
-          { width: 800, height: 800, label: "800x800" },
-        ],
-      },
     });
+    expect(normalized).not.toHaveProperty("image");
     expect(selectAgentRoute(normalized)).toBe("image");
   });
 
   it("uses a clean reference-image prompt for spaced dimension expansion", () => {
-    const normalized = normalizeImageRequestSlots(
-      "帮我把这个图拓展4个尺寸： 1125-450 / 1125-672  /  1080-1440  /1029-540",
-      undefined,
-      { maxOutputImages: 4 }
-    );
+    const normalized = normalizeImageGenerationParameters({
+      rawPrompt:
+        "帮我把这个图拓展4个尺寸： 1125-450 / 1125-672  /  1080-1440  /1029-540",
+      maxOutputImages: 4,
+    });
 
     expect(normalized).toMatchObject({
       resultCount: 4,
-      contentPrompt:
+      prompt:
         "基于参考图扩展画布，保持原图主体、文字、风格、光影和构图一致，补全新增区域。",
       variants: [
         { width: 1125, height: 450, label: "1125x450" },
@@ -163,11 +144,8 @@ describe("input normalizer", () => {
       artifact: { kind: "image", format: "png" },
       requiredCapabilities: ["media-analysis", "image-generation"],
       intent: "image.generate",
-      image: {
-        resultCount: 1,
-        contentPrompt: "根据这个帮我出这个角色的毛绒 IP 形象",
-      },
     });
+    expect(normalized).not.toHaveProperty("image");
     expect(selectAgentRoute(normalized)).toBe("image");
   });
 
@@ -196,7 +174,8 @@ describe("input normalizer", () => {
 
   it("rejects requested image counts above the configured limit", () => {
     expect(() =>
-      normalizeImageRequestSlots("生成五张小狗图片", undefined, {
+      normalizeImageGenerationParameters({
+        rawPrompt: "生成五张小狗图片",
         maxOutputImages: 4,
       })
     ).toThrow("一次最多生成 4 张图片。");
@@ -270,12 +249,8 @@ describe("input normalizer", () => {
       artifact: { kind: "image", subtype: "banner", format: "png" },
       domain: "visual-design",
       intent: "image.generate",
-      image: {
-        contentPrompt: "最佳 HOME 产品颁奖典礼 KV",
-        resultCount: 1,
-        aspectRatio: "16:9",
-      },
     });
+    expect(normalized).not.toHaveProperty("image");
   });
 
   it("routes HTML animation requests to webpage artifacts instead of image generation", () => {
@@ -302,7 +277,7 @@ describe("input normalizer", () => {
       negativeCapabilities: ["image-generation"],
       intent: "webpage.create",
     });
-    expect(normalized.image).toBeUndefined();
+    expect(normalized).not.toHaveProperty("image");
     expect(selectAgentRoute(normalized)).toBe("document");
   });
 
@@ -326,7 +301,7 @@ describe("input normalizer", () => {
       negativeCapabilities: ["image-generation"],
       intent: "image.decompose",
     });
-    expect(normalized.image).toBeUndefined();
+    expect(normalized).not.toHaveProperty("image");
     expect(selectAgentRoute(normalized)).toBe("image");
   });
 
@@ -418,7 +393,7 @@ describe("input normalizer", () => {
       negativeCapabilities: ["image-generation"],
       intent: "text.answer",
     });
-    expect(normalized.image).toBeUndefined();
+    expect(normalized).not.toHaveProperty("image");
     expect(selectAgentRoute(normalized)).toBe("manager");
   });
 
@@ -443,7 +418,7 @@ describe("input normalizer", () => {
       requiredCapabilities: [],
       intent: "text.answer",
     });
-    expect(normalized.image).toBeUndefined();
+    expect(normalized).not.toHaveProperty("image");
     expect(selectAgentRoute(normalized)).toBe("manager");
   });
 
@@ -468,7 +443,7 @@ describe("input normalizer", () => {
       negativeCapabilities: ["image-generation"],
       intent: "text.answer",
     });
-    expect(normalized.image).toBeUndefined();
+    expect(normalized).not.toHaveProperty("image");
   });
 
   it("keeps image-generation meta questions out of image creation", () => {
@@ -492,7 +467,7 @@ describe("input normalizer", () => {
       negativeCapabilities: ["image-generation"],
       intent: "text.answer",
     });
-    expect(normalized.image).toBeUndefined();
+    expect(normalized).not.toHaveProperty("image");
     expect(selectAgentRoute(normalized)).toBe("manager");
   });
 
@@ -518,7 +493,7 @@ describe("input normalizer", () => {
       requiredCapabilities: [],
       intent: "code.create",
     });
-    expect(normalized.image).toBeUndefined();
+    expect(normalized).not.toHaveProperty("image");
     expect(selectAgentRoute(normalized)).toBe("document");
   });
 
@@ -543,7 +518,7 @@ describe("input normalizer", () => {
       requiredCapabilities: [],
       intent: "data.analyze",
     });
-    expect(normalized.image).toBeUndefined();
+    expect(normalized).not.toHaveProperty("image");
   });
 
   it("routes canvas node requests containing image words before image fallback", () => {
@@ -567,7 +542,7 @@ describe("input normalizer", () => {
       requiredCapabilities: ["canvas-operation"],
       intent: "canvas.operation",
     });
-    expect(normalized.image).toBeUndefined();
+    expect(normalized).not.toHaveProperty("image");
   });
 
   it("routes explicit long-form explanations to the document specialist", () => {
@@ -654,7 +629,7 @@ describe("input normalizer", () => {
       negativeCapabilities: ["image-generation"],
       intent: "document.create",
     });
-    expect(normalized.image).toBeUndefined();
+    expect(normalized).not.toHaveProperty("image");
     expect(selectAgentRoute(normalized)).toBe("document");
   });
 
@@ -681,7 +656,7 @@ describe("input normalizer", () => {
       negativeCapabilities: ["image-generation"],
       intent: "document.create",
     });
-    expect(normalized.image).toBeUndefined();
+    expect(normalized).not.toHaveProperty("image");
     expect(selectAgentRoute(normalized)).toBe("document");
   });
 
@@ -775,7 +750,7 @@ describe("input normalizer", () => {
       requiredCapabilities: [],
       intent: "text.answer",
     });
-    expect(normalized.image).toBeUndefined();
+    expect(normalized).not.toHaveProperty("image");
     expect(selectAgentRoute(normalized)).toBe("manager");
   });
 
@@ -829,7 +804,7 @@ describe("input normalizer", () => {
       negativeCapabilities: ["image-generation"],
       intent: "document.create",
     });
-    expect(normalized.image).toBeUndefined();
+    expect(normalized).not.toHaveProperty("image");
   });
 
   it("routes visual H5 flowcharts to mermaid diagrams, not images", () => {

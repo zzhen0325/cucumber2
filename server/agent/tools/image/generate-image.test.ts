@@ -430,6 +430,26 @@ describe("generate_image tool", () => {
     ).toEqual(["小狗的图", "小狗的图", "小狗的图", "小狗的图"]);
   });
 
+  it("infers image parameters from run context when the Image Agent omits them", async () => {
+    isSeedreamConfigured.mockReturnValue(true);
+    generateSeedreamImage.mockResolvedValue({ images: [] });
+
+    const context = buildContext({
+      imageProvider: "seedream",
+      prompt: "生成两张 2048x1024 的产品海报",
+    });
+    await invokeTool(context, {});
+
+    const callArg = generateSeedreamImage.mock.calls[0][0];
+    expect(callArg.totalRequestedImageCount).toBe(2);
+    expect(callArg.requests).toHaveLength(2);
+    expect(callArg.requests[0].body).toMatchObject({
+      prompt: "产品海报",
+      width: 2048,
+      height: 1024,
+    });
+  });
+
   it("forwards normalized aspect ratio and count to Seedream requests", async () => {
     isSeedreamConfigured.mockReturnValue(true);
     generateSeedreamImage.mockResolvedValue({ images: [] });
@@ -779,7 +799,7 @@ describe("generate_image tool", () => {
       expect.objectContaining({
         requests: [
           expect.objectContaining({
-            prompt: "生成 lemo 海报",
+            prompt: "lemo 海报",
           }),
         ],
       }),
