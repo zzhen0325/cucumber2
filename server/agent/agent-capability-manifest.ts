@@ -41,7 +41,7 @@ const routeCapabilities = [
       "propose_canvas_operations",
     ],
     description:
-      "General coordinator for plain answers, canvas operation proposals, skill activation, and handoff decisions.",
+      "Fallback and composite-task coordinator for knowledge answers, canvas operation proposals, skill activation, and handoff decisions.",
   },
   {
     route: "document",

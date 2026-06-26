@@ -2,6 +2,7 @@ import { tool } from "@openai/agents";
 import { z } from "zod";
 
 import type { ArtifactRef } from "../../../../src/types/canvas.ts";
+import { repairMarkdownBlockBoundaries } from "../../../../src/lib/markdown-artifact.ts";
 import { storeTextArtifactContent } from "../../../storage.ts";
 import type { CucumberAgentContext } from "../../context.ts";
 import { assertTextArtifactToolAllowed } from "../../policy/task-artifact-policy.ts";
@@ -119,7 +120,7 @@ function getArtifactTypeForContext(
 
 function normalizeArtifactContent(content: string, format: string | undefined) {
   if (format !== "html" && format !== "code") {
-    return content;
+    return repairMarkdownBlockBoundaries(content);
   }
   const match = content.match(/^```(?:html|css|js|javascript|ts|typescript|json)?\s*\n([\s\S]*?)\n```$/i);
   return match?.[1]?.trim() ?? content;

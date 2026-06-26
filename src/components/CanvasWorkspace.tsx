@@ -111,6 +111,7 @@ import {
   layoutAgentCanvasGraph,
 } from "@/lib/canvas-layout";
 import { normalizeLoadedCanvasSnapshot } from "@/lib/canvas-load-normalization";
+import { repairMarkdownBlockBoundaries } from "@/lib/markdown-artifact";
 import {
   loadProject,
   loadRunTrace,
@@ -5902,9 +5903,14 @@ function MarkdownNode({
     shouldLoadFullContent && loadedContent && loadedContent.url === contentUrl
       ? loadedContent.text
       : null;
+  const rawMarkdownContent =
+    loadedText && loadedText !== data.content ? loadedText : data.content;
+  const markdownContent = data.blockNoteBlocks
+    ? rawMarkdownContent
+    : repairMarkdownBlockBoundaries(rawMarkdownContent);
   const editorData =
-    loadedText && loadedText !== data.content
-      ? { ...data, content: loadedText }
+    markdownContent !== data.content
+      ? { ...data, content: markdownContent }
       : data;
   const metaLine = getArtifactMetaLine(data);
 
@@ -5957,11 +5963,7 @@ function shouldLoadFullMarkdownContent(
   data: MarkdownNodeData,
   contentUrl: string | undefined
 ) {
-  return Boolean(
-    contentUrl &&
-      !data.blockNoteBlocks &&
-      data.content.trimEnd().endsWith("...内容已截断")
-  );
+  return Boolean(contentUrl && !data.blockNoteBlocks);
 }
 
 function summarizeMarkdownForCanvasNode(content: string) {

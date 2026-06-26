@@ -8,6 +8,7 @@ import { createImageAgent } from "./agents/image.agent.ts";
 import { createManagerAgent } from "./agents/manager.agent.ts";
 import { createResearchAgent } from "./agents/research.agent.ts";
 import { createWebAgent } from "./agents/web.agent.ts";
+import { chatInstructions } from "./prompts/chat.instructions.ts";
 import {
   AgentContextValidationError,
   buildAgentRunInput,
@@ -55,8 +56,8 @@ import {
 import { validateCanvasOperations } from "./policy/canvas-operation-policy.ts";
 
 let runner: Runner | undefined;
-let simpleChatRunner: Runner | undefined;
-let simpleChatAgent: Agent | undefined;
+let chatRunner: Runner | undefined;
+let chatAgent: Agent<CucumberAgentContext> | undefined;
 
 const MAX_RUN_INPUT_IMAGES = 4;
 
@@ -161,19 +162,19 @@ function getAgentRunner() {
   return runner;
 }
 
-export async function* runSimpleChatAgent(
+export async function* runChatAgent(
   input: AgentRunInput
 ): AsyncIterable<CucumberRunEvent> {
   const context = buildCucumberAgentContext(input);
-  const chatPhase = startRunPhase("chat.start", "启动轻量聊天模型", "execute");
+  const chatPhase = startRunPhase("chat.start", "启动 Chat Agent", "execute");
   yield runPhaseStarted(chatPhase, {
-    route: "simple_chat",
+    route: "chat_agent_task",
   });
   let stream;
   try {
-    stream = await getSimpleChatRunner().run(
-      getSimpleChatAgent(),
-      buildSimpleChatPrompt(input),
+    stream = await getChatRunner().run(
+      getChatAgent(),
+      buildChatPrompt(input),
       {
         context,
         maxTurns: 1,
@@ -182,11 +183,11 @@ export async function* runSimpleChatAgent(
       }
     );
     yield runPhaseCompleted(chatPhase, {
-      route: "simple_chat",
+      route: "chat_agent_task",
     });
   } catch (error) {
     yield runPhaseFailed(chatPhase, error, {
-      route: "simple_chat",
+      route: "chat_agent_task",
     });
     throw error;
   }
@@ -195,8 +196,8 @@ export async function* runSimpleChatAgent(
 
 export function prewarmAgentRuntimeWorld() {
   getAgentRunner();
-  getSimpleChatRunner();
-  getSimpleChatAgent();
+  getChatRunner();
+  getChatAgent();
   prewarmInputNormalizer();
   createManagerAgent();
   createImageAgent();
@@ -205,25 +206,20 @@ export function prewarmAgentRuntimeWorld() {
   createWebAgent();
 }
 
-function getSimpleChatRunner() {
-  simpleChatRunner ??= new Runner({
-    workflowName: "Cucumber Simple Chat",
+function getChatRunner() {
+  chatRunner ??= new Runner({
+    workflowName: "Cucumber Chat",
     ...getAgentRunnerConfig(),
   });
-  return simpleChatRunner;
+  return chatRunner;
 }
 
-function getSimpleChatAgent() {
-  simpleChatAgent ??= new Agent({
-    name: "Cucumber Simple Chat",
-    instructions: [
-      "You are Cucumber's lightweight chat responder.",
-      "Answer concise, ordinary user questions directly.",
-      "Do not claim to modify the canvas, generate artifacts, call tools, or inspect unavailable context.",
-      "Reply in the user's language.",
-    ].join("\n"),
+function getChatAgent() {
+  chatAgent ??= new Agent<CucumberAgentContext>({
+    name: "Cucumber Chat Agent",
+    instructions: (runContext) => chatInstructions(runContext.context),
   });
-  return simpleChatAgent;
+  return chatAgent;
 }
 
 function startRunPhase(
@@ -354,7 +350,7 @@ async function activateForcedSkillForRun(
 }
 
 function shouldWriteRunPlan(route: AgentRunRoute, itemCount: number) {
-  return route === "complex_agent_task" || route === "image_task" || itemCount > 0;
+  return route === "manager_task" || route === "image_task" || itemCount > 0;
 }
 
 function routeForRuntimeNormalizedInput(
@@ -376,13 +372,12 @@ function applyForcedSkillRoute(
   return {
     ...route,
     canvasOperations: undefined,
-    directResponse: undefined,
     fallbackReason: route.fallbackReason ?? "forced_skill",
     route: route.normalizedInput
       ? routeForRuntimeNormalizedInput(input, route.normalizedInput, {
           allowSimpleChat: false,
         })
-      : "complex_agent_task",
+      : "manager_task",
     skippedSteps: route.normalizedInput ? ["input.normalize"] : [],
   };
 }
@@ -568,8 +563,7 @@ export async function executeAgentRun({
   };
 
   const shouldDeferRunMaterialization = () =>
-    quickRoute?.route === "smalltalk" ||
-    quickRoute?.route === "simple_chat" ||
+    quickRoute?.route === "chat_agent_task" ||
     quickRoute?.route === "simple_canvas";
 
   try {
@@ -714,21 +708,14 @@ export async function executeAgentRun({
       }),
     });
 
-    if (quickRoute.directResponse) {
-      await writeAgentTextDelta(quickRoute.directResponse);
-      finalOutput = quickRoute.directResponse;
-      await completeRun();
-      return;
-    }
-
     if (quickRoute.route === "simple_canvas") {
       await executeSimpleCanvasRoute(quickRoute, agentInput);
       await completeRun();
       return;
     }
 
-    if (quickRoute.route === "simple_chat") {
-      await consumeRunEvents(runSimpleChatAgent(agentInput));
+    if (quickRoute.route === "chat_agent_task") {
+      await consumeRunEvents(runChatAgent(agentInput));
       await completeRun();
       return;
     }
@@ -1498,14 +1485,11 @@ function buildManagerRunPrompt(input: AgentRunInput) {
   ].filter(Boolean).join("\n\n");
 }
 
-function buildSimpleChatPrompt(input: AgentRunInput) {
+function buildChatPrompt(input: AgentRunInput) {
   return [
     `User request: ${input.message}`,
     input.normalizedInput
       ? `Normalized input: ${JSON.stringify(input.normalizedInput)}`
-      : "",
-    input.upstreamContext.length
-      ? `Trusted upstream context summary: ${JSON.stringify(input.upstreamContext.slice(0, 4))}`
       : "",
     "Answer directly and concisely. Do not create canvas artifacts or claim that tools were used.",
   ].filter(Boolean).join("\n\n");

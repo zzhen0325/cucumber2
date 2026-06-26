@@ -6,11 +6,17 @@
 
 - 画布运行时新增临时 `Agent Run 检查` 浮层，自动展示当前/最近一次 Agent Run 的输出事件和完整 raw event JSON，方便排查实时流、tool、artifact、canvas operation、terminal output 和 error；该面板只消费现有 `agent_run_events` / AI SDK runtime events，不新增后端协议、数据库表或平行 Trace 状态。
 
+## 2026-06-26 Chat Agent Route Boundary
+
+- `Cucumber Simple Chat` 升级为 `Cucumber Chat Agent`，集中使用 `chat.instructions.ts`；寒暄、普通短答、轻量解释和基于可信上游上下文的短回答统一进入 `chat_agent_task`，启动 Chat Agent Runner，但跳过 plan 和 skill retrieval。
+- runtime route 从旧的泛化命名调整为 `chat_agent_task`、`manager_task`、`document_task`、`research_task`、`web_task` 和 `image_task`；单一 specialist 任务继续直达对应 Agent，fallback、文本改写、knowledge 问答、受限画布操作和复合编排进入 Manager。
+- `smalltalk` 直接返回路径删除；图片生成元信息问题也进入 Chat Agent，由 Chat Agent 只依据可信 upstream context 和 artifact metadata 回答。
+
 ## 2026-06-25 Reusable Text Artifact Boundary
 
 - Input Normalizer 继续复用 artifact-first task protocol，不新增独立 Output Planner 或 `responseMode` 状态；可复用、可复制、可编辑的文本产物仍通过 `artifact.kind/subtype/format` 表达。
 - 模板、提示词模板、完整提示词、可复制/直接使用方案、设定稿、规范和 IP 三视图模板等生产型文本请求归一化为 `document/markdown` artifact，并由 Document Agent 通过 `create_text_artifact` 创建画布文档；明确要求生成真实图片/海报/插画时仍走 Image Agent。
-- 简单解释、为什么/是什么类问答继续保持 `artifact=null`，由 fast path、轻量 chat 或 Manager 在 Run 节点直接回复。
+- 简单解释、为什么/是什么类问答继续保持 `artifact=null`，由 Cucumber Chat Agent 在 Run 节点直接回复。
 
 ## 2026-06-24 Input Normalizer And Manager Boundary
 
@@ -62,10 +68,10 @@
 ## 2026-06-17 Runtime Fast Path
 
 - `/api/agent-run` 入口保持 AI SDK HTTP stream 不变；最初的 `Quick Router` 本地规则层后来收缩为确定性 preflight，复杂语义路由见 2026-06-24 的 Fast Capability-Aware Router。Trace 仍在 `run.created` / `input.normalized` payload 中写入 route、routerSource、skippedSteps 和路由诊断字段。
-- `smalltalk` 直接写 Trace、流式文本和 `run.completed`；`simple_chat` 使用缓存的轻量 chat Agent/Runner，不加载 skills、handoff 或动态计划；`simple_canvas` 只处理确定性的安全画布操作，并继续通过 canvas policy 写 `canvas.operation.*`。
+- `chat_agent_task` 使用缓存的 Chat Agent/Runner，不加载 skills、handoff 或动态计划；`simple_canvas` 只处理确定性的安全画布操作，并继续通过 canvas policy 写 `canvas.operation.*`。
 - `image_task` 可在 `input.normalized` 后由投影层先创建 loading 图片结果节点；完整图片 artifact 由 `generate_image`、`image_matting` 或 `upscale_image` 产生并按 artifact id 幂等物化，不重复生成结果节点；图片拆解由 `decompose_image` 创建 Markdown artifact 节点，图片理解直接在 Run 节点回复。
-- `complex_agent_task` 才进入完整 Agent Runner；compact context、skill retrieval 和 tool prepare 在依赖允许时并行。`plan.build` 只在复杂、图片或非空动态计划时写 Trace，简单任务不再写空计划步骤。
-- Agent world 进程级缓存 Manager、Document/Web/Research/Image agents、handoff registry、normalizer Agent、Runner 和 simple chat Runner；per-run instructions/context 仍从 `runContext` 注入，不写入单例。
+- `manager_task`、direct specialist task 和 `image_task` 进入完整 Agent Runner；compact context、skill retrieval 和 tool prepare 在依赖允许时并行。`plan.build` 只在 Manager、图片或非空动态计划时写 Trace，简单任务不再写空计划步骤。
+- Agent world 进程级缓存 Chat、Manager、Document/Web/Research/Image agents、handoff registry、normalizer Agent 和 Runner；per-run instructions/context 仍从 `runContext` 注入，不写入单例。
 - `generate_image` 是 Image Agent 本地 function tool；简单生图和复杂图片任务统一进入 Image Agent。简单任务可直接调用 `generate_image`，需要风格系统、prompt 扩写、knowledge 或资源脚本时再按需调用对应工具。
 - API server 启动成功后服务端 fire-and-forget 预热 model provider、Agent world 和 skill registry；打开项目成功后也会补触发同一预热。预热失败只记录日志，不阻塞服务或画布加载。
 
@@ -76,7 +82,7 @@
 - `视觉`、`H5`、营销或产品语义只作为 `domain`/上下文；流程图和时序图默认归一化为 `diagram` + `mermaid`，由 Document Agent 产出 Markdown artifact，不走图片链路。
 - 明确的 HTML 页面、H5 页面、交互 demo 或 HTML 动画请求归一化为 `webpage` + `html`，并加上 `negativeCapabilities=["image-generation"]`；生成 HTML 由 Document Agent 创建 webpage artifact，抓取公开 URL 才走 Web Agent。
 - 提示词/文本改写任务（例如选中长图片 prompt 后输入“取消标题”）归一化为 `artifact=null` + `operation=edit` + `negativeCapabilities=["image-generation"]`，由 Manager 直接输出修改后的文本；即使存在上游 prompt 节点也不创建任务 plan、不委派 Image Agent、不调用 `generate_image`。
-- Manager 作为通用 fallback 与复合任务编排者：短问答、概念解释、轻量分析和简短总结保持 `artifact=null`，优先由 fast path/轻量 chat 或 Manager route 直接回复；明确要求详细说明、完整规划、长篇方案、调研分析、报告或文档时归一化为 document/markdown artifact，交由 Document Agent 创建可沉淀的长文本产物。
+- Manager 作为通用 fallback 与复合任务编排者：提示词/文本改写、knowledge 问答、受限画布操作和复合任务进入 Manager；短问答、概念解释、轻量分析和简短总结保持 `artifact=null` 并优先进入 Chat Agent；明确要求详细说明、完整规划、长篇方案、调研分析、报告或文档时归一化为 document/markdown artifact，交由 Document Agent 创建可沉淀的长文本产物。
 - Skill frontmatter 新增可选 `capabilities`、`produces`、`uses` 和 `notFor`；skill retrieval 先按 artifact/capability 打分，再看关键词、canvas kind 和 token overlap，并会按 `negativeCapabilities` 抑制不应出现的 image skill。
 - 新增 seed skill `sequence-diagram`，声明 `diagram/sequenceDiagram/mermaid` 能力，Document Agent 可激活后用 `create_text_artifact` 创建包含 Mermaid fenced block 的 Markdown artifact。
 - 工具入口新增 task artifact policy：图片 prompt/generation 工具只允许 image artifact task，`image-generation` negative capability 会阻止新图生成；`image_matting` 仍要求 image artifact task 但不视为新图生成；`decompose_image` 要求对应 image inspection capability，可产出 markdown/document 分析 artifact；`create_text_artifact` 只允许 markdown/document/diagram/code/webpage 文本类 artifact task，Mermaid diagram 必须包含 mermaid fenced block，webpage artifact 必须是完整 HTML document。

@@ -392,6 +392,8 @@ export async function storeTextArtifactContent(
   const artifactType = input.type ?? "doc";
   const mimeType = getMimeTypeForTextArtifact(artifactType);
   const format = getTextArtifactContentFormat(artifactType);
+  const preview = previewTextContent(input.content, 4_000);
+  const summary = summarizeTextPreview(input.content, 240);
 
   const metadata = compactRecord({
     ...input.metadata,
@@ -401,13 +403,13 @@ export async function storeTextArtifactContent(
     format,
     mimeType,
     origin: "runtime_materialized",
-    preview: summarizeTextPreview(input.content, 4_000),
+    preview,
     previewKind: getPreviewKindForArtifactType(artifactType),
     projectId: input.projectId,
     size: bytes.byteLength,
     sourceRunNodeId: input.runNodeId,
     sourceToolName: input.sourceToolName,
-    summary: summarizeTextPreview(input.content, 240),
+    summary,
   });
 
   const artifact = await upsertTextArtifactContentForUser({
@@ -418,9 +420,9 @@ export async function storeTextArtifactContent(
     mimeType,
     plainText: input.content,
     previewKind: getPreviewKindForArtifactType(artifactType),
-    previewText: summarizeTextPreview(input.content, 4_000),
+    previewText: preview,
     projectId: input.projectId,
-    summary: summarizeTextPreview(input.content, 240),
+    summary,
     title: input.title,
     type: artifactType,
     userId: input.userId,
@@ -749,6 +751,14 @@ function summarizeTextPreview(content: string, limit: number) {
     return normalized;
   }
   return `${normalized.slice(0, Math.max(0, limit - 1))}…`;
+}
+
+function previewTextContent(content: string, limit: number) {
+  const normalized = content.replace(/\r\n?/g, "\n").trim();
+  if (normalized.length <= limit) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
 }
 
 function compactRecord(record: Record<string, unknown>) {

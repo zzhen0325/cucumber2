@@ -8,25 +8,26 @@ import {
 } from "./quick-router.ts";
 
 describe("quick agent run router", () => {
-  it("routes smalltalk to a direct response without slow prep", () => {
+  it("routes greetings to the chat agent without slow prep", () => {
     const route = routeAgentRunQuick(input({ message: "哈喽" }));
 
     expect(route).toMatchObject({
-      route: "smalltalk",
+      route: "chat_agent_task",
       routerSource: "quick-router",
       requiresModelNormalization: false,
     });
-    expect(route.directResponse).toContain("我在");
-    expect(route.skippedSteps).toEqual(
-      expect.arrayContaining(["input.normalize", "skills.retrieve", "agent.start"])
-    );
+    expect(route.skippedSteps).toEqual([
+      "input.normalize",
+      "plan.build",
+      "skills.retrieve",
+    ]);
   });
 
   it("defers short ordinary questions to the LLM normalizer", () => {
     const route = routeAgentRunQuick(input({ message: "解释一下 React Flow 是什么" }));
 
     expect(route).toMatchObject({
-      route: "complex_agent_task",
+      route: "manager_task",
       routerSource: "quick-router",
       requiresModelNormalization: true,
     });
@@ -39,14 +40,14 @@ describe("quick agent run router", () => {
     );
 
     expect(route).toMatchObject({
-      route: "complex_agent_task",
+      route: "manager_task",
       routerSource: "quick-router",
       requiresModelNormalization: true,
     });
     expect(route.normalizedInput).toBeUndefined();
   });
 
-  it("answers selected image generation metadata without image tools", () => {
+  it("routes selected image generation metadata to the chat agent", () => {
     const route = routeAgentRunQuick(
       input({
         message: "这个图片的生成信息是什么",
@@ -78,27 +79,26 @@ describe("quick agent run router", () => {
     );
 
     expect(route).toMatchObject({
-      route: "simple_chat",
+      route: "chat_agent_task",
       requiresModelNormalization: false,
-      directResponse: expect.stringContaining("这张图记录到的生成信息"),
       normalizedInput: {
         operation: "answer",
         artifact: null,
         negativeCapabilities: ["image-generation"],
       },
     });
-    expect(route.directResponse).toContain("seed5_duotu_zz");
-    expect(route.directResponse).toContain("1536x1024");
-    expect(route.skippedSteps).toEqual(
-      expect.arrayContaining(["input.normalize", "skills.retrieve", "agent.start"])
-    );
+    expect(route.skippedSteps).toEqual([
+      "input.normalize",
+      "plan.build",
+      "skills.retrieve",
+    ]);
   });
 
   it("defers explicit image generation to the LLM normalizer", () => {
     const route = routeAgentRunQuick(input({ message: "生成一张 16:9 黄瓜海报" }));
 
     expect(route).toMatchObject({
-      route: "complex_agent_task",
+      route: "manager_task",
       routerSource: "quick-router",
       requiresModelNormalization: true,
     });
@@ -140,7 +140,6 @@ describe("quick agent run router", () => {
         },
       },
     });
-    expect(route.directResponse).toBeUndefined();
   });
 
   it("defers selected-image character IP figure requests to the LLM normalizer", () => {
@@ -154,7 +153,7 @@ describe("quick agent run router", () => {
     );
 
     expect(route).toMatchObject({
-      route: "complex_agent_task",
+      route: "manager_task",
       routerSource: "quick-router",
       requiresModelNormalization: true,
     });
@@ -167,7 +166,7 @@ describe("quick agent run router", () => {
     );
 
     expect(route).toMatchObject({
-      route: "complex_agent_task",
+      route: "manager_task",
       routerSource: "quick-router",
       requiresModelNormalization: true,
     });
@@ -180,7 +179,7 @@ describe("quick agent run router", () => {
     );
 
     expect(route).toMatchObject({
-      route: "complex_agent_task",
+      route: "manager_task",
       routerSource: "quick-router",
       requiresModelNormalization: true,
     });
@@ -216,7 +215,7 @@ describe("quick agent run router", () => {
     );
 
     expect(route).toMatchObject({
-      route: "complex_agent_task",
+      route: "manager_task",
       routerSource: "quick-router",
       requiresModelNormalization: true,
     });
@@ -236,7 +235,7 @@ describe("quick agent run router", () => {
       }
     );
 
-    expect(route).toBe("simple_chat");
+    expect(route).toBe("chat_agent_task");
     expect(skippedStepsForNormalizedRoute(route)).toEqual([
       "plan.build",
       "skills.retrieve",
@@ -258,7 +257,7 @@ describe("quick agent run router", () => {
       { allowSimpleChat: false }
     );
 
-    expect(route).toBe("complex_agent_task");
+    expect(route).toBe("manager_task");
   });
 
   it("routes normalized image artifacts to image tasks", () => {
@@ -278,6 +277,51 @@ describe("quick agent run router", () => {
     });
 
     expect(route).toBe("image_task");
+  });
+
+  it("routes normalized document artifacts to document tasks", () => {
+    const route = routeNormalizedAgentRun(input({ message: "写一份 PRD" }), {
+      rawPrompt: "写一份 PRD",
+      userGoal: "写一份 PRD",
+      operation: "create",
+      artifact: { kind: "document", subtype: "prd", format: "markdown" },
+      domain: "product",
+      requiredCapabilities: ["markdown-artifact"],
+      negativeCapabilities: [],
+      intent: "document.create",
+    });
+
+    expect(route).toBe("document_task");
+  });
+
+  it("routes normalized research answers to research tasks", () => {
+    const route = routeNormalizedAgentRun(input({ message: "调研一下 Agent SDK" }), {
+      rawPrompt: "调研一下 Agent SDK",
+      userGoal: "调研一下 Agent SDK",
+      operation: "answer",
+      artifact: null,
+      domain: "engineering",
+      requiredCapabilities: ["research", "source-based-answer", "citations"],
+      negativeCapabilities: [],
+      intent: "research.answer",
+    });
+
+    expect(route).toBe("research_task");
+  });
+
+  it("routes normalized public URL fetches to web tasks", () => {
+    const route = routeNormalizedAgentRun(input({ message: "读取 https://example.com" }), {
+      rawPrompt: "读取 https://example.com",
+      userGoal: "读取 https://example.com",
+      operation: "create",
+      artifact: { kind: "webpage", format: "html" },
+      domain: "general",
+      requiredCapabilities: ["web-fetch"],
+      negativeCapabilities: [],
+      intent: "web.fetch",
+    });
+
+    expect(route).toBe("web_task");
   });
 });
 

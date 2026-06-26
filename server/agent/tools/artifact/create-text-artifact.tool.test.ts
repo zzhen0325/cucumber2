@@ -125,6 +125,38 @@ describe("create_text_artifact tool", () => {
       title: "Agent 工作原理动画",
     });
   });
+
+  it("repairs collapsed markdown block boundaries before storing", async () => {
+    mocks.storeTextArtifactContent.mockClear();
+    mocks.storeTextArtifactContent.mockResolvedValue({
+      id: "text-1",
+      metadata: {
+        format: "markdown",
+        mimeType: "text/markdown",
+        previewKind: "markdown",
+        sourceRunNodeId: "run-1",
+        sourceToolName: "create_text_artifact",
+      },
+      title: "提示词合集",
+      type: "doc",
+    });
+    const context = agentContext();
+
+    await createTextArtifactTool.invoke(
+      new RunContext(context),
+      JSON.stringify({
+        content: "# 标题 ## 小节 ``` prompt ``` --- ## 下一节",
+        title: "提示词合集",
+      })
+    );
+
+    expect(mocks.storeTextArtifactContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content:
+          "# 标题\n\n## 小节\n\n```\nprompt\n\n```\n---\n\n## 下一节",
+      })
+    );
+  });
 });
 
 function agentContext(

@@ -11,6 +11,7 @@ const storageMocks = vi.hoisted(() => {
   const getObject = vi.fn();
   const headObject = vi.fn();
   const putObject = vi.fn(async () => undefined);
+  const getAgentArtifactForUser = vi.fn(async () => null);
   const registerAgentArtifact = vi.fn(async (input: Record<string, unknown>) => ({
     bucketId: input.bucketId ?? null,
     contentRef: input.contentRef ?? null,
@@ -36,15 +37,28 @@ const storageMocks = vi.hoisted(() => {
     version: 0,
   }));
   const replaceAgentKnowledgeChunksForArtifact = vi.fn(async () => undefined);
+  const upsertTextArtifactContentForUser = vi.fn(async (input: Record<string, unknown>) => ({
+    id: input.artifactId,
+    metadata: input.metadata ?? {},
+    mimeType: input.mimeType,
+    preview: input.previewText,
+    previewKind: input.previewKind,
+    summary: input.summary,
+    title: input.title,
+    type: input.type,
+    uri: `/api/projects/${input.projectId}/artifacts/${input.artifactId}/content`,
+  }));
 
   return {
     createPresignedReadUrl,
     createPresignedUploadUrl,
+    getAgentArtifactForUser,
     getObject,
     headObject,
     putObject,
     registerAgentArtifact,
     replaceAgentKnowledgeChunksForArtifact,
+    upsertTextArtifactContentForUser,
   };
 });
 
@@ -62,9 +76,15 @@ vi.mock("./r2-storage.ts", () => ({
 }));
 
 vi.mock("./supabase.ts", () => ({
+  getAgentArtifactForUser: storageMocks.getAgentArtifactForUser,
   registerAgentArtifact: storageMocks.registerAgentArtifact,
   replaceAgentKnowledgeChunksForArtifact:
     storageMocks.replaceAgentKnowledgeChunksForArtifact,
+}));
+
+vi.mock("./artifact-content-store.ts", () => ({
+  upsertTextArtifactContentForUser:
+    storageMocks.upsertTextArtifactContentForUser,
 }));
 
 const {
@@ -76,17 +96,20 @@ const {
   parseStorageContentRef,
   resolveStorageBackedImageContext,
   storeGeneratedImageFromBytes,
+  storeTextArtifactContent,
 } = await import("./storage.ts");
 
 describe("agent asset storage helpers", () => {
   beforeEach(() => {
     storageMocks.createPresignedReadUrl.mockClear();
     storageMocks.createPresignedUploadUrl.mockClear();
+    storageMocks.getAgentArtifactForUser.mockClear();
     storageMocks.getObject.mockReset();
     storageMocks.headObject.mockReset();
     storageMocks.putObject.mockClear();
     storageMocks.registerAgentArtifact.mockClear();
     storageMocks.replaceAgentKnowledgeChunksForArtifact.mockClear();
+    storageMocks.upsertTextArtifactContentForUser.mockClear();
   });
 
   it("uses stable app refs for stored artifacts", () => {
@@ -108,6 +131,33 @@ describe("agent asset storage helpers", () => {
     });
     expect(getArtifactContentUrl("project-1", "artifact-1")).toBe(
       "/api/projects/project-1/artifacts/artifact-1/content"
+    );
+  });
+
+  it("preserves markdown line breaks in text artifact previews", async () => {
+    const content = "# 日本家居风格 Banner\n\n## 核心通用版\n\n正文";
+
+    await storeTextArtifactContent({
+      content,
+      projectId: "project-1",
+      runNodeId: "run-1",
+      sourceToolName: "create_text_artifact",
+      title: "日本家居Banner生成提示词合集",
+      type: "doc",
+      userId: "user-1",
+    });
+
+    expect(storageMocks.upsertTextArtifactContentForUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contentText: content,
+        plainText: content,
+        previewText: content,
+        summary: "# 日本家居风格 Banner ## 核心通用版 正文",
+        metadata: expect.objectContaining({
+          preview: content,
+          summary: "# 日本家居风格 Banner ## 核心通用版 正文",
+        }),
+      })
     );
   });
 
