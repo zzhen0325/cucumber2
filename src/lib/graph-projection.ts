@@ -1162,10 +1162,15 @@ function readNormalizedImageRequest(
     "";
 
   if (dimensionVariants.length > 1) {
+    const previews = dimensionVariants.map((variant) => ({
+      width: variant.width,
+      height: variant.height,
+      aspectRatio: simplifyAspectRatio(variant.width, variant.height),
+    }));
     return {
-      count: dimensionVariants.length,
-      preview: dimensionVariants[0],
-      previews: dimensionVariants,
+      count: previews.length,
+      preview: previews[0],
+      previews,
     };
   }
 

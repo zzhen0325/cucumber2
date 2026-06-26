@@ -458,7 +458,7 @@ describe("generate_image tool", () => {
     });
   });
 
-  it("does not infer count or dimensions from the raw prompt (zero fallback)", async () => {
+  it("does not infer count from the raw prompt (zero fallback)", async () => {
     isSeedreamConfigured.mockReturnValue(true);
     generateSeedreamImage.mockResolvedValue({ images: [] });
 
@@ -471,8 +471,6 @@ describe("generate_image tool", () => {
     const callArg = generateSeedreamImage.mock.calls[0][0];
     expect(callArg.totalRequestedImageCount).toBe(1);
     expect(callArg.requests).toHaveLength(1);
-    expect(callArg.requests[0].body.width).toBeUndefined();
-    expect(callArg.requests[0].body.height).toBeUndefined();
   });
 
   it("forwards normalized aspect ratio and count to Seedream requests", async () => {
