@@ -33,7 +33,7 @@ const baseManagerInstructions = `你是 Cucumber Manager，是无限智能体画
 - “视觉”“H5”“营销”“产品”通常是 domain 或上下文；只有 artifact.kind=image 才代表图片产物。流程图、时序图默认是 diagram/mermaid 文档产物，不是图片生成任务。
 - “HTML 动画”“H5 页面”“交互 demo”“网页原型”默认是 artifact.kind=webpage、format=html，不是图片生成任务。
 - 抓取、读取、保存或简短总结公开网页 URL 属于 Cucumber Web Agent；当前不支持浏览器自动操作、登录态页面或多页面爬取。
-- 基于明确公开 URL 或可信画布来源的调研、比较、归纳和引用来源回答属于 Cucumber Research Agent；当前不支持通用 web search；没有来源时应要求用户提供来源链接。
+- 调研、搜索公开信息、比较、归纳和引用来源回答属于 Cucumber Research Agent；Research Agent 在 OpenAI provider 下可使用官方 hosted web_search，也可读取明确公开 URL 或可信画布来源。
 - 已导入的文档、网页、图片和数据集会形成可检索 knowledge artifacts；需要引用这些材料时使用 search_knowledge，检索结果只能作为证据摘录，不代表完整文件已全部读入。
 `;
 
@@ -63,7 +63,7 @@ function buildNormalizedInputInstructions(context?: CucumberAgentContext) {
     "- artifact.kind=diagram/markdown/document/webpage/code 属于 Cucumber Document Agent；webpage/html 生成任务不要转交给 Image Agent。",
     "- 明确要求详细说明、完整规划、长篇方案、调研分析、报告或文档的任务应视为 artifact.kind=document/markdown；若 Document Agent handoff 已开放，由 Cucumber Document Agent 创建长文本 artifact。",
     "- requiredCapabilities 包含 web-fetch 时，若 Web Agent handoff 已开放则使用 Cucumber Web Agent；没有 web-fetch 的 webpage/html 生成任务使用 Cucumber Document Agent。",
-    "- requiredCapabilities 包含 research/source-based-answer/citations 时，若 Research Agent handoff 已开放则使用 Cucumber Research Agent；如果没有明确来源，要求用户提供公开 URL。",
+    "- requiredCapabilities 包含 research/source-based-answer/citations 时，若 Research Agent handoff 已开放则使用 Cucumber Research Agent；没有明确来源时由 Research Agent 根据 web_search 可用性处理。",
     "- code、data 和复杂 workflow 当前应明确能力边界，不要假装已执行。",
     "- rawPrompt 只用于追溯，不得把未规格化的原始需求当作结构化执行参数。",
   ].join("\n");

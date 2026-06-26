@@ -95,6 +95,7 @@ describe("ByteArtist matting provider", () => {
       baseUrl: "https://byteartist.example",
       blue: -1,
       expiredDuration: 600,
+      generateStaggerMs: 800,
       green: -1,
       height: 1024,
       imageReturnFormat: "png",

@@ -77,11 +77,9 @@ export function RunNodeView({
   const pendingAgentText = getPendingAgentText(data.status, headerSummary);
   const toggleLabel = expanded ? "收起输出" : "展开输出";
   const nodeClassName = [
-    "canvas-node",
     "run-card",
     data.status,
     isActiveRun ? "active" : "",
-    selected ? "selected" : "",
   ]
     .filter(Boolean)
     .join(" ");

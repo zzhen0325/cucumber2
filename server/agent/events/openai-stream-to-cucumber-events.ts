@@ -302,8 +302,14 @@ function readToolName(item: unknown) {
   if (typeof rawItem?.name === "string") {
     return rawItem.name;
   }
+  if (rawItem?.type === "web_search_call") {
+    return "web_search";
+  }
   if (isRecord(rawItem?.rawItem) && typeof rawItem.rawItem.name === "string") {
     return rawItem.rawItem.name;
+  }
+  if (isRecord(rawItem?.rawItem) && rawItem.rawItem.type === "web_search_call") {
+    return "web_search";
   }
   return null;
 }
@@ -316,6 +322,9 @@ function readToolCallId(item: unknown) {
   if (typeof rawItem?.call_id === "string") {
     return rawItem.call_id;
   }
+  if (typeof rawItem?.id === "string") {
+    return rawItem.id;
+  }
   return undefined;
 }
 
@@ -327,6 +336,9 @@ function readToolInput(item: unknown) {
     } catch {
       return rawItem.arguments;
     }
+  }
+  if (isRecord(rawItem?.action)) {
+    return rawItem.action;
   }
   return undefined;
 }

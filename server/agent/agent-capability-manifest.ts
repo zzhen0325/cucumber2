@@ -79,9 +79,13 @@ const routeCapabilities = [
     requiredCapabilities: ["research", "source-based-answer", "citations"],
     negativeCapabilities: [],
     producedArtifactTypes: ["doc"],
-    requiredTools: ["collect_research_sources", "create_research_artifact"],
+    requiredTools: [
+      "web_search",
+      "collect_research_sources",
+      "create_research_artifact",
+    ],
     description:
-      "Research specialist for source-based comparison, synthesis, and cited answers over explicit public URLs or trusted canvas sources.",
+      "Research specialist for web-backed comparison, synthesis, and cited answers over public web search, explicit URLs, or trusted canvas sources.",
   },
   {
     route: "image",

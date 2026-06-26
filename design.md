@@ -12,7 +12,7 @@
 ## Design Tokens
 
 - Tailwind v4 是 CSS-first：稳定、重复使用的颜色、尺寸、圆角、阴影和节点字号统一维护在 `src/styles/theme.css` 的 `@theme` 中，使用官方 namespace：`--color-*`、`--radius-*`、`--shadow-*`、`--spacing-*`、`--text-*`。
-- `src/index.css` 是唯一 Tailwind CSS entry，只负责按顺序 `@import` Tailwind、动画库和 `src/styles/` 下的各产品域样式文件；产品样式按域拆分到独立文件维护。
+- `src/index.css` 是唯一 Tailwind CSS entry，只负责按顺序 `@import` Tailwind、动画库和 `src/styles/` 下仍需要全局选择器的样式文件；普通页面样式优先直接写在组件 `className`。
 - `:root` 只保留 shadcn/ui 语义变量和运行时组件变量，例如 `--cuc-width-composer`；新增重复视觉值先补 `@theme` token，再引用 token。
 - token 组织只参考 Geist 的分层格式，数值以当前 Cucumber/Flowith 画布视觉为准，不直接套用 Geist 数值。
 
@@ -21,12 +21,12 @@
 - `src/index.css` 只保留 `@import`（Tailwind、动画库、`src/styles/*`）、`@source` 和 `@custom-variant`，不直接写产品样式。
 - `src/styles/theme.css` 维护 `@theme`、`@theme inline`、`:root` 和需要 token 的 `@utility`（如 `cuc-checkerboard`）。
 - `src/styles/base.css` 用 `@layer base` 放 `html`、`body`、`#root`、字体、滚动条和基础表单继承，以及全局 `@keyframes` 和 `@utility` 动画（如 `animate-star-sparkle`）。
-- 产品样式按域拆分为独立文件：`workspace-pages.css`、`canvas-shell.css`、`composer.css`、`canvas-nodes.css`、`run-node.css`、`artifacts.css`、`trace-panel.css`；不要在 `src/App.tsx` 或其他组件里重新引入全局样式入口。
-- 不要把完整产品域样式整体包进 `@layer components`，否则 JSX 中已有 Tailwind utilities 会覆盖 `.home-*`、`.composer-*`、`.canvas-node` 等产品 class，造成视觉回退。
-- `workspace-pages.css` 管理 `home-*`、`project-*`、`skills-*`、`workspace-*`、`app-state-*`。
-- `canvas-shell.css` 管理 `app-shell`、`agent-canvas`、`top-bar`、`tool-rail`、`viewport-controls`、`file-drop-*`、`replay-banner`。
+- 产品样式按域拆分为独立文件：`canvas-shell.css`、`composer.css`、`run-node.css`、`artifacts.css`、`trace-panel.css`；普通页面和基础节点样式优先写在组件 `className`，不要在 `src/App.tsx` 或其他组件里重新引入全局样式入口。
+- 不要把完整产品域样式整体包进 `@layer components`，否则 JSX 中已有 Tailwind utilities 会覆盖 `.composer-*`、`.run-*` 等产品 class，造成视觉回退。
+- `workspace-pages.css` 只保留仍需要全局选择器或资源 mask 的 `app-state-*`、`cucumber-send-icon`、`storage-chip`；Home、Project、Skills 页面样式写在各自组件 `className`。
+- `canvas-shell.css` 只保留 React Flow 内部选择器（如 `.react-flow__pane`、selection、handle、edge）；shell、top bar、tool rail、viewport controls、file drop overlay 直接写在组件 `className`。
 - `composer.css` 管理 `composer-*`、图像模式 controls、inline token、skill menu。
-- `canvas-nodes.css` 管理 `canvas-node`、resizer、prompt、sticky、shape 基础节点。
+- 基础节点样式由 `src/components/ai-elements/node.tsx` 的 `Node` 和基础节点组件 className 管理，并继续提供 `--canvas-node-*` 变量给 `run-node.css` 与 `artifacts.css`。
 - `run-node.css` 管理 `run-*`、`agent-*`、`tool-call-*`、`tool-json-*`。
 - `artifacts.css` 管理 image / markdown / code / html artifact、preview dialog、BlockNote 覆盖和透明棋盘格。
 - `trace-panel.css` 管理 `run-trace-*`、`trace-*` 和 replay banner。

@@ -186,6 +186,46 @@ describe("OpenAI Agents stream adapter", () => {
     );
   });
 
+  it("names hosted web search calls in tool trace events", async () => {
+    const context = agentContext();
+    const stream = fakeStream([
+      {
+        type: "run_item_stream_event",
+        name: "tool_called",
+        item: {
+          rawItem: {
+            id: "ws-1",
+            type: "web_search_call",
+            action: { query: "OpenAI Agents SDK web search" },
+          },
+        },
+      },
+      {
+        type: "run_item_stream_event",
+        name: "tool_output",
+        item: { rawItem: { id: "ws-1", type: "web_search_call" } },
+      },
+    ], "完成");
+
+    const events = await collect(openAIStreamToCucumberEvents(stream, context));
+
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "tool_started",
+          toolCallId: "ws-1",
+          toolName: "web_search",
+          input: { query: "OpenAI Agents SDK web search" },
+        }),
+        expect.objectContaining({
+          type: "tool_completed",
+          toolCallId: "ws-1",
+          toolName: "web_search",
+        }),
+      ])
+    );
+  });
+
   it("emits tool_failed before propagating a stream failure", async () => {
     const context = agentContext();
     const stream = failingStream();

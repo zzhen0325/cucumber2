@@ -1,7 +1,6 @@
 import {
   applyEdgeChanges,
   applyNodeChanges,
-  Controls,
   MiniMap,
   NodeToolbar,
   Position,
@@ -148,6 +147,7 @@ import {
   runtimeEventsFromMessageParts,
   runtimeEventsFromMessages,
 } from "@/lib/runtime-event-renderer";
+import { cn } from "@/lib/utils";
 import type {
   AgentCanvasEdge,
   AgentCanvasNode,
@@ -330,6 +330,14 @@ const IMAGE_ASPECT_RATIO_STORAGE_KEY = "cucumber:image-aspect-ratio";
 const IMAGE_RESULT_COUNT_STORAGE_KEY = "cucumber:image-result-count";
 const IMAGE_PROVIDER_STORAGE_KEY = "cucumber:image-provider";
 const TRACE_RECONCILE_DELAYS_MS = [0, 1500, 4000, 8000] as const;
+const SHELL_ICON_BUTTON_CLASS =
+  "grid place-items-center border-0 bg-transparent text-[#5c5c5c] cursor-pointer [&:hover:not(:disabled)]:bg-cuc-surface-warm [&:hover:not(:disabled)]:text-cuc-text disabled:cursor-default disabled:opacity-[0.38]";
+const TOP_ICON_BUTTON_CLASS =
+  "grid h-cuc-control place-items-center border-0 bg-transparent text-cuc-text-heading cursor-pointer hover:bg-cuc-surface/72 hover:text-cuc-text-heading";
+const TOP_CONTROL_BUTTON_CLASS = cn(
+  TOP_ICON_BUTTON_CLASS,
+  "rounded-cuc-control"
+);
 
 function getSelectedNodeIds(nodes: AgentCanvasNode[]) {
   return nodes.filter((node) => node.selected).map((node) => node.id);
@@ -2896,7 +2904,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
   return (
     <main
-      className="app-shell"
+      className="relative h-screen w-screen overflow-hidden bg-cuc-surface p-cuc-canvas-inset"
       onDragEnter={fileDrop.handleFileDragEnter}
       onDragLeave={fileDrop.handleFileDragLeave}
       onDragOver={fileDrop.handleFileDragOver}
@@ -2918,7 +2926,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         >
           <ImageNodeActionContext.Provider value={imageNodeActions}>
             <Canvas<AgentCanvasNode, AgentCanvasEdge>
-              className={`agent-canvas canvas-tool-${canvasTool}${
+              className={`agent-canvas h-full w-full overflow-hidden rounded-cuc-canvas border border-cuc-canvas-border bg-cuc-canvas canvas-tool-${canvasTool}${
                 isCreateTool ? " canvas-tool-create" : ""
               }`}
               colorMode="light"
@@ -2954,12 +2962,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
                 fitRequest={layoutFitRequest}
                 nodeCount={canvasNodes.length}
               />
-              <Controls position="bottom-right" showInteractive={false} />
               <MiniMap
                 pannable
                 zoomable
                 position="top-right"
-                className="canvas-minimap"
+                className="hidden"
               />
             </Canvas>
           </ImageNodeActionContext.Provider>
@@ -3071,7 +3078,7 @@ function CanvasCreationPreview({ preview }: { preview: CreationPreview | null })
   return (
     <div
       aria-hidden
-      className="canvas-creation-preview"
+      className="pointer-events-none absolute z-[18] grid min-h-2 min-w-2 place-items-center rounded-cuc-popover border border-black/75 bg-cuc-ink/8 text-[11px] leading-[14px] text-[#174222]/80 shadow-[0_0_0_3px_rgba(0,0,0,0.08)]"
       style={{
         height: preview.rect.height,
         left: preview.rect.left,
@@ -3079,7 +3086,9 @@ function CanvasCreationPreview({ preview }: { preview: CreationPreview | null })
         width: preview.rect.width,
       }}
     >
-      <span>{preview.label}</span>
+      <span className="max-w-[86px] overflow-hidden truncate rounded-cuc-pill bg-cuc-surface/72 px-1.5 py-0.5">
+        {preview.label}
+      </span>
     </div>
   );
 }
@@ -3705,29 +3714,36 @@ function TopBar({
   onBack: () => void;
 }) {
   return (
-    <div className="top-bar">
+    <div className="absolute left-3.5 top-3.5 z-20 flex h-cuc-floating-height items-center gap-1 rounded-cuc-floating bg-cuc-canvas-glass p-2 text-[13px] font-normal text-cuc-text-strong backdrop-blur-sm max-[760px]:left-3 max-[760px]:max-w-[calc(100vw-24px)] max-[760px]:overflow-hidden">
       <button
         aria-label="返回项目列表"
-        className="top-back-button"
+        className={cn(TOP_ICON_BUTTON_CLASS, "size-cuc-icon-button rounded-cuc-card text-cuc-text-secondary hover:bg-cuc-surface/72")}
         onClick={onBack}
         title="返回项目列表"
         type="button"
       >
         <ArrowLeft size={12} />
       </button>
-      <div className="top-bar-main">
-        <div className="brand-mark">
-          <img src="/LOGO.svg" alt="cucumber logo" />
+      <div className="flex h-cuc-control w-[271px] items-center gap-1 overflow-hidden max-[760px]:w-[min(271px,calc(100vw-88px))]">
+        <div className="grid size-cuc-control flex-none place-items-center rounded-cuc-control text-cuc-control-dark">
+          <img className="size-5" src="/LOGO.svg" alt="cucumber logo" />
         </div>
-        <span className="top-bar-divider" />
-        <button className="top-title-button" title={title} type="button">
-          <span>{title}</span>
+        <span className="mx-2 h-3 w-px flex-none bg-cuc-edge" />
+        <button
+          className={cn(
+            TOP_CONTROL_BUTTON_CLASS,
+            "grid w-[150px] grid-cols-[minmax(0,1fr)_12px] gap-1.5 px-2 text-left max-[760px]:w-[min(150px,calc(100vw-210px))]"
+          )}
+          title={title}
+          type="button"
+        >
+          <span className="truncate">{title}</span>
           <ChevronDown size={12} />
         </button>
-        <button aria-label="分享" className="top-icon-button" title="分享" type="button">
+        <button aria-label="分享" className={cn(TOP_CONTROL_BUTTON_CLASS, "w-cuc-control")} title="分享" type="button">
           <ArrowUpRight size={14} />
         </button>
-        <button aria-label="评论" className="top-icon-button" title="评论" type="button">
+        <button aria-label="评论" className={cn(TOP_CONTROL_BUTTON_CLASS, "w-cuc-control")} title="评论" type="button">
           <Copy size={14} />
         </button>
         <span
@@ -3759,13 +3775,17 @@ function ToolRail({
   ];
 
   return (
-    <aside className="tool-rail" aria-label="Canvas tools">
+    <aside className="absolute left-3.5 top-1/2 z-20 flex w-14 -translate-y-1/2 flex-col items-center gap-1 rounded-cuc-composer border-[0.5px] border-cuc-border bg-cuc-surface p-[8.5px] max-[760px]:left-3 max-[760px]:w-12 max-[760px]:p-1.5" aria-label="Canvas tools">
       {tools.map(({ icon: Icon, label, tool }) => {
         const active = tool === activeTool;
         return (
           <button
             aria-label={label}
-            className={active ? "active" : ""}
+            className={cn(
+              SHELL_ICON_BUTTON_CLASS,
+              "size-cuc-tool rounded-cuc-floating max-[760px]:size-9",
+              active && "bg-cuc-surface-warm text-cuc-text"
+            )}
             key={label}
             onClick={() => onToolChange(tool)}
             type="button"
@@ -3787,9 +3807,10 @@ function ViewportControls({
   onAutoLayout: () => void;
 }) {
   return (
-    <div className="viewport-controls">
+    <div className="absolute right-5 top-3.5 z-20 flex h-cuc-floating-height items-center gap-1 rounded-cuc-floating bg-cuc-canvas-glass px-2 backdrop-blur-sm max-[760px]:right-3 max-[760px]:top-[68px] max-[760px]:max-w-[calc(100vw-118px)] max-[760px]:overflow-hidden">
       <button
         aria-label="自动布局"
+        className={cn(SHELL_ICON_BUTTON_CLASS, "h-cuc-control w-cuc-control rounded-cuc-control")}
         disabled={!canAutoLayout}
         onClick={onAutoLayout}
         title={canAutoLayout ? "自动布局" : "暂无节点"}
@@ -3799,12 +3820,15 @@ function ViewportControls({
       </button>
       <button
         aria-label="适应画布"
-        className="viewport-zoom-button"
+        className={cn(
+          SHELL_ICON_BUTTON_CLASS,
+          "!flex h-cuc-control w-[69px] items-center justify-center gap-1 rounded-cuc-control px-2 disabled:opacity-100"
+        )}
         disabled
         title="暂未开放"
         type="button"
       >
-        <span className="zoom-label">100%</span>
+        <span className="w-[37px] text-center text-[13px] leading-5 text-cuc-text-heading">100%</span>
         <ChevronDown size={12} />
       </button>
      
@@ -3819,7 +3843,7 @@ function EmptyState({ visible }: { visible: boolean }) {
   }
 
   return (
-    <div className="empty-state">
+    <div className="pointer-events-none absolute left-1/2 top-1/2 z-[5] flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 text-[13px] text-cuc-text-subtle">
       <CircleDot size={18} />
       <span>输入需求，让 Agent 帮你实现它</span>
     </div>
@@ -4479,30 +4503,26 @@ function PromptNode({
   const { onPromptTextChange, readOnly } = useContext(ManualNodeEditingContext);
   const isExpanded = typeof height === "number" && height > 96;
   const isManualPrompt = Boolean(data.manual);
-  const nodeClassName = [
-    "canvas-node",
-    "prompt-card",
-    isManualPrompt ? "manual" : "",
-    selected ? "selected" : "",
-    isExpanded ? "expanded" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
 
   return (
     <Node
-      className={nodeClassName}
+      className="h-[78px] min-h-[78px]"
       handles={{ source: true, target: true }}
       minHeight={64}
       minWidth={180}
       selected={selected}
       style={getResizableNodeStyle(width, height)}
     >
-      <NodeContent className="prompt-content">
+      <NodeContent
+        className={cn(
+          "grid h-full min-h-0 overflow-auto px-[26px] py-cuc-node-padding",
+          isExpanded ? "[place-items:start_stretch]" : "place-items-center"
+        )}
+      >
         {isManualPrompt ? (
           <textarea
             aria-label="用户输入"
-            className="prompt-node-input nodrag nopan nowheel"
+            className="nodrag nopan nowheel h-full w-full resize-none border-0 bg-transparent text-left text-cuc-ink text-cuc-node-body outline-0 [font:inherit] placeholder:text-cuc-ink/42"
             onChange={(event) => onPromptTextChange(id, event.currentTarget.value)}
             placeholder="输入需求..."
             readOnly={readOnly}
@@ -4510,7 +4530,10 @@ function PromptNode({
             value={data.prompt}
           />
         ) : (
-          <p className="copyable-text nodrag nopan" title={data.contextLabel}>
+          <p
+            className="copyable-text nodrag nopan m-0 block overflow-visible whitespace-pre-wrap text-left text-cuc-ink text-cuc-node-body [overflow-wrap:anywhere]"
+            title={data.contextLabel}
+          >
             {data.prompt}
           </p>
         )}
@@ -4530,21 +4553,22 @@ function StickyNoteNode({
 
   return (
     <Node
-      className={
-        selected
-          ? `canvas-node selected sticky-note-card ${data.color}`
-          : `canvas-node sticky-note-card ${data.color}`
-      }
+      className={cn(
+        "!h-[170px] !w-[220px] border-[rgba(217,207,116,0.48)] !bg-[#fff8b8] shadow-[0_6px_18px_rgba(111,93,18,0.07)]",
+        data.color === "green" && "border-black/25 !bg-[#eaffcf]",
+        data.color === "blue" && "border-[rgba(74,132,195,0.2)] !bg-[#eaf4ff]",
+        data.color === "pink" && "border-[rgba(212,92,142,0.2)] !bg-[#ffeef5]"
+      )}
       handles={{ source: true, target: true }}
       minHeight={120}
       minWidth={160}
       selected={selected}
       style={getResizableNodeStyle(width, height)}
     >
-      <NodeContent className="sticky-note-content">
+      <NodeContent className="h-full p-cuc-node-padding">
         <textarea
           aria-label="便签内容"
-          className="sticky-note-input nodrag nopan nowheel"
+          className="nodrag nopan nowheel h-full w-full resize-none border-0 bg-transparent text-cuc-node-body text-cuc-text outline-0 [font:inherit] placeholder:text-[#111111]/42"
           onChange={(event) => onStickyTextChange(id, event.currentTarget.value)}
           placeholder="写下想法..."
           readOnly={readOnly}
@@ -4564,25 +4588,32 @@ function ShapeNode({
   height,
 }: NodeProps<FlowNode<ShapeNodeData, "shapeNode">>) {
   const { onShapeLabelChange, readOnly } = useContext(ManualNodeEditingContext);
+  const visualClassName = cn(
+    "relative grid size-full place-items-center rounded-cuc-node border border-input bg-cuc-surface/88 shadow-cuc-card",
+    data.shape === "ellipse" && "rounded-cuc-pill",
+    data.shape === "pill" && "rounded-cuc-pill",
+    data.shape === "diamond" &&
+      "rounded-none [clip-path:polygon(50%_0,100%_50%,50%_100%,0_50%)]",
+    data.shape === "triangle" &&
+      "rounded-none [clip-path:polygon(50%_0,100%_100%,0_100%)]",
+    data.shape === "frame" &&
+      "border-[1.5px] border-dashed border-cuc-border-dashed bg-cuc-surface/42"
+  );
 
   return (
     <Node
-      className={
-        selected
-          ? `canvas-node selected shape-card ${data.shape}`
-          : `canvas-node shape-card ${data.shape}`
-      }
+      className="!h-[140px] !w-[200px] !border-0 !bg-transparent !shadow-none"
       handles={{ source: true, target: true }}
       minHeight={72}
       minWidth={96}
       selected={selected}
       style={getResizableNodeStyle(width, height)}
     >
-      <NodeContent className="shape-content">
-        <div className="shape-visual">
+      <NodeContent className="grid size-full place-items-stretch p-0">
+        <div className={visualClassName}>
           <input
             aria-label="形状标签"
-            className="shape-label-input nodrag nopan"
+            className="nodrag nopan w-[min(80%,140px)] border-0 bg-transparent text-center text-cuc-node-title text-cuc-text outline-0 [font:inherit]"
             onChange={(event) => onShapeLabelChange(id, event.currentTarget.value)}
             readOnly={readOnly}
             spellCheck={false}
@@ -4814,8 +4845,8 @@ function ArtifactLikeNode({ data, selected, width, height }: ArtifactLikeNodePro
       <Node
         className={
           selected
-            ? `canvas-node selected artifact-card ${data.kind}`
-            : `canvas-node artifact-card ${data.kind}`
+            ? `selected artifact-card ${data.kind}`
+            : `artifact-card ${data.kind}`
         }
         handles={{ source: true, target: true }}
         minHeight={160}
@@ -5051,9 +5082,7 @@ function CodeNode({
       )}
 
       <Node
-        className={
-          selected ? "canvas-node selected code-card" : "canvas-node code-card"
-        }
+        className={selected ? "selected code-card" : "code-card"}
         handles={{ source: true, target: true }}
         minHeight={180}
         minWidth={180}
@@ -5128,8 +5157,8 @@ function HtmlPageNode({
     <Node
       className={
         selected
-          ? "canvas-node selected html-page-card"
-          : "canvas-node html-page-card"
+          ? "selected html-page-card"
+          : "html-page-card"
       }
       handles={{ source: true, target: true }}
       minHeight={180}
@@ -5766,8 +5795,8 @@ function MarkdownNode({
     <Node
       className={
         selected
-          ? "canvas-node selected markdown-card"
-          : "canvas-node markdown-card"
+          ? "selected markdown-card"
+          : "markdown-card"
       }
       handles={{ source: true, target: true }}
       minHeight={180}
@@ -5971,9 +6000,7 @@ function ImageResultNode({
       )}
 
       <Node
-        className={
-          selected ? "canvas-node selected result-card" : "canvas-node result-card"
-        }
+        className={selected ? "selected result-card" : "result-card"}
         handles={{ source: true, target: true }}
         minHeight={24}
         minWidth={120}

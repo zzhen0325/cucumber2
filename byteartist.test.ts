@@ -7,6 +7,7 @@ import {
   buildByteArtistReqJson,
   doesByteArtistModelSupportReferenceImages,
   extractDefaultByteArtistImages,
+  generateByteArtistImage,
   isByteArtistConfigured,
   readByteArtistConfigFromEnv,
   submitAndPollByteArtistImageTask,
@@ -135,6 +136,7 @@ describe("ByteArtist provider", () => {
       appKey: "app-key",
       appSecret: "app-secret",
       baseUrl: "https://byteartist.example",
+      generateStaggerMs: 800,
       modelId: "seed4_0407_lemo",
     });
   });
@@ -353,6 +355,85 @@ describe("ByteArtist provider", () => {
       taskId: "task-1",
     });
     expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("starts generated image tasks in parallel with the configured stagger", async () => {
+    vi.stubEnv("GATEWAY_BASE_URL", "https://byteartist.example");
+    vi.stubEnv("BYTEDANCE_AID", "6834");
+    vi.stubEnv("BYTEDANCE_APP_KEY", "app-key");
+    vi.stubEnv("BYTEDANCE_APP_SECRET", "app-secret");
+
+    const submitStarts: number[] = [];
+    let activePolls = 0;
+    let maxActivePolls = 0;
+    const fetchMock = vi.fn(
+      async (url: RequestInfo | URL, init?: RequestInit) => {
+        const requestUrl = String(url);
+        const body = new URLSearchParams(init?.body?.toString() ?? "");
+        if (requestUrl.endsWith("/submit_task_v2")) {
+          submitStarts.push(Date.now());
+          const reqJson = JSON.parse(String(body.get("req_json")));
+          const prompt = String(reqJson.Prompt ?? reqJson.user_prompt);
+          return new Response(
+            JSON.stringify({
+              data: { task_id: `task-${prompt.at(-1)}` },
+              status_code: 0,
+            })
+          );
+        }
+
+        const taskId = body.get("task_ids") ?? "task";
+        activePolls += 1;
+        maxActivePolls = Math.max(maxActivePolls, activePolls);
+        await new Promise<void>((resolve) => setTimeout(resolve, 50));
+        activePolls -= 1;
+        return new Response(
+          JSON.stringify({
+            data: {
+              results: {
+                [taskId]: {
+                  pic_urls: [{ main_url: `https://cdn.example/${taskId}.png` }],
+                  status: 1,
+                },
+              },
+            },
+            status_code: 0,
+          })
+        );
+      }
+    );
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const startedAt = Date.now();
+    const result = await generateByteArtistImage(
+      {
+        requests: [1, 2, 3].map((index) => ({
+          height: 1024,
+          inputImageCount: 0,
+          prompt: `prompt-${index}`,
+          promptIndex: index,
+          width: 1024,
+        })),
+        totalRequestedImageCount: 3,
+      },
+      {
+        ...readByteArtistConfigFromEnv(),
+        generateStaggerMs: 10,
+      }
+    );
+
+    expect(submitStarts).toHaveLength(3);
+    expect(submitStarts[0] - startedAt).toBeLessThan(100);
+    expect(submitStarts[1] - submitStarts[0]).toBeGreaterThanOrEqual(8);
+    expect(submitStarts[2] - submitStarts[1]).toBeGreaterThanOrEqual(8);
+    expect(maxActivePolls).toBeGreaterThan(1);
+    expect(result).toMatchObject({
+      images: [
+        { metadata: { promptIndex: 1 } },
+        { metadata: { promptIndex: 2 } },
+        { metadata: { promptIndex: 3 } },
+      ],
+    });
   });
 
   it("surfaces provider errors from completed ByteArtist tasks", async () => {

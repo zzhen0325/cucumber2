@@ -614,7 +614,7 @@ describe("input normalizer", () => {
     expect(selectAgentRoute(normalized)).toBe("document");
   });
 
-  it("routes long-form research analysis to a document artifact when no source citations are requested", () => {
+  it("routes research analysis to the research agent now that web search is available", () => {
     const raw = "做一份 AI 画布产品机会点的调研分析";
 
     const normalized = finalizeNormalizedAgentInput(
@@ -627,12 +627,12 @@ describe("input normalizer", () => {
     );
 
     expect(normalized).toMatchObject({
-      operation: "create",
-      artifact: { kind: "document", format: "markdown" },
-      requiredCapabilities: ["markdown-artifact"],
-      intent: "document.create",
+      operation: "answer",
+      artifact: null,
+      requiredCapabilities: ["research", "source-based-answer", "citations"],
+      intent: "research.answer",
     });
-    expect(selectAgentRoute(normalized)).toBe("document");
+    expect(selectAgentRoute(normalized)).toBe("research");
   });
 
   it("routes prompt templates to reusable document artifacts", () => {
@@ -721,6 +721,27 @@ describe("input normalizer", () => {
     expect(normalized).toMatchObject({
       operation: "answer",
       artifact: null,
+      intent: "text.answer",
+    });
+    expect(selectAgentRoute(normalized)).toBe("manager");
+  });
+
+  it("keeps image source metadata questions out of research search", () => {
+    const raw = "这个图片来源是什么？";
+
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        rawPrompt: raw,
+        operation: "answer",
+        artifact: null,
+      },
+      raw
+    );
+
+    expect(normalized).toMatchObject({
+      operation: "answer",
+      artifact: null,
+      requiredCapabilities: [],
       intent: "text.answer",
     });
     expect(selectAgentRoute(normalized)).toBe("manager");

@@ -69,9 +69,9 @@ export function buildRunPlan(input: AgentRunInput): RuntimeRunPlanItem[] {
       ];
     case "research.answer":
       return [
-        step("research-sources", "梳理用户提供的来源", "prepare"),
+        step("research-sources", "梳理来源和搜索策略", "prepare"),
         step("research-agent", "进入 Research Agent", "route"),
-        step("research-collect", "收集来源摘录和 citation", "execute"),
+        step("research-collect", "搜索或收集来源 citation", "execute"),
         step("research-artifact", "生成调研内容", "execute"),
         step("research-materialize", "投影调研结果节点", "materialize"),
       ];

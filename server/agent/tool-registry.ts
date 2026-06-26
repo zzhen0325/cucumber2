@@ -165,6 +165,16 @@ export const toolRegistry = {
     },
     outputSchema: objectSchema,
   },
+  web_search: {
+    id: "web_search",
+    name: "web_search",
+    traceLabel: "Web search",
+    requiredScopes: ["tool.web.fetch", "tool.research.answer"],
+    producedArtifactTypes: [],
+    canCallExternalNetwork: true,
+    inputSchema: objectSchema,
+    outputSchema: objectSchema,
+  },
   collect_research_sources: {
     id: "collect_research_sources",
     name: "collect_research_sources",

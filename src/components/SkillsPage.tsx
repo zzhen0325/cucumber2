@@ -57,6 +57,19 @@ bindings:
 Follow the user's request and keep all canvas changes proposal-first.
 `;
 
+const pageClassName =
+  "min-h-full overflow-auto bg-cuc-canvas px-6 pb-14 pt-[42px] text-cuc-text-strong max-[760px]:h-[calc(100dvh-56px)] max-[760px]:min-h-0 max-[760px]:px-3 max-[760px]:pb-[78px] max-[760px]:pt-7";
+const workspaceButtonClassName =
+  "!inline-flex !h-9 !min-w-0 !items-center !gap-2 !rounded-cuc-control !px-[12.5px] !text-sm !font-normal !leading-[22px]";
+const primaryWorkspaceButtonClassName = cn(
+  workspaceButtonClassName,
+  "!border-0 !bg-cuc-ink !text-cuc-surface hover:!bg-[#1a1a1a] disabled:!cursor-default disabled:!opacity-[0.42]"
+);
+const secondaryWorkspaceButtonClassName = cn(
+  workspaceButtonClassName,
+  "!border-[0.5px] !border-cuc-border !bg-cuc-surface !text-cuc-text-heading hover:!bg-cuc-surface-warm disabled:!cursor-default disabled:!opacity-[0.42]"
+);
+
 type DraftState = {
   enabled: boolean;
   skillMd: string;
@@ -404,15 +417,19 @@ export function SkillsPage({ className }: SkillsPageProps) {
   }
 
   return (
-    <div className={cn("skills-page", className)}>
-      <div className="workspace-page-inner skills-shell">
-        <div className="workspace-page-header">
+    <div className={cn(pageClassName, className)}>
+      <div className="mx-auto w-[min(1180px,calc(100vw_-_108px))] max-[760px]:w-full">
+        <div className="mb-4 flex min-h-20 items-center justify-between gap-3 rounded-cuc-floating p-2 max-[760px]:items-start">
           <div>
-            <h1>技能</h1>
-            <p>管理 Agent OS 全局技能</p>
+            <h1 className="m-0 text-2xl font-medium leading-[30px] text-cuc-text">
+              技能
+            </h1>
+            <p className="mb-0 mt-px text-[13px] leading-5 text-cuc-text-muted">
+              管理 Agent OS 全局技能
+            </p>
           </div>
 
-          <div className="workspace-header-actions">
+          <div className="flex flex-none items-center gap-1.5 max-[760px]:gap-1">
             <input
               ref={fileInputRef}
               type="file"
@@ -424,7 +441,7 @@ export function SkillsPage({ className }: SkillsPageProps) {
               type="button"
               variant="outline"
               size="sm"
-              className="workspace-secondary-button"
+              className={secondaryWorkspaceButtonClassName}
               disabled={importing}
               onClick={() => fileInputRef.current?.click()}
               title="导入 Agent Skills zip，最高 100MB，支持 SKILL.md、scripts、references、assets 和其他资源"
@@ -436,7 +453,12 @@ export function SkillsPage({ className }: SkillsPageProps) {
               )}
               导入
             </Button>
-            <Button type="button" size="lg" className="workspace-primary-button" onClick={handleNew}>
+            <Button
+              type="button"
+              size="lg"
+              className={primaryWorkspaceButtonClassName}
+              onClick={handleNew}
+            >
               <Plus className="size-4" />
               新建
             </Button>
@@ -446,35 +468,35 @@ export function SkillsPage({ className }: SkillsPageProps) {
         {(error || status) && (
           <div
             className={cn(
-              "workspace-status",
+              "mb-3 rounded-cuc-card border-[0.5px] px-2.5 py-2 text-xs leading-4",
               error
-                ? "workspace-status-error"
-                : "workspace-status-ok"
+                ? "border-cuc-danger-border bg-cuc-danger-surface text-cuc-danger-strong"
+                : "border-black/20 bg-cuc-ink/8 text-cuc-ink"
             )}
           >
             {error ?? status}
           </div>
         )}
 
-        <div className="skills-layout">
-        <section className="skills-list-panel">
-          <div className="skills-list-header">
+        <div className="grid grid-cols-[300px_minmax(0,1fr)] gap-3 max-[760px]:grid-cols-1">
+        <section className="min-w-0 rounded-cuc-card border-[0.5px] border-cuc-border bg-cuc-surface p-2 shadow-none">
+          <div className="flex h-cuc-control items-center justify-between py-0 pl-1.5 pr-1 text-[11px] leading-[14px] text-cuc-text-muted">
             <span>
               已配置 {skills.length}
             </span>
             {loading && <LoadingIndicator ariaLabel="加载技能中" size={14} />}
           </div>
 
-          <div className="skills-list">
+          <div className="grid gap-1">
             {skills.map((skill) => (
               <button
                 key={skill.id}
                 type="button"
                 onClick={() => void handleSelect(skill.id)}
                 className={cn(
-                  "skill-list-item",
+                  "grid w-full cursor-pointer gap-1 rounded-cuc-card border-[0.5px] border-transparent bg-transparent p-2 text-left text-cuc-text transition-[background,border-color] duration-[140ms] hover:border-cuc-node-border-hover hover:bg-cuc-surface-warm",
                   skill.id === selectedId && !isNew
-                    ? "selected"
+                    ? "border-black/40 bg-cuc-ink/8"
                     : ""
                 )}
               >
@@ -499,7 +521,7 @@ export function SkillsPage({ className }: SkillsPageProps) {
             ))}
 
             {!loading && skills.length === 0 && (
-              <div className="skills-empty">
+              <div className="grid min-h-[108px] place-items-center rounded-cuc-card border-[0.5px] border-dashed border-cuc-preview-border text-center text-cuc-text-muted">
                 <FileArchive className="mx-auto mb-2 size-5 text-muted-foreground" />
                 <p className="text-xs text-muted-foreground">还没有技能</p>
               </div>
@@ -507,8 +529,8 @@ export function SkillsPage({ className }: SkillsPageProps) {
           </div>
         </section>
 
-        <section className="skills-detail-panel">
-          <div className="skills-detail-header">
+        <section className="min-w-0 overflow-hidden rounded-cuc-card border-[0.5px] border-cuc-border bg-cuc-surface shadow-none">
+          <div className="flex items-center justify-between gap-3 border-b-[0.5px] border-cuc-border p-3 max-[760px]:flex-col max-[760px]:items-start">
             <div className="min-w-0">
               <div className="flex min-w-0 items-center gap-2">
                 <Sparkles className="size-4 shrink-0 text-primary" />
@@ -525,8 +547,8 @@ export function SkillsPage({ className }: SkillsPageProps) {
               </p>
             </div>
 
-            <div className="skills-detail-actions">
-              <label className="skills-toggle">
+            <div className="flex flex-none flex-wrap items-center justify-end gap-1.5 max-[760px]:w-full max-[760px]:justify-start">
+              <label className="inline-flex h-cuc-control items-center gap-1.5 rounded-cuc-control border-[0.5px] border-cuc-border bg-cuc-surface px-[9px] text-xs leading-4 text-cuc-text-heading">
                 <input
                   type="checkbox"
                   checked={draft.enabled}
@@ -544,7 +566,7 @@ export function SkillsPage({ className }: SkillsPageProps) {
               <Button
                 type="button"
                 size="sm"
-                className="workspace-primary-button"
+                className={primaryWorkspaceButtonClassName}
                 disabled={
                   saving ||
                   updatingEnabled ||
@@ -566,7 +588,7 @@ export function SkillsPage({ className }: SkillsPageProps) {
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="workspace-secondary-button"
+                  className={secondaryWorkspaceButtonClassName}
                   disabled={downloading}
                   onClick={() => void handleDownloadPackage()}
                   title="下载技能源文件 zip"
@@ -600,7 +622,7 @@ export function SkillsPage({ className }: SkillsPageProps) {
             </div>
           </div>
 
-          <div className="skills-detail-body">
+          <div className="grid gap-3 p-3">
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <Badge variant="outline">
                 {selectedSummary?.agentScope ?? selectedSkill?.agentScope ?? "general"}
@@ -614,7 +636,7 @@ export function SkillsPage({ className }: SkillsPageProps) {
             </div>
 
             {selectedSkill && (
-              <div className="skills-meta-grid">
+              <div className="grid grid-cols-2 gap-2 rounded-cuc-card border-[0.5px] border-cuc-border bg-cuc-canvas p-2.5 text-[11px] leading-[14px] text-cuc-text-muted max-[760px]:grid-cols-1">
                 <MetaRow label="Tags" value={selectedSkill.tags.join(", ")} />
                 <MetaRow
                   label="Triggers"
@@ -654,7 +676,7 @@ export function SkillsPage({ className }: SkillsPageProps) {
               </div>
             )}
 
-            <div className="skills-editor-grid">
+            <div className="grid grid-cols-[minmax(0,1fr)_360px] gap-3 max-[760px]:grid-cols-1">
               <div className="min-w-0">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
@@ -675,7 +697,7 @@ export function SkillsPage({ className }: SkillsPageProps) {
                     }));
                   }}
                   spellCheck={false}
-                  className="min-h-[560px] resize-y font-mono text-xs leading-5"
+                  className="min-h-[560px] resize-y rounded-cuc-card border-cuc-border bg-cuc-surface font-mono !text-[11px] !leading-[18px]"
                   aria-label="SKILL.md"
                 />
               </div>

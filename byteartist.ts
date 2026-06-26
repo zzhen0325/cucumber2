@@ -33,6 +33,7 @@ export type ByteArtistConfig = {
   appSecret: string;
   baseUrl: string;
   expiredDuration: number;
+  generateStaggerMs: number;
   imageReturnFormat: string;
   imageReturnType: string;
   maxAttempts: number;
@@ -100,6 +101,7 @@ export const BYTEARTIST_MATTING_MODEL = "image_matting_lemo";
 export const BYTEARTIST_SEED5_DUOTU_MODEL = "seed5_duotu_zz";
 const DEFAULT_BYTEARTIST_MODEL = BYTEARTIST_LEMO_MODEL;
 const DEFAULT_BYTEARTIST_BASE_URL = "https://lv-api-lf.ulikecam.com";
+const DEFAULT_BYTEARTIST_GENERATE_STAGGER_MS = 800;
 
 const modelAdapters: Record<string, ByteArtistModelAdapter> = {
   [BYTEARTIST_LEMO_MODEL]: {
@@ -288,29 +290,34 @@ export async function generateByteArtistImage(
   }
 
   const client = new ByteArtistClient(config);
-  const images: ByteArtistGeneratedImage[] = [];
+  const images = await Promise.all(
+    input.requests.map(async (request, index) => {
+      if (index > 0 && config.generateStaggerMs > 0) {
+        await delay(index * config.generateStaggerMs, undefined, {
+          signal: input.signal,
+        });
+      }
+      input.signal?.throwIfAborted();
+      const { imageUrls, taskId } = await client.submitAndPoll(
+        request,
+        input.signal
+      );
+      const selectedUrl = imageUrls[0];
+      if (!selectedUrl) {
+        throw new Error("ByteArtist returned no image URL.");
+      }
 
-  for (const request of input.requests) {
-    input.signal?.throwIfAborted();
-    const { imageUrls, taskId } = await client.submitAndPoll(
-      request,
-      input.signal
-    );
-    const selectedUrl = imageUrls[0];
-    if (!selectedUrl) {
-      throw new Error("ByteArtist returned no image URL.");
-    }
-
-    const image = buildByteArtistGeneratedImage({
-      config,
-      request,
-      taskId,
-      totalRequestedImageCount: input.totalRequestedImageCount,
-      url: selectedUrl,
-    });
-    images.push(image);
-    await input.onImage?.(image);
-  }
+      const image = buildByteArtistGeneratedImage({
+        config,
+        request,
+        taskId,
+        totalRequestedImageCount: input.totalRequestedImageCount,
+        url: selectedUrl,
+      });
+      await input.onImage?.(image);
+      return image;
+    })
+  );
 
   return { images };
 }
@@ -361,6 +368,14 @@ export function readByteArtistConfigFromEnv(
         DEFAULT_BYTEARTIST_BASE_URL
     ),
     expiredDuration: readNumberEnv(env, "BYTEARTIST_EXPIRED_DURATION", 600),
+    generateStaggerMs: Math.max(
+      0,
+      readNumberEnv(
+        env,
+        "BYTEARTIST_GENERATE_STAGGER_MS",
+        DEFAULT_BYTEARTIST_GENERATE_STAGGER_MS
+      )
+    ),
     height: readNumberEnv(env, "BYTEARTIST_HEIGHT", adapter.defaultHeight),
     imageReturnFormat: env.BYTEARTIST_IMAGE_RETURN_FORMAT?.trim() || "png",
     imageReturnType: env.BYTEARTIST_IMAGE_RETURN_TYPE?.trim() || "url",

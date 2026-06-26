@@ -107,6 +107,12 @@
 - Tool Registry 新增 `collect_research_sources` 和 `create_research_artifact`，scope 为 `tool.research.answer`，其中来源收集工具同时需要 `tool.web.fetch` 并标记可访问外部网络。
 - 代码、数据和 workflow specialist 只完成 intent 分类和 Manager 能力边界提示，尚未接入工具执行。
 
+## 2026-06-25 Research Web Search
+
+- Research Agent 接入官方 Agents SDK hosted `web_search`；在 OpenAI Agent provider 下，无明确 URL 的搜索/调研/引用来源请求也可进入 Research Agent 并搜索公开互联网。
+- `web_search` 纳入 Tool Registry 和 capability manifest，Trace metadata 标记为外部网络工具；SDK hosted `web_search_call` 会投影为 `tool.input/tool.output`。
+- Research prompt、Manager prompt 和 research run plan 更新为“搜索或收集来源”，URL 来源仍走 `collect_research_sources`，最终仍由 `create_research_artifact` 生成带 citation metadata 的 markdown artifact。
+
 ## 2026-06-14 P0 Runtime Hardening
 
 - Agent Run Trace 继续只写 `agent_run_events`，不新增平行 Trace 表。
@@ -163,7 +169,7 @@
 - 底部输入器可选择本轮图片 provider；客户端只提交白名单 `imageProvider=seed5_duotu_zz` 或 `imageProvider=byteartist`，服务端写入 agent context 后由 `generate_image` 选择 provider。未提交时默认 Seedream 5；`upscale_image` 仍只走 Seedream。
 - 底部输入器新增 Agent / 图像模式；图像模式提交 `inputMode=image`、白名单 `imageAspectRatio` 和 1-4 的 `imageResultCount`，服务端直接生成 image normalized input，让短提示也进入图片生成链路。
 - `seedream.ts` 收敛为 Seedream provider 执行层，保留配置读取、签名、提交/轮询、并发/重试、取消和 provider metadata；`byteartist.ts` 是 ByteArtist provider 执行层，保留配置读取、SHA1 表单签名、submit/poll、模型 adapter、取消和 provider metadata。
-- 多张图片生成按 `SEEDREAM_MAX_CONCURRENCY` 限制完整 submit+poll 生命周期的并发数，并按 `SEEDREAM_STAGGER_MS` 间隔启动新任务；默认 `SEEDREAM_MAX_CONCURRENCY=1` 会等上一张完整出图或失败后再提交下一张，避免触发 Seedream 账号级并发限制。
+- 多张图片生成会拆成多个 provider request：Seedream 按 `SEEDREAM_MAX_CONCURRENCY` 限制完整 submit+poll 生命周期并按 `SEEDREAM_STAGGER_MS` 间隔启动；ByteArtist（当前 Seedream 5/Lemo 路径）并行启动所有 request，并按 800ms 间隔错峰提交。
 
 ## 2026-06-13 Input Normalization
 

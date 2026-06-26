@@ -118,6 +118,7 @@ const testByteArtistConfig = {
   appSecret: "app-secret",
   baseUrl: "https://byteartist.example",
   expiredDuration: 600,
+  generateStaggerMs: 800,
   imageReturnFormat: "png",
   imageReturnType: "url",
   maxAttempts: 120,

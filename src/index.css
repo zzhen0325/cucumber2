@@ -5,7 +5,6 @@
 @import "./styles/workspace-pages.css";
 @import "./styles/canvas-shell.css";
 @import "./styles/composer.css";
-@import "./styles/canvas-nodes.css";
 @import "./styles/run-node.css";
 @import "./styles/artifacts.css";
 @import "./styles/trace-panel.css";

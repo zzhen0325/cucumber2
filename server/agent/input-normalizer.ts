@@ -195,6 +195,7 @@ export function createInputNormalizerAgent() {
       "Classify HTML pages, H5 pages, interactive prototypes, HTML demos, and HTML animations as operation=create, artifact.kind=webpage, artifact.format=html, requiredCapabilities including html-artifact, and negativeCapabilities including image-generation.",
       "HTML animation requests such as 30秒 HTML 动画 are webpage/html artifacts, not image artifacts, unless the user explicitly asks to generate a raster image/poster/banner.",
       "Classify PRD, brief,方案,说明,邮件草稿,纪要 as document or markdown artifacts.",
+      "Classify web search, 搜索, 查找资料, 调研, 研究, research, sources, or citation requests as operation=answer, artifact=null, requiredCapabilities including research, source-based-answer, and citations.",
       "Classify reusable text deliverables such as 模板, 提示词模板, 完整提示词, 可复制/直接使用方案, 设定稿, 规范, IP 三视图模板 as document or markdown artifacts with markdown-artifact. These are text products even if they mention images, IP, characters, or visual design.",
       "Classify requests to edit, rewrite, polish, expand, shorten, remove parts from, or otherwise revise a prompt/text/description as operation=edit with artifact=null and negativeCapabilities including image-generation. Terse commands such as 取消标题, 去掉标题, 删除文案, or remove the title should revise the selected/upstream prompt text and must not generate images unless the user explicitly asks to generate/create/render an image now.",
       "Classify requests to analyze, evaluate, critique, summarize, or give suggestions for a visual/image/banner/poster/KV brief as operation=analyze or answer with no image artifact unless the user explicitly asks to generate/create/render the image now; include negativeCapabilities image-generation.",
@@ -445,7 +446,7 @@ export function inferIntentFromProtocol({
   if (artifact?.kind === "canvas") {
     return "canvas.operation";
   }
-  if (/(调研|研究|搜索|查找资料|引用来源|research|sources?|citations?)/i.test(rawPrompt)) {
+  if (isResearchRequest(rawPrompt)) {
     return "research.answer";
   }
   if (/(计划|拆解任务|workflow|checkpoint|plan)/i.test(rawPrompt)) {
@@ -508,6 +509,16 @@ function inferTaskProtocol(prompt: string): Pick<
       negativeCapabilities: ["image-generation"],
       operation: inferEditOperation(prompt) ? "edit" : "create",
       requiredCapabilities: inferLongFormDocumentCapabilities(prompt),
+    };
+  }
+
+  if (isResearchRequest(prompt)) {
+    return {
+      artifact: null,
+      domain,
+      negativeCapabilities: ["image-generation"],
+      operation: "answer",
+      requiredCapabilities: ["research", "source-based-answer", "citations"],
     };
   }
 
@@ -1001,6 +1012,10 @@ function inferLongFormDocumentCapabilities(prompt: string) {
       ? ["source-based-answer", "citations"]
       : []),
   ]);
+}
+
+function isResearchRequest(prompt: string) {
+  return /(调研|研究|搜索|查找资料|联网查|引用来源|来源出处|引用|出处|web\s*search|research|sources?|citations?)/i.test(prompt);
 }
 
 function isHtmlArtifactCreationRequest(prompt: string) {

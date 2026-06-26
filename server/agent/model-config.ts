@@ -57,6 +57,10 @@ export function getAgentModelConfiguration(): AgentModelConfiguration {
   };
 }
 
+export function supportsHostedWebSearchTool() {
+  return getAgentModelConfiguration().provider === "openai";
+}
+
 function getAgentModelProviderProfile(): AgentModelProviderProfile {
   if (cachedProfile !== undefined) {
     return cachedProfile;
