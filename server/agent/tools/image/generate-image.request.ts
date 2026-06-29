@@ -83,11 +83,7 @@ export function buildGenerateImageSeedreamInput(
   );
   const resultCount = variants.length
     ? variants.length
-    : resolveImageResultCount(
-        input.requestedResultCount,
-        [normalizedPrompt],
-        config.maxOutputImages
-      );
+    : resolveImageResultCount(input.requestedResultCount, config.maxOutputImages);
 
   return {
     requests: buildSeedreamRequestBodies(
@@ -128,11 +124,7 @@ export function buildGenerateImageByteArtistInput(
   );
   const resultCount = variants.length
     ? variants.length
-    : resolveImageResultCount(
-        input.requestedResultCount,
-        [normalizedPrompt],
-        config.maxOutputImages
-      );
+    : resolveImageResultCount(input.requestedResultCount, config.maxOutputImages);
 
   return {
     requests: buildByteArtistRequestBodies(
@@ -179,7 +171,7 @@ export function buildSeedreamRequestBodies(
     }
 
     return input.variants.map((variant, index) => {
-      const geometry = resolveSeedreamGeometry(variantPrompt, config, variant);
+      const geometry = resolveSeedreamGeometry(config, variant);
       const body: Record<string, unknown> = {
         prompt: variantPrompt,
         force_single: config.forceSingle,
@@ -207,7 +199,6 @@ export function buildSeedreamRequestBodies(
   return resolveSeedreamPromptRequests(input, config.maxOutputImages).map(
     (request) => {
       const geometry = resolveSeedreamGeometry(
-        request.prompt,
         config,
         input.geometry
       );
@@ -261,7 +252,6 @@ export function buildByteArtistRequestBodies(
 
     return input.variants.map((variant, index) => {
       const geometry = resolveByteArtistGeometry(
-        variantPrompt,
         config,
         variant
       );
@@ -280,7 +270,6 @@ export function buildByteArtistRequestBodies(
     (request) => {
       const prompt = normalizeSeedreamProviderPrompt(request.prompt);
       const geometry = resolveByteArtistGeometry(
-        prompt,
         config,
         input.geometry
       );
@@ -298,7 +287,6 @@ export function buildByteArtistRequestBodies(
 
 export function resolveImageResultCount(
   requested: number | undefined,
-  prompts: readonly string[],
   maxOutputImages: number
 ): number {
   if (requested !== undefined) {
@@ -306,30 +294,6 @@ export function resolveImageResultCount(
       throw new Error(`一次最多生成 ${maxOutputImages} 张图片。`);
     }
     return Math.max(1, Math.floor(requested));
-  }
-  return inferImageResultCountFromPrompts(prompts, maxOutputImages);
-}
-
-export function inferImageResultCount(prompt: string, maxOutputImages = 4) {
-  return inferImageResultCountFromPrompts([prompt], maxOutputImages);
-}
-
-export function inferImageResultCountFromPrompts(
-  prompts: readonly string[],
-  maxOutputImages = 4
-) {
-  for (const prompt of prompts) {
-    const normalized = normalizeImagePrompt(prompt);
-    const explicitCount = findExplicitImageCount(normalized);
-
-    if (!explicitCount) {
-      continue;
-    }
-    if (explicitCount > maxOutputImages) {
-      throw new Error(`一次最多生成 ${maxOutputImages} 张图片。`);
-    }
-
-    return explicitCount;
   }
   return 1;
 }
@@ -416,7 +380,6 @@ function resolveSeedreamPromptRequests(
 }
 
 function resolveSeedreamGeometry(
-  prompt: string,
   config: Pick<SeedreamConfig, "height" | "width">,
   geometry?: SeedreamGeometryInput
 ): SeedreamResolvedGeometry {
@@ -429,34 +392,18 @@ function resolveSeedreamGeometry(
 
   const requestedAspectRatio = parseAspectRatio(geometry?.aspectRatio);
   if (requestedAspectRatio) {
-    const area = findExplicitOutputArea(prompt) ?? config.width * config.height;
+    const area = config.width * config.height;
     return dimensionsFromAspectRatio(requestedAspectRatio, area);
-  }
-
-  const explicitDimensions = findExplicitDimensions(prompt);
-  if (explicitDimensions) {
-    return explicitDimensions;
-  }
-
-  const area = findExplicitOutputArea(prompt) ?? config.width * config.height;
-  const aspectRatio = findExplicitAspectRatio(prompt);
-  if (aspectRatio) {
-    return dimensionsFromAspectRatio(aspectRatio, area);
-  }
-
-  if (findExplicitOutputArea(prompt)) {
-    return { fields: { size: area } };
   }
 
   return normalizeExplicitSeedreamDimensions(config.width, config.height);
 }
 
 function resolveByteArtistGeometry(
-  prompt: string,
   config: Pick<ByteArtistConfig, "height" | "width">,
   geometry?: SeedreamGeometryInput
 ) {
-  const resolved = resolveSeedreamGeometry(prompt, config, geometry);
+  const resolved = resolveSeedreamGeometry(config, geometry);
   const width = readPositiveInteger(resolved.fields.width);
   const height = readPositiveInteger(resolved.fields.height);
   const size = readPositiveInteger(resolved.fields.size);
@@ -474,52 +421,6 @@ function resolveByteArtistGeometry(
     ...dimensions,
     ...getSeedreamTargetGeometry(resolved),
   };
-}
-
-function findExplicitDimensions(prompt: string) {
-  const dimensionMatch = prompt.match(
-    /\b(\d{3,5})\s*(?:x|×|\*)\s*(\d{3,5})\b/i
-  );
-  if (!dimensionMatch) {
-    return null;
-  }
-
-  const width = Number(dimensionMatch[1]);
-  const height = Number(dimensionMatch[2]);
-  return normalizeExplicitSeedreamDimensions(width, height);
-}
-
-function findExplicitOutputArea(prompt: string) {
-  if (/\b4\s*k\b|4k|4K|４K|４k/.test(prompt)) {
-    return 4096 * 4096;
-  }
-  if (/\b2\s*k\b|2k|2K|２K|２k/.test(prompt)) {
-    return 2048 * 2048;
-  }
-  if (/\b1\s*k\b|1k|1K|１K|１k/.test(prompt)) {
-    return 1024 * 1024;
-  }
-
-  return null;
-}
-
-function findExplicitAspectRatio(prompt: string) {
-  const ratioMatch = prompt.match(/\b(\d{1,2})\s*[:：]\s*(\d{1,2})\b/);
-  if (ratioMatch) {
-    return parseAspectRatio(`${ratioMatch[1]}:${ratioMatch[2]}`);
-  }
-
-  if (/(横版|横图|宽屏|landscape|wide)/i.test(prompt)) {
-    return 16 / 9;
-  }
-  if (/(竖版|竖图|纵向|portrait|vertical)/i.test(prompt)) {
-    return 9 / 16;
-  }
-  if (/(方图|方形|正方形|square)/i.test(prompt)) {
-    return 1;
-  }
-
-  return null;
 }
 
 function parseAspectRatio(value: string | undefined) {
@@ -668,38 +569,6 @@ function validateSeedreamDimensions(width: number, height: number) {
   }
 }
 
-function findExplicitImageCount(prompt: string) {
-  const groupedArabicMatch = prompt.match(
-    /(?:一|1)\s*组\s*(\d{1,2})\s*(?:张|幅|个|款|版|images?|imgs?|pictures?|results?)/i
-  );
-  if (groupedArabicMatch) {
-    return Number(groupedArabicMatch[1]);
-  }
-
-  const groupedChineseMatch = prompt.match(
-    /(?:一|1)\s*组\s*([一二两三四五六七八九十])\s*(?:张|幅|个|款|版|图片|图|结果)/
-  );
-  if (groupedChineseMatch) {
-    return chineseImageCountToNumber(groupedChineseMatch[1]);
-  }
-
-  const arabicMatch = prompt.match(
-    /(?:生成|出|要|做|给我|create|generate|make)?\s*(\d{1,2})\s*(?:张|幅|个|款|版|组|images?|imgs?|pictures?|results?)/i
-  );
-  if (arabicMatch) {
-    return Number(arabicMatch[1]);
-  }
-
-  const chineseMatch = prompt.match(
-    /(?:生成|出|要|做|给我)?\s*([一二两三四五六七八九十])\s*(?:张|幅|个|款|版|组|图片|图|结果)/
-  );
-  if (chineseMatch) {
-    return chineseImageCountToNumber(chineseMatch[1]);
-  }
-
-  return null;
-}
-
 function normalizeSingleImagePrompt(prompt: string) {
   return normalizeImagePrompt(
     stripBatchImageCountInstruction(normalizeImagePrompt(prompt))
@@ -722,24 +591,6 @@ function stripBatchImageCountInstruction(prompt: string) {
     .replace(/[\s,，:：;；.。-]+$/, "");
 
   return normalizeImagePrompt(stripped) || prompt;
-}
-
-function chineseImageCountToNumber(value: string) {
-  const numbers: Record<string, number> = {
-    一: 1,
-    二: 2,
-    两: 2,
-    三: 3,
-    四: 4,
-    五: 5,
-    六: 6,
-    七: 7,
-    八: 8,
-    九: 9,
-    十: 10,
-  };
-
-  return numbers[value] ?? null;
 }
 
 function collectInputImageUrls(

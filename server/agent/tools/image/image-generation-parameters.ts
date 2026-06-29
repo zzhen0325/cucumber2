@@ -22,37 +22,23 @@ export type ImageGenerationParameters = {
   width?: number;
 };
 
-// Parameter resolution with zero numeric fallback. The Image Agent decides
-// resultCount / dimensions / aspectRatio / variants from the Task Frame
-// constraints and passes them as tool args. This layer only:
-//   - uses the agent prompt, falling back to the raw run prompt as the image
-//     description (identity passthrough, not parsing),
-//   - cleans the prompt string (strips count/size phrases and leading verbs),
-//   - enforces the maxOutputImages hard limit,
-//   - normalizes dimension/aspectRatio shapes.
-// It does NOT parse counts, dimensions, or aspect ratios out of the raw text.
+// Parameter resolution with zero fallback. The Image Agent decides prompt,
+// resultCount, dimensions, aspectRatio, and variants from the Task Frame
+// constraints and passes them as tool args. This layer only cleans and validates
+// those args; it does not parse final parameters out of raw text.
 export function normalizeImageGenerationParameters({
   candidate,
-  defaultAspectRatio,
-  defaultResultCount,
   maxOutputImages = readMaxOutputImages(),
-  rawPrompt,
 }: {
   candidate?: ImageGenerationParameterCandidate | null;
-  defaultAspectRatio?: string | null;
-  defaultResultCount?: number | null;
   maxOutputImages?: number;
-  rawPrompt?: string;
 }): ImageGenerationParameters {
-  const raw = normalizeText(rawPrompt ?? "");
   const candidatePrompt = normalizeNullableText(candidate?.prompt);
   const variants = normalizeImageVariants(candidate?.variants);
   const resultCount =
     variants.length > 0
       ? variants.length
-      : normalizePositiveInteger(candidate?.resultCount) ??
-        normalizePositiveInteger(defaultResultCount) ??
-        1;
+      : normalizePositiveInteger(candidate?.resultCount) ?? 1;
   if (resultCount > maxOutputImages) {
     throw new Error(`一次最多生成 ${maxOutputImages} 张图片。`);
   }
@@ -64,13 +50,11 @@ export function normalizeImageGenerationParameters({
       : undefined);
   const aspectRatio =
     normalizeAspectRatio(candidate?.aspectRatio) ??
-    normalizeAspectRatio(defaultAspectRatio) ??
     (explicitDimensions && variants.length <= 1
       ? simplifyAspectRatio(explicitDimensions.width, explicitDimensions.height)
       : undefined);
 
-  const prompt =
-    normalizeContentPrompt(candidatePrompt ?? raw) || normalizeContentPrompt(raw);
+  const prompt = normalizeContentPrompt(candidatePrompt ?? "");
   if (!prompt) {
     throw new Error("Image Agent did not produce an image content prompt.");
   }

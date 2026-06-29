@@ -370,16 +370,17 @@ describe("generate_image tool", () => {
     });
   });
 
-  it("falls back to the run prompt when no prompt argument is provided", async () => {
+  it("requires the Image Agent to pass a prompt argument", async () => {
     isByteArtistConfigured.mockReturnValue(true);
     generateByteArtistImage.mockResolvedValue({ images: [] });
 
     const context = buildContext({ prompt: "默认提示词" });
-    await invokeTool(context, {});
+    const result = await invokeTool(context, {});
 
-    expect(generateByteArtistImage.mock.calls[0][0].requests[0].prompt).toBe(
-      "默认提示词"
-    );
+    expect(result).toMatchObject({
+      error: expect.stringContaining("invalid_image_input"),
+    });
+    expect(generateByteArtistImage).not.toHaveBeenCalled();
   });
 
   it("stores the actual provider-limited prompt for long style prompts", async () => {
@@ -458,7 +459,7 @@ describe("generate_image tool", () => {
     });
   });
 
-  it("does not infer count from the raw prompt (zero fallback)", async () => {
+  it("does not infer count or dimensions from the raw prompt (zero fallback)", async () => {
     isSeedreamConfigured.mockReturnValue(true);
     generateSeedreamImage.mockResolvedValue({ images: [] });
 
@@ -466,11 +467,36 @@ describe("generate_image tool", () => {
       imageProvider: "seedream",
       prompt: "生成两张 2048x1024 的产品海报",
     });
-    await invokeTool(context, {});
+    await invokeTool(context, { prompt: "产品海报" });
 
     const callArg = generateSeedreamImage.mock.calls[0][0];
     expect(callArg.totalRequestedImageCount).toBe(1);
     expect(callArg.requests).toHaveLength(1);
+    expect(callArg.requests[0].body).toMatchObject({
+      width: testSeedreamConfig.width,
+      height: testSeedreamConfig.height,
+    });
+  });
+
+  it("does not use canvas image controls unless the Image Agent passes them", async () => {
+    isSeedreamConfigured.mockReturnValue(true);
+    generateSeedreamImage.mockResolvedValue({ images: [] });
+
+    const context = buildContext({
+      imageAspectRatio: "9:16",
+      imageProvider: "seedream",
+      imageResultCount: 3,
+      inputMode: "image",
+    });
+    await invokeTool(context, { prompt: "产品海报" });
+
+    const callArg = generateSeedreamImage.mock.calls[0][0];
+    expect(callArg.totalRequestedImageCount).toBe(1);
+    expect(callArg.requests).toHaveLength(1);
+    expect(callArg.requests[0].body).toMatchObject({
+      width: testSeedreamConfig.width,
+      height: testSeedreamConfig.height,
+    });
   });
 
   it("forwards normalized aspect ratio and count to Seedream requests", async () => {

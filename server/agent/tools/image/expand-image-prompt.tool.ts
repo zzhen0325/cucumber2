@@ -7,27 +7,15 @@ import { assertImageToolAllowed } from "../../policy/task-artifact-policy.ts";
 import type { ActivatedAgentSkill } from "../../skills/types.ts";
 
 const expandImagePromptInputSchema = z.object({
-  prompt: z.string().min(1),
-  reason: z.string().optional(),
+  prompt: z
+    .string()
+    .min(1)
+    .describe("The user's original compact or underspecified image-generation prompt."),
+  reason: z
+    .string()
+    .describe("Brief internal reason this prompt needs expansion.")
+    .optional(),
 });
-
-const expandImagePromptJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    prompt: {
-      type: "string",
-      description:
-        "The user's original compact or underspecified image-generation prompt.",
-    },
-    reason: {
-      type: "string",
-      description:
-        "Brief internal reason this prompt needs expansion, such as missing composition, style, color, or layout details.",
-    },
-  },
-  required: ["prompt"],
-} as const;
 
 let promptExpansionRunner: Runner | undefined;
 
@@ -35,24 +23,16 @@ export const expandImagePromptTool = tool({
   name: "expand_image_prompt",
   description:
     "Use an activated image prompt-expansion skill to turn a short, keyword-like, or underspecified image request into one polished prompt. Call this before generate_image only when the user is asking to create a new image and the prompt lacks enough visual detail. Do not use for upscale-only requests.",
-  parameters: expandImagePromptJsonSchema as never,
-  strict: false,
+  parameters: expandImagePromptInputSchema,
+  strict: true,
   errorFunction: null,
   isEnabled: async ({ runContext }) => {
     const context = requireCucumberContext(runContext.context);
     return Boolean(getActivatedPromptExpansionSkill(context));
   },
-  async execute(rawArgs, runContext, details) {
+  async execute(args, runContext, details) {
     const context = requireCucumberContext(runContext?.context);
     assertImageToolAllowed(context, "expand_image_prompt");
-    const parsed = expandImagePromptInputSchema.safeParse(rawArgs);
-    if (!parsed.success) {
-      return {
-        error: `invalid_prompt_expansion_input: ${parsed.error.issues
-          .map((issue) => `${issue.path.join(".")} ${issue.message}`)
-          .join("; ")}`,
-      };
-    }
 
     const skill = getActivatedPromptExpansionSkill(context);
     if (!skill) {
@@ -70,8 +50,8 @@ export const expandImagePromptTool = tool({
     const result = await getPromptExpansionRunner().run(
       agent,
       buildPromptExpansionInput({
-        prompt: parsed.data.prompt,
-        reason: parsed.data.reason,
+        prompt: args.prompt,
+        reason: args.reason,
       }),
       {
         context,

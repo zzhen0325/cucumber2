@@ -47,7 +47,7 @@ const imageVariantInputSchema = z.object({
 const generateImageInputSchema = z.object({
   aspectRatio: z.string().min(1).optional(),
   height: z.number().int().positive().optional(),
-  prompt: z.string().min(1).optional(),
+  prompt: z.string().trim().min(1),
   resultCount: z.number().int().positive().optional(),
   variants: z.array(imageVariantInputSchema).optional(),
   width: z.number().int().positive().optional(),
@@ -63,7 +63,7 @@ export const generateImageJsonSchema = {
     prompt: {
       type: "string",
       description:
-        "The image description to render. Optional. Defaults to the run prompt when omitted. Reference images attached on the canvas are resolved by the server and are NOT visible to you; providers that cannot accept images receive a server-authored text prompt instead.",
+        "The image description to render. Required: derive it from raw prompt, normalized input constraints, and trusted context before calling this tool. Reference images attached on the canvas are resolved by the server and are NOT visible to you; providers that cannot accept images receive a server-authored text prompt instead.",
     },
     aspectRatio: {
       type: "string",
@@ -86,7 +86,7 @@ export const generateImageJsonSchema = {
       type: "integer",
       minimum: 1,
       description:
-        "How many images to generate. Match the number the user asked for; defaults to what the prompt implies (usually 1).",
+        "How many images to generate. Match the number the user asked for after reading normalized input constraints; defaults to 1 when omitted.",
     },
     variants: {
       type: "array",
@@ -104,6 +104,7 @@ export const generateImageJsonSchema = {
       },
     },
   },
+  required: ["prompt"],
 } as const;
 
 export const generateImageToolDescription =
@@ -146,24 +147,22 @@ export async function executeGenerateImageTool({
     };
   }
 
-  // No silent fallback: surface a configuration error instead of faking output.
-  const lemoRequested =
-    isLemoImagePrompt(parsed.data.prompt) || isLemoImagePrompt(context.prompt);
-  const imageProvider = assertImageProviderConfigured(
-    "generation",
-    lemoRequested ? "byteartist" : context.imageProvider
-  );
-
   const imageParameters = normalizeImageGenerationParameters({
     candidate: parsed.data,
-    defaultAspectRatio: context.imageAspectRatio,
-    defaultResultCount: context.imageResultCount,
-    rawPrompt: context.prompt,
   });
   let prompt = normalizeSeedreamProviderPrompt(imageParameters.prompt);
   if (!prompt) {
     return { error: "empty_prompt: no image prompt was provided." };
   }
+
+  // No silent fallback: surface a configuration error instead of faking output.
+  const lemoRequested =
+    isLemoImagePrompt(prompt) || isLemoImagePrompt(context.prompt);
+  const imageProvider = assertImageProviderConfigured(
+    "generation",
+    lemoRequested ? "byteartist" : context.imageProvider
+  );
+
   const variants = normalizeImageToolVariants(imageParameters.variants);
   let providerPromptMetadata: Record<string, unknown> = {};
 
@@ -239,7 +238,6 @@ export async function executeGenerateImageTool({
           prompt,
           resultCount: resolveImageResultCount(
             imageParameters.resultCount,
-            [prompt],
             config.maxOutputImages
           ),
           width: imageParameters.width,

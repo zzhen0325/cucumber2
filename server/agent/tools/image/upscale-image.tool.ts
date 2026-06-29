@@ -16,48 +16,29 @@ import {
 } from "./image-source.ts";
 
 const upscaleImageInputSchema = z.object({
-  resolution: z.enum(["4k", "8k"]).optional(),
-  scale: z.number().int().min(0).max(100).optional(),
+  resolution: z
+    .enum(["4k", "8k"])
+    .describe("Target upscale resolution. Defaults to 4k unless the user asks for 8k.")
+    .optional(),
+  scale: z
+    .number()
+    .int()
+    .min(0)
+    .max(100)
+    .describe("Detail generation strength from 0 to 100. Defaults to 50.")
+    .optional(),
 });
-
-const upscaleImageJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    resolution: {
-      type: "string",
-      enum: ["4k", "8k"],
-      description:
-        "Target upscale resolution. Defaults to 4k unless the user explicitly asks for 8k.",
-    },
-    scale: {
-      type: "integer",
-      minimum: 0,
-      maximum: 100,
-      description:
-        "Detail generation strength from 0 to 100. Defaults to 50.",
-    },
-  },
-} as const;
 
 export const upscaleImageTool = tool({
   name: "upscale_image",
   description:
     "Upscale exactly one selected or upstream image using Seedream intelligent super-resolution. Use this for requests like 高清, 超清, 放大, upscale, 4K, 8K, or 提升清晰度. The image itself is resolved by the Cucumber runtime and is not visible to you; do not ask for or fabricate URLs.",
-  parameters: upscaleImageJsonSchema as never,
-  strict: false,
+  parameters: upscaleImageInputSchema,
+  strict: true,
   errorFunction: null,
-  async execute(rawArgs, runContext, details) {
+  async execute(args, runContext, details) {
     const context = requireCucumberContext(runContext?.context);
     assertImageToolAllowed(context, "upscale_image");
-    const parsed = upscaleImageInputSchema.safeParse(rawArgs);
-    if (!parsed.success) {
-      return {
-        error: `invalid_upscale_input: ${parsed.error.issues
-          .map((issue) => `${issue.path.join(".")} ${issue.message}`)
-          .join("; ")}`,
-      };
-    }
 
     assertImageProviderConfigured("upscale");
 
@@ -88,8 +69,8 @@ export const upscaleImageTool = tool({
       {
         imageUrl: source.imageUrl,
         onImage: emitArtifact,
-        resolution: parsed.data.resolution as SeedreamUpscaleResolution | undefined,
-        scale: parsed.data.scale,
+        resolution: args.resolution as SeedreamUpscaleResolution | undefined,
+        scale: args.scale,
         signal: details?.signal,
       },
       config

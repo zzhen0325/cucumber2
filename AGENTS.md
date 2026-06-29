@@ -28,6 +28,7 @@
 - React Flow 改动先查看官方文档：<https://reactflow.dev/learn>。
 - Agent 改动先查看 Agents SDK 官方文档：<https://openai.github.io/openai-agents-js/>。
 - 流式 UI 改动先查看 AI SDK 官方文档：<https://ai-sdk.dev/docs>。
+- 新增简单 Agent tool 默认用 Zod `parameters` + `strict: true`；复杂 union/open payload 才保留手写 JSON Schema + 执行期 Zod 校验。
 - 新增能力同步更新 `README.md` 或 `process.md`；UI 改动先阅读 `design.md`。
 - 文件超过 1500 行时优先按职责拆分。
 - 优先使用codex的Chrome插件进行测试。
@@ -70,4 +71,3 @@ pnpm build
 - 不把关键执行状态只留在聊天文本。
 - 不引入与 `design.md` 冲突的视觉语言。
 - 不为了内部诊断污染默认 UI。
-

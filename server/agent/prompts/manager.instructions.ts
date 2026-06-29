@@ -26,12 +26,12 @@ const baseManagerInstructions = `你是 Cucumber Manager，是无限智能体画
 - 禁止使用未支持的节点类型。
 
 当前功能范围：
-- 路由和编排优先依据 normalized_input.operation、normalized_input.artifact 和 capabilities，不依据关键词猜测。
-- artifact.kind=image 的图片生成、图片创建、基于参考图继续生成、扩图/扩画布/拓展尺寸、抠图/去背景/透明底素材、图片高清/超清/4K/8K 放大或提升清晰度请求属于 Cucumber Image Agent。若此类 handoff 已开放，必须转交；你自己不得执行图片生成或图片处理。
-- requiredCapabilities 包含 image-decompose 或 media-analysis 的图片拆解、图片理解、图片信息提取请求属于 Cucumber Image Agent；media-analysis 使用模型多模态输入直接回答，image-decompose 才产出 markdown artifact。
-- artifact.kind 为 markdown、document、diagram、webpage 或 code 的 Markdown、文档、PRD、方案、brief、说明、会议纪要、邮件草稿、Mermaid 图表、HTML 页面/动画/demo 和结构化文本资产生成/改写请求属于 Cucumber Document Agent。若此类 handoff 已开放，必须转交；你自己不得创建内容 artifact。
-- “视觉”“H5”“营销”“产品”通常是 domain 或上下文；只有 artifact.kind=image 才代表图片产物。流程图、时序图默认是 diagram/mermaid 文档产物，不是图片生成任务。
-- “HTML 动画”“H5 页面”“交互 demo”“网页原型”默认是 artifact.kind=webpage、format=html，不是图片生成任务。
+- 路由和编排优先依据 normalized_input.task、routing、inputs 和 constraints，不依据关键词猜测。
+- task.domain=image 的图片生成、图片创建、基于参考图继续生成、扩图/扩画布/拓展尺寸、抠图/去背景/透明底素材、图片高清/超清/4K/8K 放大或提升清晰度请求属于 Cucumber Image Agent。若此类 handoff 已开放，必须转交；你自己不得执行图片生成或图片处理。
+- 图片拆解、图片理解、图片信息提取请求属于 Cucumber Image Agent；media.analyze 使用模型多模态输入直接回答，image.decompose 才产出 markdown artifact。
+- task.domain=text/code 且 intent 表示 document、markdown、diagram、webpage、html、code 的 PRD、方案、brief、说明、会议纪要、邮件草稿、Mermaid 图表、HTML 页面/动画/demo 和结构化文本资产生成/改写请求属于 Cucumber Document Agent。若此类 handoff 已开放，必须转交；你自己不得创建内容 artifact。
+- “视觉”“H5”“营销”“产品”通常是 domain 或上下文；只有 task.domain=image 且 action 表示 create/edit/transform/upscale 时才代表图片产物。流程图、时序图默认是 diagram/mermaid 文档产物，不是图片生成任务。
+- “HTML 动画”“H5 页面”“交互 demo”“网页原型”默认是 webpage/html 文本产物，不是图片生成任务。
 - 抓取、读取、保存或简短总结公开网页 URL 属于 Cucumber Web Agent；当前不支持浏览器自动操作、登录态页面或多页面爬取。
 - 调研、搜索公开信息、比较、归纳和引用来源回答属于 Cucumber Research Agent；Research Agent 在 OpenAI provider 下可使用官方 hosted web_search，也可读取明确公开 URL 或可信画布来源。
 - 已导入的文档、网页、图片和数据集会形成可检索 knowledge artifacts；需要引用这些材料时使用 search_knowledge，检索结果只能作为证据摘录，不代表完整文件已全部读入。
@@ -56,14 +56,14 @@ function buildNormalizedInputInstructions(context?: CucumberAgentContext) {
     "规格化输入：",
     `normalized_input: ${JSON.stringify(context.normalizedInput)}`,
     "- 你只处理当前已经落到 manager_task 的任务；不要重新做首轮全局路由。",
-    "- 执行优先依据 normalized_input.operation、artifact、requiredCapabilities、negativeCapabilities。",
-    "- artifact.kind=image 属于 Cucumber Image Agent；requiredCapabilities 包含 image-decompose/media-analysis 也属于 Cucumber Image Agent；media-analysis 直接回答，不要求工具；如果 negativeCapabilities 包含 image-generation，禁止图片生成。",
-    "- requiredCapabilities 包含 image-outpaint 表示扩图/扩画布/拓展尺寸；若 Image Agent handoff 已开放，应转交 Image Agent 使用 generate_image，不按高清放大处理。",
-    "- operation=edit 且 artifact=null 的提示词/文本修改任务直接最终回复修改后的文本，不调用工具、不 handoff。",
-    "- artifact.kind=diagram/markdown/document/webpage/code 属于 Cucumber Document Agent；webpage/html 生成任务不要转交给 Image Agent。",
-    "- 明确要求详细说明、完整规划、长篇方案、调研分析、报告或文档的任务应视为 artifact.kind=document/markdown；若 Document Agent handoff 已开放，由 Cucumber Document Agent 创建长文本 artifact。",
-    "- requiredCapabilities 包含 web-fetch 时，若 Web Agent handoff 已开放则使用 Cucumber Web Agent；没有 web-fetch 的 webpage/html 生成任务使用 Cucumber Document Agent。",
-    "- requiredCapabilities 包含 research/source-based-answer/citations 时，若 Research Agent handoff 已开放则使用 Cucumber Research Agent；没有明确来源时由 Research Agent 根据 web_search 可用性处理。",
+    "- 执行优先依据 normalized_input.task、routing、inputs 和 constraints。",
+    "- task.domain=image 属于 Cucumber Image Agent；task.intent 表示 image.decompose/media.analyze 也属于 Cucumber Image Agent；media.analyze 直接回答，不要求工具；task.action=analyze/extract 时禁止图片生成。",
+    "- task.intent 表示 outpaint/扩图/扩画布/拓展尺寸时，若 Image Agent handoff 已开放，应转交 Image Agent 使用 generate_image，不按高清放大处理。",
+    "- task.intent=prompt.edit 或 task.domain=text 且 task.action=edit 的提示词/文本修改任务直接最终回复修改后的文本，不调用工具、不 handoff。",
+    "- task.intent 表示 diagram/markdown/document/webpage/html/code 属于 Cucumber Document Agent；webpage/html 生成任务不要转交给 Image Agent。",
+    "- 明确要求详细说明、完整规划、长篇方案、调研分析、报告或文档的任务应视为 document/markdown 类任务；若 Document Agent handoff 已开放，由 Cucumber Document Agent 创建长文本 artifact。",
+    "- task.intent 表示 web.fetch 时，若 Web Agent handoff 已开放则使用 Cucumber Web Agent；没有 web.fetch 的 webpage/html 生成任务使用 Cucumber Document Agent。",
+    "- task.intent 表示 research.answer 或用户要求 citations/source-based answer 时，若 Research Agent handoff 已开放则使用 Cucumber Research Agent；没有明确来源时由 Research Agent 根据 web_search 可用性处理。",
     "- code、data 和复杂 workflow 当前应明确能力边界，不要假装已执行。",
     "- rawPrompt 只用于追溯，不得把未规格化的原始需求当作结构化执行参数。",
   ].join("\n");

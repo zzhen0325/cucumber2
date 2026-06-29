@@ -12,8 +12,6 @@ import {
   buildGenerateImageByteArtistInput,
   buildSeedreamRequestBodies,
   buildGenerateImageSeedreamInput,
-  inferImageResultCount,
-  inferImageResultCountFromPrompts,
 } from "./generate-image.request.ts";
 
 const testSeedreamConfig: SeedreamConfig = {
@@ -69,35 +67,6 @@ const testSeed5DuotuConfig: ByteArtistConfig = {
 };
 
 describe("generate image request normalization", () => {
-  it("defaults to one image when no explicit count is requested", () => {
-    expect(inferImageResultCount("生成一张黄瓜工作台图片")).toBe(1);
-    expect(inferImageResultCount("生成 1024x1024 的正方形图片")).toBe(1);
-  });
-
-  it("parses explicit Chinese and English image counts", () => {
-    expect(inferImageResultCount("一次生成4张图片")).toBe(4);
-    expect(inferImageResultCount("生成四张不同构图")).toBe(4);
-    expect(inferImageResultCount("create 3 images of a cucumber canvas")).toBe(3);
-  });
-
-  it("falls back to expanded prompts for follow-up regeneration counts", () => {
-    expect(
-      inferImageResultCountFromPrompts([
-        "重新生成",
-        "一组四张3D渲染风格的小狗图像",
-      ])
-    ).toBe(4);
-    expect(
-      inferImageResultCountFromPrompts(["重新生成", "一组 4 张小狗图像"])
-    ).toBe(4);
-  });
-
-  it("rejects counts above the configured output limit", () => {
-    expect(() => inferImageResultCount("生成 8 张图片", 4)).toThrow(
-      "一次最多生成 4 张图片。"
-    );
-  });
-
   it("splits multi-image single-prompt requests into independent tasks", () => {
     const requests = buildSeedreamRequestBodies(
       {
@@ -140,7 +109,7 @@ describe("generate image request normalization", () => {
     ]);
   });
 
-  it("keeps geometry hints while removing multi-image count text", () => {
+  it("keeps geometry words in the prompt without turning them into parameters", () => {
     const requests = buildSeedreamRequestBodies(
       {
         prompts: ["create 3 images of a 16:9 2K puppy poster"],
@@ -155,9 +124,11 @@ describe("generate image request normalization", () => {
       "a 16:9 2K puppy poster",
       "a 16:9 2K puppy poster",
     ]);
-    expect(
-      (requests[0].body.width as number) / (requests[0].body.height as number)
-    ).toBeCloseTo(16 / 9, 2);
+    expect(requests[0].body).toMatchObject({
+      width: testSeedreamConfig.width,
+      height: testSeedreamConfig.height,
+    });
+    expect(requests[0].body.size).toBeUndefined();
   });
 
   it("splits distinct prompt batches into one Seedream request per prompt", () => {
@@ -189,6 +160,7 @@ describe("generate image request normalization", () => {
     const request = buildSeedreamRequestBodies(
       {
         prompts: ["生成4张 16:9 横版 2K 海报"],
+        geometry: { aspectRatio: "16:9" },
         resultCount: 4,
         promptBatchMode: "single_prompt",
         upstreamContext: [
@@ -265,12 +237,13 @@ describe("generate image request normalization", () => {
       SEEDREAM_PROMPT_MAX_LENGTH
     );
     expect(request.body.prompt).toContain("手绘家居清洁海报");
-    expect(
-      (request.body.width as number) / (request.body.height as number)
-    ).toBeCloseTo(16 / 9, 2);
+    expect(request.body).toMatchObject({
+      width: testSeedreamConfig.width,
+      height: testSeedreamConfig.height,
+    });
   });
 
-  it("uses explicit pixel dimensions or size-only requests when present", () => {
+  it("ignores prompt-only dimensions and uses structured dimensions", () => {
     expect(
       buildSeedreamRequestBodies(
         {
@@ -280,7 +253,10 @@ describe("generate image request normalization", () => {
         },
         testSeedreamConfig
       )[0].body
-    ).toMatchObject({ width: 2048, height: 2048 });
+    ).toMatchObject({
+      width: testSeedreamConfig.width,
+      height: testSeedreamConfig.height,
+    });
 
     expect(
       buildSeedreamRequestBodies(
@@ -291,7 +267,22 @@ describe("generate image request normalization", () => {
         },
         testSeedreamConfig
       )[0].body
-    ).toMatchObject({ size: 4096 * 4096 });
+    ).toMatchObject({
+      width: testSeedreamConfig.width,
+      height: testSeedreamConfig.height,
+    });
+
+    expect(
+      buildSeedreamRequestBodies(
+        {
+          prompts: ["产品图"],
+          geometry: { width: 2048, height: 2048 },
+          resultCount: 1,
+          promptBatchMode: "single_prompt",
+        },
+        testSeedreamConfig
+      )[0].body
+    ).toMatchObject({ width: 2048, height: 2048 });
   });
 
   it("builds one Seedream request per output variant", () => {

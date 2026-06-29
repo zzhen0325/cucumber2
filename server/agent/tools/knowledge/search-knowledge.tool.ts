@@ -7,54 +7,35 @@ import { listAgentKnowledgeChunksForProject } from "../../../supabase.ts";
 import type { CucumberAgentContext } from "../../context.ts";
 
 const searchKnowledgeInputSchema = z.object({
-  limit: z.number().int().min(1).max(12).default(6),
-  query: z.string().trim().min(1).max(500),
-  sourceNodeIds: z.array(z.string().trim().min(1).max(260)).max(20).optional(),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(12)
+    .describe("Maximum number of matching knowledge chunks to return.")
+    .default(6),
+  query: z
+    .string()
+    .trim()
+    .min(1)
+    .max(500)
+    .describe("Search query for uploaded or generated project knowledge."),
+  sourceNodeIds: z
+    .array(z.string().trim().min(1).max(260))
+    .max(20)
+    .describe("Optional trusted project node ids to restrict retrieval to.")
+    .optional(),
 });
-
-const searchKnowledgeJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    limit: {
-      type: "integer",
-      minimum: 1,
-      maximum: 12,
-      description: "Maximum number of matching knowledge chunks to return.",
-    },
-    query: {
-      type: "string",
-      minLength: 1,
-      maxLength: 500,
-      description: "Search query for uploaded or generated project knowledge.",
-    },
-    sourceNodeIds: {
-      type: "array",
-      items: { type: "string" },
-      description:
-        "Optional project node ids to restrict retrieval to. The runtime ignores ids that are not in the trusted project snapshot.",
-    },
-  },
-  required: ["query"],
-} as const;
 
 export const searchKnowledgeTool = tool({
   name: "search_knowledge",
   description:
     "Search trusted project knowledge artifacts created from imported documents, webpages, images, datasets, and generated artifacts. Use when the user asks to reference, compare, summarize, reuse, or answer from project materials beyond the short upstream context.",
-  parameters: searchKnowledgeJsonSchema as never,
-  strict: false,
+  parameters: searchKnowledgeInputSchema,
+  strict: true,
   errorFunction: null,
-  async execute(rawArgs, runContext) {
+  async execute(args, runContext) {
     const context = requireCucumberContext(runContext?.context);
-    const parsed = searchKnowledgeInputSchema.safeParse(rawArgs);
-    if (!parsed.success) {
-      return {
-        error: `invalid_knowledge_search_input: ${parsed.error.issues
-          .map((issue) => `${issue.path.join(".")} ${issue.message}`)
-          .join("; ")}`,
-      };
-    }
 
     const chunks = await listAgentKnowledgeChunksForProject({
       projectId: context.projectId,
@@ -66,18 +47,18 @@ export const searchKnowledgeTool = tool({
 
     const visible = getVisibleKnowledgeSources(
       context.canvasSnapshot.nodes,
-      parsed.data.sourceNodeIds
+      args.sourceNodeIds
     );
     const results = searchKnowledgeChunks({
       chunks,
-      limit: parsed.data.limit,
-      query: parsed.data.query,
+      limit: args.limit,
+      query: args.query,
       visibleSourceArtifactIds: visible.artifactIds,
       visibleSourceNodeIds: visible.nodeIds,
     });
 
     return {
-      query: parsed.data.query,
+      query: args.query,
       resultCount: results.length,
       results: results.map((result) => ({
         artifactType: result.artifactType,

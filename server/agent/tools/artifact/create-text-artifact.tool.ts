@@ -8,61 +8,42 @@ import type { CucumberAgentContext } from "../../context.ts";
 import { assertTextArtifactToolAllowed } from "../../policy/task-artifact-policy.ts";
 
 const createTextArtifactInputSchema = z.object({
-  content: z.string().trim().min(1),
-  format: z.enum(["markdown", "document", "html", "code"]).optional(),
-  language: z.string().trim().min(1).max(64).optional(),
-  title: z.string().trim().min(1).max(160),
+  content: z
+    .string()
+    .trim()
+    .min(1)
+    .describe("Complete user-facing artifact content."),
+  format: z
+    .enum(["markdown", "document", "html", "code"])
+    .describe("Output surface for the text artifact.")
+    .optional(),
+  language: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .describe("Optional code language label, such as html, css, ts, or json.")
+    .optional(),
+  title: z
+    .string()
+    .trim()
+    .min(1)
+    .max(160)
+    .describe("Short artifact title shown on the canvas."),
 });
-
-const createTextArtifactJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    content: {
-      type: "string",
-      description:
-        "Complete user-facing artifact content. Use Markdown for markdown/document drafts.",
-    },
-    format: {
-      type: "string",
-      enum: ["markdown", "document", "html", "code"],
-      description:
-        "Output surface. Use markdown for notes, briefs, specs, and summaries; document for longer document drafts; html for generated HTML pages/animations; code for source code artifacts.",
-    },
-    language: {
-      type: "string",
-      maxLength: 64,
-      description: "Optional code language label, such as html, css, ts, or json.",
-    },
-    title: {
-      type: "string",
-      maxLength: 160,
-      description: "Short artifact title shown on the canvas.",
-    },
-  },
-  required: ["title", "content"],
-} as const;
 
 export const createTextArtifactTool = tool({
   name: "create_text_artifact",
   description:
     "Create a trusted text artifact for the canvas. Use this only from a specialist that is producing a markdown or document result. It writes artifact content through Cucumber runtime storage and emits an artifact event; it does not directly mutate canvas nodes.",
-  parameters: createTextArtifactJsonSchema as never,
-  strict: false,
+  parameters: createTextArtifactInputSchema,
+  strict: true,
   errorFunction: null,
-  async execute(rawArgs, runContext) {
+  async execute(args, runContext) {
     const context = requireCucumberContext(runContext?.context);
     assertTextArtifactToolAllowed(context);
-    const parsed = createTextArtifactInputSchema.safeParse(rawArgs);
-    if (!parsed.success) {
-      return {
-        error: `invalid_text_artifact_input: ${parsed.error.issues
-          .map((issue) => `${issue.path.join(".")} ${issue.message}`)
-          .join("; ")}`,
-      };
-    }
-    const artifactType = getArtifactTypeForContext(context, parsed.data.format);
-    const content = normalizeArtifactContent(parsed.data.content, parsed.data.format);
+    const artifactType = getArtifactTypeForContext(context, args.format);
+    const content = normalizeArtifactContent(args.content, args.format);
     if (
       /diagram|mermaid|时序图|流程图|sequence|flowchart/i.test(
         context.normalizedInput?.task.intent ?? ""
@@ -82,12 +63,12 @@ export const createTextArtifactTool = tool({
     const artifact = await storeTextArtifactContent({
       content,
       metadata: {
-        language: parsed.data.language ?? inferLanguage(artifactType, parsed.data.format),
+        language: args.language ?? inferLanguage(artifactType, args.format),
       },
       projectId: context.projectId,
       runNodeId: context.runNodeId,
       sourceToolName: "create_text_artifact",
-      title: parsed.data.title,
+      title: args.title,
       type: artifactType,
       userId: context.userId,
     });
@@ -98,7 +79,7 @@ export const createTextArtifactTool = tool({
     return {
       artifactId: artifact.id,
       artifactType: artifact.type,
-      format: parsed.data.format ?? inferFormat(artifactType),
+      format: args.format ?? inferFormat(artifactType),
       note: "Text artifact created and rendered to the canvas.",
       title: artifact.title,
     };

@@ -2,6 +2,10 @@
 
 本文记录 2026-06-11 Agent v2 正式切换后的变更。
 
+## 2026-06-28 Agent Tool Schema Boundary
+
+- 简单本地 Agent tool 收敛为 Zod `parameters` + `strict: true`，由 Agents SDK 自动解析并校验入参；复杂 union/open payload 工具继续保留手写 JSON Schema 给模型、执行期 Zod 校验兜底。
+
 ## 2026-06-26 Temporary Agent Run Debug Panel
 
 - 画布运行时新增临时 `Agent Run 检查` 浮层，自动展示当前/最近一次 Agent Run 的输出事件和完整 raw event JSON，方便排查实时流、tool、artifact、canvas operation、terminal output 和 error；该面板只消费现有 `agent_run_events` / AI SDK runtime events，不新增后端协议、数据库表或平行 Trace 状态。
@@ -14,13 +18,13 @@
 
 ## 2026-06-25 Reusable Text Artifact Boundary
 
-- Input Normalizer 继续复用 artifact-first task protocol，不新增独立 Output Planner 或 `responseMode` 状态；可复用、可复制、可编辑的文本产物仍通过 `artifact.kind/subtype/format` 表达。
+- Input Normalizer 继续只输出 Task Frame，不新增独立 Output Planner 或 `responseMode` 状态；可复用、可复制、可编辑的文本产物由 Document Agent 和 artifact tools 根据 Task Frame 自行落成最终 artifact 参数。
 - 模板、提示词模板、完整提示词、可复制/直接使用方案、设定稿、规范和 IP 三视图模板等生产型文本请求归一化为 `document/markdown` artifact，并由 Document Agent 通过 `create_text_artifact` 创建画布文档；明确要求生成真实图片/海报/插画时仍走 Image Agent。
-- 简单解释、为什么/是什么类问答继续保持 `artifact=null`，由 Cucumber Chat Agent 在 Run 节点直接回复。
+- 简单解释、为什么/是什么类问答继续保持轻量 Task Frame，由 Cucumber Chat Agent 在 Run 节点直接回复。
 
 ## 2026-06-24 Input Normalizer And Manager Boundary
 
-- `server/agent/input-normalizer.ts` 保持为 artifact-first task protocol 生成与确定性纠偏边界；specialist route 选择拆到 `server/agent/task-router.ts`，由 runtime、quick router、handoff registry、tool policy 和 skill retrieval 共用同一套 route/capability 判断。
+- `server/agent/input-normalizer.ts` 保持为 Task Frame 生成与规格化边界；specialist route 选择拆到 `server/agent/task-router.ts`，由 runtime、quick router、handoff registry、tool policy 和 skill retrieval 共用同一套 route 判断。
 - Manager prompt 收窄为通用 fallback 与复合任务编排：运行时已经先完成可信上下文重建、快速路由和输入归一化；明确的单一 specialist 任务直接启动对应 Agent，只有短答 fallback、提示词/文本改写、knowledge 问答、受限画布操作和复合任务才由 Manager 处理。
 - Run plan 的 route 文案从“委派 XX Agent”调整为“进入 XX Agent”，覆盖直接启动 specialist 和 Manager handoff 两种路径，避免把单一任务误读成一定经过 Manager。
 
@@ -42,7 +46,7 @@
 - Image Agent 扩展为图片生成、抠图、拆解、理解和高清处理的统一 specialist；Manager 继续只做编排，工具只创建 artifact 和事件，不直接写画布节点。
 - 新增 `image_matting` 本地工具，通过统一 matting provider 接口和可信上游图片解析生成抠图/透明底优先素材；当前默认 provider 为 ByteArtist `image_matting_lemo`，不再依赖本地 rembg CLI；`image-generation` negative capability 仍阻止新图生成，但不阻止抠图和高清这类图片处理。
 - 新增 `decompose_image` 本地工具，把图片风格拆解、prompt 线索保存为 Markdown/doc artifact；图片内容理解不再走工具，Agent 模型通过多模态输入直接回答。
-- 输入归一化新增 `image.matting`、`image.decompose` 和 `media.analyze` intent 兼容摘要，实际路由仍以 `operation + artifact + requiredCapabilities + negativeCapabilities` 为准；`image-decompose` 的 Markdown 产物和 `media-analysis` 的直接看图回答都路由到 Image Agent。
+- 输入归一化新增 `image.matting`、`image.decompose` 和 `media.analyze` intent 兼容摘要，实际路由以 Task Frame 的 `task` 和 `routing` 为准；`image-decompose` 的 Markdown 产物和 `media-analysis` 的直接看图回答都路由到 Image Agent。
 - Tool Registry 新增 `tool.image.matting` 和 `tool.image.decompose` scope；Run plan、Run 节点工具摘要、错误来源摘要和 artifact 投影路径同步识别 `image_matting`、`decompose_image`。
 
 ## 2026-06-18 R2 Object Storage
@@ -77,13 +81,13 @@
 
 ## 2026-06-16 Artifact-First Routing
 
-- 输入归一化从只依赖 `intent` 升级为 artifact-first task protocol：`userGoal`、`operation`、`artifact.kind/subtype/format`、`domain`、`requiredCapabilities` 和 `negativeCapabilities`；`intent` 仅作为 Trace/UI 兼容摘要派生。
-- Specialist registry 不再按 intent 字符串开 handoff；runtime 根据 artifact protocol deterministic route。单一 image/document/web/research 任务直接启动对应 specialist，复合任务留给 Manager 编排并只开放匹配 handoff。
+- 输入归一化从只依赖 `intent` 演进为结构化任务协议；当前实现已收敛为 Task Frame：`task`、`userGoal`、`routing`、`inputs`、`constraints` 和 `ambiguities`。
+- Specialist registry 不再按 intent 字符串开 handoff；runtime 根据 Task Frame route。单一 image/document/web/research 任务直接启动对应 specialist，复合任务留给 Manager 编排并只开放匹配 handoff。
 - `视觉`、`H5`、营销或产品语义只作为 `domain`/上下文；流程图和时序图默认归一化为 `diagram` + `mermaid`，由 Document Agent 产出 Markdown artifact，不走图片链路。
-- 明确的 HTML 页面、H5 页面、交互 demo 或 HTML 动画请求归一化为 `webpage` + `html`，并加上 `negativeCapabilities=["image-generation"]`；生成 HTML 由 Document Agent 创建 webpage artifact，抓取公开 URL 才走 Web Agent。
-- 提示词/文本改写任务（例如选中长图片 prompt 后输入“取消标题”）归一化为 `artifact=null` + `operation=edit` + `negativeCapabilities=["image-generation"]`，由 Manager 直接输出修改后的文本；即使存在上游 prompt 节点也不创建任务 plan、不委派 Image Agent、不调用 `generate_image`。
-- Manager 作为通用 fallback 与复合任务编排者：提示词/文本改写、knowledge 问答、受限画布操作和复合任务进入 Manager；短问答、概念解释、轻量分析和简短总结保持 `artifact=null` 并优先进入 Chat Agent；明确要求详细说明、完整规划、长篇方案、调研分析、报告或文档时归一化为 document/markdown artifact，交由 Document Agent 创建可沉淀的长文本产物。
-- Skill frontmatter 新增可选 `capabilities`、`produces`、`uses` 和 `notFor`；skill retrieval 先按 artifact/capability 打分，再看关键词、canvas kind 和 token overlap，并会按 `negativeCapabilities` 抑制不应出现的 image skill。
+- 明确的 HTML 页面、H5 页面、交互 demo 或 HTML 动画请求归一化为 webpage/html 类 Task Frame；生成 HTML 由 Document Agent 创建 webpage artifact，抓取公开 URL 才走 Web Agent。
+- 提示词/文本改写任务（例如选中长图片 prompt 后输入“取消标题”）归一化为 text edit / prompt.edit 类 Task Frame，由 Manager 直接输出修改后的文本；即使存在上游 prompt 节点也不创建任务 plan、不委派 Image Agent、不调用 `generate_image`。
+- Manager 作为通用 fallback 与复合任务编排者：提示词/文本改写、knowledge 问答、受限画布操作和复合任务进入 Manager；短问答、概念解释、轻量分析和简短总结保持轻量 Task Frame 并优先进入 Chat Agent；明确要求详细说明、完整规划、长篇方案、调研分析、报告或文档时归一化为 document/markdown 类任务，交由 Document Agent 创建可沉淀的长文本产物。
+- Skill frontmatter 新增可选 `capabilities`、`produces`、`uses` 和 `notFor`；skill retrieval 先按 Task Frame 派生的领域/意图与 skill capability 打分，再看关键词、canvas kind 和 token overlap，并抑制不应出现的 image skill。
 - 新增 seed skill `sequence-diagram`，声明 `diagram/sequenceDiagram/mermaid` 能力，Document Agent 可激活后用 `create_text_artifact` 创建包含 Mermaid fenced block 的 Markdown artifact。
 - 工具入口新增 task artifact policy：图片 prompt/generation 工具只允许 image artifact task，`image-generation` negative capability 会阻止新图生成；`image_matting` 仍要求 image artifact task 但不视为新图生成；`decompose_image` 要求对应 image inspection capability，可产出 markdown/document 分析 artifact；`create_text_artifact` 只允许 markdown/document/diagram/code/webpage 文本类 artifact task，Mermaid diagram 必须包含 mermaid fenced block，webpage artifact 必须是完整 HTML document。
 
@@ -184,7 +188,7 @@
 ## 2026-06-13 Input Normalization
 
 - Agent Run 在 Manager 启动前通过 `server/agent/input-normalizer.ts` 生成结构化 `normalizedInput`，并写入 `input.normalized` Trace。
-- 图片生成请求会单独抽取 `contentPrompt`、`resultCount`、`aspectRatio`、`dimensions` 或 `variants`；`variants` 表示同一参考图/同一 prompt 输出多组目标尺寸，`generate_image` 会按尺寸拆成 provider request 并由投影层创建对应 pending 图片结果节点。扩图、扩画布、拓展尺寸和 outpaint 归一化为 `image.generate + image-outpaint`，不是 `image.upscale`；只有纯高清、超清、4K/8K 或提升清晰度才进入 `upscale_image`。
+- Input Normalizer 只输出 Task Frame：`task`、`userGoal`、`routing`、`inputs`、`constraints` 和 `ambiguities`。图片数量、尺寸、比例等用户硬约束只进入 `constraints.explicit`（如 `output_count`、`dimension`、`aspect_ratio`），不会在 normalizer 中变成 `resultCount`、`dimensions`、`aspectRatio` 或 `variants`；Image Agent 必须自己把这些约束转换成 `generate_image` 的最终 tool args。扩图、扩画布、拓展尺寸和 outpaint 归一化为 `image.generate`，不是 `image.upscale`；只有纯高清、超清、4K/8K 或提升清晰度才进入 `upscale_image`。
 - 分析、评估或给建议类视觉 brief（如图片、海报、banner、KV 需求）默认归一化为 `text.answer`；只有用户明确要求生成、创建或渲染图片时才进入 `image.generate`。如果请求明确指向选中/上游实际图片，风格拆解归一化为 `image.decompose`，内容理解/信息提取归一化为 `media.analyze` 并由 Image Agent 直接看图回答，抠图/去背景归一化为 `image.matting`。
 
 ## 2026-06-13 Multi Node References

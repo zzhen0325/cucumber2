@@ -12,51 +12,36 @@ import {
 } from "./public-web-fetch.ts";
 
 const fetchWebpageInputSchema = z.object({
-  title: z.string().trim().min(1).max(160).optional(),
-  url: z.string().trim().url(),
+  title: z
+    .string()
+    .trim()
+    .min(1)
+    .max(160)
+    .describe("Optional short title for the webpage artifact.")
+    .optional(),
+  url: z
+    .string()
+    .trim()
+    .url()
+    .describe("The public http(s) URL to fetch and save as a webpage artifact."),
 });
-
-const fetchWebpageJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    title: {
-      type: "string",
-      maxLength: 160,
-      description: "Optional short title for the webpage artifact.",
-    },
-    url: {
-      type: "string",
-      description: "The public http(s) URL to fetch and save as a webpage artifact.",
-    },
-  },
-  required: ["url"],
-} as const;
 
 export const fetchWebpageTool = tool({
   name: "fetch_webpage",
   description:
     "Fetch one public http(s) webpage, save the HTML as a Cucumber webpage artifact, and return a short extracted text preview. Do not use for browser automation, logged-in pages, local files, localhost, private network URLs, or arbitrary binary downloads.",
-  parameters: fetchWebpageJsonSchema as never,
-  strict: false,
+  parameters: fetchWebpageInputSchema,
+  strict: true,
   errorFunction: null,
-  async execute(rawArgs, runContext, details) {
+  async execute(args, runContext, details) {
     const context = requireCucumberContext(runContext?.context);
-    const parsed = fetchWebpageInputSchema.safeParse(rawArgs);
-    if (!parsed.success) {
-      return {
-        error: `invalid_webpage_input: ${parsed.error.issues
-          .map((issue) => `${issue.path.join(".")} ${issue.message}`)
-          .join("; ")}`,
-      };
-    }
 
     const fetched = await fetchPublicReadableWebpage(
-      parsed.data.url,
+      args.url,
       details?.signal
     );
     const extractedTitle = extractHtmlTitle(fetched.html);
-    const title = parsed.data.title ?? extractedTitle ?? fetched.url.hostname;
+    const title = args.title ?? extractedTitle ?? fetched.url.hostname;
     const artifact = await storeTextArtifactContent({
       content: fetched.html,
       projectId: context.projectId,
