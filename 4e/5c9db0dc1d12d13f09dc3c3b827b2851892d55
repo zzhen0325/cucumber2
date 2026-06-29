@@ -1,0 +1,135 @@
+src/styles/theme.css
+  s_04df4cdd6c3544::t_a122751d5a24b3 34
+  h_49a1fcd5ff42d1 95-96,165-168,170-174,192-194
+src/components/ai-elements/task.tsx
+  s_290cc7d568eb10::t_6c77286eb3e963 88
+  s_6020663dfbc7a3::t_737f5ebd62f806 98
+  h_49a1fcd5ff42d1 94,96,99
+  s_a1f49682571787::t_36dccbb4ac5c7c 83
+src/components/ai-elements/reasoning.tsx
+  h_49a1fcd5ff42d1 37-38,40-46,127,153,167,172-173,178-186,206 gitai:{"mixed_line_ranges":[{"Single":153}],"operations":[]}
+  s_78ba0d3831b921::t_68d0b2f8a6e67a 171
+  s_0c45dad2bd7438::t_dba0c02f18b6b0 39
+  s_f156614c1376d5::t_30931d867600f4 176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "4e5c9db0dc1d12d13f09dc3c3b827b2851892d55",
+  "prompts": {},
+  "humans": {
+    "h_49a1fcd5ff42d1": {
+      "author": "zzhen0325 <26629213+zzhen0325@users.noreply.github.com>"
+    }
+  },
+  "sessions": {
+    "s_04df4cdd6c3544": {
+      "agent_id": {
+        "tool": "trae-cue",
+        "id": "ai_tab-icr-084b3096-dec9-4aba-b081-9d1ab3f9dab8",
+        "model": "default"
+      },
+      "human_author": "zzhen0325 <26629213+zzhen0325@users.noreply.github.com>"
+    },
+    "s_0c45dad2bd7438": {
+      "agent_id": {
+        "tool": "trae-cue",
+        "id": "ai_tab-icr-d5a6f1f9-7766-4bbb-b7d9-7355687d1c1a",
+        "model": "default"
+      },
+      "human_author": "zzhen0325 <26629213+zzhen0325@users.noreply.github.com>"
+    },
+    "s_290cc7d568eb10": {
+      "agent_id": {
+        "tool": "trae-cue",
+        "id": "ai_tab-icr-a37007a0-2e0a-4cd9-8c03-2011c2434a0d",
+        "model": "default"
+      },
+      "human_author": "zzhen0325 <26629213+zzhen0325@users.noreply.github.com>"
+    },
+    "s_6020663dfbc7a3": {
+      "agent_id": {
+        "tool": "trae-cue",
+        "id": "ai_tab-icr-b00c419b-2f7b-47a3-ae96-03714d83ffc3",
+        "model": "default"
+      },
+      "human_author": "zzhen0325 <26629213+zzhen0325@users.noreply.github.com>"
+    },
+    "s_78ba0d3831b921": {
+      "agent_id": {
+        "tool": "trae-cue",
+        "id": "ai_tab-icr-7767635e-f50d-480d-a16f-d60772c734ee",
+        "model": "default"
+      },
+      "human_author": "zzhen0325 <26629213+zzhen0325@users.noreply.github.com>"
+    },
+    "s_a1f49682571787": {
+      "agent_id": {
+        "tool": "trae-cue",
+        "id": "ai_tab-icr-fd76def0-730b-40bc-95b7-bb3bf6681e13",
+        "model": "default"
+      },
+      "human_author": "zzhen0325 <26629213+zzhen0325@users.noreply.github.com>"
+    },
+    "s_f156614c1376d5": {
+      "agent_id": {
+        "tool": "trae-cue",
+        "id": "ai_tab-icr-d0e89dd6-88e0-4966-8156-89b576e3dbea",
+        "model": "default"
+      },
+      "human_author": "zzhen0325 <26629213+zzhen0325@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {
+    "src/components/ai-elements/reasoning.tsx": [
+      {
+        "hash": "h_49a1fcd5ff42d1",
+        "line_ranges": [
+          {
+            "Range": [
+              37,
+              38
+            ]
+          },
+          {
+            "Range": [
+              40,
+              46
+            ]
+          },
+          {
+            "Single": 127
+          },
+          {
+            "Single": 153
+          },
+          {
+            "Single": 167
+          },
+          {
+            "Range": [
+              172,
+              173
+            ]
+          },
+          {
+            "Range": [
+              178,
+              186
+            ]
+          },
+          {
+            "Single": 206
+          }
+        ],
+        "mixed_line_ranges": [
+          {
+            "Single": 153
+          }
+        ],
+        "operations": []
+      }
+    ]
+  },
+  "remote_transcripts": {}
+}
