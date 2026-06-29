@@ -24,24 +24,25 @@ export type ToolProps = ComponentProps<typeof Collapsible>;
 
 export const Tool = ({ className, ...props }: ToolProps) => (
   <Collapsible
-    className={cn("not-prose group mb-4 w-full rounded-md border", className)}
+    className={cn("tool-card not-prose group w-full", className)}
     {...props}
   />
 );
 
-export type ToolHeaderProps = {
+export type ToolHeaderProps = ComponentProps<typeof CollapsibleTrigger> & {
+  description?: ReactNode;
+  stateLabel?: string;
   title?: string;
-  type: CanvasToolPart["type"];
+  toolType: CanvasToolPart["type"];
   state: CanvasToolState;
-  className?: string;
 };
 
-const getStatusBadge = (status: CanvasToolState) => {
+const getStatusBadge = (status: CanvasToolState, stateLabel?: string) => {
   const labels: Record<CanvasToolState, string> = {
-    "input-streaming": "Pending",
-    "input-available": "Running",
-    "output-available": "Completed",
-    "output-error": "Error",
+    "input-streaming": "准备中",
+    "input-available": "运行中",
+    "output-available": "完成",
+    "output-error": "失败",
   };
 
   const icons: Record<CanvasToolState, ReactNode> = {
@@ -52,35 +53,37 @@ const getStatusBadge = (status: CanvasToolState) => {
   };
 
   return (
-    <Badge className="gap-1.5 rounded-full text-xs" variant="secondary">
+    <Badge className="tool-status-badge" variant="secondary">
       {icons[status]}
-      {labels[status]}
+      {stateLabel ?? labels[status]}
     </Badge>
   );
 };
 
 export const ToolHeader = ({
   className,
+  description,
+  stateLabel,
   title,
-  type,
+  toolType,
   state,
+  type = "button",
   ...props
 }: ToolHeaderProps) => (
   <CollapsibleTrigger
-    className={cn(
-      "flex w-full items-center justify-between gap-4 p-3",
-      className
-    )}
+    className={cn("tool-card-header", className)}
+    type={type}
     {...props}
   >
-    <div className="flex items-center gap-2">
-      <WrenchIcon className="size-4 text-muted-foreground" />
-      <span className="font-medium text-sm">
-        {title ?? type.split("-").slice(1).join("-")}
+    <div className="tool-card-heading">
+      <WrenchIcon className="tool-card-icon" size={12} />
+      <span className="tool-card-copy">
+        <strong>{title ?? toolType.split("-").slice(1).join("-")}</strong>
+        {description && <span className="tool-card-description">{description}</span>}
       </span>
-      {getStatusBadge(state)}
     </div>
-    <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+    {getStatusBadge(state, stateLabel)}
+    <ChevronDownIcon className="tool-card-chevron" size={13} />
   </CollapsibleTrigger>
 );
 
@@ -88,24 +91,25 @@ export type ToolContentProps = ComponentProps<typeof CollapsibleContent>;
 
 export const ToolContent = ({ className, ...props }: ToolContentProps) => (
   <CollapsibleContent
-    className={cn(
-      "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
-      className
-    )}
+    className={cn("tool-card-content", className)}
     {...props}
   />
 );
 
 export type ToolInputProps = ComponentProps<"div"> & {
   input: CanvasToolPart["input"];
+  label?: string;
 };
 
-export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
-  <div className={cn("space-y-2 overflow-hidden p-4", className)} {...props}>
-    <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-      Parameters
-    </h4>
-    <div className="rounded-md bg-muted/50">
+export const ToolInput = ({
+  className,
+  input,
+  label = "参数",
+  ...props
+}: ToolInputProps) => (
+  <div className={cn("tool-card-io", className)} {...props}>
+    <h4>{label}</h4>
+    <div className="tool-card-code">
       <CodeBlock code={JSON.stringify(input, null, 2)} language="json" />
     </div>
   </div>
@@ -114,21 +118,25 @@ export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
 export type ToolOutputProps = ComponentProps<"div"> & {
   output: CanvasToolPart["output"];
   errorText: CanvasToolPart["errorText"];
+  errorLabel?: string;
+  outputLabel?: string;
 };
 
 export const ToolOutput = ({
   className,
+  errorLabel = "错误",
   output,
+  outputLabel = "结果",
   errorText,
   ...props
 }: ToolOutputProps) => {
-  if (!(output || errorText)) {
+  if (output === undefined && !errorText) {
     return null;
   }
 
-  let Output = <div>{output as ReactNode}</div>;
+  let Output = output === undefined ? null : <div>{output as ReactNode}</div>;
 
-  if (typeof output === "object" && !isValidElement(output)) {
+  if (output !== undefined && typeof output === "object" && !isValidElement(output)) {
     Output = (
       <CodeBlock code={JSON.stringify(output, null, 2)} language="json" />
     );
@@ -137,18 +145,9 @@ export const ToolOutput = ({
   }
 
   return (
-    <div className={cn("space-y-2 p-4", className)} {...props}>
-      <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-        {errorText ? "Error" : "Result"}
-      </h4>
-      <div
-        className={cn(
-          "overflow-x-auto rounded-md text-xs [&_table]:w-full",
-          errorText
-            ? "bg-destructive/10 text-destructive"
-            : "bg-muted/50 text-foreground"
-        )}
-      >
+    <div className={cn("tool-card-io", className)} {...props}>
+      <h4>{errorText ? errorLabel : outputLabel}</h4>
+      <div className={cn("tool-card-code", errorText && "error")}>
         {errorText && <div>{errorText}</div>}
         {Output}
       </div>

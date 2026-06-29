@@ -89,8 +89,15 @@ import {
   PromptInput,
   PromptInputBody,
   PromptInputFooter,
+  PromptInputHeader,
+  PromptInputSelect,
+  PromptInputSelectContent,
+  PromptInputSelectItem,
+  PromptInputSelectTrigger,
+  PromptInputSelectValue,
   PromptInputSubmit,
   PromptInputTextarea,
+  PromptInputTools,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import {
@@ -99,13 +106,6 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   getCanvasLayoutSignature,
   layoutAgentCanvasGraph,
@@ -353,15 +353,17 @@ const STORAGE_CHIP_CLASS =
 const COMPOSER_WRAP_CLASS =
   "absolute bottom-8 left-1/2 z-30 flex w-[var(--cuc-width-composer)] -translate-x-1/2 flex-col items-start gap-1 max-[760px]:bottom-4 max-[760px]:w-[calc(100vw-24px)]";
 const COMPOSER_FORM_CLASS =
-  "min-h-cuc-composer-height rounded-cuc-composer border-[0.5px] border-cuc-border bg-cuc-surface shadow-cuc-composer [&_[data-slot=input-group]]:min-h-[inherit] [&_[data-slot=input-group]]:items-center [&_[data-slot=input-group]]:overflow-hidden [&_[data-slot=input-group]]:rounded-cuc-composer [&_[data-slot=input-group]]:border-0 [&_[data-slot=input-group]]:bg-transparent [&_[data-slot=input-group]]:shadow-none";
+  "rounded-cuc-composer border-[0.5px] border-cuc-border bg-cuc-surface shadow-cuc-composer [&_[data-slot=input-group]]:min-h-[inherit] [&_[data-slot=input-group]]:items-stretch [&_[data-slot=input-group]]:overflow-hidden [&_[data-slot=input-group]]:rounded-cuc-composer [&_[data-slot=input-group]]:border-0 [&_[data-slot=input-group]]:bg-transparent [&_[data-slot=input-group]]:shadow-none";
 const COMPOSER_AGENT_FORM_CLASS =
-  "[&_[data-slot=input-group]]:grid [&_[data-slot=input-group]]:grid-cols-[minmax(0,1fr)_52px] max-[560px]:[&_[data-slot=input-group]]:grid-cols-[minmax(0,1fr)_50px]";
+  "min-h-[168px] [&_[data-slot=input-group]]:flex [&_[data-slot=input-group]]:flex-col";
 const COMPOSER_IMAGE_FORM_CLASS =
   "min-h-cuc-composer-image-height [&_[data-slot=input-group]]:flex [&_[data-slot=input-group]]:flex-col [&_[data-slot=input-group]]:items-stretch [&_[data-slot=input-group]]:justify-between";
+const COMPOSER_HEADER_CLASS =
+  "box-border w-full cursor-default items-start justify-start gap-2 border-0 px-3.5 pb-1.5 pt-3";
 const COMPOSER_MODE_SWITCH_CLASS =
-  "inline-flex min-h-[41px] items-center gap-1 rounded-cuc-floating border-[0.5px] border-cuc-control-border bg-cuc-border p-[4.5px] shadow-[0_2px_20px_rgba(41,37,100,0.06)]";
+  "inline-flex min-h-cuc-control items-center gap-1 rounded-cuc-control-lg border-[0.5px] border-cuc-control-border bg-cuc-control-surface p-1 shadow-none";
 const COMPOSER_MODE_BUTTON_CLASS =
-  "inline-flex h-cuc-control min-w-cuc-control cursor-pointer items-center justify-center gap-1.5 rounded-cuc-control border-0 bg-transparent px-2 text-[13px] leading-5 text-cuc-control-dark disabled:cursor-not-allowed disabled:opacity-[0.58]";
+  "inline-flex h-7 min-w-7 cursor-pointer items-center justify-center gap-1.5 rounded-[10px] border-0 bg-transparent px-2 text-[13px] leading-5 text-cuc-control-dark disabled:cursor-not-allowed disabled:opacity-[0.58]";
 const COMPOSER_SKILL_MENU_CLASS =
   "max-h-60 w-full overflow-auto rounded-cuc-floating border-[0.5px] border-cuc-border bg-cuc-surface p-1.5 shadow-[0_6px_18px_rgba(41,37,100,0.08)]";
 const COMPOSER_SKILL_OPTION_CLASS =
@@ -372,12 +374,18 @@ const COMPOSER_TOKEN_KIND_CLASS =
   "flex-none text-[11px] text-cuc-text-soft";
 const COMPOSER_TOKEN_LABEL_CLASS =
   "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap";
+const COMPOSER_BODY_CLASS =
+  "flex min-w-0 flex-1 px-0";
+const COMPOSER_BODY_INNER_CLASS =
+  "flex min-w-0 flex-1 flex-col";
 const COMPOSER_FOOTER_BASE_CLASS =
-  "box-border h-cuc-composer-height justify-end border-0";
+  "box-border h-[52px] w-full cursor-default border-0 px-3.5 pb-3 pt-1.5";
 const COMPOSER_FOOTER_AGENT_CLASS =
-  "w-[52px] p-0 pr-2.5 max-[560px]:w-[50px] max-[560px]:pr-2";
+  "justify-between";
 const COMPOSER_FOOTER_IMAGE_CLASS =
-  "h-[52px] w-full justify-between p-2";
+  "justify-between";
+const COMPOSER_TOOLS_CLASS =
+  "min-w-0 flex-wrap gap-1.5";
 const COMPOSER_TEXTAREA_BASE_CLASS =
   "resize-none px-4 text-sm leading-5 text-cuc-text placeholder:text-cuc-text-soft";
 const COMPOSER_SUBMIT_BUTTON_CLASS =
@@ -4095,11 +4103,17 @@ function Composer({
       ? submitBlockedLabel
       : hasReference
         ? hasMultipleReferences
-          ? `继续基于 ${referenceNodeCount} 个引用节点生成分支`
-          : "继续基于引用节点生成分支"
+          ? `${referenceNodeCount} 个引用`
+          : "引用结果"
         : selectionCount > 1
-          ? "选中节点无可引用内容"
-          : `${contextCount} upstream items`;
+          ? "选中节点不可引用"
+          : contextCount > 0
+            ? `上下文 ${contextCount} 项`
+            : "Agent";
+  const footerStatusLabel =
+    hasReference && !hasMultipleReferences
+      ? `上下文 ${referenceContextCount} 项`
+      : footerContextLabel;
   const placeholder = replayActive
     ? "Run 回放模式为只读..."
     : !canEdit
@@ -4116,11 +4130,6 @@ function Composer({
 
   return (
     <div className={COMPOSER_WRAP_CLASS} data-mode={composerMode}>
-      <ComposerModeSwitch
-        disabled={busy || replayActive}
-        value={composerMode}
-        onChange={setComposerMode}
-      />
       <ComposerSkillMenu
         error={skillOptionsError}
         loading={skillOptionsStatus === "loading" || skillOptionsStatus === "idle"}
@@ -4134,39 +4143,42 @@ function Composer({
         className={cn(
           COMPOSER_FORM_CLASS,
           composerMode === "agent" && COMPOSER_AGENT_FORM_CLASS,
-          composerMode === "image" && COMPOSER_IMAGE_FORM_CLASS,
-          composerMode === "agent" && hasSelectedTokens && "min-h-[88px]"
+          composerMode === "image" && COMPOSER_IMAGE_FORM_CLASS
         )}
         data-mode={composerMode}
         data-has-tokens={hasSelectedTokens}
         onSubmit={(message, event) => onSubmit(message, event)}
       >
-        <PromptInputBody>
-          <div
-            className={cn(
-              "flex min-w-0 flex-1 flex-col",
-              composerMode === "agent" && "min-h-[52px] justify-center",
-              composerMode === "image" && "min-h-[123px] pt-2.5"
-            )}
-          >
+        <PromptInputHeader className={COMPOSER_HEADER_CLASS}>
+          <div className="flex max-w-full flex-wrap items-center gap-2">
+            <ComposerModeSwitch
+              disabled={busy || replayActive}
+              value={composerMode}
+              onChange={setComposerMode}
+            />
             <ComposerInlineTokens
               forcedSkill={forcedSkill}
               nodes={selectedNodes}
               referenceNodeIdSet={referenceNodeIdSet}
               onClearForcedSkill={onClearForcedSkill}
             />
-            <PromptInputTextarea
-              className={cn(
-                COMPOSER_TEXTAREA_BASE_CLASS,
-                composerMode === "agent" && "h-[52px] min-h-[52px] max-h-[52px] pb-[15px] pt-4",
-                composerMode === "agent" && hasSelectedTokens && "h-[34px] min-h-[34px] max-h-[34px] pt-1",
-                composerMode === "image" && "h-[76px] min-h-[76px] max-h-24 pb-2 pt-1"
-              )}
-              disabled={!canEdit && !busy}
-              placeholder={placeholder}
-              value={prompt}
-              onChange={(event) => setPrompt(event.currentTarget.value)}
-            />
+          </div>
+        </PromptInputHeader>
+        <PromptInputBody>
+          <div className={COMPOSER_BODY_CLASS}>
+            <div className={COMPOSER_BODY_INNER_CLASS}>
+              <PromptInputTextarea
+                className={cn(
+                  COMPOSER_TEXTAREA_BASE_CLASS,
+                  composerMode === "agent" && "h-[78px] min-h-[78px] max-h-28 pb-2 pt-3",
+                  composerMode === "image" && "h-[84px] min-h-[84px] max-h-28 pb-2 pt-2"
+                )}
+                disabled={!canEdit && !busy}
+                placeholder={placeholder}
+                value={prompt}
+                onChange={(event) => setPrompt(event.currentTarget.value)}
+              />
+            </div>
           </div>
         </PromptInputBody>
         <PromptInputFooter
@@ -4176,7 +4188,7 @@ function Composer({
             composerMode === "image" && COMPOSER_FOOTER_IMAGE_CLASS
           )}
         >
-          <div className="flex min-w-0 items-center gap-1">
+          <PromptInputTools className={COMPOSER_TOOLS_CLASS}>
             {composerMode === "image" ? (
               <>
                 <ImageAspectRatioSelect
@@ -4196,15 +4208,9 @@ function Composer({
                 />
               </>
             ) : (
-              <ComposerFooterStatus
-                label={
-                  hasReference && !hasMultipleReferences
-                    ? `${referenceContextCount} upstream items`
-                    : footerContextLabel
-                }
-              />
+              <ComposerFooterStatus label={footerStatusLabel} />
             )}
-          </div>
+          </PromptInputTools>
           <PromptInputSubmit
             className={COMPOSER_SUBMIT_BUTTON_CLASS}
             disabled={busy ? false : !prompt.trim() || !canSubmit}
@@ -4285,7 +4291,7 @@ function ComposerInlineTokens({
   const hiddenCount = nodes.length - visibleNodes.length;
 
   return (
-    <div aria-label="输入上下文" className="flex max-w-full flex-wrap gap-1.5 px-3.5 pb-1">
+    <div aria-label="输入上下文" className="flex max-w-full flex-wrap gap-1.5">
       {forcedSkill ? (
         <span
           className={cn(
@@ -4396,8 +4402,12 @@ function ComposerFooterStatus({
   label: string;
 }) {
   return (
-    <span className="inline-flex items-center">
-      <span className="hidden">{label}</span>
+    <span
+      className="inline-flex h-cuc-control max-w-[220px] items-center gap-1.5 rounded-cuc-control border-[0.5px] border-cuc-border bg-cuc-control-surface px-2.5 text-xs font-medium text-cuc-control-dark max-[560px]:max-w-[156px]"
+      title={label}
+    >
+      <Sparkles size={14} />
+      <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
     </span>
   );
 }
@@ -4412,14 +4422,14 @@ function ImageProviderSelect({
   onChange: (value: ImageProviderSelection) => void;
 }) {
   return (
-    <Select
+    <PromptInputSelect
       disabled={disabled}
       value={value}
       onValueChange={(nextValue) =>
         onChange(readImageProviderSelection(nextValue))
       }
     >
-      <SelectTrigger
+      <PromptInputSelectTrigger
         aria-label="选择生图模型"
         className={cn(
           COMPOSER_SELECT_TRIGGER_CLASS,
@@ -4427,13 +4437,13 @@ function ImageProviderSelect({
         )}
         title="选择生图模型"
       >
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent align="end" className={COMPOSER_SELECT_CONTENT_CLASS}>
-        <SelectItem value="byteartist">Lemo</SelectItem>
-        <SelectItem value="seed5_duotu_zz">Seedream 5</SelectItem>
-      </SelectContent>
-    </Select>
+        <PromptInputSelectValue />
+      </PromptInputSelectTrigger>
+      <PromptInputSelectContent align="end" className={COMPOSER_SELECT_CONTENT_CLASS}>
+        <PromptInputSelectItem value="byteartist">Lemo</PromptInputSelectItem>
+        <PromptInputSelectItem value="seed5_duotu_zz">Seedream 5</PromptInputSelectItem>
+      </PromptInputSelectContent>
+    </PromptInputSelect>
   );
 }
 
@@ -4447,14 +4457,14 @@ function ImageAspectRatioSelect({
   onChange: (value: ImageAspectRatioSelection) => void;
 }) {
   return (
-    <Select
+    <PromptInputSelect
       disabled={disabled}
       value={value}
       onValueChange={(nextValue) =>
         onChange(readImageAspectRatioSelection(nextValue))
       }
     >
-      <SelectTrigger
+      <PromptInputSelectTrigger
         aria-label="选择图像比例"
         className={cn(
           COMPOSER_SELECT_TRIGGER_CLASS,
@@ -4462,16 +4472,16 @@ function ImageAspectRatioSelect({
         )}
         title="选择图像比例"
       >
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent align="start" className={COMPOSER_SELECT_CONTENT_CLASS}>
-        <SelectItem value="1:1">1:1</SelectItem>
-        <SelectItem value="16:9">16:9</SelectItem>
-        <SelectItem value="9:16">9:16</SelectItem>
-        <SelectItem value="4:3">4:3</SelectItem>
-        <SelectItem value="3:4">3:4</SelectItem>
-      </SelectContent>
-    </Select>
+        <PromptInputSelectValue />
+      </PromptInputSelectTrigger>
+      <PromptInputSelectContent align="start" className={COMPOSER_SELECT_CONTENT_CLASS}>
+        <PromptInputSelectItem value="1:1">1:1</PromptInputSelectItem>
+        <PromptInputSelectItem value="16:9">16:9</PromptInputSelectItem>
+        <PromptInputSelectItem value="9:16">9:16</PromptInputSelectItem>
+        <PromptInputSelectItem value="4:3">4:3</PromptInputSelectItem>
+        <PromptInputSelectItem value="3:4">3:4</PromptInputSelectItem>
+      </PromptInputSelectContent>
+    </PromptInputSelect>
   );
 }
 
@@ -4485,14 +4495,14 @@ function ImageResultCountSelect({
   onChange: (value: ImageResultCountSelection) => void;
 }) {
   return (
-    <Select
+    <PromptInputSelect
       disabled={disabled}
       value={String(value)}
       onValueChange={(nextValue) =>
         onChange(readImageResultCountSelection(nextValue))
       }
     >
-      <SelectTrigger
+      <PromptInputSelectTrigger
         aria-label="选择生成数量"
         className={cn(
           COMPOSER_SELECT_TRIGGER_CLASS,
@@ -4500,15 +4510,15 @@ function ImageResultCountSelect({
         )}
         title="选择生成数量"
       >
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent align="end" className={COMPOSER_SELECT_CONTENT_CLASS}>
-        <SelectItem value="1">1 张</SelectItem>
-        <SelectItem value="2">2 张</SelectItem>
-        <SelectItem value="3">3 张</SelectItem>
-        <SelectItem value="4">4 张</SelectItem>
-      </SelectContent>
-    </Select>
+        <PromptInputSelectValue />
+      </PromptInputSelectTrigger>
+      <PromptInputSelectContent align="end" className={COMPOSER_SELECT_CONTENT_CLASS}>
+        <PromptInputSelectItem value="1">1 张</PromptInputSelectItem>
+        <PromptInputSelectItem value="2">2 张</PromptInputSelectItem>
+        <PromptInputSelectItem value="3">3 张</PromptInputSelectItem>
+        <PromptInputSelectItem value="4">4 张</PromptInputSelectItem>
+      </PromptInputSelectContent>
+    </PromptInputSelect>
   );
 }
 

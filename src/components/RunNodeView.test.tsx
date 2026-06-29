@@ -142,7 +142,7 @@ describe("RunNodeView", () => {
     expect(screen.getByText("我会先整理画面要求，然后调用图片工具。")).toBeTruthy();
   });
 
-  it("renders reasoning progress as an agent conversation message", () => {
+  it("renders reasoning progress with the reasoning component", () => {
     renderRunNode({
       agentMessages: [
         {
@@ -157,11 +157,70 @@ describe("RunNodeView", () => {
       status: "running",
     });
 
+    expect(screen.getByLabelText("Agent 推理")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /推理过程/ })).toBeTruthy();
     expect(screen.getByText("正在整理画面要求和参考图。")).toBeTruthy();
-    expect(screen.getByText("进展中")).toBeTruthy();
+    expect(screen.queryByText("进展中")).toBeNull();
+    expect(screen.queryByLabelText("Agent 对话")).toBeNull();
   });
 
-  it("renders execution details as a chain of thought under the agent conversation", () => {
+  it("keeps completed reasoning collapsed under final output", () => {
+    renderRunNode({
+      agentMessages: [
+        {
+          agentName: "Image Agent",
+          content: "正在整理画面要求和参考图。",
+          id: "progress-1",
+          kind: "progress",
+          role: "assistant",
+          status: "completed",
+        },
+      ],
+      agentText: "图片已生成，结果已展示在画布上。",
+      outputKind: "simple",
+      status: "success",
+    });
+
+    expect(screen.getByText("图片已生成，结果已展示在画布上。")).toBeTruthy();
+    expect(screen.queryByText("正在整理画面要求和参考图。")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /推理过程/ }));
+
+    expect(screen.getByText("正在整理画面要求和参考图。")).toBeTruthy();
+  });
+
+  it("renders separate process text under final output as reasoning", () => {
+    renderRunNode({
+      agentMessages: [
+        {
+          agentName: "Image Agent",
+          content: "用户询问 Agent Canvas 的定义，我将给出准确简洁的解释。",
+          id: "message-1",
+          role: "assistant",
+          status: "completed",
+        },
+      ],
+      agentText: "Agent Canvas 是面向多智能体协作的统一可视化工作空间。",
+      outputKind: "simple",
+      status: "success",
+    });
+
+    expect(
+      screen.getByText("Agent Canvas 是面向多智能体协作的统一可视化工作空间。")
+    ).toBeTruthy();
+    expect(
+      screen.queryByText("用户询问 Agent Canvas 的定义，我将给出准确简洁的解释。")
+    ).toBeNull();
+    expect(screen.queryByLabelText("Agent 对话")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /推理过程/ }));
+
+    expect(
+      screen.getByText("用户询问 Agent Canvas 的定义，我将给出准确简洁的解释。")
+    ).toBeTruthy();
+  });
+
+  it("renders execution details as a task under the agent conversation", () => {
     renderRunNode({
       agentMessages: [
         {
@@ -192,7 +251,7 @@ describe("RunNodeView", () => {
     });
 
     expect(screen.getByLabelText("Agent 执行")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /执行过程/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /执行计划/ })).toBeTruthy();
     expect(screen.getByText("Cucumber Manager -> Image Agent")).toBeTruthy();
     expect(screen.queryByText("1 image")).toBeNull();
     expect(
@@ -203,7 +262,7 @@ describe("RunNodeView", () => {
     ).toBeTruthy();
   });
 
-  it("shows plan items in the chain of thought", () => {
+  it("shows plan items in the task", () => {
     renderRunNode({
       currentStep: {
         id: "generate_image",
@@ -221,6 +280,17 @@ describe("RunNodeView", () => {
     expect(screen.getByLabelText("Agent 执行")).toBeTruthy();
     expect(screen.getByText("1/2 已完成")).toBeTruthy();
     expect(screen.getByText("整理需求和上下文")).toBeTruthy();
+  });
+
+  it("does not render an empty task for simple output without plan", () => {
+    renderRunNode({
+      agentText: "黄瓜是一种常见的葫芦科蔬菜。",
+      outputKind: "simple",
+      status: "success",
+    });
+
+    expect(screen.queryByLabelText("Agent 执行")).toBeNull();
+    expect(screen.queryByRole("button", { name: /执行/ })).toBeNull();
   });
 
   it("shows a current step fallback when no plan, summary, or tool is available", () => {

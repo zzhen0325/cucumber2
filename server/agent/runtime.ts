@@ -448,9 +448,11 @@ export async function executeAgentRun({
   let agentInput: AgentRunInput | null = null;
   let quickRoute: QuickAgentRunRoute | null = null;
   const textStreamId = `agent-text-${crypto.randomUUID()}`;
+  const reasoningStreamId = `agent-reasoning-${crypto.randomUUID()}`;
   let messageStarted = false;
   let messageFinished = false;
   let textStarted = false;
+  let reasoningStarted = false;
   let finalOutput: string | undefined;
   let artifactIds: string[] = [];
   let currentAgentName: string | undefined;
@@ -768,6 +770,7 @@ export async function executeAgentRun({
       console.error("[agent-run]", error);
     }
     await finishAgentMessage();
+    closeReasoningStream();
     closeTextStream();
     const failedEvent = await eventWriter.writeEvent({
       projectId: input.projectId,
@@ -1096,6 +1099,7 @@ export async function executeAgentRun({
       await writeAgentTextDelta(finalOutput);
       await finishAgentMessage();
     }
+    closeReasoningStream();
     closeTextStream();
     if (!shouldDeferRunMaterialization()) {
       await eventWriter.flush();
@@ -1131,6 +1135,13 @@ export async function executeAgentRun({
     text: string,
     source?: CucumberTextDeltaSource
   ) {
+    if (source === "reasoning_summary") {
+      writeReasoningDelta(text);
+      await writeAgentMessageDelta(text, "progress", source);
+      return;
+    }
+
+    closeReasoningStream();
     writeTextDelta(text);
     await writeAgentMessageDelta(text, "assistant", source);
   }
@@ -1237,6 +1248,29 @@ export async function executeAgentRun({
     writeStreamPart({ type: "text-end", id: textStreamId });
     writeStreamPart({ type: "finish-step" });
     textStarted = false;
+  }
+
+  function writeReasoningDelta(text: string) {
+    ensureMessageStarted();
+    if (!reasoningStarted) {
+      reasoningStarted = true;
+      writeStreamPart({ type: "start-step" });
+      writeStreamPart({ type: "reasoning-start", id: reasoningStreamId });
+    }
+    writeStreamPart({
+      type: "reasoning-delta",
+      id: reasoningStreamId,
+      delta: text,
+    });
+  }
+
+  function closeReasoningStream() {
+    if (!reasoningStarted) {
+      return;
+    }
+    writeStreamPart({ type: "reasoning-end", id: reasoningStreamId });
+    writeStreamPart({ type: "finish-step" });
+    reasoningStarted = false;
   }
 
   function ensureMessageStarted() {

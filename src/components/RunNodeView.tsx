@@ -6,25 +6,34 @@ import {
   CheckmarkCircleIcon as CheckCircle,
   ChevronDownIcon as ChevronDown,
   AlertCircleIcon as CircleAlert,
-  ClockIcon as Clock,
-  DotIcon as Dot,
   BulletListTreeIcon as ListTree,
   ArrowCounterclockwiseIcon as RotateCcw,
   SparkleIcon as Sparkles,
-  WrenchIcon as Wrench,
 } from "@proicons/react";
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Node, NodeContent } from "@/components/ai-elements/node";
 import {
-  ChainOfThought,
-  ChainOfThoughtContent,
-  ChainOfThoughtHeader,
-  ChainOfThoughtStep,
-  type ChainOfThoughtStatus,
-} from "@/components/ai-elements/chain-of-thought";
+  Task,
+  TaskContent,
+  TaskItem,
+  TaskTrigger,
+  type TaskItemStatus,
+} from "@/components/ai-elements/task";
+import {
+  Tool,
+  ToolContent,
+  ToolHeader,
+  ToolInput,
+  ToolOutput,
+} from "@/components/ai-elements/tool";
 import { MessageResponse } from "@/components/ai-elements/message";
+import {
+  Reasoning,
+  ReasoningContent,
+  ReasoningTrigger,
+} from "@/components/ai-elements/reasoning";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { isSimpleRunOutput } from "@/lib/graph";
 import type {
@@ -69,15 +78,24 @@ export function RunNodeView({
     () => normalizeAgentMessages(data.agentMessages),
     [data.agentMessages]
   );
+  const reasoningMessages = useMemo(
+    () => agentMessages.filter((message) => message.kind === "progress"),
+    [agentMessages]
+  );
+  const assistantMessages = useMemo(
+    () => agentMessages.filter((message) => message.kind !== "progress"),
+    [agentMessages]
+  );
   const explicitAgentText = data.agentText?.trim();
-  const agentMessagesText = formatAgentMessagesForText(agentMessages);
+  const agentMessagesText = formatAgentMessagesForText(assistantMessages);
   const agentText = explicitAgentText || agentMessagesText;
   const hasSeparateFinalOutput = Boolean(
     explicitAgentText && agentMessagesText && explicitAgentText !== agentMessagesText
   );
   const showAgentMessages =
-    agentMessages.length > 0 &&
+    assistantMessages.length > 0 &&
     (!explicitAgentText || explicitAgentText === agentMessagesText);
+  const hasReasoningMessages = reasoningMessages.length > 0;
   const summaryItems = useMemo(
     () => (data.summaryItems ?? []).filter((item) => item.kind !== "artifact"),
     [data.summaryItems]
@@ -92,6 +110,7 @@ export function RunNodeView({
   const hasRunOutput =
     isActiveRun ||
     Boolean(agentText) ||
+    hasReasoningMessages ||
     hasToolDetail ||
     hasPlan ||
     hasSummaryItems ||
@@ -114,7 +133,8 @@ export function RunNodeView({
         simpleRunOutput,
         status: data.status,
         currentStep: data.currentStep,
-        agentMessages,
+        assistantMessages,
+        reasoningMessages,
         plan: data.plan,
         summaryItems,
         toolParts: toolParts.map((part) => ({
@@ -129,11 +149,12 @@ export function RunNodeView({
     [
       agentText,
       data.currentStep,
-      agentMessages,
+      assistantMessages,
       data.outputKind,
       data.plan,
       data.status,
       expanded,
+      reasoningMessages,
       simpleRunOutput,
       summaryItems,
       toolParts,
@@ -272,27 +293,37 @@ export function RunNodeView({
           >
             <div className="run-conversation-flow">
               <div className="run-agent-text-region nodrag nopan nowheel">
+                {hasReasoningMessages && !agentText && (
+                  <RunReasoningBlock
+                    messages={reasoningMessages}
+                    runStatus={data.status}
+                  />
+                )}
                 {showAgentMessages ? (
-                  <AgentMessageList messages={agentMessages} />
+                  <AgentMessageList messages={assistantMessages} />
                 ) : agentText ? (
                   <MessageResponse className="agent-text-output h-auto">
                     {agentText}
                   </MessageResponse>
-                ) : (
+                ) : !hasReasoningMessages ? (
                   <Shimmer as="p" className="agent-text-output muted" duration={1.8}>
                     {pendingAgentText}
                   </Shimmer>
+                ) : null}
+                {hasReasoningMessages && agentText && (
+                  <RunReasoningBlock
+                    messages={reasoningMessages}
+                    runStatus={data.status}
+                  />
                 )}
                 {hasSeparateFinalOutput && (
-                  <details className="mt-[7px] grid min-w-0 gap-[7px] ">
-                    <summary className="cursor-pointer text-[8px] leading-3 text-cuc-text-muted marker:text-cuc-text-muted">
-                      过程
-                    </summary>
-                    <AgentMessageList messages={agentMessages} />
-                  </details>
+                  <RunReasoningBlock
+                    messages={assistantMessages}
+                    runStatus={data.status}
+                  />
                 )}
                 {hasAgentActivity && (
-                  <RunActivityChain
+                  <RunActivityStack
                     currentStep={
                       showCurrentStepFallback ? data.currentStep : undefined
                     }
@@ -310,6 +341,38 @@ export function RunNodeView({
         )}
       </NodeContent>
     </Node>
+  );
+}
+
+function RunReasoningBlock({
+  messages,
+  runStatus,
+}: {
+  messages: CanvasAgentMessage[];
+  runStatus: RunNodeData["status"];
+}) {
+  const reasoningText = formatReasoningMessagesForText(messages);
+  const isStreaming =
+    runStatus === "running" &&
+    messages.some((message) => message.status !== "completed");
+
+  if (!reasoningText) {
+    return null;
+  }
+
+  return (
+    <Reasoning
+      aria-label="Agent 推理"
+      className="agent-reasoning"
+      defaultOpen={isStreaming}
+      isStreaming={isStreaming}
+      key={isStreaming ? "streaming" : "completed"}
+    >
+      <ReasoningTrigger className="nodrag nopan" type="button" />
+      <ReasoningContent className="nodrag nopan nowheel">
+        {reasoningText}
+      </ReasoningContent>
+    </Reasoning>
   );
 }
 
@@ -361,11 +424,20 @@ function normalizeAgentMessages(messages?: CanvasAgentMessage[]) {
 
 function formatAgentMessagesForText(messages: CanvasAgentMessage[]) {
   return messages
+    .filter((message) => message.kind !== "progress")
     .map((message) =>
       message.agentName
         ? `${message.agentName}\n${message.content}`
         : message.content
     )
+    .join("\n\n")
+    .trim();
+}
+
+function formatReasoningMessagesForText(messages: CanvasAgentMessage[]) {
+  return messages
+    .map((message) => message.content.trim())
+    .filter(Boolean)
     .join("\n\n")
     .trim();
 }
@@ -396,12 +468,10 @@ function getResizableNodeStyle(
 export function ToolPartView({
   error,
   runNodeId,
-  showIcon = true,
   toolPart,
 }: {
   error?: string;
   runNodeId?: string;
-  showIcon?: boolean;
   toolPart: CanvasToolPart;
 }) {
   const [open, setOpen] = useState(false);
@@ -414,42 +484,26 @@ export function ToolPartView({
   const previewLine = errorText ?? getToolPreviewLine(toolPart);
 
   return (
-    <div
+    <Tool
       className={[
-        "tool-call-row",
+        "run-tool-card",
         toolPart.state === "output-error" ? "error" : "",
-        showIcon ? "" : "no-icon",
       ]
         .filter(Boolean)
         .join(" ")}
-      data-state={open ? "open" : "closed"}
+      onOpenChange={setOpen}
+      open={open}
     >
-      <button
+      <ToolHeader
         aria-label={`${toolName}${stateLabel}`}
-        aria-expanded={open}
-        className="tool-call-main nodrag nopan"
-        onClick={(event) => {
-          event.stopPropagation();
-          setOpen((current) => !current);
-        }}
-        type="button"
-      >
-        {showIcon && (
-          <span className="tool-call-icon">
-            <Wrench size={12} />
-          </span>
-        )}
-        <span className="tool-call-copy">
-          <strong>{toolName}</strong>
-          {previewLine && (
-            <span className="tool-call-preview" title={previewLine}>
-              {previewLine}
-            </span>
-          )}
-        </span>
-        <span className={`tool-state ${toolPart.state}`}>{stateLabel}</span>
-        <ChevronDown className="tool-call-chevron" size={13} />
-      </button>
+        className="nodrag nopan"
+        description={previewLine}
+        onClick={(event) => event.stopPropagation()}
+        state={toolPart.state}
+        stateLabel={stateLabel}
+        title={toolName}
+        toolType={toolPart.type}
+      />
       {errorText && !open && (
         <span className="tool-call-error-line">
           <span className="tool-call-error-snippet" title={errorText}>
@@ -474,24 +528,18 @@ export function ToolPartView({
         </span>
       )}
       {open && (
-        <div className="tool-call-content nodrag nopan nowheel">
-          {toolPart.input !== undefined && (
-            <ToolJsonBlock label="参数" value={toolPart.input} />
-          )}
+        <ToolContent className="nodrag nopan nowheel">
+          {toolPart.input !== undefined && <ToolInput input={toolPart.input} />}
           {(toolPart.output !== undefined || errorText) && (
-            <ToolJsonBlock
-              error={Boolean(errorText)}
-              label={errorText ? "错误" : "结果"}
-              value={errorText ?? toolPart.output}
-            />
+            <ToolOutput errorText={errorText} output={toolPart.output} />
           )}
-        </div>
+        </ToolContent>
       )}
-    </div>
+    </Tool>
   );
 }
 
-function RunActivityChain({
+function RunActivityStack({
   currentStep,
   error,
   plan,
@@ -516,62 +564,59 @@ function RunActivityChain({
     runStatus,
     toolParts,
   });
+  const hasTaskItems = Boolean(summaryItems.length || plan.length || currentStep);
+  const taskTitle = plan.length ? "执行计划" : "执行过程";
 
   return (
-    <ChainOfThought
-      aria-label="Agent 执行"
-      className="agent-activity-stack"
-      defaultOpen={runStatus !== "success"}
-      key={runStatus}
-    >
-      <ChainOfThoughtHeader className="nodrag nopan" type="button">
-        <span>执行过程</span>
-        {headerDetail && <em>{headerDetail}</em>}
-      </ChainOfThoughtHeader>
-      <ChainOfThoughtContent className="nodrag nopan nowheel">
-        {summaryItems.map((item) => (
-          <ChainOfThoughtStep
-            description={item.label}
-            icon={getSummaryIcon(item.kind)}
-            key={`summary-${item.kind}-${item.label}-${item.detail ?? ""}`}
-            label={item.detail ?? item.label}
-            status="complete"
-          />
-        ))}
-        {plan.map((item) => (
-          <ChainOfThoughtStep
-            description={getPlanStepDescription(item.status)}
-            icon={getPlanIcon(item.status)}
-            key={`plan-${item.id}`}
-            label={item.label}
-            status={mapRunStatusToChainStatus(item.status)}
-          />
-        ))}
-        {toolParts.map((part, index) => (
-          <ChainOfThoughtStep
-            icon={Wrench}
-            key={`tool-${part.type}-${part.toolCallId ?? index}`}
-            label={
-              <ToolPartView
-                error={error}
-                runNodeId={runNodeId}
-                showIcon={false}
-                toolPart={part}
+    <div aria-label="Agent 执行" className="agent-activity-stack">
+      {hasTaskItems && (
+        <Task
+          className="agent-task-stack"
+          defaultOpen={runStatus !== "success"}
+          key={runStatus}
+        >
+          <TaskTrigger className="nodrag nopan" detail={headerDetail} title={taskTitle} />
+          <TaskContent className="nodrag nopan nowheel">
+            {summaryItems.map((item) => (
+              <TaskItem
+                description={item.label}
+                icon={getSummaryIcon(item.kind)}
+                key={`summary-${item.kind}-${item.label}-${item.detail ?? ""}`}
+                status="completed"
+                title={item.detail ?? item.label}
               />
-            }
-            status={mapToolStateToChainStatus(part.state)}
-          />
-        ))}
-        {currentStep && (
-          <ChainOfThoughtStep
-            description={getPlanStepDescription(currentStep.status)}
-            icon={getPlanIcon(currentStep.status)}
-            label={currentStep.label}
-            status={mapRunStatusToChainStatus(currentStep.status)}
-          />
-        )}
-      </ChainOfThoughtContent>
-    </ChainOfThought>
+            ))}
+            {plan.map((item) => (
+              <TaskItem
+                description={getPlanStepDescription(item.status)}
+                key={`plan-${item.id}`}
+                status={mapRunStatusToTaskStatus(item.status)}
+                title={item.label}
+              />
+            ))}
+            {currentStep && (
+              <TaskItem
+                description={getPlanStepDescription(currentStep.status)}
+                status={mapRunStatusToTaskStatus(currentStep.status)}
+                title={currentStep.label}
+              />
+            )}
+          </TaskContent>
+        </Task>
+      )}
+      {toolParts.length > 0 && (
+        <div aria-label="工具调用" className="run-tool-list">
+          {toolParts.map((part, index) => (
+            <ToolPartView
+              error={error}
+              key={`tool-${part.type}-${part.toolCallId ?? index}`}
+              runNodeId={runNodeId}
+              toolPart={part}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -624,19 +669,6 @@ function getSummaryIcon(kind: RunSummaryItem["kind"]) {
   return icons[kind];
 }
 
-function getPlanIcon(status: RunNodeData["status"]) {
-  if (status === "success") {
-    return CheckCircle;
-  }
-  if (status === "error") {
-    return CircleAlert;
-  }
-  if (status === "running") {
-    return Clock;
-  }
-  return Dot;
-}
-
 function getPlanStepDescription(status: RunNodeData["status"]) {
   const labels: Record<RunNodeData["status"], string> = {
     error: "失败",
@@ -648,32 +680,17 @@ function getPlanStepDescription(status: RunNodeData["status"]) {
   return labels[status];
 }
 
-function mapRunStatusToChainStatus(
+function mapRunStatusToTaskStatus(
   status: RunNodeData["status"]
-): ChainOfThoughtStatus {
+): TaskItemStatus {
   if (status === "success") {
-    return "complete";
+    return "completed";
   }
   if (status === "error") {
     return "error";
   }
   if (status === "running") {
-    return "active";
-  }
-  return "pending";
-}
-
-function mapToolStateToChainStatus(
-  state: CanvasToolPart["state"]
-): ChainOfThoughtStatus {
-  if (state === "output-available") {
-    return "complete";
-  }
-  if (state === "output-error") {
-    return "error";
-  }
-  if (state === "input-available") {
-    return "active";
+    return "in_progress";
   }
   return "pending";
 }
@@ -881,28 +898,4 @@ function getToolStateLabel(state: CanvasToolPart["state"]) {
   };
 
   return labels[state];
-}
-
-function ToolJsonBlock({
-  error = false,
-  label,
-  value,
-}: {
-  error?: boolean;
-  label: string;
-  value: unknown;
-}) {
-  return (
-    <div className={`tool-json-block ${error ? "error" : ""}`}>
-      <span>{label}</span>
-      <pre>{formatToolValue(value)}</pre>
-    </div>
-  );
-}
-
-function formatToolValue(value: unknown) {
-  if (typeof value === "string") {
-    return value;
-  }
-  return JSON.stringify(value, null, 2);
 }

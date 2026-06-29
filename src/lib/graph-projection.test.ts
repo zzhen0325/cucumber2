@@ -712,6 +712,66 @@ describe("agent event graph projection", () => {
     });
   });
 
+  it("does not promote lone reasoning progress to run text", () => {
+    const projection = projectRunTraceToCanvas({
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", { prompt: "生成图片", promptNodeId: "prompt-1" }),
+        event("agent.message.delta", "agent-message", {
+          agentName: "Image Agent",
+          delta: "正在整理画面要求和参考图。",
+          index: 0,
+          messageId: "progress-1",
+          messageKind: "progress",
+          role: "assistant",
+        }),
+      ],
+    });
+    const run = projection.nodes.find((node) => node.id === "run-1");
+
+    expect(run?.data).toMatchObject({
+      kind: "run",
+      status: "running",
+      agentMessages: [
+        expect.objectContaining({
+          content: "正在整理画面要求和参考图。",
+          kind: "progress",
+        }),
+      ],
+    });
+    expect(run?.data.kind === "run" ? run.data.agentText : null).toBeUndefined();
+  });
+
+  it("maps legacy reasoning source messages to progress", () => {
+    const projection = projectRunTraceToCanvas({
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", { prompt: "生成图片", promptNodeId: "prompt-1" }),
+        event("agent.message.delta", "agent-message", {
+          agentName: "Image Agent",
+          delta: "正在整理画面要求和参考图。",
+          index: 0,
+          messageId: "legacy-reasoning-1",
+          messageKind: "assistant",
+          role: "assistant",
+          source: "reasoning_summary",
+        }),
+      ],
+    });
+    const run = projection.nodes.find((node) => node.id === "run-1");
+
+    expect(run?.data).toMatchObject({
+      kind: "run",
+      agentMessages: [
+        expect.objectContaining({
+          content: "正在整理画面要求和参考图。",
+          kind: "progress",
+        }),
+      ],
+    });
+    expect(run?.data.kind === "run" ? run.data.agentText : null).toBeUndefined();
+  });
+
   it("uses terminal final output instead of completed agent chatter", () => {
     const projection = projectRunTraceToCanvas({
       runNodeId: "run-1",

@@ -65,6 +65,20 @@ describe("agent event renderer", () => {
     ).toBe("");
   });
 
+  it("does not extract reasoning parts as agent text", () => {
+    expect(
+      agentTextFromMessages([
+        {
+          role: "assistant",
+          parts: [
+            { type: "reasoning", text: "正在整理任务" },
+            { type: "text", text: "最终回答" },
+          ],
+        },
+      ])
+    ).toBe("最终回答");
+  });
+
   it("projects streamed assistant text before final output arrives", () => {
     const projection = projectRuntimeEventsToCanvas({
       projectId: "project-1",

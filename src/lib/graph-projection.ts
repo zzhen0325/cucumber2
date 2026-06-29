@@ -1938,11 +1938,6 @@ function buildAgentText(
     return assistantText;
   }
 
-  const persistedText = formatAgentMessageText(agentMessages);
-  if (persistedText) {
-    return persistedText;
-  }
-
   if (streamedAgentText) {
     return streamedAgentText;
   }
@@ -1988,7 +1983,7 @@ function buildAgentMessages(
         id: messageId,
         role: "assistant",
         content: "",
-        kind: readAgentMessageKind(event.payload.messageKind),
+        kind: readAgentMessageKind(event.payload),
         deltaIndexes: new Set<number>(),
         order: nextOrder++,
       } satisfies CanvasAgentMessage & {
@@ -1999,7 +1994,7 @@ function buildAgentMessages(
     if (agentName) {
       message.agentName = agentName;
     }
-    const messageKind = readAgentMessageKind(event.payload.messageKind);
+    const messageKind = readAgentMessageKind(event.payload);
     if (messageKind) {
       message.kind = messageKind;
     }
@@ -2070,8 +2065,13 @@ function formatAgentMessageText(
     .trim();
 }
 
-function readAgentMessageKind(value: unknown): CanvasAgentMessage["kind"] {
-  const kind = readString(value);
+function readAgentMessageKind(payload: unknown): CanvasAgentMessage["kind"] {
+  const record = readRecord(payload);
+  const kind = readString(record?.messageKind ?? payload);
+  const source = readString(record?.source);
+  if (source === "reasoning_summary") {
+    return "progress";
+  }
   return kind === "progress" ? "progress" : kind === "assistant" ? "assistant" : undefined;
 }
 
