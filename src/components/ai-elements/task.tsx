@@ -25,6 +25,30 @@ type TaskIcon = ComponentType<{
   size?: number;
 }>;
 
+const TASK_CLASS_NAME = "task not-prose min-w-0";
+const TASK_TRIGGER_CLASS_NAME =
+  "task-trigger run-text-muted text-cuc-label-8 flex w-full min-w-0 cursor-pointer items-center justify-between gap-1 rounded-cuc-card border-[0.5px] border-cuc-run-border bg-transparent p-1 text-left [&>svg]:run-text-muted  hover:bg-cuc-run-border";
+const TASK_TRIGGER_LABEL_CLASS_NAME =
+  "task-trigger-label flex min-w-0 items-center gap-[5px] [&_em]:shrink-0 [&_em]:whitespace-nowrap [&_em]:not-italic [&_em]:run-text-muted [&_em]:before:mr-[5px] [&_em]:before:text-cuc-ink/38 [&_em]:before:content-['·'] [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:font-medium [&_span]:run-text-muted";
+const TASK_TRIGGER_CHEVRON_CLASS_NAME =
+  "task-trigger-chevron run-text-muted transition-transform duration-[140ms] ease-[ease]";
+const TASK_CONTENT_CLASS_NAME = "task-content grid min-w-0 gap-[5px] pt-[5px]";
+const TASK_ITEM_CLASS_NAME =
+  "task-item run-meta run-text-muted grid min-w-0 grid-cols-[16px_minmax(0,1fr)] gap-1.5 [&:last-child_.task-item-line]:hidden";
+const TASK_ITEM_MARKER_CLASS_NAME =
+  "task-item-marker relative grid justify-items-center";
+const TASK_ITEM_ICON_CLASS_NAME =
+  "task-item-icon z-[1] mt-px block rounded-cuc-round bg-cuc-accent text-current";
+const TASK_ITEM_LINE_CLASS_NAME =
+  "task-item-line absolute top-[18px] bottom-[-7px] w-px bg-cuc-node-border-hover";
+const TASK_ITEM_BODY_CLASS_NAME = "task-item-body grid min-w-0 gap-[3px]";
+const TASK_ITEM_TITLE_CLASS_NAME =
+  "task-item-title min-w-0 overflow-hidden text-inherit [text-overflow:ellipsis]";
+const TASK_ITEM_DESCRIPTION_CLASS_NAME =
+  "task-item-description run-text-muted truncate";
+const TASK_ITEM_FILE_CLASS_NAME =
+  "task-item-file run-text-muted truncate";
+
 export type TaskProps = ComponentProps<typeof Collapsible>;
 
 export const Task = memo(function Task({
@@ -34,7 +58,7 @@ export const Task = memo(function Task({
 }: TaskProps) {
   return (
     <Collapsible
-      className={cn("task not-prose", className)}
+      className={cn(TASK_CLASS_NAME, className)}
       defaultOpen={defaultOpen}
       {...props}
     />
@@ -56,20 +80,23 @@ export const TaskTrigger = memo(function TaskTrigger({
 }: TaskTriggerProps) {
   return (
     <CollapsibleTrigger
-      className={cn("task-trigger", className)}
+      className={cn(TASK_TRIGGER_CLASS_NAME, "flex items-center justify-between gap-1", className)}
       type={type}
       {...props}
     >
       {children ?? (
-        <>
+        <div className="flex items-center gap-1">
           <ListTreeIcon size={13} />
-          <span className="task-trigger-label">
+          <span className={TASK_TRIGGER_LABEL_CLASS_NAME}>
             <span>{title}</span>
             {detail && <em>{detail}</em>}
           </span>
-          <ChevronDownIcon className="task-trigger-chevron" size={13} />
-        </>
+        </div>
       )}
+        <div>
+          <ChevronDownIcon className={TASK_TRIGGER_CHEVRON_CLASS_NAME} size={13} />
+        </div>
+      
     </CollapsibleTrigger>
   );
 });
@@ -82,7 +109,7 @@ export const TaskContent = memo(function TaskContent({
   ...props
 }: TaskContentProps) {
   return (
-    <CollapsibleContent className={cn("task-content", className)} {...props}>
+    <CollapsibleContent className={cn(TASK_CONTENT_CLASS_NAME, className)} {...props}>
       {children}
     </CollapsibleContent>
   );
@@ -107,15 +134,27 @@ export const TaskItem = memo(function TaskItem({
   const StatusIcon = Icon ?? getTaskStatusIcon(status);
 
   return (
-    <div className={cn("task-item", `status-${status}`, className)} {...props}>
-      <div className="task-item-marker" aria-hidden="true">
-        <StatusIcon className="task-item-icon" size={13} />
-        <span className="task-item-line" />
+    <div
+      className={cn(
+        TASK_ITEM_CLASS_NAME,
+        `status-${status}`,
+        (status === "completed" || status === "in_progress") &&
+          "run-text",
+        status === "error" && "text-cuc-danger-strong",
+        className
+      )}
+      {...props}
+    >
+      <div className={TASK_ITEM_MARKER_CLASS_NAME} aria-hidden="true">
+        <StatusIcon className={TASK_ITEM_ICON_CLASS_NAME} size={13} />
+        <span className={TASK_ITEM_LINE_CLASS_NAME} />
       </div>
-      <div className="task-item-body">
-        {title && <div className="task-item-title">{title}</div>}
+      <div className={TASK_ITEM_BODY_CLASS_NAME}>
+        {title && <div className={TASK_ITEM_TITLE_CLASS_NAME}>{title}</div>}
         {children}
-        {description && <div className="task-item-description">{description}</div>}
+        {description && (
+          <div className={TASK_ITEM_DESCRIPTION_CLASS_NAME}>{description}</div>
+        )}
       </div>
     </div>
   );
@@ -127,7 +166,7 @@ export const TaskItemFile = memo(function TaskItemFile({
   className,
   ...props
 }: TaskItemFileProps) {
-  return <div className={cn("task-item-file", className)} {...props} />;
+  return <div className={cn(TASK_ITEM_FILE_CLASS_NAME, className)} {...props} />;
 });
 
 function getTaskStatusIcon(status: TaskItemStatus) {

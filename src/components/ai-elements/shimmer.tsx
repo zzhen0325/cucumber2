@@ -1,6 +1,9 @@
 import { cn } from "@/lib/utils";
 import type { CSSProperties, ElementType, HTMLAttributes } from "react";
 
+const SHIMMER_CLASS_NAME =
+  "ai-shimmer inline-block bg-[linear-gradient(110deg,var(--ai-shimmer-text)_0%,var(--ai-shimmer-text)_38%,rgba(255,255,255,0.95)_48%,var(--ai-shimmer-text)_58%,var(--ai-shimmer-text)_100%)] text-transparent [--ai-shimmer-text:var(--color-cuc-ink)] [-webkit-background-clip:text] [animation:ai-shimmer_var(--ai-shimmer-duration)_linear_infinite] [background-clip:text] [background-position:0_0] [background-size:calc(var(--ai-shimmer-spread)*100%)_100%]";
+
 export type ShimmerProps = HTMLAttributes<HTMLElement> & {
   as?: ElementType;
   duration?: number;
@@ -17,7 +20,7 @@ export function Shimmer({
 }: ShimmerProps) {
   return (
     <Component
-      className={cn("ai-shimmer", className)}
+      className={cn(SHIMMER_CLASS_NAME, className)}
       style={
         {
           "--ai-shimmer-duration": `${duration}s`,

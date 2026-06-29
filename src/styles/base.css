@@ -65,6 +65,16 @@
   animation: star-sparkle 3s ease-in-out infinite;
 }
 
+@keyframes ai-shimmer {
+  0% {
+    background-position: 100% center;
+  }
+
+  100% {
+    background-position: 0% center;
+  }
+}
+
 @keyframes smile-draw {
   0% { stroke-dashoffset: 28; opacity: 0; }
   30% { stroke-dashoffset: 0; opacity: 1; }

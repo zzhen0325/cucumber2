@@ -36,12 +36,81 @@ import {
 } from "@/components/ai-elements/reasoning";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { isSimpleRunOutput } from "@/lib/graph";
+import { cn } from "@/lib/utils";
 import type {
   CanvasAgentMessage,
   CanvasToolPart,
   RunSummaryItem,
   RunNodeData,
 } from "@/types/canvas";
+
+const RUN_CARD_CLASS_NAME =
+  "run-card min-h-9 border-cuc-run-border bg-cuc-accent [--run-text:var(--color-cuc-run-text)] [--run-text-muted:var(--color-cuc-run-text-muted)]";
+const RUN_CONTENT_CLASS_NAME =
+  "run-content grid min-h-0 p-[14px] [grid-template-rows:auto_auto]";
+const RUN_CONTENT_RESIZED_CLASS_NAME =
+  "h-full [grid-template-rows:auto_minmax(0,1fr)]";
+const RUN_HEADING_CLASS_NAME =
+  "run-heading run-title run-text grid h-[34px] grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-1 px-2.5";
+const RUN_HEADING_MAIN_CLASS_NAME =
+  "run-heading-main flex min-w-0 items-center gap-[5px]";
+const RUN_TITLE_CLASS_NAME =
+  "run-title min-w-0 flex-[0_1_auto] overflow-hidden text-ellipsis whitespace-nowrap";
+const RUN_TITLE_SHIMMER_CLASS_NAME =
+  `${RUN_TITLE_CLASS_NAME} shimmer-run-text`;
+const RUN_HEADER_SUMMARY_CLASS_NAME =
+  "run-header-summary run-meta run-text-muted min-w-[34px] flex-[1_1_auto] overflow-hidden text-ellipsis whitespace-nowrap before:mr-1.5 before:text-cuc-ink/42 before:content-['·']";
+const RUN_HEADING_ACTIONS_CLASS_NAME =
+  "run-heading-actions flex shrink-0 items-center gap-0.5";
+const RUN_ICON_BUTTON_CLASS_NAME =
+  "run-text grid size-[18px] cursor-pointer place-items-center rounded-cuc-round border-0 bg-transparent transition-[background,color,opacity] duration-[140ms] ease-[ease]";
+const RUN_RETRY_BUTTON_CLASS_NAME =
+  `${RUN_ICON_BUTTON_CLASS_NAME} run-retry-button nodrag nopan hover:bg-cuc-surface/58 hover:text-cuc-danger-strong`;
+const RUN_TRACE_BUTTON_CLASS_NAME =
+  `${RUN_ICON_BUTTON_CLASS_NAME} run-trace-button nodrag nopan hover:bg-cuc-surface/58`;
+const RUN_TOGGLE_BUTTON_CLASS_NAME =
+  `${RUN_ICON_BUTTON_CLASS_NAME} run-toggle nodrag nopan hover:bg-cuc-surface/58 disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent data-[expanded=false]:[&_svg]:-rotate-90 [&_svg]:transition-transform [&_svg]:duration-[140ms] [&_svg]:ease-[ease]`;
+const RUN_STATUS_DOT_CLASS_NAME =
+  "run-status-dot grid size-[18px] place-items-center text-cuc-ink";
+const RUN_STREAM_CLASS_NAME =
+  "run-stream copyable-region nodrag nopan nowheel grid max-h-none min-h-0 gap-1.5 overscroll-contain px-2.5 pb-2.5 [scrollbar-width:thin]";
+const RUN_STREAM_RESIZED_CLASS_NAME = "overflow-y-auto";
+const RUN_STREAM_UNRESIZED_CLASS_NAME = "overflow-visible";
+const RUN_CONVERSATION_FLOW_CLASS_NAME =
+  "run-conversation-flow grid min-w-0 gap-[7px]";
+const RUN_AGENT_TEXT_REGION_CLASS_NAME =
+  "run-agent-text-region nodrag nopan nowheel min-w-0 max-h-none overflow-visible overscroll-contain [scrollbar-width:thin]";
+const AGENT_TEXT_OUTPUT_CLASS_NAME =
+  "agent-text-output run-body run-text block h-auto m-0 whitespace-pre-wrap [overflow-wrap:anywhere] [&_p]:m-0 [&_p+p]:mt-1";
+const AGENT_TEXT_MUTED_CLASS_NAME =
+  "run-text-muted shimmer-run-muted";
+const AGENT_REASONING_CLASS_NAME =
+  "agent-reasoning mt-1.5 grid min-w-0 gap-1";
+const AGENT_MESSAGE_LIST_CLASS_NAME =
+  "agent-message-list grid min-w-0 gap-1.5";
+const RUN_FLOW_ENTRY_CLASS_NAME =
+  "run-flow-entry agent-message grid min-w-0 grid-cols-[17px_minmax(0,1fr)] gap-[5px]";
+const RUN_FLOW_MARKER_CLASS_NAME =
+  "run-flow-marker relative grid justify-items-center after:absolute after:top-[15px] after:bottom-[-7px] after:w-px after:bg-cuc-node-border-hover after:content-['']";
+const RUN_FLOW_MARKER_LAST_CLASS_NAME = "after:hidden";
+const RUN_FLOW_MARKER_ICON_CLASS_NAME =
+  "run-text z-[1] grid size-[15px] place-items-center rounded-cuc-round border border-[rgb(141_149_165_/_18%)] bg-white/74";
+const RUN_FLOW_BODY_CLASS_NAME = "run-flow-body grid min-w-0 gap-1";
+const RUN_FLOW_HEADING_CLASS_NAME =
+  "run-flow-heading run-meta run-text-muted flex min-w-0 items-center gap-1";
+const RUN_FLOW_HEADING_NAME_CLASS_NAME =
+  "overflow-hidden text-ellipsis whitespace-nowrap font-medium";
+const RUN_FLOW_BADGE_CLASS_NAME = "shrink-0 text-cuc-success";
+const AGENT_ACTIVITY_STACK_CLASS_NAME =
+  "agent-activity-stack mt-1.5 grid min-w-0 gap-1";
+const AGENT_TASK_STACK_CLASS_NAME = "agent-task-stack min-w-0";
+const RUN_TOOL_LIST_CLASS_NAME = "run-tool-list grid min-w-0 gap-[5px]";
+const TOOL_CALL_ERROR_LINE_CLASS_NAME =
+  "tool-call-error-line grid grid-cols-[minmax(0,1fr)_auto] items-start gap-[5px]";
+const TOOL_CALL_ERROR_SNIPPET_CLASS_NAME =
+  "tool-call-error-snippet run-meta line-clamp-2 overflow-hidden text-cuc-danger-deep [overflow-wrap:anywhere]";
+const TOOL_CALL_RETRY_CLASS_NAME =
+  "tool-call-retry nodrag nopan grid size-4 cursor-pointer place-items-center rounded-cuc-round border-0 bg-cuc-surface/68 text-cuc-danger-strong hover:bg-white/92";
 
 export function RunNodeView({
   id,
@@ -117,13 +186,11 @@ export function RunNodeView({
     Boolean(data.currentStep);
   const pendingAgentText = getPendingAgentText(data.status, headerSummary);
   const toggleLabel = expanded ? "收起输出" : "展开输出";
-  const nodeClassName = [
-    "run-card",
+  const nodeClassName = cn(
+    RUN_CARD_CLASS_NAME,
     data.status,
-    isActiveRun ? "active" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
+    isActiveRun && "active"
+  );
   const contentSignature = useMemo(
     () =>
       JSON.stringify({
@@ -165,6 +232,7 @@ export function RunNodeView({
     hasRunOutput,
     manualSize,
   });
+  const hasFixedHeight = Boolean(nodeStyle?.height);
 
   useEffect(() => {
     const previous = previousStatus.current;
@@ -220,32 +288,47 @@ export function RunNodeView({
       ref={nodeRef}
       selected={selected}
       style={nodeStyle}
-      data-resized={nodeStyle?.height ? "true" : undefined}
+      data-resized={hasFixedHeight ? "true" : undefined}
     >
-      <NodeContent className="run-content">
-        <div className="run-heading">
-          <span className={`run-status-dot ${data.status}`}>
+      <NodeContent
+        className={cn(
+          RUN_CONTENT_CLASS_NAME,
+          hasFixedHeight && RUN_CONTENT_RESIZED_CLASS_NAME
+        )}
+      >
+        <div className={RUN_HEADING_CLASS_NAME}>
+          <span
+            className={cn(
+              RUN_STATUS_DOT_CLASS_NAME,
+              data.status,
+              data.status === "success" && "text-cuc-success",
+              data.status === "error" && "text-cuc-danger-strong"
+            )}
+          >
             <RunStatusIcon status={data.status} />
           </span>
-          <span className="run-heading-main">
+          <span className={RUN_HEADING_MAIN_CLASS_NAME}>
             {isActiveRun ? (
-              <Shimmer as="span" className="run-title" duration={1.8}>
+              <Shimmer as="span" className={RUN_TITLE_SHIMMER_CLASS_NAME} duration={1.8}>
                 {title}
               </Shimmer>
             ) : (
-              <span className="run-title">{title}</span>
+              <span className={RUN_TITLE_CLASS_NAME}>{title}</span>
             )}
             {headerSummary && (
-              <span className="run-header-summary" title={headerSummary.fullLabel}>
+              <span
+                className={RUN_HEADER_SUMMARY_CLASS_NAME}
+                title={headerSummary.fullLabel}
+              >
                 {/* {headerSummary.visibleLabel} */}
               </span>
             )}
           </span>
-          <span className="run-heading-actions">
+          <span className={RUN_HEADING_ACTIONS_CLASS_NAME}>
             {data.status === "error" && (
               <button
                 aria-label="重试 Agent Run"
-                className="run-retry-button nodrag nopan"
+                className={RUN_RETRY_BUTTON_CLASS_NAME}
                 onClick={(event) => {
                   event.stopPropagation();
                   dispatchRetryRun(id);
@@ -258,7 +341,7 @@ export function RunNodeView({
             )}
             <button
               aria-label="查看 Run Trace"
-              className="run-trace-button nodrag nopan"
+              className={RUN_TRACE_BUTTON_CLASS_NAME}
               onClick={(event) => {
                 event.stopPropagation();
                 dispatchOpenTrace(id);
@@ -271,7 +354,7 @@ export function RunNodeView({
             <button
               aria-expanded={expanded}
               aria-label={toggleLabel}
-              className="run-toggle nodrag nopan"
+              className={RUN_TOGGLE_BUTTON_CLASS_NAME}
               data-expanded={expanded}
               disabled={!hasRunOutput}
               onClick={(event) => {
@@ -287,12 +370,17 @@ export function RunNodeView({
         </div>
         {hasRunOutput && expanded && (
           <div
-            className="run-stream copyable-region nodrag nopan nowheel"
+            className={cn(
+              RUN_STREAM_CLASS_NAME,
+              hasFixedHeight
+                ? RUN_STREAM_RESIZED_CLASS_NAME
+                : RUN_STREAM_UNRESIZED_CLASS_NAME
+            )}
             aria-label="Agent run stream"
             data-expanded="true"
           >
-            <div className="run-conversation-flow">
-              <div className="run-agent-text-region nodrag nopan nowheel">
+            <div className={RUN_CONVERSATION_FLOW_CLASS_NAME}>
+              <div className={RUN_AGENT_TEXT_REGION_CLASS_NAME}>
                 {hasReasoningMessages && !agentText && (
                   <RunReasoningBlock
                     messages={reasoningMessages}
@@ -302,11 +390,18 @@ export function RunNodeView({
                 {showAgentMessages ? (
                   <AgentMessageList messages={assistantMessages} />
                 ) : agentText ? (
-                  <MessageResponse className="agent-text-output h-auto">
+                  <MessageResponse className={AGENT_TEXT_OUTPUT_CLASS_NAME}>
                     {agentText}
                   </MessageResponse>
                 ) : !hasReasoningMessages ? (
-                  <Shimmer as="p" className="agent-text-output muted" duration={1.8}>
+                  <Shimmer
+                    as="p"
+                    className={cn(
+                      AGENT_TEXT_OUTPUT_CLASS_NAME,
+                      AGENT_TEXT_MUTED_CLASS_NAME
+                    )}
+                    duration={1.8}
+                  >
                     {pendingAgentText}
                   </Shimmer>
                 ) : null}
@@ -363,7 +458,7 @@ function RunReasoningBlock({
   return (
     <Reasoning
       aria-label="Agent 推理"
-      className="agent-reasoning"
+      className={AGENT_REASONING_CLASS_NAME}
       defaultOpen={isStreaming}
       isStreaming={isStreaming}
       key={isStreaming ? "streaming" : "completed"}
@@ -378,24 +473,34 @@ function RunReasoningBlock({
 
 function AgentMessageList({ messages }: { messages: CanvasAgentMessage[] }) {
   return (
-    <div className="agent-message-list" aria-label="Agent 对话">
-      {messages.map((message) => (
-        <div className="run-flow-entry agent-message" key={message.id}>
-          <div className="run-flow-marker">
-            <span>
+    <div className={AGENT_MESSAGE_LIST_CLASS_NAME} aria-label="Agent 对话">
+      {messages.map((message, index) => (
+        <div className={RUN_FLOW_ENTRY_CLASS_NAME} key={message.id}>
+          <div
+            className={cn(
+              RUN_FLOW_MARKER_CLASS_NAME,
+              index === messages.length - 1 && RUN_FLOW_MARKER_LAST_CLASS_NAME
+            )}
+          >
+            <span className={RUN_FLOW_MARKER_ICON_CLASS_NAME}>
               <Sparkles size={10} />
             </span>
           </div>
-          <div className="run-flow-body">
-            <div className="run-flow-heading">
-              <strong title={message.agentName ?? "Agent"}>
+          <div className={RUN_FLOW_BODY_CLASS_NAME}>
+            <div className={RUN_FLOW_HEADING_CLASS_NAME}>
+              <strong
+                className={RUN_FLOW_HEADING_NAME_CLASS_NAME}
+                title={message.agentName ?? "Agent"}
+              >
                 {message.agentName ?? "Agent"}
               </strong>
               {getAgentMessageBadges(message).map((badge) => (
-                <span key={badge}>{badge}</span>
+                <span className={RUN_FLOW_BADGE_CLASS_NAME} key={badge}>
+                  {badge}
+                </span>
               ))}
             </div>
-            <MessageResponse className="agent-text-output h-auto">
+            <MessageResponse className={AGENT_TEXT_OUTPUT_CLASS_NAME}>
               {message.content}
             </MessageResponse>
           </div>
@@ -485,12 +590,10 @@ export function ToolPartView({
 
   return (
     <Tool
-      className={[
+      className={cn(
         "run-tool-card",
-        toolPart.state === "output-error" ? "error" : "",
-      ]
-        .filter(Boolean)
-        .join(" ")}
+        toolPart.state === "output-error" && "error"
+      )}
       onOpenChange={setOpen}
       open={open}
     >
@@ -505,14 +608,14 @@ export function ToolPartView({
         toolType={toolPart.type}
       />
       {errorText && !open && (
-        <span className="tool-call-error-line">
-          <span className="tool-call-error-snippet" title={errorText}>
+        <span className={TOOL_CALL_ERROR_LINE_CLASS_NAME}>
+          <span className={TOOL_CALL_ERROR_SNIPPET_CLASS_NAME} title={errorText}>
             {errorText}
           </span>
           {runNodeId && (
             <button
               aria-label={`从${toolName}重试`}
-              className="tool-call-retry nodrag nopan"
+              className={TOOL_CALL_RETRY_CLASS_NAME}
               onClick={(event) => {
                 event.stopPropagation();
                 dispatchRetryRun(runNodeId, {
@@ -568,10 +671,10 @@ function RunActivityStack({
   const taskTitle = plan.length ? "执行计划" : "执行过程";
 
   return (
-    <div aria-label="Agent 执行" className="agent-activity-stack">
+    <div aria-label="Agent 执行" className={AGENT_ACTIVITY_STACK_CLASS_NAME}>
       {hasTaskItems && (
         <Task
-          className="agent-task-stack"
+          className={AGENT_TASK_STACK_CLASS_NAME}
           defaultOpen={runStatus !== "success"}
           key={runStatus}
         >
@@ -605,7 +708,7 @@ function RunActivityStack({
         </Task>
       )}
       {toolParts.length > 0 && (
-        <div aria-label="工具调用" className="run-tool-list">
+        <div aria-label="工具调用" className={RUN_TOOL_LIST_CLASS_NAME}>
           {toolParts.map((part, index) => (
             <ToolPartView
               error={error}

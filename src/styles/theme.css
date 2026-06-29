@@ -30,9 +30,9 @@
   --color-cuc-primary-foreground: #06100a;
   --color-cuc-accent: #f8ffbf;
   --color-cuc-accent-foreground: #174222;
-  --color-cuc-run-text: #505430;
-  --color-cuc-run-text-muted: #a5ac72;
-  --color-cuc-run-border: #e1e9a5;
+  --color-cuc-run-text: #2D3139;
+  --color-cuc-run-text-muted: #B1B970;
+  --color-cuc-run-border: rgba(176 185 112 / 0.3);
   --color-cuc-danger: #e5484d;
   --color-cuc-danger-strong: #cc2e33;
   --color-cuc-danger-deep: #9d2025;
@@ -90,8 +90,10 @@
   --text-cuc-node-title--line-height: 14px;
   --text-cuc-node-body: 8px;
   --text-cuc-node-body--line-height: 12.5px;
-  --text-cuc-node-meta: 7px;
+  --text-cuc-node-meta: 6px;
   --text-cuc-node-meta--line-height: 9px;
+  --text-cuc-label-8: 8px;
+  --text-cuc-label-8--line-height: 12px;
 }
 
 @theme inline {
@@ -156,3 +158,38 @@
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
   background-size: 16px 16px;
 }
+
+@utility run-text {
+  color: var(--run-text);
+}
+@utility run-text-muted {
+  color: var(--run-text-muted);
+}
+
+
+@utility run-title {
+  font-size: var(--canvas-node-title-size);
+  line-height: var(--canvas-node-title-line);
+}
+
+@utility run-body {
+  font-size: var(--canvas-node-body-size);
+  line-height: var(--canvas-node-body-line);
+}
+
+@utility run-meta {
+  font-size: var(--canvas-node-meta-size);
+  line-height: var(--canvas-node-meta-line);
+}
+
+@utility shimmer-run-text {
+  --ai-shimmer-text: var(--run-text);
+}
+
+@utility shimmer-run-muted {
+  --ai-shimmer-text: var(--run-text-muted);
+}
+
+
+
+    

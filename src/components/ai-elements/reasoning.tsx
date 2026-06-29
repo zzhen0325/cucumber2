@@ -34,6 +34,16 @@ type ReasoningContextValue = {
   setIsOpen: (open: boolean) => void;
 };
 
+const REASONING_CLASS_NAME = "reasoning not-prose min-w-0";
+const REASONING_TRIGGER_CLASS_NAME =
+  "reasoning-trigger run-text-muted text-cuc-label-8 flex w-full min-w-0 cursor-pointer items-center justify-between gap-1 rounded-cuc-card border-[0.5px] border-cuc-run-border bg-transparent p-1 text-left [&>svg]:run-text-muted  hover:bg-cuc-run-border";
+const REASONING_TRIGGER_LABEL_CLASS_NAME =
+  "reasoning-trigger-label flex min-w-0 items-center gap-[5px] [&_em]:shrink-0 [&_em]:whitespace-nowrap [&_em]:not-italic [&_em]:run-text-muted [&_em]:before:mr-[5px] [&_em]:before:text-cuc-ink/38 [&_em]:before:content-['·'] [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:font-medium [&_span]:run-text-muted";
+const REASONING_TRIGGER_CHEVRON_CLASS_NAME =
+  "reasoning-trigger-chevron run-text-muted transition-transform duration-[140ms] ease-[ease]";
+const REASONING_CONTENT_CLASS_NAME =
+  "reasoning-content run-body run-text-muted min-w-0 pt-1 [overflow-wrap:anywhere] [&_p]:m-0 [&_p+p]:mt-1";
+
 const ReasoningContext = createContext<ReasoningContextValue | null>(null);
 
 export function useReasoning() {
@@ -114,7 +124,7 @@ export const Reasoning = memo(function Reasoning({
   return (
     <ReasoningContext.Provider value={contextValue}>
       <Collapsible
-        className={cn("reasoning not-prose", className)}
+        className={cn(REASONING_CLASS_NAME, className)}
         onOpenChange={setIsOpen}
         open={isOpen}
         {...props}
@@ -140,7 +150,7 @@ const defaultGetThinkingMessage = (
 ) => (
   <>
     <span>推理过程</span>
-    <em>{isStreaming ? "进行中" : duration ? `${duration}s` : "完成"}</em>
+    {isStreaming ? "in progress" : duration ? `${duration}s` : "DONE"}
   </>
 );
 
@@ -154,21 +164,26 @@ export const ReasoningTrigger = memo(function ReasoningTrigger({
 
   return (
     <CollapsibleTrigger
-      className={cn("reasoning-trigger", className)}
+      className={cn(REASONING_TRIGGER_CLASS_NAME, className)}
       {...props}
     >
       {children ?? (
-        <>
-          <BrainIcon size={13} />
-          <span className="reasoning-trigger-label">
+        <div className="flex items-center gap-1">
+          <BrainIcon size={10} />
+          <span className={REASONING_TRIGGER_LABEL_CLASS_NAME}>
             {getThinkingMessage(isStreaming, duration)}
           </span>
-          <ChevronDownIcon
-            className={cn("reasoning-trigger-chevron", isOpen && "open")}
-            size={13}
-          />
-        </>
+        </div>
       )}
+      <div>
+        <ChevronDownIcon
+          className={cn(
+            REASONING_TRIGGER_CHEVRON_CLASS_NAME,
+            isOpen && "open rotate-180"
+          )}
+          size={10}
+        />
+      </div>
     </CollapsibleTrigger>
   );
 });
@@ -188,7 +203,7 @@ export const ReasoningContent = memo(function ReasoningContent({
 }: ReasoningContentProps) {
   return (
     <CollapsibleContent
-      className={cn("reasoning-content", className)}
+      className={cn(REASONING_CONTENT_CLASS_NAME, className)}
       {...props}
     >
       <Streamdown plugins={streamdownPlugins}>{children}</Streamdown>

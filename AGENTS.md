@@ -16,6 +16,7 @@
 ## Working Rules
 
 - 每个功能域保持清晰、独立、唯一的职责边界。
+- 不要新增一堆自定义 utility，优先用已经存在的 Tailwind theme token；如果某个语义确实反复出现，再补一个小的语义 class，而不是每行都写任意值。
 - 目标是通用Agent OS，遇到问题不要单独修某一个类型的特例。
 - 保持改动小而完整，不新增平行状态绕开 `AgentCanvasNode`、`AgentCanvasEdge` 和 `RunDraft`。
 - 不做 legacy adapter、降级或静默兜底；错误直接进入 Run 节点和 Trace。
@@ -71,3 +72,4 @@ pnpm build
 - 不把关键执行状态只留在聊天文本。
 - 不引入与 `design.md` 冲突的视觉语言。
 - 不为了内部诊断污染默认 UI。
+
