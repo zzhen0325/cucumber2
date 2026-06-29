@@ -38,7 +38,7 @@
 
 ## 2026-06-23 Run Node Conversation Flow
 
-- Run 节点信息层级调整为 Agent 对话优先：所有可见文本 delta（`output_text_delta`、Responses `response.output_text.delta`、reasoning summary 和 refusal）都会立即写入 `agent.message.*` 并同步进入 AI SDK `text-delta`，最终输出在没有被文本流覆盖时会补成 assistant 消息；计划、handoff/skill 摘要和工具调用折叠在 Agent 执行流下方，不再把图片等 artifact 摘要作为 Run 卡主内容展示。
+- Run 节点信息层级调整为 Agent 对话优先：所有可见文本 delta（`output_text_delta`、Responses `response.output_text.delta`、reasoning summary 和 refusal）都会立即写入 `agent.message.*` 并同步进入 AI SDK `text-delta`，最终输出在没有被文本流覆盖时会补成 assistant 消息；计划、handoff/skill 摘要和工具调用以 AI Elements Chain of Thought 样式折叠在 Agent 执行流下方，不再把图片等 artifact 摘要作为 Run 卡主内容展示。
 - OpenAI Agents SDK raw stream 兼容 normalized delta、嵌套 `event.data.event.type` 的 Responses 事件和 Chat Completions `delta.content`；Responses 同时发 normalized/raw `output_text` 时会按 delta 去重，避免 Run 节点重复显示同一段字。
 
 ## 2026-06-18 Image Agent Matting And Inspection
@@ -171,7 +171,7 @@
 - 前端开始消费 AI SDK UI assistant `text` parts，并将当前 Run 的实时文字投影到 `RunNodeData.agentText`。
 - Agent 模型输出同时持久化为 `agent.message.delta` / `agent.message.completed` Trace 事件；Run 节点优先从这些事件还原完整 Agent 对话，失败、刷新和 Trace 回放不再依赖临时 streamed text。
 - Run 节点文字优先级为持久化 Agent message 高于 `run.completed.finalOutput`；旧 Trace 没有 Agent message 时，`finalOutput` 继续高于当前 streamed text 和运行状态占位文案。
-- Run 节点默认收起，仅展示 Agent 流式文字和工具调用摘要；简单文本输出完成后保持展开，详细 Agent/handoff/timeline 诊断继续通过 Trace 面板查看。
+- Run 节点默认收起，仅展示 Agent 流式文字和 Chain of Thought 执行流摘要；简单文本输出完成后保持展开，详细 Agent/handoff/timeline 诊断继续通过 Trace 面板查看。
 - Run 节点内部滚动区使用 React Flow `nodrag`、`nopan`、`nowheel`，避免滚动文字或工具详情时拖动、平移画布。
 - 简单问答、解释、轻量分析或简短总结任务不调用工具时，`run.completed.finalOutput` 只显示在 Run 节点内；不再自动创建下游 Prompt/Markdown 结果节点。用户选中该 Run 后可以继续提交下一轮对话，服务端会从持久化画布重建该 Run 的文本上下文。
 

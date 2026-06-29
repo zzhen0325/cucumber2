@@ -1,9 +1,13 @@
 import type { Node as FlowNode, NodeProps, ResizeParams } from "@xyflow/react";
 import { useUpdateNodeInternals } from "@xyflow/react";
 import {
+  BrainIcon as Brain,
   CheckmarkIcon as Check,
+  CheckmarkCircleIcon as CheckCircle,
   ChevronDownIcon as ChevronDown,
   AlertCircleIcon as CircleAlert,
+  ClockIcon as Clock,
+  DotIcon as Dot,
   BulletListTreeIcon as ListTree,
   ArrowCounterclockwiseIcon as RotateCcw,
   SparkleIcon as Sparkles,
@@ -13,6 +17,13 @@ import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Node, NodeContent } from "@/components/ai-elements/node";
+import {
+  ChainOfThought,
+  ChainOfThoughtContent,
+  ChainOfThoughtHeader,
+  ChainOfThoughtStep,
+  type ChainOfThoughtStatus,
+} from "@/components/ai-elements/chain-of-thought";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { isSimpleRunOutput } from "@/lib/graph";
@@ -74,13 +85,17 @@ export function RunNodeView({
   const hasPlan = Boolean(data.plan?.length);
   const hasSummaryItems = Boolean(summaryItems.length);
   const hasToolParts = hasToolDetail && toolParts.length > 0;
-  const hasAgentActivity = hasSummaryItems || hasPlan || hasToolParts;
+  const showCurrentStepFallback =
+    !hasSummaryItems && !hasPlan && !hasToolParts && Boolean(data.currentStep);
+  const hasAgentActivity =
+    hasSummaryItems || hasPlan || hasToolParts || showCurrentStepFallback;
   const hasRunOutput =
     isActiveRun ||
     Boolean(agentText) ||
     hasToolDetail ||
     hasPlan ||
-    hasSummaryItems;
+    hasSummaryItems ||
+    Boolean(data.currentStep);
   const pendingAgentText = getPendingAgentText(data.status, headerSummary);
   const toggleLabel = expanded ? "收起输出" : "展开输出";
   const nodeClassName = [
@@ -277,22 +292,17 @@ export function RunNodeView({
                   </details>
                 )}
                 {hasAgentActivity && (
-                  <div className="agent-activity-stack" aria-label="Agent 执行">
-                    {hasSummaryItems && <RunSummaryTimeline items={summaryItems} />}
-                    {hasPlan && <RunPlanView plan={data.plan ?? []} />}
-                    {hasToolParts && (
-                      <div className="tool-call-stack" aria-label="工具调用">
-                        {toolParts.map((part, index) => (
-                          <ToolPartView
-                            error={data.error}
-                            key={`${part.type}-${part.toolCallId ?? index}`}
-                            runNodeId={id}
-                            toolPart={part}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  <RunActivityChain
+                    currentStep={
+                      showCurrentStepFallback ? data.currentStep : undefined
+                    }
+                    error={data.error}
+                    plan={data.plan ?? []}
+                    runNodeId={id}
+                    runStatus={data.status}
+                    summaryItems={summaryItems}
+                    toolParts={hasToolParts ? toolParts : []}
+                  />
                 )}
               </div>
             </div>
@@ -386,10 +396,12 @@ function getResizableNodeStyle(
 export function ToolPartView({
   error,
   runNodeId,
+  showIcon = true,
   toolPart,
 }: {
   error?: string;
   runNodeId?: string;
+  showIcon?: boolean;
   toolPart: CanvasToolPart;
 }) {
   const [open, setOpen] = useState(false);
@@ -403,7 +415,13 @@ export function ToolPartView({
 
   return (
     <div
-      className={`tool-call-row ${toolPart.state === "output-error" ? "error" : ""}`}
+      className={[
+        "tool-call-row",
+        toolPart.state === "output-error" ? "error" : "",
+        showIcon ? "" : "no-icon",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       data-state={open ? "open" : "closed"}
     >
       <button
@@ -416,9 +434,11 @@ export function ToolPartView({
         }}
         type="button"
       >
-        <span className="tool-call-icon">
-          <Wrench size={12} />
-        </span>
+        {showIcon && (
+          <span className="tool-call-icon">
+            <Wrench size={12} />
+          </span>
+        )}
         <span className="tool-call-copy">
           <strong>{toolName}</strong>
           {previewLine && (
@@ -471,65 +491,191 @@ export function ToolPartView({
   );
 }
 
-function RunPlanView({ plan }: { plan: NonNullable<RunNodeData["plan"]> }) {
-  const completedCount = plan.filter((item) => item.status === "success").length;
-  const currentItem =
-    plan.find((item) => item.status === "running") ??
-    plan.find((item) => item.status === "queued") ??
-    plan.at(-1);
+function RunActivityChain({
+  currentStep,
+  error,
+  plan,
+  runNodeId,
+  runStatus,
+  summaryItems,
+  toolParts,
+}: {
+  currentStep?: RunNodeData["currentStep"];
+  error?: string;
+  plan: NonNullable<RunNodeData["plan"]>;
+  runNodeId: string;
+  runStatus: RunNodeData["status"];
+  summaryItems: RunSummaryItem[];
+  toolParts: CanvasToolPart[];
+}) {
+  const completedPlanCount = plan.filter((item) => item.status === "success").length;
+  const headerDetail = getActivityHeaderDetail({
+    completedPlanCount,
+    currentStep,
+    planCount: plan.length,
+    runStatus,
+    toolParts,
+  });
 
   return (
-    <div className="run-plan-panel" aria-label="任务计划">
-      <div className="run-plan-header">
-        <span>
-          <ListTree size={10} />
-        </span>
-        <strong>{completedCount}/{plan.length} 已完成</strong>
-        {currentItem && <em title={currentItem.label}>{currentItem.label}</em>}
-      </div>
-      <div className="run-plan-list">
-        {plan.map((item) => (
-          <div className={`run-plan-item ${item.status}`} key={item.id}>
-            <span className={`run-plan-dot ${item.status}`}>
-              <RunStatusIcon status={item.status} />
-            </span>
-            <strong title={item.label}>{item.label}</strong>
-          </div>
+    <ChainOfThought
+      aria-label="Agent 执行"
+      className="agent-activity-stack"
+      defaultOpen={runStatus !== "success"}
+      key={runStatus}
+    >
+      <ChainOfThoughtHeader className="nodrag nopan" type="button">
+        <span>执行过程</span>
+        {headerDetail && <em>{headerDetail}</em>}
+      </ChainOfThoughtHeader>
+      <ChainOfThoughtContent className="nodrag nopan nowheel">
+        {summaryItems.map((item) => (
+          <ChainOfThoughtStep
+            description={item.label}
+            icon={getSummaryIcon(item.kind)}
+            key={`summary-${item.kind}-${item.label}-${item.detail ?? ""}`}
+            label={item.detail ?? item.label}
+            status="complete"
+          />
         ))}
-      </div>
-    </div>
+        {plan.map((item) => (
+          <ChainOfThoughtStep
+            description={getPlanStepDescription(item.status)}
+            icon={getPlanIcon(item.status)}
+            key={`plan-${item.id}`}
+            label={item.label}
+            status={mapRunStatusToChainStatus(item.status)}
+          />
+        ))}
+        {toolParts.map((part, index) => (
+          <ChainOfThoughtStep
+            icon={Wrench}
+            key={`tool-${part.type}-${part.toolCallId ?? index}`}
+            label={
+              <ToolPartView
+                error={error}
+                runNodeId={runNodeId}
+                showIcon={false}
+                toolPart={part}
+              />
+            }
+            status={mapToolStateToChainStatus(part.state)}
+          />
+        ))}
+        {currentStep && (
+          <ChainOfThoughtStep
+            description={getPlanStepDescription(currentStep.status)}
+            icon={getPlanIcon(currentStep.status)}
+            label={currentStep.label}
+            status={mapRunStatusToChainStatus(currentStep.status)}
+          />
+        )}
+      </ChainOfThoughtContent>
+    </ChainOfThought>
   );
 }
 
-function RunSummaryTimeline({ items }: { items: RunSummaryItem[] }) {
-  return (
-    <div className="run-summary-timeline" aria-label="执行摘要">
-      {items.map((item) => (
-        <div
-          className={`run-summary-item ${item.kind}`}
-          key={`${item.kind}-${item.label}-${item.detail ?? ""}`}
-        >
-          <span aria-hidden="true">{getSummaryMarker(item.kind)}</span>
-          <strong title={item.detail ?? item.label}>
-            {item.detail ?? item.label}
-          </strong>
-          <em>{item.label}</em>
-        </div>
-      ))}
-    </div>
+function getActivityHeaderDetail({
+  completedPlanCount,
+  currentStep,
+  planCount,
+  runStatus,
+  toolParts,
+}: {
+  completedPlanCount: number;
+  currentStep?: RunNodeData["currentStep"];
+  planCount: number;
+  runStatus: RunNodeData["status"];
+  toolParts: CanvasToolPart[];
+}) {
+  if (planCount) {
+    return `${completedPlanCount}/${planCount} 已完成`;
+  }
+
+  const failedTool = toolParts.find((part) => part.state === "output-error");
+  if (failedTool || runStatus === "error") {
+    return "失败";
+  }
+
+  const activeTool = toolParts.find(
+    (part) =>
+      part.state === "input-streaming" || part.state === "input-available"
   );
+  if (activeTool) {
+    return getToolStateLabel(activeTool.state);
+  }
+
+  if (currentStep?.label) {
+    return currentStep.label;
+  }
+
+  return null;
 }
 
-function getSummaryMarker(kind: RunSummaryItem["kind"]) {
-  const markers: Record<RunSummaryItem["kind"], string> = {
-    agent: "A",
-    artifact: "产",
-    canvas: "画",
-    handoff: "→",
-    skill: "技",
+function getSummaryIcon(kind: RunSummaryItem["kind"]) {
+  const icons = {
+    agent: Sparkles,
+    artifact: CheckCircle,
+    canvas: ListTree,
+    handoff: ListTree,
+    skill: Brain,
   };
 
-  return markers[kind];
+  return icons[kind];
+}
+
+function getPlanIcon(status: RunNodeData["status"]) {
+  if (status === "success") {
+    return CheckCircle;
+  }
+  if (status === "error") {
+    return CircleAlert;
+  }
+  if (status === "running") {
+    return Clock;
+  }
+  return Dot;
+}
+
+function getPlanStepDescription(status: RunNodeData["status"]) {
+  const labels: Record<RunNodeData["status"], string> = {
+    error: "失败",
+    queued: "等待中",
+    running: "进行中",
+    success: "完成",
+  };
+
+  return labels[status];
+}
+
+function mapRunStatusToChainStatus(
+  status: RunNodeData["status"]
+): ChainOfThoughtStatus {
+  if (status === "success") {
+    return "complete";
+  }
+  if (status === "error") {
+    return "error";
+  }
+  if (status === "running") {
+    return "active";
+  }
+  return "pending";
+}
+
+function mapToolStateToChainStatus(
+  state: CanvasToolPart["state"]
+): ChainOfThoughtStatus {
+  if (state === "output-available") {
+    return "complete";
+  }
+  if (state === "output-error") {
+    return "error";
+  }
+  if (state === "input-available") {
+    return "active";
+  }
+  return "pending";
 }
 
 function RunStatusIcon({ status }: { status: RunNodeData["status"] }) {

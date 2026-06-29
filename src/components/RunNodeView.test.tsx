@@ -161,7 +161,7 @@ describe("RunNodeView", () => {
     expect(screen.getByText("进展中")).toBeTruthy();
   });
 
-  it("renders execution details under the agent conversation without artifact summary", () => {
+  it("renders execution details as a chain of thought under the agent conversation", () => {
     renderRunNode({
       agentMessages: [
         {
@@ -191,10 +191,10 @@ describe("RunNodeView", () => {
       ],
     });
 
-    expect(screen.getByLabelText("执行摘要")).toBeTruthy();
+    expect(screen.getByLabelText("Agent 执行")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /执行过程/ })).toBeTruthy();
     expect(screen.getByText("Cucumber Manager -> Image Agent")).toBeTruthy();
     expect(screen.queryByText("1 image")).toBeNull();
-    expect(screen.getByLabelText("Agent 执行")).toBeTruthy();
     expect(
       screen
         .getByText("我会先整理画面要求，然后调用图片工具。")
@@ -203,7 +203,7 @@ describe("RunNodeView", () => {
     ).toBeTruthy();
   });
 
-  it("shows a compact plan and current step", () => {
+  it("shows plan items in the chain of thought", () => {
     renderRunNode({
       currentStep: {
         id: "generate_image",
@@ -217,10 +217,25 @@ describe("RunNodeView", () => {
       status: "running",
     });
 
-    expect(screen.getAllByTitle("生成图片产物").length).toBeGreaterThan(0);
-    expect(screen.getByLabelText("任务计划")).toBeTruthy();
+    expect(screen.getAllByText("生成图片产物").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("Agent 执行")).toBeTruthy();
     expect(screen.getByText("1/2 已完成")).toBeTruthy();
     expect(screen.getByText("整理需求和上下文")).toBeTruthy();
+  });
+
+  it("shows a current step fallback when no plan, summary, or tool is available", () => {
+    renderRunNode({
+      currentStep: {
+        id: "input.normalize",
+        label: "整理用户需求",
+        status: "running",
+      },
+      status: "running",
+    });
+
+    expect(screen.getByLabelText("Agent 执行")).toBeTruthy();
+    expect(screen.getAllByText("整理用户需求").length).toBeGreaterThan(0);
+    expect(screen.getByText("进行中")).toBeTruthy();
   });
 
   it("shows useful tool previews before expanding details", () => {
