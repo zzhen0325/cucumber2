@@ -27,11 +27,11 @@ type TaskIcon = ComponentType<{
 
 const TASK_CLASS_NAME = "task not-prose min-w-0";
 const TASK_TRIGGER_CLASS_NAME =
-  "task-trigger run-text-muted text-cuc-label-8 flex w-full min-w-0 cursor-pointer items-center justify-between gap-1 rounded-cuc-card border-[0.5px] border-cuc-run-border bg-transparent p-1 text-left [&>svg]:run-text-muted  hover:bg-cuc-run-border";
+  "task-trigger run-trigger flex";
 const TASK_TRIGGER_LABEL_CLASS_NAME =
-  "task-trigger-label flex min-w-0 items-center gap-[5px] [&_em]:shrink-0 [&_em]:whitespace-nowrap [&_em]:not-italic [&_em]:run-text-muted [&_em]:before:mr-[5px] [&_em]:before:text-cuc-ink/38 [&_em]:before:content-['·'] [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:font-medium [&_span]:run-text-muted";
+  "task-trigger-label run-trigger-label";
 const TASK_TRIGGER_CHEVRON_CLASS_NAME =
-  "task-trigger-chevron run-text-muted transition-transform duration-[140ms] ease-[ease]";
+  "task-trigger-chevron run-trigger-chevron";
 const TASK_CONTENT_CLASS_NAME = "task-content grid min-w-0 gap-[5px] pt-[5px]";
 const TASK_ITEM_CLASS_NAME =
   "task-item run-meta run-text-muted grid min-w-0 grid-cols-[16px_minmax(0,1fr)] gap-1.5 [&:last-child_.task-item-line]:hidden";
@@ -80,7 +80,7 @@ export const TaskTrigger = memo(function TaskTrigger({
 }: TaskTriggerProps) {
   return (
     <CollapsibleTrigger
-      className={cn(TASK_TRIGGER_CLASS_NAME, "flex items-center justify-between gap-1", className)}
+      className={cn(TASK_TRIGGER_CLASS_NAME, className)}
       type={type}
       {...props}
     >

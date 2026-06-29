@@ -30,9 +30,16 @@
   --color-cuc-primary-foreground: #06100a;
   --color-cuc-accent: #f8ffbf;
   --color-cuc-accent-foreground: #174222;
-  --color-cuc-run-text: #2D3139;
-  --color-cuc-run-text-muted: #B1B970;
+  --color-cuc-run-text: #2d3139;
+  --color-cuc-run-text-muted: #b1b970;
   --color-cuc-run-border: rgba(176 185 112 / 0.3);
+  --color-cuc-run-surface: rgb(255 255 255 / 74%);
+  --color-cuc-run-surface-muted: rgb(255 255 255 / 66%);
+  --color-cuc-run-surface-hover: rgb(255 255 255 / 92%);
+  --color-cuc-run-divider: rgb(141 149 165 / 28%);
+  --color-cuc-run-marker-border: rgb(141 149 165 / 18%);
+  --color-cuc-run-tool-icon: #5a6472;
+  --color-cuc-run-shimmer-highlight: rgb(255 255 255 / 95%);
   --color-cuc-danger: #e5484d;
   --color-cuc-danger-strong: #cc2e33;
   --color-cuc-danger-deep: #9d2025;
@@ -162,10 +169,10 @@
 @utility run-text {
   color: var(--run-text);
 }
+
 @utility run-text-muted {
   color: var(--run-text-muted);
 }
-
 
 @utility run-title {
   font-size: var(--canvas-node-title-size);
@@ -182,6 +189,189 @@
   line-height: var(--canvas-node-meta-line);
 }
 
+/* Run utilities override base Node/Badge chrome so components do not repeat important utilities. */
+@utility run-card {
+  --run-text: var(--color-cuc-run-text);
+  --run-text-muted: var(--color-cuc-run-text-muted);
+  border-color: var(--color-cuc-run-border) !important;
+  background-color: var(--color-cuc-accent) !important;
+}
+
+@utility run-icon-button {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-cuc-round);
+  background-color: transparent;
+  color: var(--run-text);
+  transition-duration: 140ms;
+  transition-property: background-color, color, opacity;
+  transition-timing-function: ease;
+}
+
+@utility run-trigger {
+  width: 100%;
+  min-width: 0;
+  cursor: pointer;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  border: 0.5px solid var(--color-cuc-run-border);
+  border-radius: var(--radius-cuc-card);
+  background-color: transparent;
+  padding: 4px;
+  color: var(--run-text-muted);
+  font-size: var(--text-cuc-label-8);
+  line-height: var(--text-cuc-label-8--line-height);
+  text-align: left;
+
+  &:hover {
+    background-color: var(--color-cuc-run-border);
+  }
+
+  & > svg {
+    color: var(--run-text-muted);
+  }
+}
+
+@utility run-trigger-label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+
+  & span {
+    overflow: hidden;
+    color: var(--run-text-muted);
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  & em {
+    flex-shrink: 0;
+    color: var(--run-text-muted);
+    font-style: normal;
+    white-space: nowrap;
+  }
+
+  & em::before {
+    margin-right: 5px;
+    color: rgb(0 0 0 / 38%);
+    content: "·";
+  }
+}
+
+@utility run-trigger-chevron {
+  color: var(--run-text-muted);
+  transition-duration: 140ms;
+  transition-property: transform;
+  transition-timing-function: ease;
+}
+
+@utility run-flow-marker {
+  position: relative;
+  display: grid;
+  justify-items: center;
+
+  &::after {
+    position: absolute;
+    top: 15px;
+    bottom: -7px;
+    width: 1px;
+    background-color: var(--color-cuc-run-divider);
+    content: "";
+  }
+}
+
+@utility run-flow-marker-icon {
+  z-index: 1;
+  display: grid;
+  width: 15px;
+  height: 15px;
+  place-items: center;
+  border: 1px solid var(--color-cuc-run-marker-border);
+  border-radius: var(--radius-cuc-round);
+  background-color: var(--color-cuc-run-surface);
+  color: var(--run-text);
+}
+
+@utility run-tool-card {
+  border-color: var(--color-cuc-subtle-border);
+  background-color: var(--color-cuc-surface);
+  color: var(--run-text);
+  font-size: var(--canvas-node-body-size);
+  line-height: var(--canvas-node-body-line);
+
+  &.error {
+    border-color: var(--color-cuc-danger-border);
+    background-color: var(--color-cuc-danger-surface);
+  }
+}
+
+@utility run-tool-status {
+  display: inline-flex;
+  height: 18px !important;
+  align-items: center;
+  gap: 3px !important;
+  border: 0 !important;
+  background-color: var(--color-cuc-run-surface-muted) !important;
+  padding: 0 5px !important;
+  color: var(--run-text-muted) !important;
+  font-size: var(--canvas-node-meta-size) !important;
+  font-weight: 500;
+  line-height: 1 !important;
+  white-space: nowrap;
+
+  &.text-cuc-danger-strong {
+    color: var(--color-cuc-danger-strong) !important;
+  }
+
+  & svg {
+    flex-shrink: 0;
+  }
+}
+
+@utility run-code-block {
+  min-width: 0;
+
+  & > div[data-language] {
+    border: 0;
+    border-radius: var(--radius-cuc-canvas);
+    background-color: rgb(246 246 243 / 72%);
+    color: var(--run-text);
+  }
+
+  & code {
+    font-size: var(--canvas-node-meta-size);
+  }
+
+  & pre {
+    max-height: 112px;
+    overflow: auto;
+    overflow-wrap: break-word;
+    background-color: transparent !important;
+    color: inherit !important;
+    font-size: var(--canvas-node-body-size);
+    padding: 6px;
+    white-space: pre-wrap;
+  }
+}
+
+@utility run-code-error {
+  border-radius: var(--radius-cuc-canvas);
+  background-color: var(--color-cuc-danger-surface);
+  color: var(--color-cuc-danger-deep);
+  font-family: inherit;
+  font-size: var(--canvas-node-body-size);
+  overflow-wrap: break-word;
+  padding: 6px;
+  white-space: pre-wrap;
+}
+
 @utility shimmer-run-text {
   --ai-shimmer-text: var(--run-text);
 }
@@ -189,7 +379,3 @@
 @utility shimmer-run-muted {
   --ai-shimmer-text: var(--run-text-muted);
 }
-
-
-
-    

@@ -27,12 +27,24 @@
 - `canvas-shell.css` 只保留 React Flow 内部选择器（如 `.react-flow__pane`、selection、handle、edge）；shell、top bar、tool rail、viewport controls、file drop overlay 直接写在组件 `className`。
 - 画布输入器、图像模式 controls、inline token 和 skill menu 样式写在 `CanvasWorkspace.tsx` 的局部 Tailwind className 常量中；不要恢复 `composer.css`。
 - 基础节点样式由 `src/components/ai-elements/node.tsx` 的 `Node` 和基础节点组件 className 管理，并继续提供 `--canvas-node-*` 变量给 Run 节点组件与 `artifacts.css`。
-- Run 节点样式写在 `RunNodeView.tsx`、`Shimmer`、`Reasoning`、`Task` 和 `Tool` 组件的局部 Tailwind `className` 中；颜色和节点字号优先使用 `theme.css` 中的 `run-text`、`run-text-muted`、`run-title`、`run-body`、`run-meta` 等语义 utility，避免在组件里重复写任意值的 text color / text size utility，只把通用 keyframes 留在 `base.css`。
+- Run 节点样式写在 `RunNodeView.tsx`、`Shimmer`、`Reasoning`、`Task` 和 `Tool` 组件的局部 Tailwind `className` 中；Run 专属颜色、节点字号、折叠 trigger、timeline marker、工具卡、状态徽标、代码块和 shimmer 高光优先使用 `theme.css` 中的 `run-*` 语义 utility，例如 `run-card`、`run-text`、`run-text-muted`、`run-title`、`run-body`、`run-meta`、`run-trigger`、`run-tool-card`、`run-code-block`。组件里只保留布局、状态和交互 class，避免重复写任意值的 text color / text size / border / background utility；只把通用 keyframes 留在 `base.css`。
 - `artifacts.css` 管理 image / markdown / code / html artifact、preview dialog、BlockNote 覆盖和透明棋盘格。
 - `trace-panel.css` 只保留 trace 事件列表、debug raw 输出和 chip 等深层/重复结构；Trace 面板外壳、header、actions、state、section 和 replay banner 写在 `RunTracePanel.tsx` 的局部 Tailwind className 常量中。
 - 不新增 `common.css`、`responsive.css` 这类垃圾桶文件；media query 跟随所属产品域文件。
 - 简单新增 UI 可以直接使用 Tailwind utility，例如 `bg-cuc-surface rounded-cuc-card border border-cuc-border`；React Flow、BlockNote、伪元素、复杂后代选择器继续留在对应 `src/styles/*` 文件。
 - `@utility` 只用于 Tailwind theme token 不能自然表达的能力，例如 `cuc-checkerboard`，以及需要同时避开 `tailwind-merge` 的运行时变量组合，如 Run 节点的 `run-*` 语义工具；阴影、颜色、尺寸、圆角优先放进 `@theme`。
+
+## Style Authoring Rule
+
+样式的默认目标是让 80% 的元素在代码现场可读，只有设计语言或复杂选择器才需要跳转：
+
+- 元素布局、尺寸、间距、对齐、定位、响应式、hover / disabled / selected 等局部状态，优先直接写在组件 `className` 或组件内局部 className 常量中。
+- 普通单元素视觉也优先写在 `className`，但颜色、圆角、阴影、字号、间距必须优先使用 `bg-cuc-*`、`text-cuc-*`、`border-cuc-*`、`rounded-cuc-*`、`shadow-cuc-*`、`text-cuc-*`、`size-cuc-*` 等 theme token utility，避免把重复视觉值写成任意值。
+- 只有同一组 class 在多个文件反复出现，并且代表明确产品语义时，才抽成小的 `@utility` 或组件内共享常量；不要为了“语义化”把一次性的布局封装成 `.cuc-panel`、`.cuc-card` 这类需要跳 CSS 的 class。
+- `src/styles/theme.css` 只回答“这个设计值是什么”，不承载单个元素布局；改全局视觉语言时才改 token。
+- `src/styles/*` 只承担 JSX 不适合表达的样式：React Flow / BlockNote / Radix 等第三方内部选择器、深层后代选择器、伪元素、mask、keyframes、全局滚动条、复杂媒体查询和少量跨组件语义 utility。
+- shadcn 的 `bg-background`、`text-foreground`、`bg-primary`、`border-border` 等语义类主要用于 `src/components/ui/*`、AI Elements 基础组件和第三方包装；产品业务界面默认使用 `cuc-*` token utility，除非正在复用 shadcn 组件契约。
+- 如果改一个元素时必须连续跳 `组件 -> CSS -> theme` 才能看懂布局，优先把布局和普通视觉移回组件 `className`，只保留真正需要 CSS 的部分。
 
 ## Color
 

@@ -45,7 +45,7 @@ import type {
 } from "@/types/canvas";
 
 const RUN_CARD_CLASS_NAME =
-  "run-card min-h-9 border-cuc-run-border bg-cuc-accent [--run-text:var(--color-cuc-run-text)] [--run-text-muted:var(--color-cuc-run-text-muted)]";
+  "run-card min-h-9";
 const RUN_CONTENT_CLASS_NAME =
   "run-content grid min-h-0 p-[14px] [grid-template-rows:auto_auto]";
 const RUN_CONTENT_RESIZED_CLASS_NAME =
@@ -63,13 +63,13 @@ const RUN_HEADER_SUMMARY_CLASS_NAME =
 const RUN_HEADING_ACTIONS_CLASS_NAME =
   "run-heading-actions flex shrink-0 items-center gap-0.5";
 const RUN_ICON_BUTTON_CLASS_NAME =
-  "run-text grid size-[18px] cursor-pointer place-items-center rounded-cuc-round border-0 bg-transparent transition-[background,color,opacity] duration-[140ms] ease-[ease]";
+  "run-icon-button";
 const RUN_RETRY_BUTTON_CLASS_NAME =
-  `${RUN_ICON_BUTTON_CLASS_NAME} run-retry-button nodrag nopan hover:bg-cuc-surface/58 hover:text-cuc-danger-strong`;
+  `${RUN_ICON_BUTTON_CLASS_NAME} run-retry-button nodrag nopan hover:bg-cuc-run-surface-muted hover:text-cuc-danger-strong`;
 const RUN_TRACE_BUTTON_CLASS_NAME =
-  `${RUN_ICON_BUTTON_CLASS_NAME} run-trace-button nodrag nopan hover:bg-cuc-surface/58`;
+  `${RUN_ICON_BUTTON_CLASS_NAME} run-trace-button nodrag nopan hover:bg-cuc-run-surface-muted`;
 const RUN_TOGGLE_BUTTON_CLASS_NAME =
-  `${RUN_ICON_BUTTON_CLASS_NAME} run-toggle nodrag nopan hover:bg-cuc-surface/58 disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent data-[expanded=false]:[&_svg]:-rotate-90 [&_svg]:transition-transform [&_svg]:duration-[140ms] [&_svg]:ease-[ease]`;
+  `${RUN_ICON_BUTTON_CLASS_NAME} run-toggle nodrag nopan hover:bg-cuc-run-surface-muted disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent data-[expanded=false]:[&_svg]:-rotate-90 [&_svg]:transition-transform [&_svg]:duration-[140ms] [&_svg]:ease-[ease]`;
 const RUN_STATUS_DOT_CLASS_NAME =
   "run-status-dot grid size-[18px] place-items-center text-cuc-ink";
 const RUN_STREAM_CLASS_NAME =
@@ -91,10 +91,10 @@ const AGENT_MESSAGE_LIST_CLASS_NAME =
 const RUN_FLOW_ENTRY_CLASS_NAME =
   "run-flow-entry agent-message grid min-w-0 grid-cols-[17px_minmax(0,1fr)] gap-[5px]";
 const RUN_FLOW_MARKER_CLASS_NAME =
-  "run-flow-marker relative grid justify-items-center after:absolute after:top-[15px] after:bottom-[-7px] after:w-px after:bg-cuc-node-border-hover after:content-['']";
+  "run-flow-marker";
 const RUN_FLOW_MARKER_LAST_CLASS_NAME = "after:hidden";
 const RUN_FLOW_MARKER_ICON_CLASS_NAME =
-  "run-text z-[1] grid size-[15px] place-items-center rounded-cuc-round border border-[rgb(141_149_165_/_18%)] bg-white/74";
+  "run-flow-marker-icon";
 const RUN_FLOW_BODY_CLASS_NAME = "run-flow-body grid min-w-0 gap-1";
 const RUN_FLOW_HEADING_CLASS_NAME =
   "run-flow-heading run-meta run-text-muted flex min-w-0 items-center gap-1";
@@ -110,7 +110,7 @@ const TOOL_CALL_ERROR_LINE_CLASS_NAME =
 const TOOL_CALL_ERROR_SNIPPET_CLASS_NAME =
   "tool-call-error-snippet run-meta line-clamp-2 overflow-hidden text-cuc-danger-deep [overflow-wrap:anywhere]";
 const TOOL_CALL_RETRY_CLASS_NAME =
-  "tool-call-retry nodrag nopan grid size-4 cursor-pointer place-items-center rounded-cuc-round border-0 bg-cuc-surface/68 text-cuc-danger-strong hover:bg-white/92";
+  "tool-call-retry nodrag nopan grid size-4 cursor-pointer place-items-center rounded-cuc-round border-0 bg-cuc-run-surface-muted text-cuc-danger-strong hover:bg-cuc-run-surface-hover";
 
 export function RunNodeView({
   id,
