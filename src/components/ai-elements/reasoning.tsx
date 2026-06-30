@@ -36,7 +36,7 @@ type ReasoningContextValue = {
 
 const REASONING_CLASS_NAME = "reasoning not-prose min-w-0";
 const REASONING_TRIGGER_CLASS_NAME =
-  "reasoning-trigger flex w-full min-w-0 cursor-pointer items-center justify-between gap-1 rounded-cuc-card border-[0.5px] border-cuc-run-border bg-transparent p-1 text-left text-cuc-label-8 [color:var(--run-text-muted)] hover:bg-cuc-run-border";
+  "reasoning-trigger flex w-full min-w-0 cursor-pointer items-center justify-between gap-1 rounded-cuc-card border-[0.5px] border-cuc-run-border bg-[#ECF3B0] p-1 text-left text-cuc-label-8 [color:var(--run-text-muted)] hover:bg-cuc-run-border";
 const REASONING_TRIGGER_LABEL_CLASS_NAME =
   "reasoning-trigger-label flex min-w-0 items-center gap-[5px] [&_em]:shrink-0 [&_em]:whitespace-nowrap [&_em]:not-italic [&_em]:[color:var(--run-text-muted)] [&_em]:before:mr-[5px] [&_em]:before:text-cuc-ink/38 [&_em]:before:content-['·'] [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:font-medium [&_span]:[color:var(--run-text-muted)]";
 const REASONING_TRIGGER_CHEVRON_CLASS_NAME =

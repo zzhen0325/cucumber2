@@ -59,7 +59,12 @@ import {
   useRef,
   useState,
 } from "react";
-import type { CSSProperties, FormEvent, MouseEvent as ReactMouseEvent } from "react";
+import type {
+  CSSProperties,
+  FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+} from "react";
 
 type IconComponent = typeof StickyNote;
 
@@ -117,6 +122,7 @@ import {
   loadRunTrace,
   mattingProjectImage,
   saveProjectCanvasPatch,
+  updateProject,
   updateTextArtifactContent,
   upscaleProjectImage,
   ProjectVersionConflictError,
@@ -1835,6 +1841,47 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     [buildPendingCanvasSaveInput, flushPendingArtifactContentSaves, hasPendingCanvasSave]
   );
 
+  const handleProjectTitleChange = useCallback(
+    async (nextTitle: string) => {
+      const currentProjectId = loadedProjectIdRef.current;
+      const trimmed = nextTitle.trim();
+      if (!currentProjectId || !trimmed) {
+        return false;
+      }
+      if (trimmed === projectTitle) {
+        return true;
+      }
+
+      setStorageStatus("saving");
+      setStorageError(null);
+
+      const pendingCanvasSaved = await saveProjectSnapshot({
+        reportStatus: false,
+      });
+      if (!pendingCanvasSaved) {
+        return false;
+      }
+
+      try {
+        const { project } = await updateProject({
+          projectId: currentProjectId,
+          title: trimmed,
+        });
+        projectVersionRef.current = project.version;
+        setLoadedProjectId(project.id);
+        setProjectTitle(project.title);
+        setStorageStatus("saved");
+        setStorageError(null);
+        return true;
+      } catch (nextError: unknown) {
+        setStorageStatus("error");
+        setStorageError(`重命名失败：${getClientError(nextError)}`);
+        return false;
+      }
+    },
+    [projectTitle, saveProjectSnapshot]
+  );
+
   const setComposerMode = useCallback((mode: ComposerMode) => {
     setComposerModeState(mode);
     window.localStorage.setItem(COMPOSER_MODE_STORAGE_KEY, mode);
@@ -3199,6 +3246,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         storageStatus={storageStatus}
         title={projectTitle}
         onBack={onBack}
+        onTitleChange={handleProjectTitleChange}
       />
       <ToolRail activeTool={canvasTool} onToolChange={setCanvasTool} />
       <ViewportControls
@@ -3939,12 +3987,70 @@ function TopBar({
   storageStatus,
   title,
   onBack,
+  onTitleChange,
 }: {
   storageError: string | null;
   storageStatus: StorageStatus;
   title: string;
   onBack: () => void;
+  onTitleChange: (title: string) => Promise<boolean>;
 }) {
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [draftTitle, setDraftTitle] = useState(title);
+  const [savingTitle, setSavingTitle] = useState(false);
+  const savingTitleRef = useRef(false);
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!isEditingTitle) {
+      return;
+    }
+    titleInputRef.current?.focus();
+    titleInputRef.current?.select();
+  }, [isEditingTitle]);
+
+  const startTitleEdit = useCallback(() => {
+    setDraftTitle(title);
+    setIsEditingTitle(true);
+  }, [title]);
+
+  const commitTitleChange = useCallback(async () => {
+    if (savingTitleRef.current) {
+      return;
+    }
+
+    const trimmed = draftTitle.trim();
+    if (!trimmed || trimmed === title) {
+      setDraftTitle(title);
+      setIsEditingTitle(false);
+      return;
+    }
+
+    savingTitleRef.current = true;
+    setSavingTitle(true);
+    const saved = await onTitleChange(trimmed);
+    savingTitleRef.current = false;
+    setSavingTitle(false);
+    if (saved) {
+      setIsEditingTitle(false);
+    }
+  }, [draftTitle, onTitleChange, title]);
+
+  const handleTitleKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLInputElement>) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        void commitTitleChange();
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setDraftTitle(title);
+        setIsEditingTitle(false);
+      }
+    },
+    [commitTitleChange, title]
+  );
+
   return (
     <div className="absolute left-3.5 top-3.5 z-20 flex h-cuc-floating-height items-center gap-1 rounded-cuc-floating bg-cuc-canvas-glass p-2 text-[13px] font-normal text-cuc-text-strong backdrop-blur-sm max-[760px]:left-3 max-[760px]:max-w-[calc(100vw-24px)] max-[760px]:overflow-hidden">
       <button
@@ -3961,17 +4067,39 @@ function TopBar({
           <img className="size-5" src="/LOGO.svg" alt="cucumber logo" />
         </div>
         <span className="mx-2 h-3 w-px flex-none bg-cuc-edge" />
-        <button
-          className={cn(
-            TOP_CONTROL_BUTTON_CLASS,
-            "grid w-[150px] grid-cols-[minmax(0,1fr)_12px] gap-1.5 px-2 text-left max-[760px]:w-[min(150px,calc(100vw-210px))]"
-          )}
-          title={title}
-          type="button"
-        >
-          <span className="truncate">{title}</span>
-          <ChevronDown size={12} />
-        </button>
+        {isEditingTitle ? (
+          <input
+            ref={titleInputRef}
+            aria-label="项目名称"
+            className={cn(
+              TOP_CONTROL_BUTTON_CLASS,
+              "w-[150px] min-w-0 cursor-text px-2 text-left outline-none focus-visible:ring-1 focus-visible:ring-cuc-primary max-[760px]:w-[min(150px,calc(100vw-210px))]"
+            )}
+            disabled={savingTitle}
+            maxLength={120}
+            onBlur={() => {
+              void commitTitleChange();
+            }}
+            onChange={(event) => setDraftTitle(event.currentTarget.value)}
+            onKeyDown={handleTitleKeyDown}
+            title={draftTitle}
+            value={draftTitle}
+          />
+        ) : (
+          <button
+            aria-label="编辑项目名称"
+            className={cn(
+              TOP_CONTROL_BUTTON_CLASS,
+              "grid w-[150px] grid-cols-[minmax(0,1fr)_12px] gap-1.5 px-2 text-left max-[760px]:w-[min(150px,calc(100vw-210px))]"
+            )}
+            onDoubleClick={startTitleEdit}
+            title={title}
+            type="button"
+          >
+            <span className="truncate">{title}</span>
+            <ChevronDown size={12} />
+          </button>
+        )}
         <button aria-label="分享" className={cn(TOP_CONTROL_BUTTON_CLASS, "w-cuc-control")} title="分享" type="button">
           <ArrowUpRight size={14} />
         </button>
