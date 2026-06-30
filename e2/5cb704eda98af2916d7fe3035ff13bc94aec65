@@ -1,0 +1,30 @@
+src/components/ai-elements/task.tsx
+  h_49a1fcd5ff42d1 30
+src/styles/theme.css
+  h_49a1fcd5ff42d1 38
+src/components/ai-elements/reasoning.tsx
+  s_88c82551a54649::t_e3eea51d0d89eb 39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "e25cb704eda98af2916d7fe3035ff13bc94aec65",
+  "prompts": {},
+  "humans": {
+    "h_49a1fcd5ff42d1": {
+      "author": "zzhen0325 <26629213+zzhen0325@users.noreply.github.com>"
+    }
+  },
+  "sessions": {
+    "s_88c82551a54649": {
+      "agent_id": {
+        "tool": "trae-cue",
+        "id": "ai_tab-icr-3a10310e-9b47-46a0-ba87-80db8f76bdd7",
+        "model": "default"
+      },
+      "human_author": "zzhen0325 <26629213+zzhen0325@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
