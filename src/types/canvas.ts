@@ -31,6 +31,9 @@ export type ArtifactMetadata = Record<string, unknown> & {
   digest?: string;
   mimeType?: string;
   previewKind?: ArtifactPreviewKind;
+  sourceUrl?: string;
+  finalUrl?: string;
+  canonicalUrl?: string;
   sourceRunNodeId?: string;
   sourceToolName?: string;
 };
@@ -101,6 +104,7 @@ export type GeneratedHtmlPage = {
   title: string;
   html: string;
   previewUrl: string;
+  sourceUrl?: string;
   summary?: string;
   artifact?: ArtifactRef;
 };
@@ -273,6 +277,7 @@ export type WebpageNodeData = ArtifactBackedNodeData & {
   kind: "webpage";
   html?: string;
   previewUrl?: string;
+  sourceUrl?: string;
 };
 
 export type AgentCanvasNodeData =

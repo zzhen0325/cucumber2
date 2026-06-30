@@ -192,6 +192,10 @@ import {
 } from "@/lib/graph";
 import { getPromptNodeDimensions } from "@/lib/canvas-node-dimensions";
 import {
+  getArtifactHtmlBaseUrl,
+  prepareHtmlPreviewDocument,
+} from "@/lib/html-preview";
+import {
   applyCanvasPatch,
   diffCanvasPatch,
   hasCanvasPatchChanges,
@@ -4662,6 +4666,9 @@ function ArtifactPreviewDialog({
   const previewText =
     (loadedPreview && loadedPreview.url === contentUrl ? loadedPreview.text : null) ??
     inlinePreview;
+  const htmlBaseUrl =
+    ("sourceUrl" in data ? data.sourceUrl : undefined) ??
+    getArtifactHtmlBaseUrl(data.artifact);
   const metaLine = getArtifactMetaLine(data);
   const codeLanguage = data.kind === "code" ? getCodeBlockLanguage(data) : null;
   const isHtmlPreview =
@@ -4678,6 +4685,7 @@ function ArtifactPreviewDialog({
           {loadState === "binary" && <span>此产物可下载或打开查看</span>}
           {previewText && isHtmlPreview && (
             <HtmlSourcePreview
+              baseUrl={htmlBaseUrl}
               className="artifact-preview-html"
               defaultMode="preview"
               filename={data.title}
@@ -4881,6 +4889,11 @@ function HtmlPageNode({
   const htmlText =
     inlineHtml ||
     (loadedHtml && loadedHtml.url === contentUrl ? loadedHtml.text ?? "" : "");
+  const htmlBaseUrl = data.sourceUrl ?? getArtifactHtmlBaseUrl(data.artifact);
+  const previewHtml = useMemo(
+    () => prepareHtmlPreviewDocument(htmlText, htmlBaseUrl),
+    [htmlBaseUrl, htmlText]
+  );
   const htmlLoadState =
     htmlText.trim().length > 0
       ? "ready"
@@ -4918,7 +4931,7 @@ function HtmlPageNode({
             <iframe
               referrerPolicy="no-referrer"
               sandbox="allow-forms allow-modals allow-scripts"
-              srcDoc={htmlText}
+              srcDoc={previewHtml}
               title={`${data.title} 预览`}
             />
           ) : (

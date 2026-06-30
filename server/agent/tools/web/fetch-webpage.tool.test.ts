@@ -57,6 +57,9 @@ describe("fetch_webpage tool", () => {
     expect(mocks.storeTextArtifactContent).toHaveBeenCalledWith(
       expect.objectContaining({
         projectId: "project-1",
+        metadata: {
+          sourceUrl: "https://example.com/",
+        },
         runNodeId: "run-1",
         sourceToolName: "fetch_webpage",
         title: "Example Domain",

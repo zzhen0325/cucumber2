@@ -643,6 +643,7 @@ export function createHtmlPageNodes(
           format: "html",
           html: page.html,
           mimeType: "text/html",
+          ...(page.sourceUrl ? { sourceUrl: page.sourceUrl } : {}),
           summary: page.summary,
         },
       } satisfies ArtifactRef);
@@ -659,6 +660,7 @@ export function createHtmlPageNodes(
         previewUrl: page.previewUrl,
         prompt: runNode.data.kind === "run" ? runNode.data.prompt : undefined,
         runId: runNode.id,
+        sourceUrl: page.sourceUrl,
         summary: page.summary,
         title: page.title,
       },

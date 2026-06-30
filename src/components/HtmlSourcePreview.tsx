@@ -13,6 +13,7 @@ import {
   CodeIcon as Code2,
   EyeIcon as Eye,
 } from "@proicons/react";
+import { prepareHtmlPreviewDocument } from "@/lib/html-preview";
 import type { BundledLanguage } from "shiki";
 import { useCallback, useMemo, useState } from "react";
 
@@ -20,6 +21,7 @@ export type HtmlViewMode = "preview" | "source";
 
 type HtmlSourcePreviewProps = {
   className?: string;
+  baseUrl?: string;
   defaultMode?: HtmlViewMode;
   filename?: string;
   frameClassName?: string;
@@ -36,6 +38,7 @@ type HtmlSourcePreviewProps = {
 const htmlLanguage = "html" as BundledLanguage;
 
 export function HtmlSourcePreview({
+  baseUrl,
   className,
   defaultMode = "source",
   filename,
@@ -56,6 +59,10 @@ export function HtmlSourcePreview({
   const downloadName = useMemo(
     () => getHtmlDownloadFilename(filename ?? title),
     [filename, title]
+  );
+  const previewHtml = useMemo(
+    () => prepareHtmlPreviewDocument(html, baseUrl),
+    [baseUrl, html]
   );
   const switchMode = useCallback((nextMode: HtmlViewMode) => {
     setMode(nextMode);
@@ -137,7 +144,7 @@ export function HtmlSourcePreview({
           <iframe
             referrerPolicy="no-referrer"
             sandbox="allow-forms allow-modals allow-scripts"
-            srcDoc={html}
+            srcDoc={previewHtml}
             title={`${title} ${previewLabel}`}
           />
         ) : (

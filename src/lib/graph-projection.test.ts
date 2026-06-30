@@ -502,6 +502,7 @@ describe("agent event graph projection", () => {
               mimeType: "text/html",
               previewKind: "webpage",
               projectId: "project-1",
+              sourceUrl: "https://example.com/guide",
               sourceToolName: "create_text_artifact",
             },
             mimeType: "text/html",
@@ -527,6 +528,7 @@ describe("agent event graph projection", () => {
       data: {
         kind: "webpage",
         html,
+        sourceUrl: "https://example.com/guide",
         artifact: {
           id: "text-html-1",
           metadata: expect.objectContaining({ projectId: "project-1" }),

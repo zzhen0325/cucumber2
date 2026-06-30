@@ -144,6 +144,7 @@ describe("agent canvas graph", () => {
           title: "页面",
           html: "<main>页面</main>",
           previewUrl: "/preview/page-1",
+          sourceUrl: "https://example.com/page-1",
         },
       ],
       []
@@ -158,6 +159,14 @@ describe("agent canvas graph", () => {
       height: 320,
       style: { height: 320, width: 420 },
       width: 420,
+      data: {
+        artifact: {
+          metadata: {
+            sourceUrl: "https://example.com/page-1",
+          },
+        },
+        sourceUrl: "https://example.com/page-1",
+      },
     });
   });
 

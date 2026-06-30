@@ -1555,6 +1555,7 @@ function createArtifactCanvasNode({
                     kind,
                     html: readHtmlArtifactContent(artifact),
                     previewUrl: artifact.contentRef ?? artifact.uri,
+                    sourceUrl: readString(artifact.metadata?.sourceUrl),
                   }
               : { ...baseData, kind },
   } as AgentCanvasNode);

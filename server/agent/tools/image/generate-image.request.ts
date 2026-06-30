@@ -66,6 +66,9 @@ export type SeedreamGeometryInput = {
 };
 
 export const SEEDREAM_PROMPT_MAX_LENGTH = 800;
+const SEEDREAM_MIN_SHORT_SIDE = 1024;
+const SEEDREAM_MIN_AREA = SEEDREAM_MIN_SHORT_SIDE * SEEDREAM_MIN_SHORT_SIDE;
+const SEEDREAM_MAX_AREA = 4096 * 4096;
 
 export function buildGenerateImageSeedreamInput(
   input: GenerateImageSeedreamRequestInput,
@@ -479,26 +482,18 @@ function normalizeSeedreamVariants(
 
 function dimensionsFromAspectRatio(aspectRatio: number, targetArea: number) {
   const boundedArea = Math.min(
-    Math.max(Math.round(targetArea), 1024 * 1024),
-    4096 * 4096
+    Math.max(Math.round(targetArea), SEEDREAM_MIN_AREA),
+    SEEDREAM_MAX_AREA
   );
   const height = Math.sqrt(boundedArea / aspectRatio);
-  let width = Math.max(1, Math.round(height * aspectRatio));
-  let roundedHeight = Math.max(1, Math.round(height));
+  const width = Math.max(1, Math.round(height * aspectRatio));
+  const roundedHeight = Math.max(1, Math.round(height));
 
-  if (width * roundedHeight < 1024 * 1024) {
-    const scale = Math.sqrt((1024 * 1024) / (width * roundedHeight));
-    width = Math.ceil(width * scale);
-    roundedHeight = Math.ceil(roundedHeight * scale);
-  }
-  if (width * roundedHeight > 4096 * 4096) {
-    const scale = Math.sqrt((4096 * 4096) / (width * roundedHeight));
-    width = Math.floor(width * scale);
-    roundedHeight = Math.floor(roundedHeight * scale);
-  }
-
-  validateSeedreamDimensions(width, roundedHeight);
-  return { fields: { width, height: roundedHeight } };
+  const normalized = normalizeSeedreamDimensionsToSupportedBounds(
+    width,
+    roundedHeight
+  );
+  return { fields: normalized };
 }
 
 function normalizeExplicitSeedreamDimensions(
@@ -516,20 +511,17 @@ function normalizeExplicitSeedreamDimensions(
     aspectRatio > 16
   ) {
     throw new Error(
-      `Seedream width and height must produce a 1K to 4K image within the supported aspect ratio (received ${width}x${height}, area ${area}).`
+      `Seedream width and height must be positive integers within the supported aspect ratio; small valid dimensions are scaled before provider submission (received ${width}x${height}, area ${area}).`
     );
   }
 
-  if (area >= 1024 * 1024 && area <= 4096 * 4096) {
-    return { fields: { width, height } };
+  const normalized = normalizeSeedreamDimensionsToSupportedBounds(width, height);
+  if (normalized.width === width && normalized.height === height) {
+    return { fields: normalized };
   }
 
-  const normalized = dimensionsFromAspectRatio(
-    aspectRatio,
-    Math.min(Math.max(area, 1024 * 1024), 4096 * 4096)
-  );
   return {
-    fields: normalized.fields,
+    fields: normalized,
     targetHeight: height,
     targetWidth: width,
   };
@@ -553,20 +545,54 @@ function readPositiveInteger(value: unknown) {
 function validateSeedreamDimensions(width: number, height: number) {
   const area = width * height;
   const aspectRatio = width / height;
+  const shortestSide = Math.min(width, height);
   if (
     !Number.isInteger(width) ||
     !Number.isInteger(height) ||
     width <= 0 ||
     height <= 0 ||
-    area < 1024 * 1024 ||
-    area > 4096 * 4096 ||
+    shortestSide < SEEDREAM_MIN_SHORT_SIDE ||
+    area > SEEDREAM_MAX_AREA ||
     aspectRatio < 1 / 16 ||
     aspectRatio > 16
   ) {
     throw new Error(
-      `Seedream width and height must produce a 1K to 4K image within the supported aspect ratio (received ${width}x${height}, area ${area}).`
+      `Seedream width and height must keep the shortest side at least ${SEEDREAM_MIN_SHORT_SIDE}px and stay within the supported aspect ratio/area (received ${width}x${height}, shortest side ${shortestSide}, area ${area}).`
     );
   }
+}
+
+function normalizeSeedreamDimensionsToSupportedBounds(width: number, height: number) {
+  let normalizedWidth = width;
+  let normalizedHeight = height;
+
+  const shortestSide = Math.min(normalizedWidth, normalizedHeight);
+  if (shortestSide < SEEDREAM_MIN_SHORT_SIDE) {
+    const scale = SEEDREAM_MIN_SHORT_SIDE / shortestSide;
+    normalizedWidth = Math.ceil(normalizedWidth * scale);
+    normalizedHeight = Math.ceil(normalizedHeight * scale);
+  }
+
+  const area = normalizedWidth * normalizedHeight;
+  if (area > SEEDREAM_MAX_AREA) {
+    const scale = Math.sqrt(SEEDREAM_MAX_AREA / area);
+    normalizedWidth = Math.floor(normalizedWidth * scale);
+    normalizedHeight = Math.floor(normalizedHeight * scale);
+  }
+
+  if (Math.min(normalizedWidth, normalizedHeight) < SEEDREAM_MIN_SHORT_SIDE) {
+    const aspectRatio = width / height;
+    if (aspectRatio >= 1) {
+      normalizedHeight = SEEDREAM_MIN_SHORT_SIDE;
+      normalizedWidth = Math.floor(SEEDREAM_MIN_SHORT_SIDE * aspectRatio);
+    } else {
+      normalizedWidth = SEEDREAM_MIN_SHORT_SIDE;
+      normalizedHeight = Math.floor(SEEDREAM_MIN_SHORT_SIDE / aspectRatio);
+    }
+  }
+
+  validateSeedreamDimensions(normalizedWidth, normalizedHeight);
+  return { width: normalizedWidth, height: normalizedHeight };
 }
 
 function normalizeSingleImagePrompt(prompt: string) {

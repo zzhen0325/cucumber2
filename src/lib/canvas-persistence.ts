@@ -76,6 +76,7 @@ const SMALL_METADATA_KEYS = new Set([
   "sourceNodeId",
   "sourceRunNodeId",
   "sourceToolName",
+  "sourceUrl",
   "storageBucket",
   "storagePath",
   "summary",

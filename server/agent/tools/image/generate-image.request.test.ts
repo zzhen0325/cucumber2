@@ -196,10 +196,12 @@ describe("generate image request normalization", () => {
     expect(request.body.force_single).toBe(testSeedreamConfig.forceSingle);
     expect(request.body.scale).toBe(60);
     expect(request.body.width).not.toBe(testSeedreamConfig.width);
-    expect(request.body.height).not.toBe(testSeedreamConfig.height);
     expect(
       (request.body.width as number) / (request.body.height as number)
     ).toBeCloseTo(16 / 9, 2);
+    expect(
+      Math.min(request.body.width as number, request.body.height as number)
+    ).toBeGreaterThanOrEqual(1024);
     expect(request.body.size).toBeUndefined();
   });
 
@@ -224,6 +226,9 @@ describe("generate image request normalization", () => {
     expect(
       (requests[0].body.width as number) / (requests[0].body.height as number)
     ).toBeCloseTo(16 / 9, 2);
+    expect(
+      Math.min(requests[0].body.width as number, requests[0].body.height as number)
+    ).toBeGreaterThanOrEqual(1024);
   });
 
   it("keeps Seedream prompt bodies within the provider limit", () => {
@@ -283,6 +288,26 @@ describe("generate image request normalization", () => {
         testSeedreamConfig
       )[0].body
     ).toMatchObject({ width: 2048, height: 2048 });
+  });
+
+  it("scales explicit Seedream dimensions so the shortest side is at least 1024px", () => {
+    const request = buildGenerateImageSeedreamInput(
+      {
+        prompt: "竖版产品海报",
+        width: 512,
+        height: 2048,
+      },
+      testSeedreamConfig
+    ).requests[0];
+
+    expect(request.body).toMatchObject({
+      width: 1024,
+      height: 4096,
+    });
+    expect(request).toMatchObject({
+      targetWidth: 512,
+      targetHeight: 2048,
+    });
   });
 
   it("builds one Seedream request per output variant", () => {
@@ -449,7 +474,7 @@ describe("generate image request normalization", () => {
     ]);
   });
 
-  it("scales small explicit variants into Seedream's supported 1K to 4K range", () => {
+  it("scales small explicit variants so the shortest side is at least 1024px", () => {
     const requests = buildGenerateImageSeedreamInput(
       {
         prompt: "基于参考图扩展画布",
@@ -482,16 +507,38 @@ describe("generate image request normalization", () => {
     for (const request of requests) {
       const width = request.body.width as number;
       const height = request.body.height as number;
+      expect(Math.min(width, height)).toBeGreaterThanOrEqual(1024);
       expect(width * height).toBeGreaterThanOrEqual(1024 * 1024);
       expect(width * height).toBeLessThanOrEqual(4096 * 4096);
     }
+    expect(requests[0].body).toMatchObject({ width: 2560, height: 1024 });
+    expect(requests[1].body).toMatchObject({ width: 1715, height: 1024 });
     expect((requests[0].body.width as number) / (requests[0].body.height as number))
       .toBeCloseTo(1125 / 450, 2);
     expect((requests[1].body.width as number) / (requests[1].body.height as number))
       .toBeCloseTo(1125 / 672, 2);
     expect(requests[2].body).toMatchObject({ width: 1080, height: 1440 });
+    expect(requests[3].body).toMatchObject({ width: 1952, height: 1024 });
     expect((requests[3].body.width as number) / (requests[3].body.height as number))
       .toBeCloseTo(1029 / 540, 2);
+  });
+
+  it("scales explicit ByteArtist dimensions through the shared Seedream geometry guard", () => {
+    const requests = buildGenerateImageByteArtistInput(
+      {
+        prompt: "竖版产品海报",
+        variants: [{ width: 512, height: 2048 }],
+      },
+      testSeed5DuotuConfig
+    ).requests;
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      width: 1024,
+      height: 4096,
+      targetWidth: 512,
+      targetHeight: 2048,
+    });
   });
 
   it("builds Coze request bodies with prompt, reference image file dicts, and scalar options", () => {

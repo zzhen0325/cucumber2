@@ -1,6 +1,7 @@
 import { tool } from "@openai/agents";
 import { z } from "zod";
 
+import { toHtmlDocumentBaseUrl } from "../../../../src/lib/html-preview.ts";
 import type { ArtifactRef } from "../../../../src/types/canvas.ts";
 import { storeTextArtifactContent } from "../../../storage.ts";
 import type { CucumberAgentContext } from "../../context.ts";
@@ -44,6 +45,9 @@ export const fetchWebpageTool = tool({
     const title = args.title ?? extractedTitle ?? fetched.url.hostname;
     const artifact = await storeTextArtifactContent({
       content: fetched.html,
+      metadata: {
+        sourceUrl: toHtmlDocumentBaseUrl(fetched.url),
+      },
       projectId: context.projectId,
       runNodeId: context.runNodeId,
       sourceToolName: "fetch_webpage",
