@@ -440,6 +440,7 @@ export async function executeAgentRun({
   writer: streamWriter,
   ...input
 }: ExecuteAgentRunInput) {
+  const runStartedMs = Date.now();
   const eventWriter = createAgentEventWriter({
     projectId: input.projectId,
     runNodeId: input.runNodeId,
@@ -1111,6 +1112,7 @@ export async function executeAgentRun({
       type: "run.completed",
       payload: {
         artifactIds,
+        durationMs: Math.max(0, Math.round(Date.now() - runStartedMs)),
         finalOutput,
         route: quickRoute?.route,
         routerSource: quickRoute?.routerSource,

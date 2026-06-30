@@ -68,8 +68,8 @@ export function HtmlSourcePreview({
     setMode(nextMode);
   }, []);
   const handleDownload = useCallback(() => {
-    downloadTextFile(downloadName, html, "text/html;charset=utf-8");
-  }, [downloadName, html]);
+    downloadTextFile(downloadName, previewHtml, "text/html;charset=utf-8");
+  }, [downloadName, previewHtml]);
 
   const actions = (
     <>

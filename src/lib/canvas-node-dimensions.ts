@@ -9,8 +9,8 @@ export const DEFAULT_MARKDOWN_NODE_DIMENSIONS = {
   height: 360,
 } as const;
 export const DEFAULT_WEBPAGE_NODE_DIMENSIONS = {
-  width: 420,
-  height: 320,
+  width: 1280,
+  height: 720,
 } as const;
 
 const PROMPT_NODE_MAX_AUTO_HEIGHT = 420;

@@ -112,7 +112,12 @@ export function RunNodeView({
   const hasSummaryItems = Boolean(summaryItems.length);
   const hasToolParts = hasToolDetail && toolParts.length > 0;
   const visibleCurrentStep = getVisibleCurrentStep(data.currentStep);
-  const title = getRunTitle(data.status, latestToolPart?.state, visibleCurrentStep);
+  const title = getRunTitle(
+    data.status,
+    latestToolPart?.state,
+    visibleCurrentStep,
+    data.durationMs
+  );
   const headerSummary = getRunHeaderSummary(data.status, toolParts, visibleCurrentStep);
   const showCurrentStepFallback =
     !hasSummaryItems && !hasPlan && !hasToolParts && Boolean(visibleCurrentStep);
@@ -799,18 +804,30 @@ function dispatchRetryRun(
 function getRunTitle(
   status: RunNodeData["status"],
   state?: CanvasToolPart["state"],
-  currentStep?: RunNodeData["currentStep"]
+  currentStep?: RunNodeData["currentStep"],
+  durationMs?: number
 ) {
   if (status === "error" || state === "output-error") {
     return "生成失败";
   }
   if (status === "success") {
-    return "DONE！😊";
+    const durationLabel = formatRunDuration(durationMs);
+    return durationLabel ? `DONE！😊 · ${durationLabel}` : "DONE！😊";
   }
   if (state === "input-available" || state === "output-available") {
     return "调用工具";
   }
   return currentStep?.label ?? (status === "queued" ? "等待服务响应" : "Agent 处理中");
+}
+
+function formatRunDuration(durationMs: number | undefined) {
+  if (durationMs === undefined) {
+    return undefined;
+  }
+  if (durationMs < 1000) {
+    return `${Math.round(durationMs)}ms`;
+  }
+  return `${(durationMs / 1000).toFixed(durationMs < 10_000 ? 1 : 0)}s`;
 }
 
 function getPendingAgentText(

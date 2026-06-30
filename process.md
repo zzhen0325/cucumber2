@@ -2,6 +2,10 @@
 
 本文记录 2026-06-11 Agent v2 正式切换后的变更。
 
+## 2026-06-30 Canvas Auto Layout Trigger Boundary
+
+- 新增或删除画布节点/边不再隐式触发全图 auto layout；节点创建入口继续负责自己的初始落点，用户显式点击画布自动布局按钮时才通过 `auto-layout` mutation 重排并保存。
+
 ## 2026-06-28 Agent Tool Schema Boundary
 
 - 简单本地 Agent tool 收敛为 Zod `parameters` + `strict: true`，由 Agents SDK 自动解析并校验入参；复杂 union/open payload 工具继续保留手写 JSON Schema 给模型、执行期 Zod 校验兜底。

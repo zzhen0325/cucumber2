@@ -158,7 +158,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  getCanvasLayoutSignature,
   layoutAgentCanvasGraph,
 } from "@/lib/canvas-layout";
 import { normalizeLoadedCanvasSnapshot } from "@/lib/canvas-load-normalization";
@@ -547,9 +546,6 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const prevSaveClassifyNodesRef = useRef<AgentCanvasNode[]>([]);
   const prevSaveClassifyTitleRef = useRef(projectTitle);
   const imageProcessingInFlightRef = useRef(new Set<string>());
-  const autoLayoutFrame = useRef<number | null>(null);
-  const autoLayoutSignatureRef = useRef<string | null>(null);
-  const pendingRunFocusNodeIdsRef = useRef<string[] | null>(null);
   const flowInstance = useRef<ReactFlowInstance<
     AgentCanvasNode,
     AgentCanvasEdge
@@ -702,14 +698,6 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
             getNodePositionOrigin(layoutInputNodes)
           )
         : layoutAgentCanvasGraph(layoutInputNodes, layoutInputEdges);
-      const focusNodeIds = shouldLayoutSelection
-        ? selectedNodeIds
-        : pendingRunFocusNodeIdsRef.current ?? undefined;
-      pendingRunFocusNodeIdsRef.current = null;
-      autoLayoutSignatureRef.current = getCanvasLayoutSignature(
-        shouldLayoutSelection ? nodesRef.current : layoutedNodes,
-        edgesRef.current
-      );
       commitCanvasMutation({
         reason: "auto-layout",
         patch: {
@@ -717,7 +705,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         },
         persist: true,
       });
-      requestCanvasFit(focusNodeIds);
+      requestCanvasFit(shouldLayoutSelection ? selectedNodeIds : undefined);
     },
     [commitCanvasMutation, requestCanvasFit]
   );
@@ -1483,10 +1471,6 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           normalizedSnapshot.nodes,
           project.selectedNodeId
         );
-        autoLayoutSignatureRef.current = getCanvasLayoutSignature(
-          normalizedSnapshot.nodes,
-          normalizedSnapshot.edges
-        );
         const selectedNodes = applySelectedNodeIds(
           normalizedSnapshot.nodes,
           nextSelectedNodeIds
@@ -1551,10 +1535,6 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
     return () => {
       ignore = true;
-      if (autoLayoutFrame.current) {
-        window.cancelAnimationFrame(autoLayoutFrame.current);
-        autoLayoutFrame.current = null;
-      }
     };
   }, [
     clearQueuedStreamProjection,
@@ -2028,7 +2008,6 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         lastRunId: draft.runNode.id,
       });
       const runFocusNodeIds = [draft.promptNode.id, draft.runNode.id];
-      pendingRunFocusNodeIdsRef.current = runFocusNodeIds;
       requestCanvasFit(runFocusNodeIds);
 
       const artifactSaveResults = await flushPendingArtifactContentSaves();
@@ -2257,34 +2236,6 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     projectTitle,
     saveProjectSnapshot,
   ]);
-
-  useEffect(() => {
-    if (!hasLoadedProject.current || isReplayMode || !nodes.length) {
-      return;
-    }
-
-    const signature = getCanvasLayoutSignature(nodes, edges);
-    if (autoLayoutSignatureRef.current === signature) {
-      return;
-    }
-
-    autoLayoutSignatureRef.current = signature;
-    if (autoLayoutFrame.current) {
-      window.cancelAnimationFrame(autoLayoutFrame.current);
-    }
-
-    autoLayoutFrame.current = window.requestAnimationFrame(() => {
-      autoLayoutFrame.current = null;
-      handleAutoLayout();
-    });
-
-    return () => {
-      if (autoLayoutFrame.current) {
-        window.cancelAnimationFrame(autoLayoutFrame.current);
-        autoLayoutFrame.current = null;
-      }
-    };
-  }, [edges, handleAutoLayout, isReplayMode, nodes]);
 
   useEffect(() => {
     if (error) {
@@ -4673,6 +4624,10 @@ function ArtifactPreviewDialog({
   const codeLanguage = data.kind === "code" ? getCodeBlockLanguage(data) : null;
   const isHtmlPreview =
     data.kind === "webpage" || (data.kind === "code" && codeLanguage === "html");
+  const htmlDownloadText =
+    previewText && isHtmlPreview
+      ? prepareHtmlPreviewDocument(previewText, htmlBaseUrl)
+      : null;
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -4727,7 +4682,13 @@ function ArtifactPreviewDialog({
             </a>
             <button
               type="button"
-              onClick={() => downloadArtifactAsset(contentUrl, data)}
+              onClick={() => {
+                if (htmlDownloadText) {
+                  downloadTextArtifact(htmlDownloadText, data);
+                  return;
+                }
+                downloadArtifactAsset(contentUrl, data);
+              }}
             >
               下载
             </button>
@@ -4751,6 +4712,7 @@ function CodeNode({
   const metaLine = getArtifactMetaLine(data);
   const language = getCodeBlockLanguage(data);
   const isHtmlCode = language === "html";
+  const htmlBaseUrl = isHtmlCode ? getArtifactHtmlBaseUrl(data.artifact) : undefined;
   const loadedCode = useTextArtifactContent(
     contentUrl,
     isHtmlCode && !inlinePreview && Boolean(contentUrl),
@@ -4759,6 +4721,9 @@ function CodeNode({
   const fetchedCodeText =
     loadedCode && loadedCode.url === contentUrl ? loadedCode.text : null;
   const codeText = inlinePreview ?? fetchedCodeText ?? "";
+  const downloadCodeText = isHtmlCode && codeText
+    ? prepareHtmlPreviewDocument(codeText, htmlBaseUrl)
+    : codeText;
   const displayCode =
     codeText ||
     (isHtmlCode && loadedCode?.status !== "error"
@@ -4811,9 +4776,13 @@ function CodeNode({
           <button
             aria-label="下载代码文件"
             className={ARTIFACT_NODE_TOOLBAR_BUTTON_CLASS}
-            disabled={!contentUrl}
+            disabled={!(contentUrl || (isHtmlCode && downloadCodeText))}
             onClick={(event) => {
               stopNodeToolbarEvent(event);
+              if (isHtmlCode && downloadCodeText) {
+                downloadTextArtifact(downloadCodeText, data);
+                return;
+              }
               if (contentUrl) {
                 downloadArtifactAsset(contentUrl, data);
               }
@@ -4841,8 +4810,8 @@ function CodeNode({
           className={CODE_CONTENT_CLASS}
           copyText={codeText}
           data={data}
-          downloadText={codeText}
-          downloadUrl={contentUrl}
+          downloadText={downloadCodeText}
+          downloadUrl={isHtmlCode ? undefined : contentUrl}
         >
           <div className="code-node-editor nodrag nopan nowheel">
             <CodeBlock
@@ -4923,8 +4892,7 @@ function HtmlPageNode({
         className={HTML_PAGE_CONTENT_CLASS}
         copyText={htmlText}
         data={data}
-        downloadText={htmlText}
-        downloadUrl={contentUrl}
+        downloadText={htmlText ? previewHtml : undefined}
       >
         <div className="html-page-frame nodrag nopan nowheel">
           {htmlText ? (

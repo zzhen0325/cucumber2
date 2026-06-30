@@ -7,6 +7,7 @@ import type {
 } from "react";
 
 import { uploadProjectFileAsset } from "@/lib/asset-upload";
+import { waitForImageDisplayReady } from "@/lib/image-preload";
 import {
   createCanvasNodeFromUploadedFile,
   prepareLocalCanvasUploads,
@@ -117,13 +118,15 @@ export function useCanvasFileDrop({
         setUploadError(null);
 
         for (const item of preparedUploads) {
+          let shouldRevokeObjectUrl = false;
           void uploadProjectFileAsset(projectId, item.upload)
-            .then((artifact) => {
+            .then(async (artifact) => {
               const finalNode = replaceLocalUploadNode(
                 [item.localNode],
                 item.localNode.id,
                 createCanvasNodeFromUploadedFile(item.upload, artifact)
               )[0];
+              await waitForUploadedImageNodeDisplayReady(finalNode);
               const currentEdges = edgesRef.current;
               const replacedEdges = replaceLocalUploadEdges(
                 currentEdges,
@@ -143,6 +146,7 @@ export function useCanvasFileDrop({
                   },
                   persist: true,
                 });
+                shouldRevokeObjectUrl = true;
                 return;
               }
               setNodes((current) =>
@@ -151,6 +155,7 @@ export function useCanvasFileDrop({
               setEdges((current) =>
                 replaceLocalUploadEdges(current, item.localNode.id, finalNode.id)
               );
+              shouldRevokeObjectUrl = true;
             })
             .catch((nextError: unknown) => {
               const message = getClientError(nextError);
@@ -160,7 +165,7 @@ export function useCanvasFileDrop({
               setUploadError(message);
             })
             .finally(() => {
-              if (item.objectUrl) {
+              if (item.objectUrl && shouldRevokeObjectUrl) {
                 URL.revokeObjectURL(item.objectUrl);
               }
             });
@@ -338,6 +343,14 @@ function replaceLocalUploadEdges(
       target: edge.target === localNodeId ? finalNodeId : edge.target,
     };
   });
+}
+
+async function waitForUploadedImageNodeDisplayReady(node: AgentCanvasNode) {
+  if (node.data.kind !== "imageResult" || !node.data.image.url) {
+    return;
+  }
+
+  await waitForImageDisplayReady(node.data.image.url);
 }
 
 function getClientError(error: unknown) {

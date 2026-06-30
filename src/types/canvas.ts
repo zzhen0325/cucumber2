@@ -188,6 +188,7 @@ export type RunNodeData = {
   plan?: RunPlanItem[];
   currentStep?: RunStepTimelineItem;
   stepTimeline?: RunStepTimelineItem[];
+  durationMs?: number;
   decision?: string;
   summaryItems?: RunSummaryItem[];
   traceAvailable?: boolean;

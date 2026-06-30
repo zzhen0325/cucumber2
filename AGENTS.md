@@ -18,12 +18,12 @@
 - 每个功能域保持清晰、独立、唯一的职责边界。
 - 接收到用户的需求时，要从第一性原理出发思考问题的本质。
 - 目标是通用Agent OS，遇到问题不要单独修某一个类型的特例。
+- 简单测试交给用户自己测试，说明测试方式和判定成功与否方法，用户明确要求你测试的时候你再测试。
 - 保持改动小而完整，不新增平行状态绕开 `AgentCanvasNode`、`AgentCanvasEdge` 和 `RunDraft`。
 - 不做 legacy adapter、降级或静默兜底；错误直接进入 Run 节点和 Trace。
 - Agent 执行必须在画布可见：prompt、run、Agent/handoff、tool、artifact、canvas operation 和 error 都由事件投影。
 - Agent 坚持 proposal-first：SDK 决定做什么，runtime policy 决定是否允许落到画布；tool 不直接写数据库。
 - 客户端不得提供可信 upstream context。提交前保存项目，服务端从持久化 nodes/edges 重建上下文。
-- `knownNodeIds` 只能来自项目快照和本轮 prompt/run 节点。
 - 图片生成 artifact 由 `generate_image` 产生；高清放大 artifact 由 `upscale_image` 或图片 toolbar 直连接口产生。引用图 URL 只转发给 Seedream，不暴露给模型。
 - Manager 通过 handoff 委派给 Image Agent；specialist model 由 runtime 统一注入。
 - React Flow 改动先查看官方文档：<https://reactflow.dev/learn>。

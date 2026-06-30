@@ -280,6 +280,7 @@ export function projectRunTraceToCanvas({
     streamedAgentText,
     agentMessages
   );
+  const durationMs = getRunDurationMs(orderedEvents);
   const outputKind = getRunOutputKind(orderedEvents, runStatus);
   const runWasAborted = isAbortedRun(orderedEvents);
   const promptDimensions = getPromptNodeDimensions(prompt);
@@ -316,6 +317,7 @@ export function projectRunTraceToCanvas({
         agentMessages,
         outputKind,
         currentStep,
+        durationMs,
         plan,
         toolPart: toolParts.at(-1),
         toolParts,
@@ -419,6 +421,9 @@ export function projectRunTraceToCanvas({
       ) {
         removeProjectedNode(projectedNodes, projectedEdges, pendingArtifactNode.id);
       }
+      if (artifact.type !== "image") {
+        removePendingArtifactNodes(projectedNodes, projectedEdges, pendingArtifactNodes);
+      }
       const artifactNodeId =
         existingArtifactNodeId ??
         pendingImageNode?.id ??
@@ -511,6 +516,19 @@ function removeProjectedNode(
   for (let index = edges.length - 1; index >= 0; index -= 1) {
     if (edges[index].source === nodeId || edges[index].target === nodeId) {
       edges.splice(index, 1);
+    }
+  }
+}
+
+function removePendingArtifactNodes(
+  nodes: AgentCanvasNode[],
+  edges: AgentCanvasEdge[],
+  pendingNodes: AgentCanvasNode[]
+) {
+  while (pendingNodes.length) {
+    const pendingNode = pendingNodes.shift();
+    if (pendingNode) {
+      removeProjectedNode(nodes, edges, pendingNode.id);
     }
   }
 }
@@ -1115,11 +1133,11 @@ function inferPendingArtifactKind({
 
 function inferDocumentArtifactKind(domain: string | undefined, intent: string) {
   const normalizedIntent = intent.toLowerCase();
-  if (domain === "code" || /code|代码/.test(normalizedIntent)) {
-    return "code";
-  }
   if (/webpage|web\.fetch|html|h5|网页/.test(normalizedIntent)) {
     return "webpage";
+  }
+  if (domain === "code" || /code|代码/.test(normalizedIntent)) {
+    return "code";
   }
   if (/diagram|mermaid|flowchart|sequence|流程图|时序图/.test(normalizedIntent)) {
     return "diagram";
@@ -2103,6 +2121,31 @@ function getProjectedRunStatus(events: RunStepTraceEvent[]): AgentRunStatus {
   }
 
   return "queued";
+}
+
+function getRunDurationMs(events: RunStepTraceEvent[]) {
+  const completed = events.findLast((event) => event.type === "run.completed");
+  if (!completed) {
+    return undefined;
+  }
+
+  const payloadDuration = readNumber(completed.payload.durationMs);
+  if (payloadDuration !== undefined) {
+    return Math.max(0, Math.round(payloadDuration));
+  }
+
+  const created = events.find((event) => event.type === "run.created");
+  if (!created) {
+    return undefined;
+  }
+
+  const startedAt = Date.parse(created.createdAt);
+  const completedAt = Date.parse(completed.createdAt);
+  if (!Number.isFinite(startedAt) || !Number.isFinite(completedAt)) {
+    return undefined;
+  }
+
+  return Math.max(0, Math.round(completedAt - startedAt));
 }
 
 function buildAgentText(

@@ -215,7 +215,7 @@ export function Composer({
               <PromptInputTextarea
                 className={cn(
                   COMPOSER_TEXTAREA_BASE_CLASS,
-                  composerMode === "agent" && "h-[78px] min-h-[78px] max-h-28 pb-2 pt-3",
+                  composerMode === "agent" && "h-[58px] min-h-[58px] max-h-28 pb-2 pt-3",
                   composerMode === "image" && "h-[84px] min-h-[84px] max-h-28 pb-2 pt-2"
                 )}
                 disabled={!canEdit && !busy}

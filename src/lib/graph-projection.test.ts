@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { projectRunTraceToCanvas } from "./graph-projection";
+import { DEFAULT_WEBPAGE_NODE_DIMENSIONS } from "./canvas-node-dimensions";
 import type { AgentCanvasNode } from "@/types/canvas";
 import type { AgentEvent, AgentEventType } from "@/types/runtime";
 
@@ -48,6 +49,35 @@ describe("agent event graph projection", () => {
       image: {
         url: "/api/projects/project-1/artifacts/artifact-1/content",
       },
+    });
+  });
+
+  it("projects total run duration from terminal event timing", () => {
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      runNodeId: "run-1",
+      events: [
+        {
+          ...event("run.created", "run", {
+            prompt: "分析画布",
+            promptNodeId: "prompt-1",
+          }),
+          createdAt: "2026-06-11T00:00:00.000Z",
+        },
+        {
+          ...event("run.completed", "run", {
+            finalOutput: "完成",
+            artifactIds: [],
+          }),
+          createdAt: "2026-06-11T00:00:12.345Z",
+        },
+      ],
+    });
+
+    expect(projection.nodes.find((node) => node.id === "run-1")?.data).toMatchObject({
+      kind: "run",
+      durationMs: 12_345,
+      status: "success",
     });
   });
 
@@ -522,9 +552,9 @@ describe("agent event graph projection", () => {
     expect(webpage).toMatchObject({
       id: "webpage-text-html-1",
       type: "webpageNode",
-      height: 320,
-      style: { height: 320, width: 420 },
-      width: 420,
+      height: DEFAULT_WEBPAGE_NODE_DIMENSIONS.height,
+      style: DEFAULT_WEBPAGE_NODE_DIMENSIONS,
+      width: DEFAULT_WEBPAGE_NODE_DIMENSIONS.width,
       data: {
         kind: "webpage",
         html,
@@ -535,6 +565,135 @@ describe("agent event graph projection", () => {
         },
       },
     });
+  });
+
+  it("keeps HTML page tasks on webpage pending nodes even when classified under code domain", () => {
+    const html =
+      "<!doctype html><html><head><title>Landing</title></head><body><main>Aside AI</main></body></html>";
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", {
+          prompt: "基于这张图生成一版 HTML landing page",
+          promptNodeId: "prompt-1",
+        }),
+        event("input.normalized", "input", {
+          normalizedInput: {
+            rawInput: "基于这张图生成一版 HTML landing page",
+            task: {
+              action: "create",
+              confidence: 0.9,
+              domain: "code",
+              intent: "webpage.create",
+            },
+            routing: {
+              candidateAgents: [],
+              primaryAgent: "document_agent",
+            },
+            inputs: {
+              files: [],
+              images: [{ id: "image-1", role: "reference" }],
+              text: "基于这张图生成一版 HTML landing page",
+            },
+            constraints: { explicit: [], inferred: [] },
+            ambiguities: [],
+          },
+        }),
+        event("artifact.created", "create_text_artifact", {
+          artifact: {
+            id: "text-html-1",
+            metadata: {
+              format: "html",
+              mimeType: "text/html",
+              previewKind: "webpage",
+              projectId: "project-1",
+              sourceToolName: "create_text_artifact",
+            },
+            mimeType: "text/html",
+            preview: html,
+            previewKind: "webpage",
+            summary: "Aside AI landing page",
+            title: "Aside AI 浏览器着陆页.html",
+            type: "webpage",
+            uri: "/api/projects/project-1/artifacts/text-html-1/content",
+          },
+          toolName: "create_text_artifact",
+        }),
+        event("run.completed", "run", {
+          artifactIds: ["text-html-1"],
+          finalOutput: "完成",
+        }),
+      ],
+    });
+
+    expect(
+      projection.nodes.some((node) => node.id.startsWith("code-pending-run-1"))
+    ).toBe(false);
+    expect(
+      projection.edges.some((edge) => edge.target.startsWith("code-pending-run-1"))
+    ).toBe(false);
+    expect(
+      projection.nodes.find((node) => node.id === "webpage-pending-run-1-1")?.data
+    ).toMatchObject({
+      artifact: { id: "text-html-1", type: "webpage" },
+      html,
+      kind: "webpage",
+      title: "Aside AI 浏览器着陆页.html",
+    });
+  });
+
+  it("removes stale pending text artifacts when the real text artifact has another kind", () => {
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", {
+          prompt: "生成 HTML landing page",
+          promptNodeId: "prompt-1",
+        }),
+        event("input.normalized", "input", {
+          normalizedInput: {
+            rawInput: "生成 HTML landing page",
+            task: {
+              action: "create",
+              confidence: 0.8,
+              domain: "code",
+              intent: "code.create",
+            },
+            routing: {
+              candidateAgents: [],
+              primaryAgent: "document_agent",
+            },
+            inputs: { files: [], images: [], text: "生成 HTML landing page" },
+            constraints: { explicit: [], inferred: [] },
+            ambiguities: [],
+          },
+        }),
+        event("artifact.created", "create_text_artifact", {
+          artifact: {
+            id: "text-html-1",
+            metadata: {
+              format: "html",
+              mimeType: "text/html",
+              previewKind: "webpage",
+              projectId: "project-1",
+            },
+            previewKind: "webpage",
+            title: "Landing.html",
+            type: "webpage",
+            uri: "/api/projects/project-1/artifacts/text-html-1/content",
+          },
+          toolName: "create_text_artifact",
+        }),
+      ],
+    });
+
+    expect(
+      projection.nodes.some((node) => node.id.startsWith("code-pending-run-1"))
+    ).toBe(false);
+    expect(projection.nodes.some((node) => node.id === "webpage-text-html-1"))
+      .toBe(true);
   });
 
   it("keeps explicit text artifact node dimensions during re-projection", () => {

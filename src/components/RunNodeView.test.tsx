@@ -122,6 +122,16 @@ describe("RunNodeView", () => {
     expect(screen.getByText("黄瓜是一种常见的葫芦科蔬菜。")).toBeTruthy();
   });
 
+  it("shows total duration in the completed title", () => {
+    renderRunNode({
+      durationMs: 1260,
+      outputKind: "artifact",
+      status: "success",
+    });
+
+    expect(screen.getByText("DONE！😊 · 1.3s")).toBeTruthy();
+  });
+
   it("renders persisted agent message dialogue", () => {
     renderRunNode({
       agentMessages: [
