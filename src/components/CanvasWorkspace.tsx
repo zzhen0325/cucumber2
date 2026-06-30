@@ -36,14 +36,12 @@ import {
   BranchIcon as Workflow,
   GlobeIcon as Globe2,
   FullScreenMaximizeIcon as Maximize2,
-  PhotoIcon as ImageIcon,
   SearchIcon as Search,
   SparkleIcon as Sparkles,
   SquareIcon as Square,
   NoteIcon as StickyNote,
   TextIcon as Type,
   TriangleIcon as Triangle,
-  CancelIcon as X,
 } from "@proicons/react";
 import {
   createContext,
@@ -83,6 +81,64 @@ import { HtmlSourcePreview } from "@/components/HtmlSourcePreview";
 import { LoadingIndicator } from "@/components/LoadingIndicator";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { Node, NodeContent } from "@/components/ai-elements/node";
+import { Composer } from "@/components/canvas/Composer";
+import {
+  COMPOSER_MODE_STORAGE_KEY,
+  IMAGE_ASPECT_RATIO_STORAGE_KEY,
+  IMAGE_PROVIDER_STORAGE_KEY,
+  IMAGE_RESULT_COUNT_STORAGE_KEY,
+  readStoredComposerMode,
+  readStoredImageAspectRatio,
+  readStoredImageProvider,
+  readStoredImageResultCount,
+  type ComposerMode,
+  type ImageAspectRatioSelection,
+  type ImageProviderSelection,
+  type ImageResultCountSelection,
+} from "@/components/canvas/composer-config";
+import {
+  ARTIFACT_BODY_TEXT_CLASS,
+  ARTIFACT_CARD_CLASS,
+  ARTIFACT_CONTENT_CLASS,
+  ARTIFACT_FRAME_ACTION_BUTTON_CLASS,
+  ARTIFACT_FRAME_ACTIONS_CLASS,
+  ARTIFACT_FRAME_CLASS,
+  ARTIFACT_FRAME_HEADER_CLASS,
+  ARTIFACT_FRAME_TITLE_CLASS,
+  ARTIFACT_HEADING_CLASS,
+  ARTIFACT_ICON_CLASS,
+  ARTIFACT_META_CLASS,
+  ARTIFACT_NODE_TOOLBAR_BUTTON_CLASS,
+  ARTIFACT_NODE_TOOLBAR_CLASS,
+  ARTIFACT_UPLOAD_STATE_POSITION_CLASS,
+  CODE_CARD_CLASS,
+  CODE_CONTENT_CLASS,
+  HTML_PAGE_CARD_CLASS,
+  HTML_PAGE_CONTENT_CLASS,
+  IMAGE_NODE_TOOLBAR_BUTTON_CLASS,
+  IMAGE_NODE_TOOLBAR_CLASS,
+  IMAGE_PREVIEW_DIALOG_CLASS,
+  IMAGE_PREVIEW_IMAGE_CLASS,
+  IMAGE_PREVIEW_STAGE_CLASS,
+  IMAGE_RESULT_CARD_CLASS,
+  IMAGE_RESULT_FOOTER_CLASS,
+  IMAGE_RESULT_FRAME_CLASS,
+  IMAGE_RESULT_FRAME_ERROR_CLASS,
+  IMAGE_RESULT_FRAME_LOADING_CLASS,
+  IMAGE_RESULT_FRAME_READY_CLASS,
+  IMAGE_RESULT_IMAGE_CLASS,
+  IMAGE_RESULT_PLACEHOLDER_CLASS,
+  IMAGE_RESULT_PLACEHOLDER_META_CLASS,
+  IMAGE_UPLOAD_STATE_POSITION_CLASS,
+  MARKDOWN_CARD_CLASS,
+  MARKDOWN_CONTENT_CLASS,
+  SHELL_ICON_BUTTON_CLASS,
+  STORAGE_CHIP_CLASS,
+  TOP_CONTROL_BUTTON_CLASS,
+  TOP_ICON_BUTTON_CLASS,
+  UPLOAD_STATE_CLASS,
+  UPLOAD_STATE_ERROR_CLASS,
+} from "@/components/design-system/canvas-patterns";
 import {
   AgentRunDebugPanel,
   ReplayBanner,
@@ -91,18 +147,6 @@ import {
 import { RunNodeView } from "@/components/RunNodeView";
 import { useCanvasFileDrop } from "@/components/useCanvasFileDrop";
 import {
-  PromptInput,
-  PromptInputBody,
-  PromptInputFooter,
-  PromptInputHeader,
-  PromptInputSelect,
-  PromptInputSelectContent,
-  PromptInputSelectItem,
-  PromptInputSelectTrigger,
-  PromptInputSelectValue,
-  PromptInputSubmit,
-  PromptInputTextarea,
-  PromptInputTools,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import {
@@ -265,11 +309,6 @@ type PendingRunCanvasPatchAck = {
   revision: number;
 };
 
-type ComposerMode = "agent" | "image";
-type ImageAspectRatioSelection = "1:1" | "16:9" | "9:16" | "4:3" | "3:4";
-type ImageResultCountSelection = 1 | 2 | 3 | 4;
-type ImageProviderSelection = "byteartist" | "seed5_duotu_zz";
-
 type CanvasWorkspaceProps = {
   projectId: string;
   onBack: () => void;
@@ -341,138 +380,7 @@ const MIDDLE_MOUSE_BUTTON = 1;
 const PAN_ON_DRAG_BUTTONS = [MIDDLE_MOUSE_BUTTON];
 const HAND_TOOL_PAN_ON_DRAG_BUTTONS = [LEFT_MOUSE_BUTTON, MIDDLE_MOUSE_BUTTON];
 const SHIFT_MULTI_SELECTION_KEYS = ["Shift", "ShiftLeft", "ShiftRight"];
-const COMPOSER_MODE_STORAGE_KEY = "cucumber:composer-mode";
-const IMAGE_ASPECT_RATIO_STORAGE_KEY = "cucumber:image-aspect-ratio";
-const IMAGE_RESULT_COUNT_STORAGE_KEY = "cucumber:image-result-count";
-const IMAGE_PROVIDER_STORAGE_KEY = "cucumber:image-provider";
 const TRACE_RECONCILE_DELAYS_MS = [0, 1500, 4000, 8000] as const;
-const SHELL_ICON_BUTTON_CLASS =
-  "grid place-items-center border-0 bg-transparent text-cuc-text-tertiary cursor-pointer [&:hover:not(:disabled)]:bg-cuc-surface-warm [&:hover:not(:disabled)]:text-cuc-text disabled:cursor-default disabled:opacity-[0.38]";
-const TOP_ICON_BUTTON_CLASS =
-  "grid h-cuc-control place-items-center border-0 bg-transparent text-cuc-text-heading cursor-pointer hover:bg-cuc-surface/72 hover:text-cuc-text-heading";
-const TOP_CONTROL_BUTTON_CLASS = cn(
-  TOP_ICON_BUTTON_CLASS,
-  "rounded-cuc-control"
-);
-const STORAGE_CHIP_CLASS =
-  "hidden h-cuc-icon-button items-center gap-1 bg-white/0 px-2 text-[11px] leading-none text-cuc-text-muted";
-const COMPOSER_WRAP_CLASS =
-  "absolute bottom-8 left-1/2 z-30 flex w-[var(--cuc-width-composer)] -translate-x-1/2 flex-col items-start gap-1 max-[760px]:bottom-4 max-[760px]:w-[calc(100vw-24px)]";
-const COMPOSER_FORM_CLASS =
-  "rounded-cuc-composer border-[0.5px] border-cuc-border bg-cuc-surface shadow-cuc-composer [&_[data-slot=input-group]]:min-h-[inherit] [&_[data-slot=input-group]]:items-stretch [&_[data-slot=input-group]]:overflow-hidden [&_[data-slot=input-group]]:rounded-cuc-composer [&_[data-slot=input-group]]:border-0 [&_[data-slot=input-group]]:bg-transparent [&_[data-slot=input-group]]:shadow-none";
-const COMPOSER_AGENT_FORM_CLASS =
-  "min-h-[168px] [&_[data-slot=input-group]]:flex [&_[data-slot=input-group]]:flex-col";
-const COMPOSER_IMAGE_FORM_CLASS =
-  "min-h-cuc-composer-image-height [&_[data-slot=input-group]]:flex [&_[data-slot=input-group]]:flex-col [&_[data-slot=input-group]]:items-stretch [&_[data-slot=input-group]]:justify-between";
-const COMPOSER_HEADER_CLASS =
-  "box-border w-full cursor-default items-start justify-start gap-2 border-0 px-3.5 pb-1.5 pt-3";
-const COMPOSER_MODE_SWITCH_CLASS =
-  "inline-flex min-h-cuc-control items-center gap-1 rounded-cuc-control-lg border-[0.5px] border-cuc-control-border bg-cuc-control-surface p-1 shadow-none";
-const COMPOSER_MODE_BUTTON_CLASS =
-  "inline-flex h-7 min-w-7 cursor-pointer items-center justify-center gap-1.5 rounded-[10px] border-0 bg-transparent px-2 text-[13px] leading-5 text-cuc-control-dark disabled:cursor-not-allowed disabled:opacity-[0.58]";
-const COMPOSER_SKILL_MENU_CLASS =
-  "max-h-60 w-full overflow-auto rounded-cuc-floating border-[0.5px] border-cuc-border bg-cuc-surface p-1.5 shadow-cuc-menu";
-const COMPOSER_SKILL_OPTION_CLASS =
-  "grid min-h-cuc-tool w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 rounded-cuc-image border-0 bg-transparent px-2.5 text-left text-[13px] leading-[18px] text-cuc-text outline-0 hover:bg-cuc-control-hover focus-visible:bg-cuc-control-hover";
-const COMPOSER_TOKEN_CLASS =
-  "inline-flex max-w-44 min-w-0 items-center gap-[5px] rounded-cuc-pill border-[0.5px] border-cuc-control-border bg-cuc-control-token px-[7px] py-[3px] text-xs leading-4 text-cuc-control-dark";
-const COMPOSER_TOKEN_KIND_CLASS =
-  "flex-none text-[11px] text-cuc-text-soft";
-const COMPOSER_TOKEN_LABEL_CLASS =
-  "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap";
-const COMPOSER_BODY_CLASS =
-  "flex min-w-0 flex-1 px-0";
-const COMPOSER_BODY_INNER_CLASS =
-  "flex min-w-0 flex-1 flex-col";
-const COMPOSER_FOOTER_BASE_CLASS =
-  "box-border h-[52px] w-full cursor-default border-0 px-3.5 pb-3 pt-1.5";
-const COMPOSER_FOOTER_AGENT_CLASS =
-  "justify-between";
-const COMPOSER_FOOTER_IMAGE_CLASS =
-  "justify-between";
-const COMPOSER_TOOLS_CLASS =
-  "min-w-0 flex-wrap gap-1.5";
-const COMPOSER_TEXTAREA_BASE_CLASS =
-  "resize-none px-4 text-sm leading-5 text-cuc-text placeholder:text-cuc-text-soft";
-const COMPOSER_SUBMIT_BUTTON_CLASS =
-  "size-cuc-control min-w-cuc-control rounded-cuc-control bg-cuc-control-dark text-cuc-surface";
-const COMPOSER_SELECT_CONTENT_CLASS =
-  "border-cuc-border bg-cuc-surface text-cuc-text";
-const COMPOSER_SELECT_TRIGGER_CLASS =
-  "h-cuc-control rounded-cuc-control border-[0.5px] border-cuc-border bg-cuc-control-surface text-xs font-medium text-cuc-control-text shadow-none hover:bg-cuc-control-hover disabled:opacity-[0.58] data-[disabled]:opacity-[0.58] aria-disabled:opacity-[0.58]";
-const ARTIFACT_CARD_BASE_CLASS =
-  "overflow-hidden !rounded-cuc-card border border-cuc-border-muted bg-cuc-surface";
-const ARTIFACT_CARD_CLASS = cn(
-  ARTIFACT_CARD_BASE_CLASS,
-  "h-[240px] min-h-[160px] w-[240px]"
-);
-const MARKDOWN_CARD_CLASS = cn(ARTIFACT_CARD_BASE_CLASS, "h-[450px] w-[360px]");
-const CODE_CARD_CLASS = cn(ARTIFACT_CARD_BASE_CLASS, "h-[450px] w-[360px]");
-const HTML_PAGE_CARD_CLASS = cn(ARTIFACT_CARD_BASE_CLASS, "h-[720px] w-[1280px]");
-const ARTIFACT_FRAME_CLASS =
-  "relative grid h-full min-h-0 grid-rows-[32px_minmax(0,1fr)] p-0";
-const ARTIFACT_FRAME_HEADER_CLASS =
-  "flex h-8 min-w-0 items-center justify-between gap-2 border-b border-cuc-border-soft bg-cuc-surface-subtle py-0 pl-3 pr-2.5";
-const ARTIFACT_FRAME_TITLE_CLASS =
-  "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-normal leading-4 text-cuc-ink";
-const ARTIFACT_FRAME_ACTIONS_CLASS =
-  "inline-flex flex-none items-center gap-2";
-const ARTIFACT_FRAME_ACTION_BUTTON_CLASS =
-  "inline-grid size-5 cursor-pointer place-items-center rounded-cuc-canvas border-0 bg-transparent p-0 text-cuc-ink hover:bg-cuc-ink/8 focus-visible:bg-cuc-ink/8 focus-visible:outline-none disabled:cursor-default disabled:opacity-[0.32]";
-const ARTIFACT_CONTENT_CLASS =
-  "grid min-h-0 content-start gap-2 overflow-hidden px-3 pb-3 pt-2.5";
-const ARTIFACT_HEADING_CLASS =
-  "flex min-w-0 items-center gap-[5px] text-cuc-node-meta text-cuc-text-muted";
-const ARTIFACT_ICON_CLASS =
-  "grid size-5 flex-none place-items-center rounded-cuc-round bg-cuc-surface-warm text-cuc-ink";
-const ARTIFACT_BODY_TEXT_CLASS =
-  "copyable-text nodrag nopan m-0 line-clamp-3 overflow-hidden text-cuc-node-body text-cuc-text-muted [overflow-wrap:anywhere]";
-const ARTIFACT_META_CLASS =
-  "copyable-text nodrag nopan overflow-hidden text-ellipsis whitespace-nowrap text-cuc-node-meta text-cuc-text-subtle";
-const ARTIFACT_NODE_TOOLBAR_CLASS =
-  "pointer-events-auto inline-flex items-center gap-1 rounded-cuc-pill border border-cuc-border-muted bg-cuc-surface/96 p-1 shadow-cuc-popover";
-const ARTIFACT_NODE_TOOLBAR_BUTTON_CLASS =
-  "inline-grid size-cuc-toolbar-button min-w-cuc-toolbar-button cursor-pointer place-items-center rounded-cuc-round border-0 bg-transparent text-cuc-text hover:bg-cuc-accent hover:text-cuc-ink focus-visible:bg-cuc-accent focus-visible:text-cuc-ink focus-visible:outline-none disabled:cursor-default disabled:opacity-[0.36]";
-const UPLOAD_STATE_CLASS =
-  "w-fit rounded-cuc-pill bg-cuc-ink/12 px-[7px] py-0.5 text-cuc-node-meta font-semibold text-cuc-ink";
-const UPLOAD_STATE_ERROR_CLASS =
-  "bg-cuc-danger-surface text-cuc-danger-deep";
-const ARTIFACT_UPLOAD_STATE_POSITION_CLASS = "absolute bottom-2.5 left-2.5";
-const IMAGE_UPLOAD_STATE_POSITION_CLASS =
-  "absolute left-[9px] top-[9px] shadow-[0_4px_16px_rgb(0_0_0_/_8%)]";
-const IMAGE_NODE_TOOLBAR_CLASS =
-  "pointer-events-auto inline-flex items-center gap-1 rounded-cuc-control border border-cuc-border-muted bg-cuc-surface/96 p-1 shadow-cuc-popover";
-const IMAGE_NODE_TOOLBAR_BUTTON_CLASS =
-  "inline-grid size-cuc-toolbar-button min-w-cuc-toolbar-button cursor-pointer place-items-center rounded-cuc-round border-0 bg-transparent text-cuc-text hover:bg-cuc-accent hover:text-cuc-ink focus-visible:bg-cuc-accent focus-visible:text-cuc-ink focus-visible:outline-none";
-const IMAGE_RESULT_CARD_CLASS =
-  "relative size-full min-h-cuc-icon-button overflow-visible !rounded-cuc-image bg-transparent";
-const IMAGE_RESULT_FRAME_CLASS =
-  "size-full overflow-hidden rounded-[inherit]";
-const IMAGE_RESULT_FRAME_READY_CLASS = "cuc-checkerboard";
-const IMAGE_RESULT_FRAME_LOADING_CLASS =
-  "grid place-items-center border border-cuc-border-muted bg-cuc-surface";
-const IMAGE_RESULT_FRAME_ERROR_CLASS =
-  "grid place-items-center border border-cuc-danger-border bg-cuc-surface";
-const IMAGE_RESULT_IMAGE_CLASS =
-  "block size-full object-cover";
-const IMAGE_RESULT_PLACEHOLDER_CLASS =
-  "pointer-events-none grid justify-items-center gap-1 text-cuc-node-body text-cuc-text";
-const IMAGE_RESULT_PLACEHOLDER_META_CLASS =
-  "max-w-[180px] overflow-hidden text-ellipsis whitespace-nowrap text-cuc-node-meta text-cuc-text-muted";
-const IMAGE_PREVIEW_DIALOG_CLASS =
-  "image-preview-dialog w-[min(1120px,calc(100vw-40px))] max-w-[min(1120px,calc(100vw-40px))] max-h-[calc(100vh-40px)] gap-2.5 overflow-hidden rounded-cuc-control border border-cuc-border-muted bg-cuc-surface p-3.5 shadow-cuc-dialog";
-const IMAGE_PREVIEW_STAGE_CLASS =
-  "cuc-checkerboard grid min-h-[220px] max-h-[calc(100vh-154px)] place-items-center overflow-auto rounded-cuc-popover";
-const IMAGE_PREVIEW_IMAGE_CLASS =
-  "block max-h-[calc(100vh-170px)] max-w-full object-contain";
-const IMAGE_RESULT_FOOTER_CLASS =
-  "pointer-events-none absolute bottom-[-44px] right-[72px] flex h-[31px] w-[95.5px] items-center justify-center gap-[7px] rounded-cuc-panel border border-cuc-border-muted bg-cuc-ink text-cuc-node-body text-cuc-surface shadow-cuc-popover";
-const CODE_CONTENT_CLASS =
-  "grid min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-2 overflow-hidden p-2.5";
-const MARKDOWN_CONTENT_CLASS =
-  "grid min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-2 overflow-hidden p-2.5";
-const HTML_PAGE_CONTENT_CLASS =
-  "grid min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-2 overflow-hidden p-2.5";
 
 function getSelectedNodeIds(nodes: AgentCanvasNode[]) {
   return nodes.filter((node) => node.selected).map((node) => node.id);
@@ -4097,8 +4005,9 @@ function TopBar({
         <span
           className={cn(
             STORAGE_CHIP_CLASS,
-            storageStatus === "saved" && "text-[#B7B7B7]",
-            (storageStatus === "saving" || storageStatus === "loading") && "text-[#B8B8B8]",
+            storageStatus === "saved" && "text-cuc-storage-saved",
+            (storageStatus === "saving" || storageStatus === "loading") &&
+              "text-cuc-storage-saving",
             storageStatus === "error" && "border-cuc-danger-border text-cuc-danger-strong"
           )}
           title={storageError ?? getStorageStatusLabel(storageStatus)}
@@ -4203,575 +4112,6 @@ function EmptyState({ visible }: { visible: boolean }) {
   );
 }
 
-function Composer({
-  busy,
-  canEdit,
-  canSubmit,
-  composerMode,
-  contextCount,
-  forcedSkill,
-  hasFailedUpload,
-  hasUploading,
-  imageAspectRatio,
-  imageProvider,
-  imageResultCount,
-  prompt,
-  referenceContextCount,
-  referenceNode,
-  referenceNodeIds,
-  referenceNodeCount,
-  replayActive,
-  selectionCount,
-  selectedNodes,
-  setComposerMode,
-  setImageAspectRatio,
-  setImageProvider,
-  setImageResultCount,
-  setPrompt,
-  showSkillMenu,
-  skillOptions,
-  skillOptionsError,
-  skillOptionsStatus,
-  skillSlashQuery,
-  stop,
-  onClearForcedSkill,
-  onSelectForcedSkill,
-  onSubmit,
-}: {
-  busy: boolean;
-  canEdit: boolean;
-  canSubmit: boolean;
-  composerMode: ComposerMode;
-  contextCount: number;
-  forcedSkill: AgentSkillDefinitionSummary | null;
-  hasFailedUpload: boolean;
-  hasUploading: boolean;
-  imageAspectRatio: ImageAspectRatioSelection;
-  imageProvider: ImageProviderSelection;
-  imageResultCount: ImageResultCountSelection;
-  prompt: string;
-  referenceContextCount: number;
-  referenceNode?: AgentCanvasNode;
-  referenceNodeIds: string[];
-  referenceNodeCount: number;
-  replayActive: boolean;
-  selectionCount: number;
-  selectedNodes: AgentCanvasNode[];
-  setComposerMode: (value: ComposerMode) => void;
-  setImageAspectRatio: (value: ImageAspectRatioSelection) => void;
-  setImageProvider: (value: ImageProviderSelection) => void;
-  setImageResultCount: (value: ImageResultCountSelection) => void;
-  setPrompt: (value: string) => void;
-  showSkillMenu: boolean;
-  skillOptions: AgentSkillDefinitionSummary[];
-  skillOptionsError: string | null;
-  skillOptionsStatus: "idle" | "loading" | "ready" | "error";
-  skillSlashQuery: string;
-  stop: () => void;
-  onClearForcedSkill: () => void;
-  onSelectForcedSkill: (skill: AgentSkillDefinitionSummary) => void;
-  onSubmit: (
-    message: PromptInputMessage,
-    event?: FormEvent<HTMLFormElement>
-  ) => void;
-}) {
-  const hasReference = Boolean(referenceNode);
-  const hasMultipleReferences = referenceNodeCount > 1;
-  const hasSelectedTokens = selectedNodes.length > 0 || Boolean(forcedSkill);
-  const referenceNodeIdSet = useMemo(
-    () => new Set(referenceNodeIds),
-    [referenceNodeIds]
-  );
-  const submitBlockedLabel = hasFailedUpload
-    ? "请先移除上传失败文件"
-    : hasUploading
-      ? "文件上传中，可继续输入，完成后提交"
-      : "项目连接失败，无法提交";
-  const footerContextLabel =
-    !canSubmit && canEdit
-      ? submitBlockedLabel
-      : hasReference
-        ? hasMultipleReferences
-          ? `${referenceNodeCount} 个引用`
-          : "引用结果"
-        : selectionCount > 1
-          ? "选中节点不可引用"
-          : contextCount > 0
-            ? `上下文 ${contextCount} 项`
-            : "Agent";
-  const footerStatusLabel =
-    hasReference && !hasMultipleReferences
-      ? `上下文 ${referenceContextCount} 项`
-      : footerContextLabel;
-  const placeholder = replayActive
-    ? "Run 回放模式为只读..."
-    : !canEdit
-      ? "项目连接失败，无法输入..."
-      : !canSubmit
-        ? submitBlockedLabel
-        : hasReference
-          ? composerMode === "image"
-            ? "基于引用节点生成图像..."
-            : "基于引用节点继续生成..."
-          : composerMode === "image"
-            ? "描述你要生成的图像..."
-            : "输入需求，让 Agent 帮你实现...";
-
-  return (
-    <div className={COMPOSER_WRAP_CLASS} data-mode={composerMode}>
-      <ComposerSkillMenu
-        error={skillOptionsError}
-        loading={skillOptionsStatus === "loading" || skillOptionsStatus === "idle"}
-        open={showSkillMenu}
-        query={skillSlashQuery}
-        skills={skillOptions}
-        onSelect={onSelectForcedSkill}
-      />
-      <PromptInput
-        attachmentsEnabled={false}
-        className={cn(
-          COMPOSER_FORM_CLASS,
-          composerMode === "agent" && COMPOSER_AGENT_FORM_CLASS,
-          composerMode === "image" && COMPOSER_IMAGE_FORM_CLASS
-        )}
-        data-mode={composerMode}
-        data-has-tokens={hasSelectedTokens}
-        onSubmit={(message, event) => onSubmit(message, event)}
-      >
-        <PromptInputHeader className={COMPOSER_HEADER_CLASS}>
-          <div className="flex max-w-full flex-wrap items-center gap-2">
-            <ComposerModeSwitch
-              disabled={busy || replayActive}
-              value={composerMode}
-              onChange={setComposerMode}
-            />
-            <ComposerInlineTokens
-              forcedSkill={forcedSkill}
-              nodes={selectedNodes}
-              referenceNodeIdSet={referenceNodeIdSet}
-              onClearForcedSkill={onClearForcedSkill}
-            />
-          </div>
-        </PromptInputHeader>
-        <PromptInputBody>
-          <div className={COMPOSER_BODY_CLASS}>
-            <div className={COMPOSER_BODY_INNER_CLASS}>
-              <PromptInputTextarea
-                className={cn(
-                  COMPOSER_TEXTAREA_BASE_CLASS,
-                  composerMode === "agent" && "h-[78px] min-h-[78px] max-h-28 pb-2 pt-3",
-                  composerMode === "image" && "h-[84px] min-h-[84px] max-h-28 pb-2 pt-2"
-                )}
-                disabled={!canEdit && !busy}
-                placeholder={placeholder}
-                value={prompt}
-                onChange={(event) => setPrompt(event.currentTarget.value)}
-              />
-            </div>
-          </div>
-        </PromptInputBody>
-        <PromptInputFooter
-          className={cn(
-            COMPOSER_FOOTER_BASE_CLASS,
-            composerMode === "agent" && COMPOSER_FOOTER_AGENT_CLASS,
-            composerMode === "image" && COMPOSER_FOOTER_IMAGE_CLASS
-          )}
-        >
-          <PromptInputTools className={COMPOSER_TOOLS_CLASS}>
-            {composerMode === "image" ? (
-              <>
-                <ImageAspectRatioSelect
-                  disabled={busy || replayActive}
-                  value={imageAspectRatio}
-                  onChange={setImageAspectRatio}
-                />
-                <ImageProviderSelect
-                  disabled={busy || replayActive}
-                  value={imageProvider}
-                  onChange={setImageProvider}
-                />
-                <ImageResultCountSelect
-                  disabled={busy || replayActive}
-                  value={imageResultCount}
-                  onChange={setImageResultCount}
-                />
-              </>
-            ) : (
-              <ComposerFooterStatus label={footerStatusLabel} />
-            )}
-          </PromptInputTools>
-          <PromptInputSubmit
-            className={COMPOSER_SUBMIT_BUTTON_CLASS}
-            disabled={busy ? false : !prompt.trim() || !canSubmit}
-            onStop={stop}
-            status={busy ? "streaming" : "ready"}
-          />
-        </PromptInputFooter>
-      </PromptInput>
-    </div>
-  );
-}
-
-function ComposerModeSwitch({
-  disabled,
-  value,
-  onChange,
-}: {
-  disabled: boolean;
-  value: ComposerMode;
-  onChange: (value: ComposerMode) => void;
-}) {
-  return (
-    <div aria-label="输入模式" className={COMPOSER_MODE_SWITCH_CLASS} role="tablist">
-      <button
-        aria-label="Agent 模式"
-        aria-selected={value === "agent"}
-        className={cn(
-          COMPOSER_MODE_BUTTON_CLASS,
-          value === "agent" ? "bg-cuc-ink text-cuc-surface" : "px-0"
-        )}
-        data-active={value === "agent"}
-        disabled={disabled}
-        onClick={() => onChange("agent")}
-        role="tab"
-        title="Agent 模式"
-        type="button"
-      >
-        <Sparkles size={14} />
-        <span className={value === "agent" ? undefined : "hidden"}>Agent</span>
-      </button>
-      <button
-        aria-label="图像模式"
-        aria-selected={value === "image"}
-        className={cn(
-          COMPOSER_MODE_BUTTON_CLASS,
-          value === "image" ? "bg-cuc-ink text-cuc-surface" : "px-0"
-        )}
-        data-active={value === "image"}
-        disabled={disabled}
-        onClick={() => onChange("image")}
-        role="tab"
-        title="图像模式"
-        type="button"
-      >
-        <ImageIcon size={14} />
-        <span className={value === "image" ? undefined : "hidden"}>图像</span>
-      </button>
-    </div>
-  );
-}
-
-function ComposerInlineTokens({
-  forcedSkill,
-  nodes,
-  onClearForcedSkill,
-  referenceNodeIdSet,
-}: {
-  forcedSkill: AgentSkillDefinitionSummary | null;
-  nodes: AgentCanvasNode[];
-  onClearForcedSkill: () => void;
-  referenceNodeIdSet: Set<string>;
-}) {
-  if (!forcedSkill && !nodes.length) {
-    return null;
-  }
-
-  const visibleNodes = nodes.slice(0, 4);
-  const hiddenCount = nodes.length - visibleNodes.length;
-
-  return (
-    <div aria-label="输入上下文" className="flex max-w-full flex-wrap gap-1.5">
-      {forcedSkill ? (
-        <span
-          className={cn(
-            COMPOSER_TOKEN_CLASS,
-            "border-cuc-primary-border bg-[#edfff1] text-cuc-accent-foreground"
-          )}
-          title={`强制使用 ${forcedSkill.name}`}
-        >
-          <span className={cn(COMPOSER_TOKEN_KIND_CLASS, "text-cuc-primary-strong")}>技能</span>
-          <span className={COMPOSER_TOKEN_LABEL_CLASS}>{forcedSkill.name}</span>
-          <button
-            aria-label={`移除技能 ${forcedSkill.name}`}
-            className="grid size-4 min-w-4 cursor-pointer place-items-center rounded-cuc-pill border-0 bg-cuc-primary-surface p-0 text-cuc-primary-strong hover:bg-cuc-primary-surface-hover"
-            onClick={onClearForcedSkill}
-            title="移除技能"
-            type="button"
-          >
-            <X size={12} />
-          </button>
-        </span>
-      ) : null}
-      {visibleNodes.map((node) => {
-        const referenceable = referenceNodeIdSet.has(node.id);
-        const label = getCanvasNodeTokenLabel(node);
-        return (
-          <span
-            className={cn(
-              COMPOSER_TOKEN_CLASS,
-              !referenceable && "text-cuc-text-soft"
-            )}
-            data-referenceable={referenceable}
-            key={node.id}
-            title={referenceable ? label : `${label} · 未引用`}
-          >
-            <span className={COMPOSER_TOKEN_KIND_CLASS}>
-              {getCanvasNodeKindLabel(node)}
-            </span>
-            <span className={COMPOSER_TOKEN_LABEL_CLASS}>{label}</span>
-          </span>
-        );
-      })}
-      {hiddenCount > 0 ? (
-        <span className={cn(COMPOSER_TOKEN_CLASS, "flex-none")}>
-          +{hiddenCount}
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
-function ComposerSkillMenu({
-  error,
-  loading,
-  open,
-  query,
-  skills,
-  onSelect,
-}: {
-  error: string | null;
-  loading: boolean;
-  open: boolean;
-  query: string;
-  skills: AgentSkillDefinitionSummary[];
-  onSelect: (skill: AgentSkillDefinitionSummary) => void;
-}) {
-  const visibleSkills = useMemo(
-    () => filterComposerSkills(skills, query).slice(0, 8),
-    [query, skills]
-  );
-
-  if (!open) {
-    return null;
-  }
-
-  return (
-    <div className={COMPOSER_SKILL_MENU_CLASS} role="listbox">
-      {loading ? (
-        <div className="px-2.5 py-2.5 text-xs leading-[18px] text-cuc-text-soft">加载技能...</div>
-      ) : error ? (
-        <div className="px-2.5 py-2.5 text-xs leading-[18px] text-cuc-text-soft">技能加载失败</div>
-      ) : visibleSkills.length ? (
-        visibleSkills.map((skill) => (
-          <button
-            aria-selected={false}
-            className={COMPOSER_SKILL_OPTION_CLASS}
-            key={skill.id}
-            onClick={() => onSelect(skill)}
-            role="option"
-            title={skill.description || skill.name}
-            type="button"
-          >
-            <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{skill.name}</span>
-            <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-cuc-text-soft">
-              {[skill.agentScope, skill.purpose].filter(Boolean).join(" · ")}
-            </span>
-          </button>
-        ))
-      ) : (
-        <div className="px-2.5 py-2.5 text-xs leading-[18px] text-cuc-text-soft">没有匹配技能</div>
-      )}
-    </div>
-  );
-}
-
-function ComposerFooterStatus({
-  label,
-}: {
-  label: string;
-}) {
-  return (
-    <span
-      className="inline-flex h-cuc-control max-w-[220px] items-center gap-1.5 rounded-cuc-control border-[0.5px] border-cuc-border bg-cuc-control-surface px-2.5 text-xs font-medium text-cuc-control-dark max-[560px]:max-w-[156px]"
-      title={label}
-    >
-      <Sparkles size={14} />
-      <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
-    </span>
-  );
-}
-
-function ImageProviderSelect({
-  disabled,
-  value,
-  onChange,
-}: {
-  disabled: boolean;
-  value: ImageProviderSelection;
-  onChange: (value: ImageProviderSelection) => void;
-}) {
-  return (
-    <PromptInputSelect
-      disabled={disabled}
-      value={value}
-      onValueChange={(nextValue) =>
-        onChange(readImageProviderSelection(nextValue))
-      }
-    >
-      <PromptInputSelectTrigger
-        aria-label="选择生图模型"
-        className={cn(
-          COMPOSER_SELECT_TRIGGER_CLASS,
-          "w-[132px] min-w-[132px] max-[560px]:w-[112px] max-[560px]:min-w-[112px] max-[560px]:px-2"
-        )}
-        title="选择生图模型"
-      >
-        <PromptInputSelectValue />
-      </PromptInputSelectTrigger>
-      <PromptInputSelectContent align="end" className={COMPOSER_SELECT_CONTENT_CLASS}>
-        <PromptInputSelectItem value="byteartist">Lemo</PromptInputSelectItem>
-        <PromptInputSelectItem value="seed5_duotu_zz">Seedream 5</PromptInputSelectItem>
-      </PromptInputSelectContent>
-    </PromptInputSelect>
-  );
-}
-
-function ImageAspectRatioSelect({
-  disabled,
-  value,
-  onChange,
-}: {
-  disabled: boolean;
-  value: ImageAspectRatioSelection;
-  onChange: (value: ImageAspectRatioSelection) => void;
-}) {
-  return (
-    <PromptInputSelect
-      disabled={disabled}
-      value={value}
-      onValueChange={(nextValue) =>
-        onChange(readImageAspectRatioSelection(nextValue))
-      }
-    >
-      <PromptInputSelectTrigger
-        aria-label="选择图像比例"
-        className={cn(
-          COMPOSER_SELECT_TRIGGER_CLASS,
-          "w-[70px] min-w-[70px] max-[560px]:w-16 max-[560px]:min-w-16"
-        )}
-        title="选择图像比例"
-      >
-        <PromptInputSelectValue />
-      </PromptInputSelectTrigger>
-      <PromptInputSelectContent align="start" className={COMPOSER_SELECT_CONTENT_CLASS}>
-        <PromptInputSelectItem value="1:1">1:1</PromptInputSelectItem>
-        <PromptInputSelectItem value="16:9">16:9</PromptInputSelectItem>
-        <PromptInputSelectItem value="9:16">9:16</PromptInputSelectItem>
-        <PromptInputSelectItem value="4:3">4:3</PromptInputSelectItem>
-        <PromptInputSelectItem value="3:4">3:4</PromptInputSelectItem>
-      </PromptInputSelectContent>
-    </PromptInputSelect>
-  );
-}
-
-function ImageResultCountSelect({
-  disabled,
-  value,
-  onChange,
-}: {
-  disabled: boolean;
-  value: ImageResultCountSelection;
-  onChange: (value: ImageResultCountSelection) => void;
-}) {
-  return (
-    <PromptInputSelect
-      disabled={disabled}
-      value={String(value)}
-      onValueChange={(nextValue) =>
-        onChange(readImageResultCountSelection(nextValue))
-      }
-    >
-      <PromptInputSelectTrigger
-        aria-label="选择生成数量"
-        className={cn(
-          COMPOSER_SELECT_TRIGGER_CLASS,
-          "w-16 min-w-16 max-[560px]:w-[58px] max-[560px]:min-w-[58px] max-[560px]:px-2"
-        )}
-        title="选择生成数量"
-      >
-        <PromptInputSelectValue />
-      </PromptInputSelectTrigger>
-      <PromptInputSelectContent align="end" className={COMPOSER_SELECT_CONTENT_CLASS}>
-        <PromptInputSelectItem value="1">1 张</PromptInputSelectItem>
-        <PromptInputSelectItem value="2">2 张</PromptInputSelectItem>
-        <PromptInputSelectItem value="3">3 张</PromptInputSelectItem>
-        <PromptInputSelectItem value="4">4 张</PromptInputSelectItem>
-      </PromptInputSelectContent>
-    </PromptInputSelect>
-  );
-}
-
-function getCanvasNodeTokenLabel(node: AgentCanvasNode) {
-  if (node.data.kind === "prompt") {
-    return truncateTokenLabel(node.data.prompt || "用户输入");
-  }
-
-  if (node.data.kind === "imageResult") {
-    return truncateTokenLabel(node.data.image.title ?? "生成图像");
-  }
-
-  if (node.data.kind === "stickyNote") {
-    return truncateTokenLabel(node.data.text || "便签");
-  }
-
-  if (node.data.kind === "shape") {
-    return truncateTokenLabel(node.data.label || "形状");
-  }
-
-  if (node.data.kind === "run") {
-    return truncateTokenLabel(node.data.agentText || node.data.prompt || "Run");
-  }
-
-  if ("artifact" in node.data) {
-    return truncateTokenLabel(node.data.title);
-  }
-
-  return "节点";
-}
-
-function getCanvasNodeKindLabel(node: AgentCanvasNode) {
-  switch (node.data.kind) {
-    case "prompt":
-      return "输入";
-    case "imageResult":
-      return "图像";
-    case "stickyNote":
-      return "便签";
-    case "shape":
-      return "形状";
-    case "run":
-      return "Run";
-    case "markdown":
-      return "文档";
-    case "webpage":
-      return "网页";
-    case "code":
-      return "代码";
-    case "toolResult":
-      return "工具";
-    default:
-      return "素材";
-  }
-}
-
-function truncateTokenLabel(value: string) {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  if (normalized.length <= 28) {
-    return normalized;
-  }
-  return `${normalized.slice(0, 27)}...`;
-}
-
 function getSkillSlashQuery(value: string) {
   const match = value.match(/^\s*\/([^\s]*)/);
   return match ? match[1].toLowerCase() : null;
@@ -4779,105 +4119,6 @@ function getSkillSlashQuery(value: string) {
 
 function removeLeadingSkillSlashCommand(value: string) {
   return value.replace(/^\s*\/\S*\s?/, "").trimStart();
-}
-
-function filterComposerSkills(
-  skills: AgentSkillDefinitionSummary[],
-  query: string
-) {
-  const normalizedQuery = query.trim().toLowerCase();
-  if (!normalizedQuery) {
-    return skills;
-  }
-
-  return skills.filter((skill) =>
-    [
-      skill.name,
-      skill.description,
-      skill.agentScope,
-      skill.purpose,
-      ...skill.tags,
-    ]
-      .join(" ")
-      .toLowerCase()
-      .includes(normalizedQuery)
-  );
-}
-
-function readStoredComposerMode(): ComposerMode {
-  if (typeof window === "undefined") {
-    return "agent";
-  }
-  return readComposerMode(window.localStorage.getItem(COMPOSER_MODE_STORAGE_KEY));
-}
-
-function readComposerMode(value: string | null | undefined): ComposerMode {
-  return value === "image" ? "image" : "agent";
-}
-
-function readStoredImageAspectRatio(): ImageAspectRatioSelection {
-  if (typeof window === "undefined") {
-    return "1:1";
-  }
-  return readImageAspectRatioSelection(
-    window.localStorage.getItem(IMAGE_ASPECT_RATIO_STORAGE_KEY)
-  );
-}
-
-function readImageAspectRatioSelection(
-  value: string | null | undefined
-): ImageAspectRatioSelection {
-  if (
-    value === "16:9" ||
-    value === "9:16" ||
-    value === "4:3" ||
-    value === "3:4"
-  ) {
-    return value;
-  }
-  return "1:1";
-}
-
-function readStoredImageResultCount(): ImageResultCountSelection {
-  if (typeof window === "undefined") {
-    return 1;
-  }
-  return readImageResultCountSelection(
-    window.localStorage.getItem(IMAGE_RESULT_COUNT_STORAGE_KEY)
-  );
-}
-
-function readImageResultCountSelection(
-  value: string | null | undefined
-): ImageResultCountSelection {
-  if (value === "2") {
-    return 2;
-  }
-  if (value === "3") {
-    return 3;
-  }
-  if (value === "4") {
-    return 4;
-  }
-  return 1;
-}
-
-function readStoredImageProvider(): ImageProviderSelection {
-  if (typeof window === "undefined") {
-    return "seed5_duotu_zz";
-  }
-  return readImageProviderSelection(
-    window.localStorage.getItem(IMAGE_PROVIDER_STORAGE_KEY)
-  );
-}
-
-function readImageProviderSelection(
-  value: string | null | undefined
-): ImageProviderSelection {
-  if (value === "byteartist" || value === "seed5_duotu_zz") {
-    return value;
-  }
-  return "seed5_duotu_zz";
 }
 
 function getStorageStatusLabel(status: StorageStatus) {

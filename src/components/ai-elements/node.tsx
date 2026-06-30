@@ -57,7 +57,7 @@ export const Node = forwardRef<HTMLDivElement, NodeProps>(
       {...props}
     >
       <NodeResizer
-        color="#29bf4e"
+        color="var(--color-cuc-primary)"
         handleClassName={RESIZER_HANDLE_CLASS_NAME}
         isVisible={selected}
         lineClassName={RESIZER_LINE_CLASS_NAME}

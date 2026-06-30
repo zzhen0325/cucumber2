@@ -28,9 +28,15 @@
   --color-cuc-control-surface: #f7f8fa;
   --color-cuc-control-token: #f5f5f5;
   --color-cuc-control-hover: #f1f3f5;
+  --color-cuc-secondary-hover: #efefec;
+  --color-cuc-ghost: #f4f4f2;
+  --color-cuc-ghost-hover: #eeeeeb;
   --color-cuc-checker: #d8d8d8;
   --color-cuc-scrollbar-thumb: #00000010;
   --color-cuc-primary: #29bf4e;
+  --color-cuc-primary-hover: #24b747;
+  --color-cuc-primary-active: #20aa40;
+  --color-cuc-primary-text-hover: #1ca33c;
   --color-cuc-primary-foreground: #06100a;
   --color-cuc-accent: #f8ffbf;
   --color-cuc-accent-foreground: #174222;
@@ -61,6 +67,9 @@
   --color-cuc-primary-surface-hover: rgb(41 191 78 / 18%);
   --color-cuc-primary-glow: rgb(41 191 78 / 16%);
   --color-cuc-primary-shadow: rgb(41 191 78 / 8%);
+  --color-cuc-skill-token-surface: #edfff1;
+  --color-cuc-storage-saved: #b7b7b7;
+  --color-cuc-storage-saving: #b8b8b8;
   --color-cuc-danger-surface: rgb(229 72 77 / 8%);
   --color-cuc-danger-border: rgb(229 72 77 / 20%);
   --color-cuc-subtle-border: rgb(235 235 235 / 70%);
@@ -85,6 +94,7 @@
   --shadow-cuc-card: 0 4px 20px rgb(0 0 0 / 4%);
   --shadow-cuc-card-hover: 0 8px 30px rgb(0 0 0 / 8%);
   --shadow-cuc-accent-glow: 0 0 20px rgb(41 191 78 / 25%);
+  --shadow-cuc-primary-hover: 0 6px 16px rgb(41 191 78 / 24%);
   --shadow-cuc-composer: 0 6px 6px rgb(41 37 100 / 4%);
   --shadow-cuc-menu: 0 6px 18px rgb(41 37 100 / 8%);
   --shadow-cuc-popover: 0 4px 20px rgb(0 0 0 / 5%);
