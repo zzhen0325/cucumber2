@@ -1,0 +1,18 @@
+src/components/canvas/Composer.tsx
+  h_49a1fcd5ff42d1 218
+src/lib/canvas-node-dimensions.ts
+  h_49a1fcd5ff42d1 12-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "d68910084e5d9af05406ddc1664074984aeaacca",
+  "prompts": {},
+  "humans": {
+    "h_49a1fcd5ff42d1": {
+      "author": "zzhen0325 <26629213+zzhen0325@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
