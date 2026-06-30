@@ -21,12 +21,15 @@
 
 ## Design Tokens
 
-- Tailwind v4 是 CSS-first：稳定、重复使用的颜色、尺寸、圆角、阴影和节点字号统一维护在 `src/styles/theme.css` 的 `@theme` 中，使用官方 namespace：`--color-*`、`--radius-*`、`--shadow-*`、`--spacing-*`、`--text-*`。
+- Tailwind v4 是 CSS-first：`src/styles/theme.css` 是唯一 token 源，按 primitive、semantic、component、motion 四层维护。
+- primitive token 只保存原始值，例如 `--primitive-gray-100`、`--primitive-green-500`；UI className、组件 CSS 和普通样式不得直接引用 primitive。
+- semantic token 是 UI 公共语言，并通过 `@theme inline` 暴露 Tailwind utilities，例如 `bg-surface`、`text-text`、`text-muted`、`border-border`、`bg-primary`、`bg-danger`、`rounded-card`、`shadow-popover`。
+- component token 承载重复的产品对象尺寸、圆角、阴影和节点字号，例如 `--component-size-control`、`--component-radius-composer`、`--component-shadow-node-selected`。
+- motion token 承载重复动画时长和 easing，例如 `--motion-duration-fast`、`--motion-ease-standard`。
 - `src/index.css` 是唯一 Tailwind CSS entry，只负责按顺序 `@import` Tailwind、动画库和 `src/styles/` 下仍需要全局选择器的样式文件；普通页面、输入器和简单面板样式优先直接写在组件 `className`。
-- `:root` 只保留 shadcn/ui 语义变量和运行时组件变量，例如 `--cuc-width-composer`；新增重复视觉值先补 `@theme` token，再引用 token。
-- token 命名先按产品语义分组，再按用途收窄：`cuc-primary-*`、`cuc-control-*`、`cuc-run-*`、`cuc-node-*`、`cuc-storage-*`、`cuc-skill-*`。
-- 允许保留一次性的任意值，例如特殊响应式宽度、运行时画布尺寸、第三方组件修正；但同一颜色、阴影、圆角或状态值出现两次以上时，先补 token。
-- primitive 层不直接写品牌色 hex；Button、Input Group、Select 等基础组件应引用 shadcn 语义变量或 `cuc-*` token。
+- 浅色是默认主题；深色通过 `html.dark` 和 `html[data-theme="dark"]` 覆盖 semantic variables；`future` 主题通过 `html[data-theme="future"]` 验证扩展主题路径。新增主题只补 `html[data-theme="<name>"]` 的 semantic 覆盖，不改组件 className。
+- shadcn/ui 兼容变量（`--background`、`--foreground`、`--primary` 等）必须映射到 semantic token；基础组件优先使用 shadcn 语义变量或本项目 semantic utilities。
+- 允许保留一次性的任意布局值，例如特殊响应式宽度、运行时画布尺寸、第三方组件修正；但颜色、阴影、圆角或状态值不得散落硬编码，新增时先补 semantic/component token。
 
 <br />
 
@@ -47,7 +50,7 @@
 样式的默认目标是让 80% 的元素在代码现场可读，只有设计语言或复杂选择器才需要跳转：
 
 - 元素布局、尺寸、间距、对齐、定位、响应式、hover / disabled / selected 等局部状态，优先直接写在组件 `className` 或组件内局部 className 常量中。
-- 只有同一组 class 在多个文件反复出现，并且代表明确产品语义时，才抽成小的 `@utility` 或组件内共享常量；不要为了“语义化”把一次性的布局封装成 `.cuc-panel`、`.cuc-card` 这类需要跳 CSS 的 class。
+- 只有同一组 class 在多个文件反复出现，并且代表明确产品语义时，才抽成小的 `@utility` 或组件内共享常量；不要为了“语义化”把一次性的布局封装成 `.panel`、`.card` 这类需要跳 CSS 的 class。
 - 如果改一个元素时必须连续跳 `组件 -> CSS -> theme` 才能看懂布局，优先把布局和普通视觉移回组件 `className`，只保留真正需要 CSS 的部分。
 - 跨多个画布对象复用的产品模式放进 `src/components/design-system/*`，例如 canvas toolbar、composer token、artifact frame、image result toolbar。
 - Composer 的具体交互 UI 放在 `src/components/canvas/Composer.tsx`；localStorage key、模式和图像参数解析放在 `src/components/canvas/composer-config.ts`。
@@ -76,7 +79,7 @@
 - 顶部浮层高度约 48px，圆角约 16px。
 - 底部输入器为 Prompt Input 浮动卡片，Agent 模式高度约 168px，图像模式高度约 185px，圆角约 20px。
 - 节点卡片圆角约 28px；图片结果节点圆角 10px。
-- 节点保持无厚重投影；输入器使用 `0 6px 6px rgba(41, 37, 100, 0.04)` 一类轻阴影。
+- 节点保持无厚重投影；输入器使用 `shadow-composer` 一类轻阴影。
 - 不做厚重投影、嵌套卡片、装饰性大卡片堆叠或渐变背景装饰。
 
 ## Components

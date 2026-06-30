@@ -1,9 +1,9 @@
 .agent-canvas.react-flow {
-  --xy-edge-stroke-default: var(--color-cuc-edge);
-  --xy-edge-stroke-selected-default: var(--color-cuc-text-soft);
+  --xy-edge-stroke-default: var(--semantic-color-edge);
+  --xy-edge-stroke-selected-default: var(--semantic-color-text-soft);
   --xy-edge-stroke-width-default: 0.75;
-  --xy-selection-background-color: rgba(200, 201, 204, 0.1);
-  --xy-selection-border: 1px solid rgba(200, 201, 204, 0.2);
+  --xy-selection-background-color: var(--semantic-color-selection-surface);
+  --xy-selection-border: 1px solid var(--semantic-color-selection-border);
 }
 
 .agent-canvas .react-flow__background {
@@ -44,7 +44,7 @@
 
 .agent-canvas .react-flow__selection,
 .agent-canvas .react-flow__nodesselection-rect {
-  box-shadow: 0 0 0 1px --alpha(var(--color-cuc-ink) / 10%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--semantic-color-ink) 10%, transparent);
 }
 
 .agent-canvas .react-flow__handle {
@@ -58,7 +58,7 @@
 }
 
 .agent-canvas .react-flow__edge-path {
-  stroke: var(--color-cuc-edge);
+  stroke: var(--semantic-color-edge);
   stroke-width: 0.75;
   stroke-dasharray: 3 3;
 }

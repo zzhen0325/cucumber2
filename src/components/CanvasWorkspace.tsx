@@ -82,6 +82,7 @@ import { LoadingIndicator } from "@/components/LoadingIndicator";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { Node, NodeContent } from "@/components/ai-elements/node";
 import { Composer } from "@/components/canvas/Composer";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   COMPOSER_MODE_STORAGE_KEY,
   IMAGE_ASPECT_RATIO_STORAGE_KEY,
@@ -3091,7 +3092,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
   return (
     <main
-      className="relative h-screen w-screen overflow-hidden bg-cuc-surface p-cuc-canvas-inset"
+      className="relative h-screen w-screen overflow-hidden bg-surface p-canvas-inset"
       onDragEnter={fileDrop.handleFileDragEnter}
       onDragLeave={fileDrop.handleFileDragLeave}
       onDragOver={fileDrop.handleFileDragOver}
@@ -3113,7 +3114,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         >
           <ImageNodeActionContext.Provider value={imageNodeActions}>
             <Canvas<AgentCanvasNode, AgentCanvasEdge>
-              className={`agent-canvas h-full w-full overflow-hidden rounded-cuc-canvas border border-cuc-canvas-border bg-cuc-canvas canvas-tool-${canvasTool}${
+              className={`agent-canvas h-full w-full overflow-hidden rounded-canvas border border-canvas-border bg-canvas canvas-tool-${canvasTool}${
                 isCreateTool ? " canvas-tool-create" : ""
               }`}
               colorMode="light"
@@ -3278,7 +3279,7 @@ function CanvasCreationPreview({ preview }: { preview: CreationPreview | null })
   return (
     <div
       aria-hidden
-      className="pointer-events-none absolute z-[18] grid min-h-2 min-w-2 place-items-center rounded-cuc-popover border border-black/75 bg-cuc-ink/8 text-[11px] leading-[14px] text-[#174222]/80 shadow-[0_0_0_3px_rgba(0,0,0,0.08)]"
+      className="pointer-events-none absolute z-[18] grid min-h-2 min-w-2 place-items-center rounded-popover border border-ink/75 bg-ink/8 text-[11px] leading-[14px] text-accent-foreground/80 shadow-primary-subtle"
       style={{
         height: preview.rect.height,
         left: preview.rect.left,
@@ -3286,7 +3287,7 @@ function CanvasCreationPreview({ preview }: { preview: CreationPreview | null })
         width: preview.rect.width,
       }}
     >
-      <span className="max-w-[86px] overflow-hidden truncate rounded-cuc-pill bg-cuc-surface/72 px-1.5 py-0.5">
+      <span className="max-w-[86px] overflow-hidden truncate rounded-pill bg-surface/72 px-1.5 py-0.5">
         {preview.label}
       </span>
     </div>
@@ -3948,28 +3949,28 @@ function TopBar({
   );
 
   return (
-    <div className="absolute left-3.5 top-3.5 z-20 flex h-cuc-floating-height items-center gap-1 rounded-cuc-floating bg-cuc-canvas-glass p-2 text-[13px] font-normal text-cuc-text-strong backdrop-blur-sm max-[760px]:left-3 max-[760px]:max-w-[calc(100vw-24px)] max-[760px]:overflow-hidden">
+    <div className="absolute left-3.5 top-3.5 z-20 flex h-floating-height items-center gap-1 rounded-floating bg-canvas-glass p-2 text-[13px] font-normal text-text-strong backdrop-blur-sm max-[760px]:left-3 max-[760px]:max-w-[calc(100vw-24px)] max-[760px]:overflow-hidden">
       <button
         aria-label="返回项目列表"
-        className={cn(TOP_ICON_BUTTON_CLASS, "size-cuc-icon-button rounded-cuc-card text-cuc-text-secondary hover:bg-cuc-surface/72")}
+        className={cn(TOP_ICON_BUTTON_CLASS, "size-icon-button rounded-card text-text-secondary hover:bg-surface/72")}
         onClick={onBack}
         title="返回项目列表"
         type="button"
       >
         <ArrowLeft size={12} />
       </button>
-      <div className="flex h-cuc-control w-[271px] items-center gap-1 overflow-hidden max-[760px]:w-[min(271px,calc(100vw-88px))]">
-        <div className="grid size-cuc-control flex-none place-items-center rounded-cuc-control text-cuc-control-dark">
+      <div className="flex h-control w-[271px] items-center gap-1 overflow-hidden max-[760px]:w-[min(271px,calc(100vw-88px))]">
+        <div className="grid size-control flex-none place-items-center rounded-control text-control-dark">
           <img className="size-5" src="/LOGO.svg" alt="cucumber logo" />
         </div>
-        <span className="mx-2 h-3 w-px flex-none bg-cuc-edge" />
+        <span className="mx-2 h-3 w-px flex-none bg-edge" />
         {isEditingTitle ? (
           <input
             ref={titleInputRef}
             aria-label="项目名称"
             className={cn(
               TOP_CONTROL_BUTTON_CLASS,
-              "w-[150px] min-w-0 cursor-text px-2 text-left outline-none focus-visible:ring-1 focus-visible:ring-cuc-primary max-[760px]:w-[min(150px,calc(100vw-210px))]"
+              "w-[150px] min-w-0 cursor-text px-2 text-left outline-none focus-visible:ring-1 focus-visible:ring-primary max-[760px]:w-[min(150px,calc(100vw-210px))]"
             )}
             disabled={savingTitle}
             maxLength={120}
@@ -3996,19 +3997,19 @@ function TopBar({
             <ChevronDown size={12} />
           </button>
         )}
-        <button aria-label="分享" className={cn(TOP_CONTROL_BUTTON_CLASS, "w-cuc-control")} title="分享" type="button">
+        <button aria-label="分享" className={cn(TOP_CONTROL_BUTTON_CLASS, "w-control")} title="分享" type="button">
           <ArrowUpRight size={14} />
         </button>
-        <button aria-label="评论" className={cn(TOP_CONTROL_BUTTON_CLASS, "w-cuc-control")} title="评论" type="button">
+        <button aria-label="评论" className={cn(TOP_CONTROL_BUTTON_CLASS, "w-control")} title="评论" type="button">
           <Copy size={14} />
         </button>
         <span
           className={cn(
             STORAGE_CHIP_CLASS,
-            storageStatus === "saved" && "text-cuc-storage-saved",
+            storageStatus === "saved" && "text-storage-saved",
             (storageStatus === "saving" || storageStatus === "loading") &&
-              "text-cuc-storage-saving",
-            storageStatus === "error" && "border-cuc-danger-border text-cuc-danger-strong"
+              "text-storage-saving",
+            storageStatus === "error" && "border-danger-border text-danger-strong"
           )}
           title={storageError ?? getStorageStatusLabel(storageStatus)}
         >
@@ -4037,7 +4038,7 @@ function ToolRail({
   ];
 
   return (
-    <aside className="absolute left-3.5 top-1/2 z-20 flex w-14 -translate-y-1/2 flex-col items-center gap-1 rounded-cuc-composer border-[0.5px] border-cuc-border bg-cuc-surface p-[8.5px] max-[760px]:left-3 max-[760px]:w-12 max-[760px]:p-1.5" aria-label="Canvas tools">
+    <aside className="absolute left-3.5 top-1/2 z-20 flex w-14 -translate-y-1/2 flex-col items-center gap-1 rounded-composer border-[0.5px] border-border bg-surface p-[8.5px] max-[760px]:left-3 max-[760px]:w-12 max-[760px]:p-1.5" aria-label="Canvas tools">
       {tools.map(({ icon: Icon, label, tool }) => {
         const active = tool === activeTool;
         return (
@@ -4045,8 +4046,8 @@ function ToolRail({
             aria-label={label}
             className={cn(
               SHELL_ICON_BUTTON_CLASS,
-              "size-cuc-tool rounded-cuc-floating max-[760px]:size-9",
-              active && "bg-cuc-surface-warm text-cuc-text"
+              "size-tool rounded-floating max-[760px]:size-9",
+              active && "bg-surface-warm text-text"
             )}
             key={label}
             onClick={() => onToolChange(tool)}
@@ -4069,10 +4070,10 @@ function ViewportControls({
   onAutoLayout: () => void;
 }) {
   return (
-    <div className="absolute right-5 top-3.5 z-20 flex h-cuc-floating-height items-center gap-1 rounded-cuc-floating bg-cuc-canvas-glass px-2 backdrop-blur-sm max-[760px]:right-3 max-[760px]:top-[68px] max-[760px]:max-w-[calc(100vw-118px)] max-[760px]:overflow-hidden">
+    <div className="absolute right-5 top-3.5 z-20 flex h-floating-height items-center gap-1 rounded-floating bg-canvas-glass px-2 backdrop-blur-sm max-[760px]:right-3 max-[760px]:top-[68px] max-[760px]:max-w-[calc(100vw-118px)] max-[760px]:overflow-hidden">
       <button
         aria-label="自动布局"
-        className={cn(SHELL_ICON_BUTTON_CLASS, "h-cuc-control w-cuc-control rounded-cuc-control")}
+        className={cn(SHELL_ICON_BUTTON_CLASS, "h-control w-control rounded-control")}
         disabled={!canAutoLayout}
         onClick={onAutoLayout}
         title={canAutoLayout ? "自动布局" : "暂无节点"}
@@ -4084,17 +4085,20 @@ function ViewportControls({
         aria-label="适应画布"
         className={cn(
           SHELL_ICON_BUTTON_CLASS,
-          "!flex h-cuc-control w-[69px] items-center justify-center gap-1 rounded-cuc-control px-2 disabled:opacity-100"
+          "!flex h-control w-[69px] items-center justify-center gap-1 rounded-control px-2 disabled:opacity-100"
         )}
         disabled
         title="暂未开放"
         type="button"
       >
-        <span className="w-[37px] text-center text-[13px] leading-5 text-cuc-text-heading">100%</span>
+        <span className="w-[37px] text-center text-[13px] leading-5 text-text-heading">100%</span>
         <ChevronDown size={12} />
       </button>
-     
-     
+      <ThemeToggle
+        align="end"
+        buttonClassName="h-control w-control rounded-control"
+        side="bottom"
+      />
     </div>
   );
 }
@@ -4105,7 +4109,7 @@ function EmptyState({ visible }: { visible: boolean }) {
   }
 
   return (
-    <div className="pointer-events-none absolute left-1/2 top-1/2 z-[5] flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 text-[13px] text-cuc-text-subtle">
+    <div className="pointer-events-none absolute left-1/2 top-1/2 z-[5] flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 text-[13px] text-text-subtle">
       <CircleDot size={18} />
       <span>输入需求，让 Agent 帮你实现它</span>
     </div>
@@ -4158,14 +4162,14 @@ function PromptNode({
     >
       <NodeContent
         className={cn(
-          "grid h-full min-h-0 overflow-auto px-[26px] py-cuc-node-padding",
+          "grid h-full min-h-0 overflow-auto px-[26px] py-node-padding",
           isExpanded ? "[place-items:start_stretch]" : "place-items-center"
         )}
       >
         {isManualPrompt ? (
           <textarea
             aria-label="用户输入"
-            className="nodrag nopan nowheel h-full w-full resize-none border-0 bg-transparent text-left text-cuc-ink text-cuc-node-body outline-0 [font:inherit] placeholder:text-cuc-ink/42"
+            className="nodrag nopan nowheel h-full w-full resize-none border-0 bg-transparent text-left text-ink text-node-body outline-0 [font:inherit] placeholder:text-ink/42"
             onChange={(event) => onPromptTextChange(id, event.currentTarget.value)}
             placeholder="输入需求..."
             readOnly={readOnly}
@@ -4174,7 +4178,7 @@ function PromptNode({
           />
         ) : (
           <p
-            className="copyable-text nodrag nopan m-0 block overflow-visible whitespace-pre-wrap text-left text-cuc-ink text-cuc-node-body [overflow-wrap:anywhere]"
+            className="copyable-text nodrag nopan m-0 block overflow-visible whitespace-pre-wrap text-left text-ink text-node-body [overflow-wrap:anywhere]"
             title={data.contextLabel}
           >
             {data.prompt}
@@ -4197,10 +4201,10 @@ function StickyNoteNode({
   return (
     <Node
       className={cn(
-        "!h-[170px] !w-[220px] border-[rgba(217,207,116,0.48)] !bg-[#fff8b8] shadow-[0_6px_18px_rgba(111,93,18,0.07)]",
-        data.color === "green" && "border-black/25 !bg-[#eaffcf]",
-        data.color === "blue" && "border-[rgba(74,132,195,0.2)] !bg-[#eaf4ff]",
-        data.color === "pink" && "border-[rgba(212,92,142,0.2)] !bg-[#ffeef5]"
+        "!h-[170px] !w-[220px] border-note-yellow-border !bg-note-yellow-bg shadow-note",
+        data.color === "green" && "border-ink/25 !bg-note-green-bg",
+        data.color === "blue" && "border-note-blue-border !bg-note-blue-bg",
+        data.color === "pink" && "border-note-pink-border !bg-note-pink-bg"
       )}
       handles={{ source: true, target: true }}
       minHeight={120}
@@ -4208,10 +4212,10 @@ function StickyNoteNode({
       selected={selected}
       style={getResizableNodeStyle(width, height)}
     >
-      <NodeContent className="h-full p-cuc-node-padding">
+      <NodeContent className="h-full p-node-padding">
         <textarea
           aria-label="便签内容"
-          className="nodrag nopan nowheel h-full w-full resize-none border-0 bg-transparent text-cuc-node-body text-cuc-text outline-0 [font:inherit] placeholder:text-[#111111]/42"
+          className="nodrag nopan nowheel h-full w-full resize-none border-0 bg-transparent text-node-body text-text outline-0 [font:inherit] placeholder:text-text/42"
           onChange={(event) => onStickyTextChange(id, event.currentTarget.value)}
           placeholder="写下想法..."
           readOnly={readOnly}
@@ -4232,15 +4236,15 @@ function ShapeNode({
 }: NodeProps<FlowNode<ShapeNodeData, "shapeNode">>) {
   const { onShapeLabelChange, readOnly } = useContext(ManualNodeEditingContext);
   const visualClassName = cn(
-    "relative grid size-full place-items-center rounded-cuc-node border border-cuc-border bg-cuc-surface/88 shadow-cuc-card",
-    data.shape === "ellipse" && "rounded-cuc-pill",
-    data.shape === "pill" && "rounded-cuc-pill",
+    "relative grid size-full place-items-center rounded-node border border-border bg-surface/88 shadow-card",
+    data.shape === "ellipse" && "rounded-pill",
+    data.shape === "pill" && "rounded-pill",
     data.shape === "diamond" &&
       "rounded-none [clip-path:polygon(50%_0,100%_50%,50%_100%,0_50%)]",
     data.shape === "triangle" &&
       "rounded-none [clip-path:polygon(50%_0,100%_100%,0_100%)]",
     data.shape === "frame" &&
-      "border-[1.5px] border-dashed border-cuc-border-dashed bg-cuc-surface/42"
+      "border-[1.5px] border-dashed border-border-dashed bg-surface/42"
   );
 
   return (
@@ -4256,7 +4260,7 @@ function ShapeNode({
         <div className={visualClassName}>
           <input
             aria-label="形状标签"
-            className="nodrag nopan w-[min(80%,140px)] border-0 bg-transparent text-center text-cuc-node-title text-cuc-text outline-0 [font:inherit]"
+            className="nodrag nopan w-[min(80%,140px)] border-0 bg-transparent text-center text-node-title text-text outline-0 [font:inherit]"
             onChange={(event) => onShapeLabelChange(id, event.currentTarget.value)}
             readOnly={readOnly}
             spellCheck={false}
@@ -6000,7 +6004,7 @@ function NodeFooterLike({ image }: { image: GeneratedImage }) {
   return (
     <div className={IMAGE_RESULT_FOOTER_CLASS}>
       <span className="sr-only">{image.title ?? "Generated image"}</span>
-      <span className="font-normal text-cuc-surface">Follow up</span>
+      <span className="font-normal text-surface">Follow up</span>
     </div>
   );
 }

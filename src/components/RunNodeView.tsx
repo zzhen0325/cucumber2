@@ -45,11 +45,11 @@ import type {
 } from "@/types/canvas";
 
 const RUN_CARD_CLASS_NAME =
-  "min-h-9 !border-cuc-run-border !bg-cuc-accent [--run-text:var(--color-cuc-run-text)] [--run-text-muted:var(--color-cuc-run-text-muted)]";
+  "min-h-9 !border-run-border !bg-accent [--run-text:var(--semantic-color-run-text)] [--run-text-muted:var(--semantic-color-run-text-muted)]";
 const RUN_TITLE_CLASS_NAME =
   "min-w-0 flex-[0_1_auto] overflow-hidden text-ellipsis whitespace-nowrap";
 const RUN_ICON_BUTTON_CLASS_NAME =
-  "grid size-[18px] cursor-pointer place-items-center rounded-cuc-round border-0 bg-transparent [color:var(--run-text)] transition-[background-color,color,opacity] duration-[140ms] ease-[ease]";
+  "grid size-[18px] cursor-pointer place-items-center rounded-round border-0 bg-transparent [color:var(--run-text)] transition-[background-color,color,opacity] duration-[140ms] ease-[ease]";
 const RUN_TEXT_CLASS_NAME =
   "agent-text-output block h-auto m-0 whitespace-pre-wrap text-[length:var(--canvas-node-body-size)] leading-[var(--canvas-node-body-line)] [color:var(--run-text)] [overflow-wrap:anywhere] [&_p]:m-0 [&_p+p]:mt-1";
 
@@ -241,10 +241,10 @@ export function RunNodeView({
         <div className="grid h-[34px] grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-1 px-2.5 text-[length:var(--canvas-node-title-size)] leading-[var(--canvas-node-title-line)] [color:var(--run-text)]">
           <span
             className={cn(
-              "grid size-[18px] place-items-center text-cuc-ink",
+              "grid size-[18px] place-items-center text-ink",
               data.status,
-              data.status === "success" && "text-cuc-success",
-              data.status === "error" && "text-cuc-danger-strong"
+              data.status === "success" && "text-success",
+              data.status === "error" && "text-danger-strong"
             )}
           >
             <RunStatusIcon status={data.status} />
@@ -266,7 +266,7 @@ export function RunNodeView({
             )}
             {headerSummary && (
               <span
-                className="min-w-[34px] flex-[1_1_auto] overflow-hidden text-ellipsis whitespace-nowrap text-[length:var(--canvas-node-meta-size)] leading-[var(--canvas-node-meta-line)] [color:var(--run-text-muted)] before:mr-1.5 before:text-cuc-ink/42 before:content-['·']"
+                className="min-w-[34px] flex-[1_1_auto] overflow-hidden text-ellipsis whitespace-nowrap text-[length:var(--canvas-node-meta-size)] leading-[var(--canvas-node-meta-line)] [color:var(--run-text-muted)] before:mr-1.5 before:text-ink/42 before:content-['·']"
                 title={headerSummary.fullLabel}
               >
                 {/* {headerSummary.visibleLabel} */}
@@ -279,7 +279,7 @@ export function RunNodeView({
                 aria-label="重试 Agent Run"
                 className={cn(
                   RUN_ICON_BUTTON_CLASS_NAME,
-                  "run-retry-button nodrag nopan hover:bg-cuc-run-surface-muted hover:text-cuc-danger-strong"
+                  "run-retry-button nodrag nopan hover:bg-run-surface-muted hover:text-danger-strong"
                 )}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -295,7 +295,7 @@ export function RunNodeView({
               aria-label="查看 Run Trace"
               className={cn(
                 RUN_ICON_BUTTON_CLASS_NAME,
-                "run-trace-button nodrag nopan hover:bg-cuc-run-surface-muted"
+                "run-trace-button nodrag nopan hover:bg-run-surface-muted"
               )}
               onClick={(event) => {
                 event.stopPropagation();
@@ -311,7 +311,7 @@ export function RunNodeView({
               aria-label={toggleLabel}
               className={cn(
                 RUN_ICON_BUTTON_CLASS_NAME,
-                "run-toggle nodrag nopan hover:bg-cuc-run-surface-muted disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent data-[expanded=false]:[&_svg]:-rotate-90 [&_svg]:transition-transform [&_svg]:duration-[140ms] [&_svg]:ease-[ease]"
+                "run-toggle nodrag nopan hover:bg-run-surface-muted disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent data-[expanded=false]:[&_svg]:-rotate-90 [&_svg]:transition-transform [&_svg]:duration-[140ms] [&_svg]:ease-[ease]"
               )}
               data-expanded={expanded}
               disabled={!hasRunOutput}
@@ -441,7 +441,7 @@ function AgentMessageList({ messages }: { messages: CanvasAgentMessage[] }) {
                 {message.agentName ?? "Agent"}
               </strong>
               {getAgentMessageBadges(message).map((badge) => (
-                <span className="shrink-0 text-cuc-success" key={badge}>
+                <span className="shrink-0 text-success" key={badge}>
                   {badge}
                 </span>
               ))}
@@ -538,7 +538,7 @@ export function ToolPartView({
     <Tool
       className={cn(
         toolPart.state === "output-error" &&
-          "border-cuc-danger-border bg-cuc-danger-surface"
+          "border-danger-border bg-danger-surface"
       )}
       onOpenChange={setOpen}
       open={open}
@@ -556,7 +556,7 @@ export function ToolPartView({
       {errorText && !open && (
         <span className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-[5px]">
           <span
-            className="line-clamp-2 overflow-hidden text-[length:var(--canvas-node-meta-size)] leading-[var(--canvas-node-meta-line)] text-cuc-danger-deep [overflow-wrap:anywhere]"
+            className="line-clamp-2 overflow-hidden text-[length:var(--canvas-node-meta-size)] leading-[var(--canvas-node-meta-line)] text-danger-deep [overflow-wrap:anywhere]"
             title={errorText}
           >
             {errorText}
@@ -564,7 +564,7 @@ export function ToolPartView({
           {runNodeId && (
             <button
               aria-label={`从${toolName}重试`}
-              className="nodrag nopan grid size-4 cursor-pointer place-items-center rounded-cuc-round border-0 bg-cuc-run-surface-muted text-cuc-danger-strong hover:bg-cuc-run-surface-hover"
+              className="nodrag nopan grid size-4 cursor-pointer place-items-center rounded-round border-0 bg-run-surface-muted text-danger-strong hover:bg-run-surface-hover"
               onClick={(event) => {
                 event.stopPropagation();
                 dispatchRetryRun(runNodeId, {

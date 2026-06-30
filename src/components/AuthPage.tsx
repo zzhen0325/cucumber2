@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 
 import { CucumberLogoInverted } from "@/components/icons/cucumber-logo";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -82,10 +83,14 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
   const features = isLogin ? LOGIN_FEATURES : REGISTER_FEATURES;
 
   return (
-    <div className="flex min-h-screen bg-cuc-surface-warm">
+    <div className="relative flex min-h-screen bg-surface-warm">
+      <ThemeToggle
+        buttonClassName="absolute right-4 top-4 z-20 bg-surface/72 shadow-popover backdrop-blur-sm"
+      />
+
       {/* Left panel — dark brand showcase (desktop only) */}
-      <div className="relative hidden overflow-hidden bg-cuc-ink px-16 text-cuc-surface lg:flex lg:w-1/2 lg:flex-col lg:justify-center">
-        <div className="pointer-events-none absolute -left-1/4 -top-1/4 h-[80%] w-[80%] rounded-full bg-cuc-surface/[0.03] blur-[100px]" />
+      <div className="relative hidden overflow-hidden bg-ink px-16 text-surface lg:flex lg:w-1/2 lg:flex-col lg:justify-center">
+        <div className="pointer-events-none absolute -left-1/4 -top-1/4 h-[80%] w-[80%] rounded-full bg-surface/[0.03] blur-[100px]" />
 
         <motion.div initial="hidden" animate="visible" className="relative z-10">
           <motion.div
@@ -108,14 +113,14 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
           <motion.p
             variants={fadeUp}
             custom={2}
-            className="mb-10 max-w-md text-lg text-cuc-surface/60"
+            className="mb-10 max-w-md text-lg text-surface/60"
           >
             {isLogin
               ? "登录后从你上次离开的地方继续。"
               : "用名称和密码注册，随时回到同一块画布。"}
           </motion.p>
 
-          <ul className="space-y-4 text-sm text-cuc-surface/50">
+          <ul className="space-y-4 text-sm text-surface/50">
             {features.map((text, index) => (
               <motion.li
                 key={text}
@@ -123,7 +128,7 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
                 custom={index + 3}
                 className="flex items-start gap-3"
               >
-                <span className="mt-1.5 block h-1.5 w-1.5 shrink-0 rounded-full bg-cuc-surface" />
+                <span className="mt-1.5 block h-1.5 w-1.5 shrink-0 rounded-full bg-surface" />
                 {text}
               </motion.li>
             ))}
@@ -150,7 +155,7 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
               <h2 className="text-2xl font-semibold tracking-tight">
                 {isLogin ? "进入项目" : "创建账号"}
               </h2>
-              <p className="text-sm text-cuc-text-muted">
+              <p className="text-sm text-text-muted">
                 用名称和密码继续你的 Agent Canvas
               </p>
             </motion.div>
@@ -161,7 +166,7 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
                   initial={{ opacity: 0, y: -8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
-                  className="rounded-cuc-card border border-cuc-danger-border bg-cuc-danger-surface px-4 py-3 text-sm text-cuc-danger-strong"
+                  className="rounded-card border border-danger-border bg-danger-surface px-4 py-3 text-sm text-danger-strong"
                   role="alert"
                   aria-live="polite"
                 >
@@ -215,7 +220,7 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
 
             <motion.p
               variants={fadeIn}
-              className="text-center text-sm text-cuc-text-muted"
+              className="text-center text-sm text-text-muted"
             >
               {isLogin ? "还没有账号？" : "已有账号？"}{" "}
               <button
@@ -226,7 +231,7 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
                   );
                   setError(null);
                 }}
-                className="font-medium text-cuc-text underline underline-offset-4"
+                className="font-medium text-text underline underline-offset-4"
               >
                 {isLogin ? "创建一个" : "去登录"}
               </button>

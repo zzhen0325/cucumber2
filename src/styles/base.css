@@ -1,7 +1,7 @@
 @layer base {
   * {
     box-sizing: border-box;
-    scrollbar-color: var(--color-cuc-scrollbar-thumb) transparent;
+    scrollbar-color: var(--semantic-color-scrollbar-thumb) transparent;
     scrollbar-width: thin;
   }
 
@@ -15,9 +15,9 @@
   }
 
   *::-webkit-scrollbar-thumb {
-    background: var(--color-cuc-scrollbar-thumb);
+    background: var(--semantic-color-scrollbar-thumb);
     border: 0;
-    border-radius: var(--radius-cuc-pill);
+    border-radius: var(--component-radius-pill);
   }
 
   *::-webkit-scrollbar-corner {

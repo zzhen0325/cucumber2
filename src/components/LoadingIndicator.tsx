@@ -31,7 +31,7 @@ export function LoadingIndicator({
       speed={1.25}
       pattern="full"
       dotShape="square"
-      color="#42e236"
+      color="var(--semantic-color-dot-on)"
       animated
       opacityBase={0.12}
       opacityMid={0.42}

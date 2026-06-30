@@ -57,7 +57,7 @@ export const TaskTrigger = memo(function TaskTrigger({
   return (
     <CollapsibleTrigger
       className={cn(
-        "task-trigger flex w-full min-w-0 cursor-pointer items-center justify-between gap-1 rounded-cuc-card border-[0.5px] border-cuc-run-border p-1 text-left text-cuc-label-8 [color:var(--run-text-muted)] hover:bg-cuc-run-border",
+        "task-trigger flex w-full min-w-0 cursor-pointer items-center justify-between gap-1 rounded-card border-[0.5px] border-run-border p-1 text-left text-label-8 [color:var(--run-text-muted)] hover:bg-run-border",
         className
       )}
       type={type}
@@ -66,7 +66,7 @@ export const TaskTrigger = memo(function TaskTrigger({
       {children ?? (
         <div className="flex items-center gap-1">
           <ListTreeIcon size={13} />
-          <span className="task-trigger-label flex min-w-0 items-center gap-[5px] [&_em]:shrink-0 [&_em]:whitespace-nowrap [&_em]:not-italic [&_em]:[color:var(--run-text-muted)] [&_em]:before:mr-[5px] [&_em]:before:text-cuc-ink/38 [&_em]:before:content-['·'] [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:font-medium [&_span]:[color:var(--run-text-muted)]">
+          <span className="task-trigger-label flex min-w-0 items-center gap-[5px] [&_em]:shrink-0 [&_em]:whitespace-nowrap [&_em]:not-italic [&_em]:[color:var(--run-text-muted)] [&_em]:before:mr-[5px] [&_em]:before:text-ink/38 [&_em]:before:content-['·'] [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:font-medium [&_span]:[color:var(--run-text-muted)]">
             <span>{title}</span>
             {detail && <em>{detail}</em>}
           </span>
@@ -124,17 +124,17 @@ export const TaskItem = memo(function TaskItem({
         `status-${status}`,
         (status === "completed" || status === "in_progress") &&
           "[color:var(--run-text)]",
-        status === "error" && "text-cuc-danger-strong",
+        status === "error" && "text-danger-strong",
         className
       )}
       {...props}
     >
       <div className="task-item-marker relative grid justify-items-center" aria-hidden="true">
         <StatusIcon
-          className="task-item-icon z-[1] mt-px block rounded-cuc-round bg-cuc-accent text-current"
+          className="task-item-icon z-[1] mt-px block rounded-round bg-accent text-current"
           size={13}
         />
-        <span className="task-item-line absolute top-[18px] bottom-[-7px] w-px bg-cuc-node-border-hover" />
+        <span className="task-item-line absolute top-[18px] bottom-[-7px] w-px bg-node-border-hover" />
       </div>
       <div className="task-item-body grid min-w-0 gap-[3px]">
         {title && (

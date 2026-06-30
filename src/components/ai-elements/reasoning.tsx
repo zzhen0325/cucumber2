@@ -155,7 +155,7 @@ export const ReasoningTrigger = memo(function ReasoningTrigger({
   return (
     <CollapsibleTrigger
       className={cn(
-        "reasoning-trigger flex w-full min-w-0 cursor-pointer items-center justify-between gap-1 rounded-cuc-card border-[0.5px] border-cuc-run-border p-1 text-left text-cuc-label-8 [color:var(--run-text-muted)] hover:bg-cuc-run-border",
+        "reasoning-trigger flex w-full min-w-0 cursor-pointer items-center justify-between gap-1 rounded-card border-[0.5px] border-run-border p-1 text-left text-label-8 [color:var(--run-text-muted)] hover:bg-run-border",
         className
       )}
       {...props}
@@ -163,7 +163,7 @@ export const ReasoningTrigger = memo(function ReasoningTrigger({
       {children ?? (
         <div className="flex items-center gap-1">
           <BrainIcon size={10} />
-          <span className="reasoning-trigger-label flex min-w-0 items-center gap-[5px] [&_em]:shrink-0 [&_em]:whitespace-nowrap [&_em]:not-italic [&_em]:[color:var(--run-text-muted)] [&_em]:before:mr-[5px] [&_em]:before:text-cuc-ink/38 [&_em]:before:content-['·'] [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:font-medium [&_span]:[color:var(--run-text-muted)]">
+          <span className="reasoning-trigger-label flex min-w-0 items-center gap-[5px] [&_em]:shrink-0 [&_em]:whitespace-nowrap [&_em]:not-italic [&_em]:[color:var(--run-text-muted)] [&_em]:before:mr-[5px] [&_em]:before:text-ink/38 [&_em]:before:content-['·'] [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:font-medium [&_span]:[color:var(--run-text-muted)]">
             {getThinkingMessage(isStreaming, duration)}
           </span>
         </div>

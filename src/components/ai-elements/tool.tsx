@@ -24,14 +24,14 @@ const TOOL_IO_CLASS_NAME = "tool-card-io grid min-w-0 gap-[3px]";
 const TOOL_IO_HEADING_CLASS_NAME =
   "m-0 text-[length:var(--canvas-node-meta-size)] font-medium leading-[var(--canvas-node-meta-line)] [color:var(--run-text-muted)]";
 const TOOL_CODE_CLASS_NAME =
-  "tool-card-code grid min-w-0 [&>div[data-language]]:rounded-cuc-canvas [&>div[data-language]]:border-0 [&>div[data-language]]:bg-[rgb(246_246_243_/_72%)] [&>div[data-language]]:[color:var(--run-text)] [&_code]:text-[length:var(--canvas-node-meta-size)] [&_pre]:max-h-28 [&_pre]:overflow-auto [&_pre]:whitespace-pre-wrap [&_pre]:!bg-transparent [&_pre]:p-1.5 [&_pre]:text-[length:var(--canvas-node-body-size)] [&_pre]:!text-inherit [&_pre]:[overflow-wrap:break-word]";
+  "tool-card-code grid min-w-0 [&>div[data-language]]:rounded-canvas [&>div[data-language]]:border-0 [&>div[data-language]]:bg-surface-warm/72 [&>div[data-language]]:[color:var(--run-text)] [&_code]:text-[length:var(--canvas-node-meta-size)] [&_pre]:max-h-28 [&_pre]:overflow-auto [&_pre]:whitespace-pre-wrap [&_pre]:!bg-transparent [&_pre]:p-1.5 [&_pre]:text-[length:var(--canvas-node-body-size)] [&_pre]:!text-inherit [&_pre]:[overflow-wrap:break-word]";
 
 export type ToolProps = ComponentProps<typeof Collapsible>;
 
 export const Tool = ({ className, ...props }: ToolProps) => (
   <Collapsible
     className={cn(
-      "tool-card not-prose group grid w-full min-w-0 gap-[5px] rounded-cuc-card border border-cuc-subtle-border bg-cuc-surface px-1.5 py-[5px] text-[length:var(--canvas-node-body-size)] leading-[var(--canvas-node-body-line)] [color:var(--run-text)]",
+      "tool-card not-prose group grid w-full min-w-0 gap-[5px] rounded-card border border-subtle-border bg-surface px-1.5 py-[5px] text-[length:var(--canvas-node-body-size)] leading-[var(--canvas-node-body-line)] [color:var(--run-text)]",
       className
     )}
     {...props}
@@ -57,15 +57,15 @@ const getStatusBadge = (status: CanvasToolState, stateLabel?: string) => {
   const icons: Record<CanvasToolState, ReactNode> = {
     "input-streaming": <CircleIcon className="size-4" />,
     "input-available": <LoadingIndicator ariaLabel="工具运行中" size={16} />,
-    "output-available": <CheckCircleIcon className="size-4 text-cuc-success" />,
-    "output-error": <XCircleIcon className="size-4 text-cuc-danger-strong" />,
+    "output-available": <CheckCircleIcon className="size-4 text-success" />,
+    "output-error": <XCircleIcon className="size-4 text-danger-strong" />,
   };
 
   return (
     <Badge
       className={cn(
-        "tool-status-badge !inline-flex !h-[18px] items-center !gap-[3px] !border-0 !bg-cuc-run-surface-muted !px-[5px] !py-0 !text-cuc-run-text-muted text-[length:var(--canvas-node-meta-size)] !font-medium !leading-none whitespace-nowrap [&_svg]:shrink-0",
-        status === "output-error" && "!text-cuc-danger-strong"
+        "tool-status-badge !inline-flex !h-[18px] items-center !gap-[3px] !border-0 !bg-run-surface-muted !px-[5px] !py-0 !text-run-text-muted text-[length:var(--canvas-node-meta-size)] !font-medium !leading-none whitespace-nowrap [&_svg]:shrink-0",
+        status === "output-error" && "!text-danger-strong"
       )}
       variant="secondary"
     >
@@ -95,7 +95,7 @@ export const ToolHeader = ({
   >
     <div className="tool-card-heading grid min-w-0 grid-cols-[16px_minmax(0,1fr)] items-center gap-1.5">
       <WrenchIcon
-        className="tool-card-icon grid size-4 place-items-center rounded-[5px] bg-cuc-run-surface p-0.5 text-cuc-run-tool-icon"
+        className="tool-card-icon grid size-4 place-items-center rounded-[5px] bg-run-surface p-0.5 text-run-tool-icon"
         size={12}
       />
       <span className="tool-card-copy grid min-w-0 gap-px">
@@ -183,7 +183,7 @@ export const ToolOutput = ({
         className={cn(
           TOOL_CODE_CLASS_NAME,
           errorText &&
-            "rounded-cuc-canvas bg-cuc-danger-surface p-1.5 font-[inherit] text-[length:var(--canvas-node-body-size)] text-cuc-danger-deep [overflow-wrap:break-word] whitespace-pre-wrap"
+            "rounded-canvas bg-danger-surface p-1.5 font-[inherit] text-[length:var(--canvas-node-body-size)] text-danger-deep [overflow-wrap:break-word] whitespace-pre-wrap"
         )}
       >
         {errorText && <div>{errorText}</div>}

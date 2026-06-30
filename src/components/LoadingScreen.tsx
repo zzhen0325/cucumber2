@@ -3,7 +3,7 @@ import { LoadingIndicator } from "@/components/LoadingIndicator";
 export function LoadingScreen({ label = "连接中" }: { label?: string }) {
   return (
     <main
-      className="grid min-h-screen w-screen place-content-center gap-3 bg-cuc-surface-warm text-center text-[13px] text-cuc-text-muted"
+      className="flex flex-col justify-center items-center min-h-screen w-screen place-content-center gap-3 bg-surface-warm text-center text-[13px] text-text-muted"
       aria-busy="true"
       aria-live="polite"
     >

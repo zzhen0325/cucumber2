@@ -284,7 +284,7 @@ function ComposerModeSwitch({
         aria-selected={value === "agent"}
         className={cn(
           COMPOSER_MODE_BUTTON_CLASS,
-          value === "agent" ? "bg-cuc-ink text-cuc-surface" : "px-0"
+          value === "agent" ? "bg-ink text-surface" : "px-0"
         )}
         data-active={value === "agent"}
         disabled={disabled}
@@ -301,7 +301,7 @@ function ComposerModeSwitch({
         aria-selected={value === "image"}
         className={cn(
           COMPOSER_MODE_BUTTON_CLASS,
-          value === "image" ? "bg-cuc-ink text-cuc-surface" : "px-0"
+          value === "image" ? "bg-ink text-surface" : "px-0"
         )}
         data-active={value === "image"}
         disabled={disabled}
@@ -341,15 +341,15 @@ function ComposerInlineTokens({
         <span
           className={cn(
             COMPOSER_TOKEN_CLASS,
-            "border-cuc-primary-border bg-cuc-skill-token-surface text-cuc-accent-foreground"
+            "border-primary-border bg-skill-token-surface text-accent-foreground"
           )}
           title={`强制使用 ${forcedSkill.name}`}
         >
-          <span className={cn(COMPOSER_TOKEN_KIND_CLASS, "text-cuc-primary-strong")}>技能</span>
+          <span className={cn(COMPOSER_TOKEN_KIND_CLASS, "text-primary-strong")}>技能</span>
           <span className={COMPOSER_TOKEN_LABEL_CLASS}>{forcedSkill.name}</span>
           <button
             aria-label={`移除技能 ${forcedSkill.name}`}
-            className="grid size-4 min-w-4 cursor-pointer place-items-center rounded-cuc-pill border-0 bg-cuc-primary-surface p-0 text-cuc-primary-strong hover:bg-cuc-primary-surface-hover"
+            className="grid size-4 min-w-4 cursor-pointer place-items-center rounded-pill border-0 bg-primary-surface p-0 text-primary-strong hover:bg-primary-surface-hover"
             onClick={onClearForcedSkill}
             title="移除技能"
             type="button"
@@ -365,7 +365,7 @@ function ComposerInlineTokens({
           <span
             className={cn(
               COMPOSER_TOKEN_CLASS,
-              !referenceable && "text-cuc-text-soft"
+              !referenceable && "text-text-soft"
             )}
             data-referenceable={referenceable}
             key={node.id}
@@ -414,9 +414,9 @@ function ComposerSkillMenu({
   return (
     <div className={COMPOSER_SKILL_MENU_CLASS} role="listbox">
       {loading ? (
-        <div className="px-2.5 py-2.5 text-xs leading-[18px] text-cuc-text-soft">加载技能...</div>
+        <div className="px-2.5 py-2.5 text-xs leading-[18px] text-text-soft">加载技能...</div>
       ) : error ? (
-        <div className="px-2.5 py-2.5 text-xs leading-[18px] text-cuc-text-soft">技能加载失败</div>
+        <div className="px-2.5 py-2.5 text-xs leading-[18px] text-text-soft">技能加载失败</div>
       ) : visibleSkills.length ? (
         visibleSkills.map((skill) => (
           <button
@@ -429,13 +429,13 @@ function ComposerSkillMenu({
             type="button"
           >
             <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{skill.name}</span>
-            <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-cuc-text-soft">
+            <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-text-soft">
               {[skill.agentScope, skill.purpose].filter(Boolean).join(" · ")}
             </span>
           </button>
         ))
       ) : (
-        <div className="px-2.5 py-2.5 text-xs leading-[18px] text-cuc-text-soft">没有匹配技能</div>
+        <div className="px-2.5 py-2.5 text-xs leading-[18px] text-text-soft">没有匹配技能</div>
       )}
     </div>
   );
@@ -444,7 +444,7 @@ function ComposerSkillMenu({
 function ComposerFooterStatus({ label }: { label: string }) {
   return (
     <span
-      className="inline-flex h-cuc-control max-w-[220px] items-center gap-1.5 rounded-cuc-control border-[0.5px] border-cuc-border bg-cuc-control-surface px-2.5 text-xs font-medium text-cuc-control-dark max-[560px]:max-w-[156px]"
+      className="inline-flex h-control max-w-[220px] items-center gap-1.5 rounded-control border-[0.5px] border-border bg-control-surface px-2.5 text-xs font-medium text-control-dark max-[560px]:max-w-[156px]"
       title={label}
     >
       <Sparkles size={14} />

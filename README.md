@@ -2,6 +2,15 @@
 
 Infinite Canvas Agent OS。前端使用 Vite、React、TypeScript、React Flow 和 AI Elements；服务端使用 Hono 与 OpenAI Agents SDK。
 
+## Design System
+
+前端样式使用 Tailwind v4 CSS-first token 系统，唯一 token 源是 `src/styles/theme.css`：
+
+- primitive token 只保存原始值，不直接用于 UI。
+- semantic token 暴露为 Tailwind utilities，例如 `bg-surface`、`text-text`、`text-muted`、`border-border`、`bg-primary`、`bg-danger`。
+- component token 承载重复的控件、画布、节点、输入器和 artifact 尺寸/圆角/阴影。
+- theme 通过 CSS variables 控制；浅色为默认，深色由 `html.dark` / `html[data-theme="dark"]` 覆盖 semantic variables，`html[data-theme="future"]` 提供可切换的未来主题样例。新增主题时只补 `html[data-theme="<name>"]` 变量覆盖，不改组件 className。
+
 ## Agent Runtime
 
 项目只有一套 Agent 运行时：

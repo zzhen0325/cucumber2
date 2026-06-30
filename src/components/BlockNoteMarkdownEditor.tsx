@@ -3,6 +3,7 @@ import { useCreateBlockNote, useEditorChange } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/shadcn";
 import { useEffect, useRef, useState } from "react";
 
+import { useTheme } from "@/components/theme-context";
 import type { MarkdownNodeData } from "@/types/canvas";
 
 import "@blocknote/core/fonts/inter.css";
@@ -21,6 +22,8 @@ export function BlockNoteMarkdownEditor({
   readOnly,
   onChange,
 }: BlockNoteMarkdownEditorProps) {
+  const { theme } = useTheme();
+  const editorTheme = theme === "light" ? "light" : "dark";
   const [initialBlocks] = useState(() => getStoredBlockNoteBlocks(data));
   const hasHydratedMarkdown = useRef(false);
   const hydrating = useRef(false);
@@ -71,7 +74,7 @@ export function BlockNoteMarkdownEditor({
       className="blocknote-editor"
       editable={!readOnly}
       editor={editor}
-      theme="light"
+      theme={editorTheme}
     />
   );
 }

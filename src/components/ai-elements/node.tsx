@@ -13,11 +13,11 @@ import { forwardRef } from "react";
 import type { ComponentProps } from "react";
 
 const CANVAS_NODE_CLASS_NAME =
-  "node-container relative w-cuc-node gap-0 overflow-visible rounded-cuc-node border-[0.5px] border-cuc-node-border bg-cuc-node p-0 text-cuc-text-strong shadow-none [--canvas-node-body-line:var(--text-cuc-node-body--line-height)] [--canvas-node-body-size:var(--text-cuc-node-body)] [--canvas-node-gap:var(--spacing-cuc-node-gap)] [--canvas-node-meta-line:var(--text-cuc-node-meta--line-height)] [--canvas-node-meta-size:var(--text-cuc-node-meta)] [--canvas-node-padding:var(--spacing-cuc-node-padding)] [--canvas-node-title-line:var(--text-cuc-node-title--line-height)] [--canvas-node-title-size:var(--text-cuc-node-title)] [&_.copyable-region]:cursor-text [&_.copyable-region]:select-text [&_.copyable-region_:is(p,span,strong,small,pre,code,li,h1,h2,h3,h4,h5,h6)]:cursor-text [&_.copyable-region_:is(p,span,strong,small,pre,code,li,h1,h2,h3,h4,h5,h6)]:select-text [&_.copyable-text]:cursor-text [&_.copyable-text]:select-text";
+  "node-container relative w-node gap-0 overflow-visible rounded-node border-[0.5px] border-node-border bg-node p-0 text-text-strong shadow-none [--canvas-node-body-line:var(--component-text-node-body-line)] [--canvas-node-body-size:var(--component-text-node-body)] [--canvas-node-gap:var(--component-space-node-gap)] [--canvas-node-meta-line:var(--component-text-node-meta-line)] [--canvas-node-meta-size:var(--component-text-node-meta)] [--canvas-node-padding:var(--component-space-node-padding)] [--canvas-node-title-line:var(--component-text-node-title-line)] [--canvas-node-title-size:var(--component-text-node-title)] [&_.copyable-region]:cursor-text [&_.copyable-region]:select-text [&_.copyable-region_:is(p,span,strong,small,pre,code,li,h1,h2,h3,h4,h5,h6)]:cursor-text [&_.copyable-region_:is(p,span,strong,small,pre,code,li,h1,h2,h3,h4,h5,h6)]:select-text [&_.copyable-text]:cursor-text [&_.copyable-text]:select-text";
 const CANVAS_NODE_SELECTED_CLASS_NAME =
-  "border-cuc-primary-border-active shadow-[0_0_0_3px_var(--color-cuc-primary-glow),0_4px_20px_var(--color-cuc-primary-shadow)]";
+  "border-primary-border-active shadow-node-selected";
 const RESIZER_HANDLE_CLASS_NAME =
-  "nodrag nopan !size-4 !rounded-[2px] !border-0 !bg-transparent !text-transparent !shadow-none [&.bottom.left]:!rounded-bl-cuc-card [&.bottom.right]:!rounded-br-cuc-card [&.top.left]:!rounded-tl-cuc-card [&.top.right]:!rounded-tr-cuc-card";
+  "nodrag nopan !size-4 !rounded-[2px] !border-0 !bg-transparent !text-transparent !shadow-none [&.bottom.left]:!rounded-bl-card [&.bottom.right]:!rounded-br-card [&.top.left]:!rounded-tl-card [&.top.right]:!rounded-tr-card";
 const RESIZER_LINE_CLASS_NAME =
   "!border-transparent !bg-transparent !opacity-0";
 
@@ -57,7 +57,7 @@ export const Node = forwardRef<HTMLDivElement, NodeProps>(
       {...props}
     >
       <NodeResizer
-        color="var(--color-cuc-primary)"
+        color="var(--semantic-color-primary)"
         handleClassName={RESIZER_HANDLE_CLASS_NAME}
         isVisible={selected}
         lineClassName={RESIZER_LINE_CLASS_NAME}

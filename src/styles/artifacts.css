@@ -1,7 +1,7 @@
 .code-node-editor {
   min-height: 0;
   overflow: hidden;
-  border-radius: var(--radius-cuc-control-lg);
+  border-radius: var(--component-radius-control-lg);
 }
 
 .code-node-block {
@@ -16,13 +16,13 @@
 
 .code-node-block-header {
   min-width: 0;
-  background: var(--color-cuc-surface-warm);
+  background: var(--semantic-color-surface-warm);
 }
 
 .code-node-block-header span {
   overflow: hidden;
   max-width: 220px;
-  color: var(--color-cuc-text-muted);
+  color: var(--semantic-color-text-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -46,7 +46,7 @@
 .code-node-block button {
   width: 22px;
   height: 22px;
-  color: var(--color-cuc-text-secondary);
+  color: var(--semantic-color-text-secondary);
 }
 
 .html-source-preview {
@@ -58,9 +58,9 @@
   display: grid;
   min-height: 0;
   grid-template-rows: auto minmax(0, 1fr);
-  border-color: var(--color-cuc-border-soft);
-  border-radius: var(--radius-cuc-control-lg);
-  background: var(--color-cuc-surface-subtle);
+  border-color: var(--semantic-color-border-soft);
+  border-radius: var(--component-radius-control-lg);
+  background: var(--semantic-color-surface-subtle);
 }
 
 .html-source-preview-code > .relative {
@@ -74,13 +74,13 @@
 
 .html-source-preview-header {
   min-width: 0;
-  background: var(--color-cuc-surface-warm);
+  background: var(--semantic-color-surface-warm);
 }
 
 .html-source-preview-header > span,
 .html-source-preview-header > div:first-child span {
   overflow: hidden;
-  color: var(--color-cuc-text-muted);
+  color: var(--semantic-color-text-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -88,7 +88,7 @@
 .html-source-preview-title {
   min-width: 0;
   overflow: hidden;
-  color: var(--color-cuc-text-muted);
+  color: var(--semantic-color-text-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
   line-height: 18px;
@@ -110,8 +110,8 @@
   align-items: center;
   padding: 2px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-cuc-pill);
-  background: var(--color-cuc-surface);
+  border-radius: var(--component-radius-pill);
+  background: var(--semantic-color-surface);
 }
 
 .html-source-preview-switch button {
@@ -123,9 +123,9 @@
   gap: 4px;
   padding: 0 7px;
   border: 0;
-  border-radius: var(--radius-cuc-pill);
+  border-radius: var(--component-radius-pill);
   background: transparent;
-  color: var(--color-cuc-text-muted);
+  color: var(--semantic-color-text-muted);
   cursor: pointer;
   font-size: 11px;
   line-height: 16px;
@@ -137,8 +137,8 @@
 }
 
 .html-source-preview-switch button[aria-pressed="true"] {
-  background: var(--color-cuc-primary);
-  color: var(--color-cuc-primary-foreground);
+  background: var(--semantic-color-primary);
+  color: var(--semantic-color-primary-foreground);
 }
 
 .html-source-preview-switch button span {
@@ -153,7 +153,7 @@
 .html-source-preview-icon-button {
   width: 26px;
   height: 26px;
-  color: var(--color-cuc-text-secondary);
+  color: var(--semantic-color-text-secondary);
 }
 
 .html-source-preview-frame-card {
@@ -162,9 +162,9 @@
   min-height: 0;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
-  border: 1px solid var(--color-cuc-border-soft);
-  border-radius: var(--radius-cuc-control-lg);
-  background: var(--color-cuc-surface-subtle);
+  border: 1px solid var(--semantic-color-border-soft);
+  border-radius: var(--component-radius-control-lg);
+  background: var(--semantic-color-surface-subtle);
 }
 
 .html-source-preview-frame-card > .html-source-preview-header {
@@ -175,27 +175,27 @@
   justify-content: space-between;
   gap: 8px;
   padding: 6px 8px 6px 10px;
-  border-bottom: 1px solid var(--color-cuc-border-soft);
+  border-bottom: 1px solid var(--semantic-color-border-soft);
 }
 
 .html-source-preview-frame {
   min-height: 0;
   overflow: hidden;
-  background: var(--color-cuc-surface);
+  background: var(--semantic-color-surface);
 }
 
 .html-source-preview-frame iframe {
   width: 100%;
   height: 100%;
   border: 0;
-  background: var(--color-cuc-surface);
+  background: var(--semantic-color-surface);
 }
 
 .html-source-preview-empty {
   display: grid;
   height: 100%;
   place-items: center;
-  color: var(--color-cuc-text-muted);
+  color: var(--semantic-color-text-muted);
   font-size: var(--canvas-node-body-size);
   line-height: var(--canvas-node-body-line);
 }
@@ -224,7 +224,7 @@
 
 .code-node-html-preview .html-source-preview-switch button,
 .html-page-viewer .html-source-preview-switch button {
-  width: var(--spacing-cuc-icon-button);
+  width: var(--component-size-icon-button);
   padding: 0;
 }
 
@@ -255,28 +255,28 @@
   overflow: hidden;
   border: 0;
   border-radius: 0;
-  background: var(--color-cuc-surface);
+  background: var(--semantic-color-surface);
 }
 
 .html-page-frame iframe {
   width: 100%;
   height: 100%;
   border: 0;
-  background: var(--color-cuc-surface);
+  background: var(--semantic-color-surface);
 }
 
 .html-page-empty {
   display: grid;
   height: 100%;
   place-items: center;
-  color: var(--color-cuc-text-muted);
+  color: var(--semantic-color-text-muted);
   font-size: var(--canvas-node-body-size);
   line-height: var(--canvas-node-body-line);
 }
 
 .html-page-footer {
   overflow: hidden;
-  color: var(--color-cuc-text-muted);
+  color: var(--semantic-color-text-muted);
   font-size: var(--canvas-node-meta-size);
   line-height: var(--canvas-node-meta-line);
   text-overflow: ellipsis;
@@ -290,7 +290,7 @@
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: var(--color-cuc-text);
+  color: var(--semantic-color-text);
   cursor: text;
   font-size: var(--canvas-node-body-size);
   line-height: var(--canvas-node-body-line);
@@ -299,22 +299,22 @@
 }
 
 .blocknote-body .bn-root {
-  --bn-colors-editor-text: var(--color-cuc-text);
+  --bn-colors-editor-text: var(--semantic-color-text);
   --bn-colors-editor-background: transparent;
-  --bn-colors-menu-text: var(--color-cuc-text);
-  --bn-colors-menu-background: var(--color-cuc-surface);
-  --bn-colors-tooltip-text: var(--color-cuc-text);
-  --bn-colors-tooltip-background: var(--color-cuc-surface-code);
-  --bn-colors-hovered-text: var(--color-cuc-ink);
-  --bn-colors-hovered-background: --alpha(var(--color-cuc-ink) / 10%);
-  --bn-colors-selected-text: var(--color-cuc-ink);
-  --bn-colors-selected-background: var(--color-cuc-accent);
-  --bn-colors-disabled-text: #a3a3a0;
-  --bn-colors-disabled-background: var(--color-cuc-surface-code);
-  --bn-colors-shadow: --alpha(var(--color-cuc-ink) / 8%);
+  --bn-colors-menu-text: var(--semantic-color-text);
+  --bn-colors-menu-background: var(--semantic-color-surface);
+  --bn-colors-tooltip-text: var(--semantic-color-text);
+  --bn-colors-tooltip-background: var(--semantic-color-surface-code);
+  --bn-colors-hovered-text: var(--semantic-color-ink);
+  --bn-colors-hovered-background: color-mix(in srgb, var(--semantic-color-ink) 10%, transparent);
+  --bn-colors-selected-text: var(--semantic-color-ink);
+  --bn-colors-selected-background: var(--semantic-color-accent);
+  --bn-colors-disabled-text: var(--semantic-color-blocknote-disabled-text);
+  --bn-colors-disabled-background: var(--semantic-color-surface-code);
+  --bn-colors-shadow: color-mix(in srgb, var(--semantic-color-ink) 8%, transparent);
   --bn-colors-border: var(--border);
-  --bn-colors-side-menu: #b7b7b3;
-  --bn-border-radius: var(--radius-cuc-image);
+  --bn-colors-side-menu: var(--semantic-color-blocknote-side-menu);
+  --bn-border-radius: var(--component-radius-image);
   height: 100%;
   min-height: 100%;
   font-family:
@@ -333,7 +333,7 @@
 
 .blocknote-body .bn-editor {
   padding: 0;
-  color: var(--color-cuc-text);
+  color: var(--semantic-color-text);
   font-size: var(--canvas-node-body-size);
   line-height: var(--canvas-node-body-line);
 }
@@ -367,8 +367,8 @@
 
 .blocknote-body .bn-inline-content code,
 .blocknote-body .bn-block-content[data-content-type="codeBlock"] {
-  border-radius: var(--radius-cuc-canvas);
-  background: var(--color-cuc-surface-code);
+  border-radius: var(--component-radius-canvas);
+  background: var(--semantic-color-surface-code);
   font-size: var(--canvas-node-body-size);
 }
 
@@ -380,7 +380,7 @@
   margin: 0;
   overflow: visible;
   background: transparent;
-  color: var(--color-cuc-run-text);
+  color: var(--semantic-color-run-text);
   cursor: text;
   font: inherit;
   line-height: var(--canvas-node-body-line);
@@ -397,16 +397,16 @@
   gap: 10px;
   overflow: hidden;
   padding: 14px;
-  border: 1px solid var(--color-cuc-border-muted);
-  border-radius: var(--radius-cuc-panel);
-  background: var(--color-cuc-surface);
-  box-shadow: var(--shadow-cuc-dialog);
+  border: 1px solid var(--semantic-color-border-muted);
+  border-radius: var(--component-radius-panel);
+  background: var(--semantic-color-surface);
+  box-shadow: var(--component-shadow-dialog);
 }
 
 .artifact-preview-dialog [data-slot="dialog-title"] {
   max-width: calc(100% - 44px);
   overflow: hidden;
-  color: var(--color-cuc-text);
+  color: var(--semantic-color-text);
   font-size: 14px;
   font-weight: 600;
   line-height: 18px;
@@ -416,7 +416,7 @@
 
 .artifact-preview-dialog [data-slot="dialog-description"] {
   margin-top: -4px;
-  color: var(--color-cuc-text-muted);
+  color: var(--semantic-color-text-muted);
   font-size: 12px;
   line-height: 16px;
 }
@@ -426,10 +426,10 @@
   max-height: calc(100vh - 190px);
   min-height: 220px;
   overflow: auto;
-  border: 1px solid var(--color-cuc-border-soft);
-  border-radius: var(--radius-cuc-popover);
-  background: var(--color-cuc-surface-subtle);
-  color: var(--color-cuc-text-muted);
+  border: 1px solid var(--semantic-color-border-soft);
+  border-radius: var(--component-radius-popover);
+  background: var(--semantic-color-surface-subtle);
+  color: var(--semantic-color-text-muted);
   font-size: 12px;
   line-height: 18px;
 }
@@ -443,7 +443,7 @@
   margin: 0;
   padding: 14px;
   background: transparent;
-  color: var(--color-cuc-text);
+  color: var(--semantic-color-text);
   font: inherit;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
@@ -488,12 +488,12 @@
 .artifact-preview-actions a,
 .artifact-preview-actions button {
   display: inline-flex;
-  height: var(--spacing-cuc-toolbar-button);
+  height: var(--component-size-toolbar-button);
   align-items: center;
-  border: 1px solid var(--color-cuc-border-muted);
-  border-radius: var(--radius-cuc-pill);
-  background: var(--color-cuc-surface);
-  color: var(--color-cuc-text);
+  border: 1px solid var(--semantic-color-border-muted);
+  border-radius: var(--component-radius-pill);
+  background: var(--semantic-color-surface);
+  color: var(--semantic-color-text);
   cursor: pointer;
   font-size: 12px;
   line-height: 1;
@@ -503,13 +503,13 @@
 
 .artifact-preview-actions a:hover,
 .artifact-preview-actions button:hover {
-  background: var(--color-cuc-accent);
+  background: var(--semantic-color-accent);
 }
 
 .image-preview-dialog [data-slot="dialog-title"] {
   max-width: calc(100% - 44px);
   overflow: hidden;
-  color: var(--color-cuc-text);
+  color: var(--semantic-color-text);
   font-size: 14px;
   font-weight: 600;
   line-height: 18px;
@@ -519,7 +519,7 @@
 
 .image-preview-dialog [data-slot="dialog-description"] {
   margin-top: -4px;
-  color: var(--color-cuc-text-muted);
+  color: var(--semantic-color-text-muted);
   font-size: 12px;
   line-height: 16px;
 }

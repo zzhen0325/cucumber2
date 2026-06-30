@@ -34,9 +34,9 @@ const cardItem = {
 };
 
 const pageClassName =
-  "min-h-full overflow-auto bg-cuc-canvas px-6 pb-14 pt-[42px] text-cuc-text-strong max-[760px]:h-[calc(100dvh-56px)] max-[760px]:min-h-0 max-[760px]:px-3 max-[760px]:pb-[78px] max-[760px]:pt-7";
+  "min-h-full overflow-auto bg-canvas px-6 pb-14 pt-[42px] text-text-strong max-[760px]:h-[calc(100dvh-56px)] max-[760px]:min-h-0 max-[760px]:px-3 max-[760px]:pb-[78px] max-[760px]:pt-7";
 const iconButtonClassName =
-  "grid size-7 cursor-pointer place-items-center rounded-cuc-image border-0 bg-cuc-surface/88 text-cuc-text-secondary hover:bg-cuc-surface-warm hover:text-cuc-text disabled:cursor-default disabled:opacity-[0.42]";
+  "grid size-7 cursor-pointer place-items-center rounded-image border-0 bg-surface/88 text-text-secondary hover:bg-surface-warm hover:text-text disabled:cursor-default disabled:opacity-[0.42]";
 
 type ProjectListPageProps = {
   projects: ProjectSummary[];
@@ -72,19 +72,19 @@ export function ProjectListPage({
 
   return (
     <div className={pageClassName}>
-      <div className="mx-auto w-[var(--cuc-width-page)] max-[760px]:w-full">
-        <div className="mb-4 flex min-h-20 items-center justify-between gap-3 rounded-cuc-floating p-2 max-[760px]:items-start">
+      <div className="mx-auto w-[var(--layout-width-page)] max-[760px]:w-full">
+        <div className="mb-4 flex min-h-20 items-center justify-between gap-3 rounded-floating p-2 max-[760px]:items-start">
           <div>
-            <h1 className="m-0 text-2xl font-medium leading-[30px] text-cuc-text">
+            <h1 className="m-0 text-2xl font-medium leading-[30px] text-text">
               项目
             </h1>
-            <p className="mb-0 mt-px text-[13px] leading-5 text-cuc-text-muted">
+            <p className="mb-0 mt-px text-[13px] leading-5 text-text-muted">
               管理你的画布工作区
             </p>
           </div>
           <button
             type="button"
-            className="inline-flex h-9 min-w-0 items-center gap-2 rounded-cuc-control border-0 bg-cuc-ink px-[12.5px] text-sm font-normal leading-[22px] text-cuc-surface hover:bg-cuc-ink-hover disabled:cursor-default disabled:opacity-[0.42]"
+            className="inline-flex h-9 min-w-0 items-center gap-2 rounded-control border-0 bg-ink px-[12.5px] text-sm font-normal leading-[22px] text-surface hover:bg-ink-hover disabled:cursor-default disabled:opacity-[0.42]"
             onClick={onCreate}
           >
             <Plus size={16} />
@@ -119,7 +119,7 @@ export function ProjectListPage({
                       type="button"
                       aria-label={`打开 ${project.title}`}
                       onClick={() => onOpenProject(project.id)}
-                      className="absolute inset-0 z-[2] cursor-pointer rounded-cuc-card border-0 bg-transparent"
+                      className="absolute inset-0 z-[2] cursor-pointer rounded-card border-0 bg-transparent"
                     />
                   )}
 
@@ -163,7 +163,7 @@ export function ProjectListPage({
                       <input
                         autoFocus
                         maxLength={120}
-                        className="h-7 min-w-0 rounded-cuc-card border-[0.5px] border-cuc-border bg-cuc-surface px-2 text-xs leading-4 text-cuc-text outline-0 focus:border-black/60"
+                        className="h-7 min-w-0 rounded-card border-[0.5px] border-border bg-surface px-2 text-xs leading-4 text-text outline-0 focus:border-ink/60"
                         value={editingTitle}
                         onChange={(event) =>
                           setEditingTitle(event.currentTarget.value)
@@ -211,7 +211,7 @@ export function ProjectListPage({
         </div>
 
         {!loading && !projects.length && (
-          <div className="grid min-h-[92px] place-items-center rounded-cuc-card border-[0.5px] border-dashed border-cuc-preview-border bg-cuc-surface/42 text-[13px] leading-5 text-cuc-text-muted">
+          <div className="grid min-h-[92px] place-items-center rounded-card border-[0.5px] border-dashed border-preview-border bg-surface/42 text-[13px] leading-5 text-text-muted">
             还没有项目，点击「新建项目」开始吧。
           </div>
         )}

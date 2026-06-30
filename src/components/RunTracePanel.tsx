@@ -31,57 +31,57 @@ type AgentRunDebugPanelProps = {
 };
 
 const TRACE_PANEL_BASE_CLASS =
-  "absolute right-5 top-[66px] grid max-h-[calc(100vh-154px)] grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden rounded-[22px] border border-cuc-border-muted bg-white/[0.97] p-3.5 shadow-[0_10px_30px_rgb(0_0_0_/_6%)] max-[760px]:bottom-[86px] max-[760px]:right-3 max-[760px]:top-auto max-[760px]:max-h-[min(540px,calc(100vh-128px))] max-[760px]:w-[calc(100vw-24px)]";
+  "absolute right-5 top-[66px] grid max-h-[calc(100vh-154px)] grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden rounded-[22px] border border-border-muted bg-surface/[0.97] p-3.5 shadow-popover max-[760px]:bottom-[86px] max-[760px]:right-3 max-[760px]:top-auto max-[760px]:max-h-[min(540px,calc(100vh-128px))] max-[760px]:w-[calc(100vw-24px)]";
 const TRACE_HEADER_CLASS =
   "flex items-center justify-between gap-3";
 const TRACE_HEADER_TITLE_CLASS =
   "grid min-w-0 gap-0.5";
 const TRACE_HEADER_STRONG_CLASS =
-  "text-sm font-semibold leading-[18px] text-cuc-text";
+  "text-sm font-semibold leading-[18px] text-text";
 const TRACE_HEADER_SUBTITLE_CLASS =
-  "overflow-hidden text-ellipsis whitespace-nowrap text-[11px] leading-[14px] text-cuc-text-muted";
+  "overflow-hidden text-ellipsis whitespace-nowrap text-[11px] leading-[14px] text-text-muted";
 const TRACE_ACTIONS_CLASS =
   "flex gap-1.5";
 const TRACE_ACTION_BUTTON_CLASS =
-  "grid size-cuc-toolbar-button cursor-pointer place-items-center rounded-cuc-round border border-cuc-border-muted bg-cuc-surface text-cuc-text-secondary hover:bg-cuc-surface-warm hover:text-cuc-text disabled:cursor-default disabled:opacity-[0.42]";
+  "grid size-toolbar-button cursor-pointer place-items-center rounded-round border border-border-muted bg-surface text-text-secondary hover:bg-surface-warm hover:text-text disabled:cursor-default disabled:opacity-[0.42]";
 const TRACE_STATE_CLASS =
-  "flex items-center justify-center gap-[7px] rounded-cuc-floating border border-dashed border-cuc-border-dashed p-3 text-xs leading-4 text-cuc-text-subtle";
+  "flex items-center justify-center gap-[7px] rounded-floating border border-dashed border-border-dashed p-3 text-xs leading-4 text-text-subtle";
 const TRACE_ERROR_CLASS =
-  "flex items-center gap-[7px] rounded-cuc-floating border border-cuc-danger-border bg-cuc-danger-surface p-3 text-xs leading-4 text-cuc-danger-strong";
+  "flex items-center gap-[7px] rounded-floating border border-danger-border bg-danger-surface p-3 text-xs leading-4 text-danger-strong";
 const TRACE_SECTIONS_CLASS =
   "grid content-start gap-2.5 overflow-auto pr-0.5";
 const TRACE_SECTION_CLASS =
-  "grid gap-2 rounded-cuc-floating border border-cuc-border-muted bg-cuc-surface p-3";
+  "grid gap-2 rounded-floating border border-border-muted bg-surface p-3";
 const TRACE_SECTION_TITLE_CLASS =
-  "m-0 text-xs font-semibold leading-[15px] text-cuc-text";
+  "m-0 text-xs font-semibold leading-[15px] text-text";
 const REPLAY_BANNER_CLASS =
-  "absolute left-1/2 top-[62px] z-[28] flex h-[34px] -translate-x-1/2 items-center gap-2 rounded-cuc-pill border border-black/30 bg-white/[0.96] py-0 pl-3 pr-[7px] text-xs text-cuc-ink shadow-[0_8px_24px_rgb(0_0_0_/_5%)] max-[760px]:top-[61px] max-[760px]:max-w-[calc(100vw-24px)]";
+  "absolute left-1/2 top-[62px] z-[28] flex h-[34px] -translate-x-1/2 items-center gap-2 rounded-pill border border-ink/30 bg-surface/[0.96] py-0 pl-3 pr-[7px] text-xs text-ink shadow-popover max-[760px]:top-[61px] max-[760px]:max-w-[calc(100vw-24px)]";
 const TRACE_LIST_CLASS = "grid gap-[7px]";
-const TRACE_MUTED_CLASS = "text-[10px] leading-[13px] text-cuc-text-muted";
+const TRACE_MUTED_CLASS = "text-[10px] leading-[13px] text-text-muted";
 const TRACE_CHIP_ROW_CLASS = "flex flex-wrap gap-1.5";
 const TRACE_CHIP_CLASS =
-  "max-w-full overflow-hidden text-ellipsis whitespace-nowrap rounded-cuc-pill bg-cuc-surface-warm px-2 py-1 text-[10px] leading-[13px] text-cuc-ink";
+  "max-w-full overflow-hidden text-ellipsis whitespace-nowrap rounded-pill bg-surface-warm px-2 py-1 text-[10px] leading-[13px] text-ink";
 const TRACE_STEP_ROW_CLASS =
-  "grid grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-[7px] text-[11px] text-cuc-text-secondary";
-const TRACE_STEP_DOT_CLASS = "grid size-[18px] place-items-center text-cuc-ink";
+  "grid grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-[7px] text-[11px] text-text-secondary";
+const TRACE_STEP_DOT_CLASS = "grid size-[18px] place-items-center text-ink";
 const TRACE_STEP_TITLE_CLASS =
-  "overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-medium text-cuc-text";
+  "overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-medium text-text";
 const TRACE_ROW_CLASS = "grid min-w-0 gap-1";
 const TRACE_ROW_HEADER_CLASS = "grid grid-cols-[minmax(0,1fr)_auto] gap-2";
 const TRACE_ROW_TITLE_CLASS =
-  "overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-medium text-cuc-text";
+  "overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-medium text-text";
 const TRACE_ROW_VALUE_CLASS =
-  "overflow-hidden text-[11px] font-normal leading-[14px] text-cuc-text-secondary [overflow-wrap:anywhere]";
+  "overflow-hidden text-[11px] font-normal leading-[14px] text-text-secondary [overflow-wrap:anywhere]";
 const TRACE_DEBUG_LIST_CLASS = "grid gap-2";
 const TRACE_DEBUG_CARD_CLASS =
-  "grid min-w-0 gap-1.5 rounded-cuc-control border border-cuc-border-soft bg-cuc-surface-subtle p-[9px]";
+  "grid min-w-0 gap-1.5 rounded-control border border-border-soft bg-surface-subtle p-[9px]";
 const TRACE_DEBUG_OUTPUT_CARD_CLASS =
-  "border-cuc-primary-border bg-cuc-primary-surface";
+  "border-primary-border bg-primary-surface";
 const TRACE_DEBUG_HEADER_CLASS = "grid grid-cols-[minmax(0,1fr)_auto] gap-2";
 const TRACE_DEBUG_TITLE_CLASS =
-  "overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-semibold leading-[14px] text-cuc-text";
+  "overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-semibold leading-[14px] text-text";
 const TRACE_DEBUG_PRE_CLASS =
-  "m-0 max-h-[260px] overflow-auto whitespace-pre-wrap text-[10px] leading-[14px] text-cuc-text-secondary [overflow-wrap:anywhere]";
+  "m-0 max-h-[260px] overflow-auto whitespace-pre-wrap text-[10px] leading-[14px] text-text-secondary [overflow-wrap:anywhere]";
 
 export function RunTracePanel({
   error,
@@ -179,8 +179,8 @@ export function RunTracePanel({
                   <span
                     className={cn(
                       TRACE_STEP_DOT_CLASS,
-                      step.status === "success" && "text-cuc-success-strong",
-                      step.status === "error" && "text-cuc-danger-strong"
+                      step.status === "success" && "text-success-strong",
+                      step.status === "error" && "text-danger-strong"
                     )}
                   >
                     {step.status === "error" ? <CircleAlert size={11} /> : step.status === "success" ? <Check size={11} /> : <LoadingIndicator ariaLabel="执行中" size={11} />}
@@ -287,7 +287,7 @@ export function ReplayBanner({ activeRunId, onExit }: { activeRunId: string | nu
     <div className={REPLAY_BANNER_CLASS}>
       <ListTree size={14} />
       <span>只读回放 · {shortId(activeRunId)}</span>
-      <button className={cn(TRACE_ACTION_BUTTON_CLASS, "size-cuc-icon-button")} aria-label="退出回放" onClick={onExit} title="退出回放" type="button">
+      <button className={cn(TRACE_ACTION_BUTTON_CLASS, "size-icon-button")} aria-label="退出回放" onClick={onExit} title="退出回放" type="button">
         <X size={13} />
       </button>
     </div>
