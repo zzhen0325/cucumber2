@@ -285,12 +285,32 @@ describe("RunNodeView", () => {
   it("does not render an empty task for simple output without plan", () => {
     renderRunNode({
       agentText: "黄瓜是一种常见的葫芦科蔬菜。",
+      currentStep: {
+        id: "run",
+        label: "完成",
+        status: "success",
+      },
       outputKind: "simple",
       status: "success",
     });
 
     expect(screen.queryByLabelText("Agent 执行")).toBeNull();
     expect(screen.queryByRole("button", { name: /执行/ })).toBeNull();
+  });
+
+  it("does not expose internal connection steps in the run output", () => {
+    renderRunNode({
+      currentStep: {
+        id: "client.connect",
+        label: "连接 Agent",
+        status: "running",
+      },
+      status: "running",
+    });
+
+    expect(screen.queryByText("连接 Agent")).toBeNull();
+    expect(screen.queryByLabelText("Agent 执行")).toBeNull();
+    expect(screen.getByText("等待模型输出")).toBeTruthy();
   });
 
   it("shows a current step fallback when no plan, summary, or tool is available", () => {

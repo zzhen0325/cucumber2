@@ -46,71 +46,12 @@ import type {
 
 const RUN_CARD_CLASS_NAME =
   "min-h-9 !border-cuc-run-border !bg-cuc-accent [--run-text:var(--color-cuc-run-text)] [--run-text-muted:var(--color-cuc-run-text-muted)]";
-const RUN_CONTENT_CLASS_NAME =
-  "run-content grid min-h-0 p-[14px] [grid-template-rows:auto_auto]";
-const RUN_CONTENT_RESIZED_CLASS_NAME =
-  "h-full [grid-template-rows:auto_minmax(0,1fr)]";
-const RUN_HEADING_CLASS_NAME =
-  "run-heading grid h-[34px] grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-1 px-2.5 text-[length:var(--canvas-node-title-size)] leading-[var(--canvas-node-title-line)] [color:var(--run-text)]";
-const RUN_HEADING_MAIN_CLASS_NAME =
-  "run-heading-main flex min-w-0 items-center gap-[5px]";
 const RUN_TITLE_CLASS_NAME =
   "min-w-0 flex-[0_1_auto] overflow-hidden text-ellipsis whitespace-nowrap";
-const RUN_TITLE_SHIMMER_CLASS_NAME =
-  `${RUN_TITLE_CLASS_NAME} [--ai-shimmer-text:var(--run-text)]`;
-const RUN_HEADER_SUMMARY_CLASS_NAME =
-  "run-header-summary min-w-[34px] flex-[1_1_auto] overflow-hidden text-ellipsis whitespace-nowrap text-[length:var(--canvas-node-meta-size)] leading-[var(--canvas-node-meta-line)] [color:var(--run-text-muted)] before:mr-1.5 before:text-cuc-ink/42 before:content-['·']";
-const RUN_HEADING_ACTIONS_CLASS_NAME =
-  "run-heading-actions flex shrink-0 items-center gap-0.5";
 const RUN_ICON_BUTTON_CLASS_NAME =
   "grid size-[18px] cursor-pointer place-items-center rounded-cuc-round border-0 bg-transparent [color:var(--run-text)] transition-[background-color,color,opacity] duration-[140ms] ease-[ease]";
-const RUN_RETRY_BUTTON_CLASS_NAME =
-  `${RUN_ICON_BUTTON_CLASS_NAME} run-retry-button nodrag nopan hover:bg-cuc-run-surface-muted hover:text-cuc-danger-strong`;
-const RUN_TRACE_BUTTON_CLASS_NAME =
-  `${RUN_ICON_BUTTON_CLASS_NAME} run-trace-button nodrag nopan hover:bg-cuc-run-surface-muted`;
-const RUN_TOGGLE_BUTTON_CLASS_NAME =
-  `${RUN_ICON_BUTTON_CLASS_NAME} run-toggle nodrag nopan hover:bg-cuc-run-surface-muted disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent data-[expanded=false]:[&_svg]:-rotate-90 [&_svg]:transition-transform [&_svg]:duration-[140ms] [&_svg]:ease-[ease]`;
-const RUN_STATUS_DOT_CLASS_NAME =
-  "run-status-dot grid size-[18px] place-items-center text-cuc-ink";
-const RUN_STREAM_CLASS_NAME =
-  "run-stream copyable-region nodrag nopan nowheel grid max-h-none min-h-0 gap-1.5 overscroll-contain px-2.5 pb-2.5 [scrollbar-width:thin]";
-const RUN_STREAM_RESIZED_CLASS_NAME = "overflow-y-auto";
-const RUN_STREAM_UNRESIZED_CLASS_NAME = "overflow-visible";
-const RUN_CONVERSATION_FLOW_CLASS_NAME =
-  "run-conversation-flow grid min-w-0 gap-[7px]";
-const RUN_AGENT_TEXT_REGION_CLASS_NAME =
-  "run-agent-text-region nodrag nopan nowheel min-w-0 max-h-none overflow-visible overscroll-contain [scrollbar-width:thin]";
-const AGENT_TEXT_OUTPUT_CLASS_NAME =
+const RUN_TEXT_CLASS_NAME =
   "agent-text-output block h-auto m-0 whitespace-pre-wrap text-[length:var(--canvas-node-body-size)] leading-[var(--canvas-node-body-line)] [color:var(--run-text)] [overflow-wrap:anywhere] [&_p]:m-0 [&_p+p]:mt-1";
-const AGENT_TEXT_MUTED_CLASS_NAME =
-  "[color:var(--run-text-muted)] [--ai-shimmer-text:var(--run-text-muted)]";
-const AGENT_REASONING_CLASS_NAME =
-  "agent-reasoning mt-1.5 grid min-w-0 gap-1";
-const AGENT_MESSAGE_LIST_CLASS_NAME =
-  "agent-message-list grid min-w-0 gap-1.5";
-const RUN_FLOW_ENTRY_CLASS_NAME =
-  "run-flow-entry agent-message grid min-w-0 grid-cols-[17px_minmax(0,1fr)] gap-[5px]";
-const RUN_FLOW_MARKER_CLASS_NAME =
-  "relative grid justify-items-center after:absolute after:bottom-[-7px] after:top-[15px] after:w-px after:bg-cuc-run-divider after:content-['']";
-const RUN_FLOW_MARKER_LAST_CLASS_NAME = "after:hidden";
-const RUN_FLOW_MARKER_ICON_CLASS_NAME =
-  "z-[1] grid size-[15px] place-items-center rounded-cuc-round border border-cuc-run-marker-border bg-cuc-run-surface [color:var(--run-text)]";
-const RUN_FLOW_BODY_CLASS_NAME = "run-flow-body grid min-w-0 gap-1";
-const RUN_FLOW_HEADING_CLASS_NAME =
-  "run-flow-heading flex min-w-0 items-center gap-1 text-[length:var(--canvas-node-meta-size)] leading-[var(--canvas-node-meta-line)] [color:var(--run-text-muted)]";
-const RUN_FLOW_HEADING_NAME_CLASS_NAME =
-  "overflow-hidden text-ellipsis whitespace-nowrap font-medium";
-const RUN_FLOW_BADGE_CLASS_NAME = "shrink-0 text-cuc-success";
-const AGENT_ACTIVITY_STACK_CLASS_NAME =
-  "agent-activity-stack mt-1.5 grid min-w-0 gap-1";
-const AGENT_TASK_STACK_CLASS_NAME = "agent-task-stack min-w-0";
-const RUN_TOOL_LIST_CLASS_NAME = "run-tool-list grid min-w-0 gap-[5px]";
-const TOOL_CALL_ERROR_LINE_CLASS_NAME =
-  "tool-call-error-line grid grid-cols-[minmax(0,1fr)_auto] items-start gap-[5px]";
-const TOOL_CALL_ERROR_SNIPPET_CLASS_NAME =
-  "tool-call-error-snippet line-clamp-2 overflow-hidden text-[length:var(--canvas-node-meta-size)] leading-[var(--canvas-node-meta-line)] text-cuc-danger-deep [overflow-wrap:anywhere]";
-const TOOL_CALL_RETRY_CLASS_NAME =
-  "tool-call-retry nodrag nopan grid size-4 cursor-pointer place-items-center rounded-cuc-round border-0 bg-cuc-run-surface-muted text-cuc-danger-strong hover:bg-cuc-run-surface-hover";
 
 export function RunNodeView({
   id,
@@ -138,8 +79,6 @@ export function RunNodeView({
     [data.toolPart, data.toolParts]
   );
   const latestToolPart = toolParts.at(-1) ?? toolParts[0];
-  const title = getRunTitle(data.status, latestToolPart?.state, data.currentStep);
-  const headerSummary = getRunHeaderSummary(data.status, toolParts, data.currentStep);
   const hasToolDetail =
     data.status !== "queued" ||
     toolParts.some((part) => part.state !== "input-streaming");
@@ -172,8 +111,11 @@ export function RunNodeView({
   const hasPlan = Boolean(data.plan?.length);
   const hasSummaryItems = Boolean(summaryItems.length);
   const hasToolParts = hasToolDetail && toolParts.length > 0;
+  const visibleCurrentStep = getVisibleCurrentStep(data.currentStep);
+  const title = getRunTitle(data.status, latestToolPart?.state, visibleCurrentStep);
+  const headerSummary = getRunHeaderSummary(data.status, toolParts, visibleCurrentStep);
   const showCurrentStepFallback =
-    !hasSummaryItems && !hasPlan && !hasToolParts && Boolean(data.currentStep);
+    !hasSummaryItems && !hasPlan && !hasToolParts && Boolean(visibleCurrentStep);
   const hasAgentActivity =
     hasSummaryItems || hasPlan || hasToolParts || showCurrentStepFallback;
   const hasRunOutput =
@@ -183,7 +125,7 @@ export function RunNodeView({
     hasToolDetail ||
     hasPlan ||
     hasSummaryItems ||
-    Boolean(data.currentStep);
+    Boolean(visibleCurrentStep);
   const pendingAgentText = getPendingAgentText(data.status, headerSummary);
   const toggleLabel = expanded ? "收起输出" : "展开输出";
   const nodeClassName = cn(
@@ -292,14 +234,14 @@ export function RunNodeView({
     >
       <NodeContent
         className={cn(
-          RUN_CONTENT_CLASS_NAME,
-          hasFixedHeight && RUN_CONTENT_RESIZED_CLASS_NAME
+          "grid min-h-0 p-[14px] [grid-template-rows:auto_auto]",
+          hasFixedHeight && "h-full [grid-template-rows:auto_minmax(0,1fr)]"
         )}
       >
-        <div className={RUN_HEADING_CLASS_NAME}>
+        <div className="grid h-[34px] grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-1 px-2.5 text-[length:var(--canvas-node-title-size)] leading-[var(--canvas-node-title-line)] [color:var(--run-text)]">
           <span
             className={cn(
-              RUN_STATUS_DOT_CLASS_NAME,
+              "grid size-[18px] place-items-center text-cuc-ink",
               data.status,
               data.status === "success" && "text-cuc-success",
               data.status === "error" && "text-cuc-danger-strong"
@@ -307,9 +249,16 @@ export function RunNodeView({
           >
             <RunStatusIcon status={data.status} />
           </span>
-          <span className={RUN_HEADING_MAIN_CLASS_NAME}>
+          <span className="flex min-w-0 items-center gap-[5px]">
             {isActiveRun ? (
-              <Shimmer as="span" className={RUN_TITLE_SHIMMER_CLASS_NAME} duration={1.8}>
+              <Shimmer
+                as="span"
+                className={cn(
+                  RUN_TITLE_CLASS_NAME,
+                  "[--ai-shimmer-text:var(--run-text)]"
+                )}
+                duration={1.8}
+              >
                 {title}
               </Shimmer>
             ) : (
@@ -317,18 +266,21 @@ export function RunNodeView({
             )}
             {headerSummary && (
               <span
-                className={RUN_HEADER_SUMMARY_CLASS_NAME}
+                className="min-w-[34px] flex-[1_1_auto] overflow-hidden text-ellipsis whitespace-nowrap text-[length:var(--canvas-node-meta-size)] leading-[var(--canvas-node-meta-line)] [color:var(--run-text-muted)] before:mr-1.5 before:text-cuc-ink/42 before:content-['·']"
                 title={headerSummary.fullLabel}
               >
                 {/* {headerSummary.visibleLabel} */}
               </span>
             )}
           </span>
-          <span className={RUN_HEADING_ACTIONS_CLASS_NAME}>
+          <span className="flex shrink-0 items-center gap-0.5">
             {data.status === "error" && (
               <button
                 aria-label="重试 Agent Run"
-                className={RUN_RETRY_BUTTON_CLASS_NAME}
+                className={cn(
+                  RUN_ICON_BUTTON_CLASS_NAME,
+                  "run-retry-button nodrag nopan hover:bg-cuc-run-surface-muted hover:text-cuc-danger-strong"
+                )}
                 onClick={(event) => {
                   event.stopPropagation();
                   dispatchRetryRun(id);
@@ -341,7 +293,10 @@ export function RunNodeView({
             )}
             <button
               aria-label="查看 Run Trace"
-              className={RUN_TRACE_BUTTON_CLASS_NAME}
+              className={cn(
+                RUN_ICON_BUTTON_CLASS_NAME,
+                "run-trace-button nodrag nopan hover:bg-cuc-run-surface-muted"
+              )}
               onClick={(event) => {
                 event.stopPropagation();
                 dispatchOpenTrace(id);
@@ -354,7 +309,10 @@ export function RunNodeView({
             <button
               aria-expanded={expanded}
               aria-label={toggleLabel}
-              className={RUN_TOGGLE_BUTTON_CLASS_NAME}
+              className={cn(
+                RUN_ICON_BUTTON_CLASS_NAME,
+                "run-toggle nodrag nopan hover:bg-cuc-run-surface-muted disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent data-[expanded=false]:[&_svg]:-rotate-90 [&_svg]:transition-transform [&_svg]:duration-[140ms] [&_svg]:ease-[ease]"
+              )}
               data-expanded={expanded}
               disabled={!hasRunOutput}
               onClick={(event) => {
@@ -371,16 +329,14 @@ export function RunNodeView({
         {hasRunOutput && expanded && (
           <div
             className={cn(
-              RUN_STREAM_CLASS_NAME,
-              hasFixedHeight
-                ? RUN_STREAM_RESIZED_CLASS_NAME
-                : RUN_STREAM_UNRESIZED_CLASS_NAME
+              "copyable-region nodrag nopan nowheel grid max-h-none min-h-0 gap-1.5 overscroll-contain px-2.5 pb-2.5 [scrollbar-width:thin]",
+              hasFixedHeight ? "overflow-y-auto" : "overflow-visible"
             )}
             aria-label="Agent run stream"
             data-expanded="true"
           >
-            <div className={RUN_CONVERSATION_FLOW_CLASS_NAME}>
-              <div className={RUN_AGENT_TEXT_REGION_CLASS_NAME}>
+            <div className="grid min-w-0 gap-[7px]">
+              <div className="nodrag nopan nowheel min-w-0 max-h-none overflow-visible overscroll-contain [scrollbar-width:thin]">
                 {hasReasoningMessages && !agentText && (
                   <RunReasoningBlock
                     messages={reasoningMessages}
@@ -390,15 +346,15 @@ export function RunNodeView({
                 {showAgentMessages ? (
                   <AgentMessageList messages={assistantMessages} />
                 ) : agentText ? (
-                  <MessageResponse className={AGENT_TEXT_OUTPUT_CLASS_NAME}>
+                  <MessageResponse className={RUN_TEXT_CLASS_NAME}>
                     {agentText}
                   </MessageResponse>
                 ) : !hasReasoningMessages ? (
                   <Shimmer
                     as="p"
                     className={cn(
-                      AGENT_TEXT_OUTPUT_CLASS_NAME,
-                      AGENT_TEXT_MUTED_CLASS_NAME
+                      RUN_TEXT_CLASS_NAME,
+                      "[color:var(--run-text-muted)] [--ai-shimmer-text:var(--run-text-muted)]"
                     )}
                     duration={1.8}
                   >
@@ -420,7 +376,7 @@ export function RunNodeView({
                 {hasAgentActivity && (
                   <RunActivityStack
                     currentStep={
-                      showCurrentStepFallback ? data.currentStep : undefined
+                      showCurrentStepFallback ? visibleCurrentStep : undefined
                     }
                     error={data.error}
                     plan={data.plan ?? []}
@@ -458,7 +414,7 @@ function RunReasoningBlock({
   return (
     <Reasoning
       aria-label="Agent 推理"
-      className={AGENT_REASONING_CLASS_NAME}
+      className="mt-1.5 grid min-w-0 gap-1"
       defaultOpen={isStreaming}
       isStreaming={isStreaming}
       key={isStreaming ? "streaming" : "completed"}
@@ -473,34 +429,24 @@ function RunReasoningBlock({
 
 function AgentMessageList({ messages }: { messages: CanvasAgentMessage[] }) {
   return (
-    <div className={AGENT_MESSAGE_LIST_CLASS_NAME} aria-label="Agent 对话">
-      {messages.map((message, index) => (
-        <div className={RUN_FLOW_ENTRY_CLASS_NAME} key={message.id}>
-          <div
-            className={cn(
-              RUN_FLOW_MARKER_CLASS_NAME,
-              index === messages.length - 1 && RUN_FLOW_MARKER_LAST_CLASS_NAME
-            )}
-          >
-            <span className={RUN_FLOW_MARKER_ICON_CLASS_NAME}>
-              <Sparkles size={10} />
-            </span>
-          </div>
-          <div className={RUN_FLOW_BODY_CLASS_NAME}>
-            <div className={RUN_FLOW_HEADING_CLASS_NAME}>
+    <div className="grid min-w-0 gap-1.5" aria-label="Agent 对话">
+      {messages.map((message) => (
+        <div className="agent-message grid min-w-0 gap-[5px]" key={message.id}>
+          <div className="grid min-w-0 gap-1">
+            <div className="flex min-w-0 items-center gap-1 text-[length:var(--canvas-node-meta-size)] leading-[var(--canvas-node-meta-line)] [color:var(--run-text-muted)]">
               <strong
-                className={RUN_FLOW_HEADING_NAME_CLASS_NAME}
+                className="overflow-hidden text-ellipsis whitespace-nowrap font-medium"
                 title={message.agentName ?? "Agent"}
               >
                 {message.agentName ?? "Agent"}
               </strong>
               {getAgentMessageBadges(message).map((badge) => (
-                <span className={RUN_FLOW_BADGE_CLASS_NAME} key={badge}>
+                <span className="shrink-0 text-cuc-success" key={badge}>
                   {badge}
                 </span>
               ))}
             </div>
-            <MessageResponse className={AGENT_TEXT_OUTPUT_CLASS_NAME}>
+            <MessageResponse className={RUN_TEXT_CLASS_NAME}>
               {message.content}
             </MessageResponse>
           </div>
@@ -608,14 +554,17 @@ export function ToolPartView({
         toolType={toolPart.type}
       />
       {errorText && !open && (
-        <span className={TOOL_CALL_ERROR_LINE_CLASS_NAME}>
-          <span className={TOOL_CALL_ERROR_SNIPPET_CLASS_NAME} title={errorText}>
+        <span className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-[5px]">
+          <span
+            className="line-clamp-2 overflow-hidden text-[length:var(--canvas-node-meta-size)] leading-[var(--canvas-node-meta-line)] text-cuc-danger-deep [overflow-wrap:anywhere]"
+            title={errorText}
+          >
             {errorText}
           </span>
           {runNodeId && (
             <button
               aria-label={`从${toolName}重试`}
-              className={TOOL_CALL_RETRY_CLASS_NAME}
+              className="nodrag nopan grid size-4 cursor-pointer place-items-center rounded-cuc-round border-0 bg-cuc-run-surface-muted text-cuc-danger-strong hover:bg-cuc-run-surface-hover"
               onClick={(event) => {
                 event.stopPropagation();
                 dispatchRetryRun(runNodeId, {
@@ -671,10 +620,10 @@ function RunActivityStack({
   const taskTitle = plan.length ? "执行计划" : "执行过程";
 
   return (
-    <div aria-label="Agent 执行" className={AGENT_ACTIVITY_STACK_CLASS_NAME}>
+    <div aria-label="Agent 执行" className="mt-1.5 grid min-w-0 gap-1">
       {hasTaskItems && (
         <Task
-          className={AGENT_TASK_STACK_CLASS_NAME}
+          className="min-w-0"
           defaultOpen={runStatus !== "success"}
           key={runStatus}
         >
@@ -708,7 +657,7 @@ function RunActivityStack({
         </Task>
       )}
       {toolParts.length > 0 && (
-        <div aria-label="工具调用" className={RUN_TOOL_LIST_CLASS_NAME}>
+        <div aria-label="工具调用" className="grid min-w-0 gap-[5px]">
           {toolParts.map((part, index) => (
             <ToolPartView
               error={error}
@@ -781,6 +730,23 @@ function getPlanStepDescription(status: RunNodeData["status"]) {
   };
 
   return labels[status];
+}
+
+function getVisibleCurrentStep(currentStep?: RunNodeData["currentStep"]) {
+  if (!currentStep) {
+    return undefined;
+  }
+  if (
+    currentStep.id === "client.connect" ||
+    currentStep.id === "agent.start" ||
+    currentStep.id === "chat.start"
+  ) {
+    return undefined;
+  }
+  if (currentStep.id === "run" && currentStep.status === "success") {
+    return undefined;
+  }
+  return currentStep;
 }
 
 function mapRunStatusToTaskStatus(

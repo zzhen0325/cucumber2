@@ -347,6 +347,33 @@ describe("agent event graph projection", () => {
     ).toBe(true);
   });
 
+  it("does not project pending markdown nodes for plain text answers", () => {
+    const projection = projectRunTraceToCanvas({
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", { prompt: "你好", promptNodeId: "prompt-1" }),
+        event("input.normalized", "input", {
+          route: "chat_agent_task",
+          normalizedInput: {
+            rawInput: "你好",
+            task: { domain: "text", intent: "text.answer", action: "analyze", confidence: 1 },
+            routing: { primaryAgent: "manager_agent", candidateAgents: [] },
+            inputs: { text: "你好", images: [], files: [] },
+            constraints: { explicit: [], inferred: [] },
+            ambiguities: [],
+          },
+        }),
+      ],
+    });
+
+    expect(
+      projection.nodes.some((node) => node.id.startsWith("markdown-pending-"))
+    ).toBe(false);
+    expect(
+      projection.nodes.some((node) => node.data.kind === "markdown")
+    ).toBe(false);
+  });
+
   it("reuses pending artifact nodes when the final artifact arrives", () => {
     const projection = projectRunTraceToCanvas({
       projectId: "project-1",

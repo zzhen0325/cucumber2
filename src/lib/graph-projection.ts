@@ -1030,20 +1030,143 @@ function readExpectedArtifactRequests(
 ): PendingArtifactRequest[] {
   const inputEvent = events.findLast((event) => event.type === "input.normalized");
   const normalizedInput = readRecord(inputEvent?.payload.normalizedInput);
+  if (!normalizedInput) {
+    return [];
+  }
   const task = readRecord(normalizedInput?.task);
-  const domain = readString(task?.domain);
-  if (!domain || domain === "image" || domain === "canvas") {
+  const artifactKind = inferPendingArtifactKind({
+    domain: readString(task?.domain),
+    intent:
+      readString(task?.intent) ??
+      readString(normalizedInput?.intent) ??
+      "",
+    primaryAgent: readString(readRecord(normalizedInput?.routing)?.primaryAgent),
+    route: readString(inputEvent?.payload.route),
+    legacyArtifactKind: readString(readRecord(normalizedInput?.artifact)?.kind),
+  });
+  if (!artifactKind) {
     return [];
   }
 
-  const kind = domain === "code" ? "code" : "document";
   const request = pendingRequestFromNormalizedArtifact({
-    format: kind === "code" ? "markdown" : "markdown",
-    kind,
+    format: getPendingArtifactFormat(artifactKind),
+    kind: artifactKind,
     prompt,
-    subtype: undefined,
+    subtype: getPendingArtifactSubtype(artifactKind, readString(task?.intent)),
   });
   return request ? [request] : [];
+}
+
+function inferPendingArtifactKind({
+  domain,
+  intent,
+  legacyArtifactKind,
+  primaryAgent,
+  route,
+}: {
+  domain?: string;
+  intent: string;
+  legacyArtifactKind?: string;
+  primaryAgent?: string;
+  route?: string;
+}) {
+  const legacyKind = normalizePendingArtifactKind(legacyArtifactKind);
+  if (legacyKind) {
+    return legacyKind;
+  }
+  if (legacyArtifactKind === "image" || legacyArtifactKind === "canvas") {
+    return null;
+  }
+
+  if (
+    route === "chat_agent_task" ||
+    route === "manager_task" ||
+    route === "simple_canvas" ||
+    route === "image_task"
+  ) {
+    return null;
+  }
+  if (route === "web_task") {
+    return "webpage";
+  }
+  if (route === "research_task") {
+    return "markdown";
+  }
+  if (route === "document_task") {
+    return inferDocumentArtifactKind(domain, intent);
+  }
+
+  if (primaryAgent === "web_agent") {
+    return "webpage";
+  }
+  if (primaryAgent === "research_agent") {
+    return "markdown";
+  }
+  if (primaryAgent === "document_agent") {
+    return inferDocumentArtifactKind(domain, intent);
+  }
+  return null;
+}
+
+function inferDocumentArtifactKind(domain: string | undefined, intent: string) {
+  const normalizedIntent = intent.toLowerCase();
+  if (domain === "code" || /code|代码/.test(normalizedIntent)) {
+    return "code";
+  }
+  if (/webpage|web\.fetch|html|h5|网页/.test(normalizedIntent)) {
+    return "webpage";
+  }
+  if (/diagram|mermaid|flowchart|sequence|流程图|时序图/.test(normalizedIntent)) {
+    return "diagram";
+  }
+  if (domain === "text") {
+    return "document";
+  }
+  return null;
+}
+
+function normalizePendingArtifactKind(kind: string | undefined) {
+  if (
+    kind === "artifact" ||
+    kind === "markdown" ||
+    kind === "decision" ||
+    kind === "memory" ||
+    kind === "toolResult" ||
+    kind === "document" ||
+    kind === "code" ||
+    kind === "webpage" ||
+    kind === "diagram" ||
+    kind === "data"
+  ) {
+    return kind;
+  }
+  return null;
+}
+
+function getPendingArtifactFormat(kind: string) {
+  if (kind === "code") {
+    return "code";
+  }
+  if (kind === "webpage") {
+    return "html";
+  }
+  if (kind === "diagram") {
+    return "mermaid";
+  }
+  return "markdown";
+}
+
+function getPendingArtifactSubtype(kind: string, intent: string | undefined) {
+  if (kind !== "diagram") {
+    return undefined;
+  }
+  if (/sequence|时序图/i.test(intent ?? "")) {
+    return "sequenceDiagram";
+  }
+  if (/flowchart|流程图/i.test(intent ?? "")) {
+    return "flowchart";
+  }
+  return undefined;
 }
 
 function pendingRequestFromNormalizedArtifact({

@@ -57,6 +57,35 @@ describe("agent run materializer", () => {
       });
   });
 
+  it("does not write pending artifact nodes for plain text answers", () => {
+    const next = materializeSnapshot(
+      projectSnapshot(),
+      [
+        event("run.created", {
+          prompt: "你好",
+          promptNodeId: "prompt-1",
+          selectedNodeId: null,
+        }),
+        event("input.normalized", {
+          route: "chat_agent_task",
+          normalizedInput: {
+            rawInput: "你好",
+            task: { domain: "text", intent: "text.answer", action: "analyze", confidence: 1 },
+            routing: { primaryAgent: "manager_agent", candidateAgents: [] },
+            inputs: { text: "你好", images: [], files: [] },
+            constraints: { explicit: [], inferred: [] },
+            ambiguities: [],
+          },
+        }),
+      ],
+      "run-1"
+    );
+
+    expect(next.nodes.some((node) => node.id.startsWith("markdown-pending-")))
+      .toBe(false);
+    expect(next.nodes.some((node) => node.data.kind === "markdown")).toBe(false);
+  });
+
   it("writes artifact result nodes while preserving unrelated canvas nodes", () => {
     const project = projectSnapshot();
     const next = materializeSnapshot(

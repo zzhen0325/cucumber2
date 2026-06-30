@@ -532,6 +532,10 @@ function hasPersistableNodeChanges(changes: NodeChange<AgentCanvasNode>[]) {
   });
 }
 
+const DELETE_SAVE_DEBOUNCE_MS = 50;
+const POSITION_SAVE_DEBOUNCE_MS = 250;
+const CONTENT_SAVE_DEBOUNCE_MS = 800;
+
 const manualNodeTemplates: ManualNodeTemplate[] = [
   {
     icon: Type,
@@ -1859,6 +1863,8 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         reportStatus: false,
       });
       if (!pendingCanvasSaved) {
+        setStorageStatus("error");
+        setStorageError("重命名失败：画布保存失败，请稍后重试。");
         return false;
       }
 
@@ -2022,7 +2028,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       const nextNodes = [
         ...applySelectedNodeIds(currentNodes, []),
         draft.promptNode,
-        withRunClientStep(draft.runNode, "client.connect", "连接 Agent"),
+        draft.runNode,
       ];
       const nextEdges = [...currentEdges, ...draft.edges];
       const draftPatch = diffCanvasPatch(
@@ -2185,7 +2191,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         saveTimer.current = null;
       }
 
-      void saveProjectSnapshot({ reportStatus: false });
+      void saveProjectSnapshot({ keepalive: true, reportStatus: false });
     };
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
@@ -2230,7 +2236,13 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
     const isContentChange =
       prevTitle !== projectTitle || hasNodeContentChanged(prevNodes, nodes);
-    const delay = isContentChange ? 800 : 250;
+    const hasPendingDeletes =
+      deletedNodeIdsRef.current.size > 0 || deletedEdgeIdsRef.current.size > 0;
+    const delay = hasPendingDeletes
+      ? DELETE_SAVE_DEBOUNCE_MS
+      : isContentChange
+        ? CONTENT_SAVE_DEBOUNCE_MS
+        : POSITION_SAVE_DEBOUNCE_MS;
 
     if (saveTimer.current) {
       window.clearTimeout(saveTimer.current);
@@ -3453,30 +3465,6 @@ function hasTerminalRunEvent(events: RunStepTraceEvent[]) {
   return events.some(
     (event) => event.type === "run.completed" || event.type === "run.failed"
   );
-}
-
-function withRunClientStep(
-  node: AgentCanvasNode,
-  stepId: string,
-  label: string
-): AgentCanvasNode {
-  if (node.data.kind !== "run") {
-    return node;
-  }
-
-  return {
-    ...node,
-    data: {
-      ...node.data,
-      currentStep: {
-        id: stepId,
-        label,
-        startedAt: new Date().toISOString(),
-        status: "running",
-      },
-      status: "running",
-    },
-  };
 }
 
 function applyLinkedNodeDragChanges(
