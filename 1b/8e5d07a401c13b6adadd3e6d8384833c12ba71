@@ -1,0 +1,26 @@
+src/components/LoadingScreen.tsx
+  s_5372c8a6cf1dcc::t_ebb73ceba787fa 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "1b8e5d07a401c13b6adadd3e6d8384833c12ba71",
+  "prompts": {},
+  "humans": {
+    "h_49a1fcd5ff42d1": {
+      "author": "zzhen0325 <26629213+zzhen0325@users.noreply.github.com>"
+    }
+  },
+  "sessions": {
+    "s_5372c8a6cf1dcc": {
+      "agent_id": {
+        "tool": "trae-cue",
+        "id": "ai_tab-icr-b396c9a4-40d1-4d05-b77a-5827141724e0",
+        "model": "default"
+      },
+      "human_author": "zzhen0325 <26629213+zzhen0325@users.noreply.github.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
