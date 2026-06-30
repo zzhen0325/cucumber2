@@ -13,7 +13,10 @@ import type {
 } from "../types/canvas";
 import {
   DEFAULT_CANVAS_NODE_WIDTH,
+  DEFAULT_MARKDOWN_NODE_DIMENSIONS,
   DEFAULT_PROMPT_NODE_HEIGHT,
+  DEFAULT_WEBPAGE_NODE_DIMENSIONS,
+  getDefaultNodeDimensionProps,
   getPromptNodeDimensions,
 } from "./canvas-node-dimensions";
 
@@ -23,10 +26,10 @@ const COMPACT_RUN_NODE_HEIGHT = 36;
 const RUN_NODE_HEIGHT = 300;
 const RESULT_NODE_HEIGHT = 240;
 const RESULT_NODE_MIN_SIDE = 24;
-const MARKDOWN_NODE_WIDTH = 420;
-const MARKDOWN_NODE_HEIGHT = 360;
-const WEBPAGE_NODE_WIDTH = 420;
-const WEBPAGE_NODE_HEIGHT = 320;
+const MARKDOWN_NODE_WIDTH = DEFAULT_MARKDOWN_NODE_DIMENSIONS.width;
+const MARKDOWN_NODE_HEIGHT = DEFAULT_MARKDOWN_NODE_DIMENSIONS.height;
+const WEBPAGE_NODE_WIDTH = DEFAULT_WEBPAGE_NODE_DIMENSIONS.width;
+const WEBPAGE_NODE_HEIGHT = DEFAULT_WEBPAGE_NODE_DIMENSIONS.height;
 const ARTIFACT_NODE_HEIGHT = 132;
 const RESULT_GAP = 17;
 const NODE_CLEARANCE = 24;
@@ -574,6 +577,7 @@ export function createMarkdownDocumentNodes(
       id: nodeId,
       type: "markdownNode",
       position: { x, y: preferredRect.y },
+      ...getDefaultNodeDimensionProps("markdown"),
       data: {
         kind: "markdown",
         artifact,
@@ -647,6 +651,7 @@ export function createHtmlPageNodes(
       id: nodeId,
       type: "webpageNode",
       position: { x, y: preferredRect.y },
+      ...getDefaultNodeDimensionProps("webpage"),
       data: {
         kind: "webpage",
         artifact,

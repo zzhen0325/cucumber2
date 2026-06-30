@@ -133,39 +133,41 @@ export function RunNodeView({
     data.status,
     isActiveRun && "active"
   );
-  const contentSignature = useMemo(
+  const nodeInternalsSignature = useMemo(
     () =>
-      JSON.stringify({
-        agentText,
-        expanded,
-        outputKind: data.outputKind,
-        simpleRunOutput,
-        status: data.status,
-        currentStep: data.currentStep,
-        assistantMessages,
-        reasoningMessages,
-        plan: data.plan,
-        summaryItems,
-        toolParts: toolParts.map((part) => ({
-          errorText: part.errorText,
-          input: part.input,
-          output: part.output,
-          state: part.state,
-          toolCallId: part.toolCallId,
-          type: part.type,
-        })),
-      }),
+      [
+        expanded ? "expanded" : "collapsed",
+        hasRunOutput ? "output" : "empty",
+        data.status,
+        data.outputKind ?? "",
+        simpleRunOutput ? "simple" : "rich",
+        data.currentStep?.id ?? "",
+        data.currentStep?.status ?? "",
+        assistantMessages.length,
+        reasoningMessages.length,
+        data.plan?.length ?? 0,
+        summaryItems.length,
+        toolParts
+          .map(
+            (part) =>
+              `${part.type}:${part.state}:${part.toolCallId ?? ""}:${
+                part.errorText ? "error" : "ok"
+              }`
+          )
+          .join("|"),
+      ].join("::"),
     [
-      agentText,
-      data.currentStep,
-      assistantMessages,
+      assistantMessages.length,
+      data.currentStep?.id,
+      data.currentStep?.status,
       data.outputKind,
-      data.plan,
+      data.plan?.length,
       data.status,
       expanded,
-      reasoningMessages,
+      hasRunOutput,
+      reasoningMessages.length,
       simpleRunOutput,
-      summaryItems,
+      summaryItems.length,
       toolParts,
     ]
   );
@@ -197,7 +199,7 @@ export function RunNodeView({
 
   useEffect(() => {
     updateNodeInternals(id);
-  }, [contentSignature, id, updateNodeInternals]);
+  }, [id, nodeInternalsSignature, updateNodeInternals]);
 
   useEffect(() => {
     const element = nodeRef.current;
@@ -225,6 +227,7 @@ export function RunNodeView({
       handles={{ source: true, target: true }}
       minHeight={36}
       minWidth={220}
+      nodeId={id}
       onResize={(_, params) => setManualSize(params)}
       onResizeEnd={(_, params) => setManualSize(params)}
       ref={nodeRef}

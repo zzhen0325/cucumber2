@@ -1,10 +1,27 @@
+import type { CSSProperties } from "react";
+
+import type { AgentCanvasNode, AgentCanvasNodeData } from "../types/canvas";
+
 export const DEFAULT_CANVAS_NODE_WIDTH = 240;
 export const DEFAULT_PROMPT_NODE_HEIGHT = 84;
+export const DEFAULT_MARKDOWN_NODE_DIMENSIONS = {
+  width: 420,
+  height: 360,
+} as const;
+export const DEFAULT_WEBPAGE_NODE_DIMENSIONS = {
+  width: 420,
+  height: 320,
+} as const;
 
 const PROMPT_NODE_MAX_AUTO_HEIGHT = 420;
 const PROMPT_NODE_HORIZONTAL_PADDING = 54;
 const PROMPT_NODE_VERTICAL_PADDING = 44;
 const PROMPT_NODE_LINE_HEIGHT = 16;
+
+type CanvasNodeDimensions = {
+  width: number;
+  height: number;
+};
 
 export function getPromptNodeDimensions(prompt: string) {
   const lineCount = estimatePromptLineCount(prompt);
@@ -18,6 +35,87 @@ export function getPromptNodeDimensions(prompt: string) {
     width: DEFAULT_CANVAS_NODE_WIDTH,
     height,
   };
+}
+
+export function getDefaultNodeDimensions(
+  kind: AgentCanvasNodeData["kind"]
+): CanvasNodeDimensions | null {
+  if (kind === "markdown") {
+    return DEFAULT_MARKDOWN_NODE_DIMENSIONS;
+  }
+  if (kind === "webpage") {
+    return DEFAULT_WEBPAGE_NODE_DIMENSIONS;
+  }
+
+  return null;
+}
+
+export function getDefaultNodeDimensionProps(
+  kind: AgentCanvasNodeData["kind"]
+): Partial<Pick<AgentCanvasNode, "height" | "style" | "width">> {
+  const dimensions = getDefaultNodeDimensions(kind);
+  if (!dimensions) {
+    return {};
+  }
+
+  return {
+    ...dimensions,
+    style: getDimensionStyle(dimensions),
+  };
+}
+
+export function applyDefaultNodeDimensions<T extends AgentCanvasNode>(node: T): T {
+  const dimensions = getDefaultNodeDimensions(node.data.kind);
+  if (!dimensions) {
+    return node;
+  }
+
+  const width = readExplicitNodeDimension(node, "width") ?? dimensions.width;
+  const height = readExplicitNodeDimension(node, "height") ?? dimensions.height;
+
+  return {
+    ...node,
+    width,
+    height,
+    style: {
+      ...readNodeStyle(node),
+      width,
+      height,
+    },
+  };
+}
+
+export function readNodeDimension(
+  node: AgentCanvasNode,
+  dimension: "height" | "width"
+) {
+  const style = readNodeStyle(node);
+  const value = node[dimension] ?? style[dimension] ?? node.measured?.[dimension];
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : null;
+}
+
+function readExplicitNodeDimension(
+  node: AgentCanvasNode,
+  dimension: "height" | "width"
+) {
+  const style = readNodeStyle(node);
+  const value = node[dimension] ?? style[dimension];
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : null;
+}
+
+function getDimensionStyle(dimensions: CanvasNodeDimensions): CSSProperties {
+  return {
+    height: dimensions.height,
+    width: dimensions.width,
+  };
+}
+
+function readNodeStyle(node: AgentCanvasNode): CSSProperties {
+  return node.style && typeof node.style === "object" ? node.style : {};
 }
 
 function estimatePromptLineCount(prompt: string) {

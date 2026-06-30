@@ -84,4 +84,51 @@ describe("normalizeLoadedCanvasSnapshot", () => {
       },
     });
   });
+
+  it("adds default dimensions to loaded text artifact nodes without replacing explicit sizes", () => {
+    const nodes: AgentCanvasNode[] = [
+      {
+        id: "markdown-1",
+        type: "markdownNode",
+        position: { x: 0, y: 0 },
+        measured: { width: 360, height: 450 },
+        data: {
+          kind: "markdown",
+          artifact: { id: "doc-1", type: "doc" },
+          content: "# 方案",
+          title: "方案",
+        },
+      },
+      {
+        id: "webpage-1",
+        type: "webpageNode",
+        position: { x: 460, y: 0 },
+        width: 600,
+        height: 380,
+        style: { width: 600, height: 380 },
+        data: {
+          kind: "webpage",
+          artifact: { id: "page-1", type: "webpage" },
+          title: "页面",
+        },
+      },
+    ];
+
+    const normalized = normalizeLoadedCanvasSnapshot({
+      edges: [],
+      nodes,
+      projectId: "project-1",
+    });
+
+    expect(normalized.nodes[0]).toMatchObject({
+      width: 420,
+      height: 360,
+      style: { width: 420, height: 360 },
+    });
+    expect(normalized.nodes[1]).toMatchObject({
+      width: 600,
+      height: 380,
+      style: { width: 600, height: 380 },
+    });
+  });
 });

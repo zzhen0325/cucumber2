@@ -2,7 +2,10 @@ import dagre from "@dagrejs/dagre";
 
 import {
   DEFAULT_CANVAS_NODE_WIDTH,
+  DEFAULT_MARKDOWN_NODE_DIMENSIONS,
+  DEFAULT_WEBPAGE_NODE_DIMENSIONS,
   getPromptNodeDimensions,
+  readNodeDimension,
 } from "./canvas-node-dimensions";
 import type { AgentCanvasEdge, AgentCanvasNode } from "@/types/canvas";
 
@@ -10,10 +13,10 @@ const NODE_WIDTH = DEFAULT_CANVAS_NODE_WIDTH;
 const COMPACT_RUN_NODE_HEIGHT = 36;
 const RUN_NODE_HEIGHT = 300;
 const RESULT_NODE_HEIGHT = 240;
-const MARKDOWN_NODE_WIDTH = 420;
-const MARKDOWN_NODE_HEIGHT = 360;
-const WEBPAGE_NODE_WIDTH = 420;
-const WEBPAGE_NODE_HEIGHT = 320;
+const MARKDOWN_NODE_WIDTH = DEFAULT_MARKDOWN_NODE_DIMENSIONS.width;
+const MARKDOWN_NODE_HEIGHT = DEFAULT_MARKDOWN_NODE_DIMENSIONS.height;
+const WEBPAGE_NODE_WIDTH = DEFAULT_WEBPAGE_NODE_DIMENSIONS.width;
+const WEBPAGE_NODE_HEIGHT = DEFAULT_WEBPAGE_NODE_DIMENSIONS.height;
 const ARTIFACT_NODE_HEIGHT = 132;
 
 export type CanvasLayoutDirection = "TB" | "LR";
@@ -98,7 +101,7 @@ function getNodeDimensions(node: AgentCanvasNode) {
 }
 
 function getNodeWidth(node: AgentCanvasNode) {
-  const measuredWidth = getStoredNodeDimension(node, "width");
+  const measuredWidth = readNodeDimension(node, "width");
   if (measuredWidth) {
     return measuredWidth;
   }
@@ -114,7 +117,7 @@ function getNodeWidth(node: AgentCanvasNode) {
 }
 
 function getNodeHeight(node: AgentCanvasNode) {
-  const measuredHeight = getStoredNodeDimension(node, "height");
+  const measuredHeight = readNodeDimension(node, "height");
   if (measuredHeight) {
     return measuredHeight;
   }
@@ -143,18 +146,6 @@ function getNodeHeight(node: AgentCanvasNode) {
   }
 
   return RUN_NODE_HEIGHT;
-}
-
-function getStoredNodeDimension(
-  node: AgentCanvasNode,
-  dimension: "height" | "width"
-) {
-  const styleValue =
-    node.style && typeof node.style === "object" ? node.style[dimension] : null;
-  const value = node[dimension] ?? styleValue ?? node.measured?.[dimension];
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? value
-    : null;
 }
 
 function hasVisibleRunOutput(data: Extract<AgentCanvasNode["data"], { kind: "run" }>) {

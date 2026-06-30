@@ -17,9 +17,9 @@ const CANVAS_NODE_CLASS_NAME =
 const CANVAS_NODE_SELECTED_CLASS_NAME =
   "border-primary-border-active shadow-node-selected";
 const RESIZER_HANDLE_CLASS_NAME =
-  "nodrag nopan !size-4 !rounded-[2px] !border-0 !bg-transparent !text-transparent !shadow-none [&.bottom.left]:!rounded-bl-card [&.bottom.right]:!rounded-br-card [&.top.left]:!rounded-tl-card [&.top.right]:!rounded-tr-card";
+  "nodrag nopan !z-20 !size-4 !rounded-[2px] !border-0 !bg-transparent !text-transparent !shadow-none [&.bottom.left]:!rounded-bl-card [&.bottom.right]:!rounded-br-card [&.top.left]:!rounded-tl-card [&.top.right]:!rounded-tr-card";
 const RESIZER_LINE_CLASS_NAME =
-  "!border-transparent !bg-transparent !opacity-0";
+  "!z-20 !border-transparent !bg-transparent !opacity-0";
 
 export type NodeProps = ComponentProps<typeof Card> & {
   handles: {
@@ -28,6 +28,7 @@ export type NodeProps = ComponentProps<typeof Card> & {
   };
   minHeight?: number;
   minWidth?: number;
+  nodeId?: string;
   onResize?: ComponentProps<typeof NodeResizer>["onResize"];
   onResizeEnd?: ComponentProps<typeof NodeResizer>["onResizeEnd"];
   selected?: boolean;
@@ -40,6 +41,7 @@ export const Node = forwardRef<HTMLDivElement, NodeProps>(
       className,
       minHeight = 72,
       minWidth = 160,
+      nodeId,
       onResize,
       onResizeEnd,
       selected,
@@ -63,6 +65,7 @@ export const Node = forwardRef<HTMLDivElement, NodeProps>(
         lineClassName={RESIZER_LINE_CLASS_NAME}
         minHeight={minHeight}
         minWidth={minWidth}
+        nodeId={nodeId}
         onResize={onResize}
         onResizeEnd={onResizeEnd}
       />

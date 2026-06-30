@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { projectRunTraceToCanvas } from "./graph-projection";
+import type { AgentCanvasNode } from "@/types/canvas";
 import type { AgentEvent, AgentEventType } from "@/types/runtime";
 
 describe("agent event graph projection", () => {
@@ -478,6 +479,109 @@ describe("agent event graph projection", () => {
         content: "# IP 形象特征分析\n\n这是最终报告正文。",
         summary: "IP 形象特征分析摘要",
         title: "上传IP形象特征分析报告",
+      },
+    });
+  });
+
+  it("projects complete HTML artifact previews into webpage nodes", () => {
+    const html =
+      "<!doctype html><html><head><title>Guide</title></head><body><main>Guide</main></body></html>";
+    const projection = projectRunTraceToCanvas({
+      projectId: "project-1",
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", {
+          prompt: "生成 HTML 页面",
+          promptNodeId: "prompt-1",
+        }),
+        event("artifact.created", "create_text_artifact", {
+          artifact: {
+            id: "text-html-1",
+            metadata: {
+              format: "html",
+              mimeType: "text/html",
+              previewKind: "webpage",
+              projectId: "project-1",
+              sourceToolName: "create_text_artifact",
+            },
+            mimeType: "text/html",
+            preview: html,
+            previewKind: "webpage",
+            summary: "Guide",
+            title: "Guide.html",
+            type: "webpage",
+            uri: "/api/projects/project-1/artifacts/text-html-1/content",
+          },
+          toolName: "create_text_artifact",
+        }),
+      ],
+    });
+
+    const webpage = projection.nodes.find((node) => node.data.kind === "webpage");
+    expect(webpage).toMatchObject({
+      id: "webpage-text-html-1",
+      type: "webpageNode",
+      height: 320,
+      style: { height: 320, width: 420 },
+      width: 420,
+      data: {
+        kind: "webpage",
+        html,
+        artifact: {
+          id: "text-html-1",
+          metadata: expect.objectContaining({ projectId: "project-1" }),
+        },
+      },
+    });
+  });
+
+  it("keeps explicit text artifact node dimensions during re-projection", () => {
+    const existingMarkdown: AgentCanvasNode = {
+      id: "markdown-text-1",
+      type: "markdownNode",
+      position: { x: 10, y: 20 },
+      width: 560,
+      height: 420,
+      style: { width: 560, height: 420 },
+      data: {
+        kind: "markdown",
+        artifact: { id: "text-1", type: "doc" },
+        content: "old",
+        title: "Agent reply",
+      },
+    };
+    const projection = projectRunTraceToCanvas({
+      existingNodes: [existingMarkdown],
+      runNodeId: "run-1",
+      events: [
+        event("run.created", "run", {
+          prompt: "生成文档",
+          promptNodeId: "prompt-1",
+        }),
+        event("artifact.created", "create_text_artifact", {
+          artifact: {
+            id: "text-1",
+            metadata: {
+              format: "markdown",
+              preview: "# 新内容",
+              previewKind: "markdown",
+            },
+            title: "Agent reply",
+            type: "doc",
+          },
+        }),
+      ],
+    });
+
+    const markdown = projection.nodes.find((node) => node.id === "markdown-text-1");
+    expect(markdown).toMatchObject({
+      position: { x: 10, y: 20 },
+      width: 560,
+      height: 420,
+      style: { width: 560, height: 420 },
+      data: {
+        kind: "markdown",
+        content: "# 新内容",
       },
     });
   });
@@ -1106,6 +1210,9 @@ describe("agent event graph projection", () => {
     expect(markdown).toMatchObject({
       id: "markdown-text-1",
       type: "markdownNode",
+      height: 360,
+      style: { height: 360, width: 420 },
+      width: 420,
       data: {
         kind: "markdown",
         content: "# 总结\n\n这是一个 markdown 结果。",

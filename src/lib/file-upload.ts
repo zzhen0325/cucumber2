@@ -1,3 +1,11 @@
+import {
+  DEFAULT_CANVAS_NODE_WIDTH,
+  DEFAULT_MARKDOWN_NODE_DIMENSIONS,
+  DEFAULT_WEBPAGE_NODE_DIMENSIONS,
+  getDefaultNodeDimensionProps,
+  getDefaultNodeDimensions,
+  readNodeDimension,
+} from "./canvas-node-dimensions";
 import type { AgentCanvasNode, ArtifactRef } from "@/types/canvas";
 
 type CanvasPosition = {
@@ -41,11 +49,13 @@ type CreateCanvasNodesFromFilesOptions = {
   uploadedAt?: string;
 };
 
-const NODE_WIDTH = 240;
+const NODE_WIDTH = DEFAULT_CANVAS_NODE_WIDTH;
 const IMAGE_NODE_HEIGHT = 240;
 const IMAGE_NODE_MIN_SIDE = 24;
-const MARKDOWN_NODE_WIDTH = 420;
-const MARKDOWN_NODE_HEIGHT = 360;
+const MARKDOWN_NODE_WIDTH = DEFAULT_MARKDOWN_NODE_DIMENSIONS.width;
+const MARKDOWN_NODE_HEIGHT = DEFAULT_MARKDOWN_NODE_DIMENSIONS.height;
+const WEBPAGE_NODE_WIDTH = DEFAULT_WEBPAGE_NODE_DIMENSIONS.width;
+const WEBPAGE_NODE_HEIGHT = DEFAULT_WEBPAGE_NODE_DIMENSIONS.height;
 const ARTIFACT_NODE_HEIGHT = 132;
 const UPLOAD_NODE_GAP = 18;
 const UPLOAD_NODE_CLEARANCE = 24;
@@ -313,6 +323,7 @@ export function createCanvasNodeFromUploadedFile(
       id: `markdown-${artifact.id}`,
       type: "markdownNode",
       position: { x: 0, y: 0 },
+      ...getDefaultNodeDimensionProps("markdown"),
       data: {
         kind: "markdown",
         artifact,
@@ -350,6 +361,7 @@ export function createCanvasNodeFromUploadedFile(
       id: `webpage-${artifact.id}`,
       type: "webpageNode",
       position: { x: 0, y: 0 },
+      ...getDefaultNodeDimensionProps("webpage"),
       data: {
         ...baseData,
         html: upload.content,
@@ -491,6 +503,19 @@ function getNodeSize(node: AgentCanvasNode) {
       height: height ?? MARKDOWN_NODE_HEIGHT,
     };
   }
+  if (node.data.kind === "webpage") {
+    return {
+      width: width ?? WEBPAGE_NODE_WIDTH,
+      height: height ?? WEBPAGE_NODE_HEIGHT,
+    };
+  }
+  const defaultDimensions = getDefaultNodeDimensions(node.data.kind);
+  if (defaultDimensions) {
+    return {
+      width: width ?? defaultDimensions.width,
+      height: height ?? defaultDimensions.height,
+    };
+  }
   if (node.data.kind === "imageResult") {
     return {
       width: width ?? NODE_WIDTH,
@@ -505,10 +530,7 @@ function getStoredNodeDimension(
   node: AgentCanvasNode,
   dimension: "height" | "width"
 ) {
-  const value = node[dimension] ?? node.measured?.[dimension];
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? value
-    : null;
+  return readNodeDimension(node, dimension);
 }
 
 function resolveNonOverlappingPosition(

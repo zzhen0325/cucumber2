@@ -4,6 +4,7 @@ import type {
   AgentCanvasNodeData,
   ArtifactRef,
 } from "@/types/canvas";
+import { applyDefaultNodeDimensions } from "./canvas-node-dimensions";
 
 export function normalizeLoadedCanvasSnapshot({
   edges,
@@ -35,7 +36,7 @@ export function normalizeLoadedCanvasSnapshot({
         materializedKeys.has(`${runId}:${family}`)
       );
     })
-    .map((node) => attachProjectIdToArtifacts(node, projectId));
+    .map((node) => applyDefaultNodeDimensions(attachProjectIdToArtifacts(node, projectId)));
   const nodeIds = new Set(nextNodes.map((node) => node.id));
 
   return {

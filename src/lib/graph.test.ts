@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   collectUpstreamContext,
   collectUpstreamContextWithTrace,
+  createHtmlPageNodes,
+  createMarkdownDocumentNodes,
   createRunDraft,
   getRunReferenceNodeId,
 } from "./graph";
@@ -125,6 +127,38 @@ describe("agent canvas graph", () => {
       "image-1",
       "note-1",
     ]);
+  });
+
+  it("materializes text artifact nodes with their default React Flow dimensions", () => {
+    const run = runNode("run-1");
+    const markdown = createMarkdownDocumentNodes(
+      run,
+      [{ id: "doc-1", title: "方案", content: "# 方案" }],
+      []
+    ).resultNodes[0];
+    const webpage = createHtmlPageNodes(
+      run,
+      [
+        {
+          id: "page-1",
+          title: "页面",
+          html: "<main>页面</main>",
+          previewUrl: "/preview/page-1",
+        },
+      ],
+      []
+    ).resultNodes[0];
+
+    expect(markdown).toMatchObject({
+      height: 360,
+      style: { height: 360, width: 420 },
+      width: 420,
+    });
+    expect(webpage).toMatchObject({
+      height: 320,
+      style: { height: 320, width: 420 },
+      width: 420,
+    });
   });
 
   it("reports context omitted by a budget", () => {

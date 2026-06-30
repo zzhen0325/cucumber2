@@ -47,6 +47,7 @@ import {
   createContext,
   lazy,
   memo,
+  startTransition,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
   Suspense,
@@ -279,6 +280,10 @@ const ImageNodeActionContext = createContext<{
 
 type StorageStatus = "loading" | "saving" | "saved" | "error";
 type StreamedRuntimeEvents = ReturnType<typeof runtimeEventsFromMessages>;
+type PendingStreamProjection = {
+  events: StreamedRuntimeEvents;
+  replace: boolean;
+};
 type AgentRunRequestBody = {
   projectId: string;
   runNodeId: string;
@@ -382,6 +387,7 @@ const PAN_ON_DRAG_BUTTONS = [MIDDLE_MOUSE_BUTTON];
 const HAND_TOOL_PAN_ON_DRAG_BUTTONS = [LEFT_MOUSE_BUTTON, MIDDLE_MOUSE_BUTTON];
 const SHIFT_MULTI_SELECTION_KEYS = ["Shift", "ShiftLeft", "ShiftRight"];
 const TRACE_RECONCILE_DELAYS_MS = [0, 1500, 4000, 8000] as const;
+const STREAM_PROJECTION_THROTTLE_MS = 50;
 
 function getSelectedNodeIds(nodes: AgentCanvasNode[]) {
   return nodes.filter((node) => node.selected).map((node) => node.id);
@@ -500,6 +506,10 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const loadedProjectIdRef = useRef<string | null>(null);
   const streamedRuntimeEvents = useRef<StreamedRuntimeEvents>([]);
   const streamedAgentTextByRunId = useRef(new Map<string, string>());
+  const queuedStreamProjection = useRef<PendingStreamProjection | null>(null);
+  const streamProjectionTimer = useRef<ReturnType<typeof window.setTimeout> | null>(
+    null
+  );
   const traceReconcileTimers = useRef<number[]>([]);
   const traceRunIdRef = useRef<string | null>(null);
   const hasLoadedProject = useRef(false);
@@ -784,7 +794,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     }
   }, []);
 
-  const projectStreamedRuntimeEvents = useCallback(
+  const commitStreamedRuntimeEvents = useCallback(
     (
       events: StreamedRuntimeEvents,
       options: { replace?: boolean } = {}
@@ -811,24 +821,22 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         ...streamedRuntimeEvents.current.filter((event) => event.runNodeId !== runId),
         ...runtimeEvents,
       ];
-      setDebugRunId(runId);
-      setDebugEvents(runtimeEvents);
-
       const projectId = loadedProjectIdRef.current ?? undefined;
+      const currentSnapshot = {
+        edges: edgesRef.current,
+        nodes: nodesRef.current,
+      };
       const projection = projectRuntimeEventsToCanvas({
         projectId,
         runNodeId: runId,
         events: runtimeEvents,
-        existingSnapshot: {
-          nodes: nodesRef.current,
-          edges: edgesRef.current,
-        },
+        existingSnapshot: currentSnapshot,
         streamedAgentTextByRunId: streamedAgentTextByRunId.current,
       });
 
       const runWasStopped = stoppedRunIds.current.has(runId);
       const stoppedPendingResultNodeIds = new Set(
-        [...nodesRef.current, ...projection.nodes].flatMap((node) =>
+        [...currentSnapshot.nodes, ...projection.nodes].flatMap((node) =>
           runWasStopped &&
           node.data.kind === "imageResult" &&
           node.data.runId === runId &&
@@ -838,47 +846,102 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         )
       );
 
-      setNodes((current) => {
-        const merged = mergeCanvasUpserts(
-          { edges: edgesRef.current, nodes: current },
-          { edges: projection.edges, nodes: projection.nodes }
-        ).nodes;
-        if (!runWasStopped) {
-          return merged;
-        }
-        return merged
-          .filter((node) => !stoppedPendingResultNodeIds.has(node.id))
-          .map((node) =>
-            node.id === runId && node.data.kind === "run"
-              ? {
-                  ...node,
-                  data: {
-                    ...node.data,
-                    status: "error" as const,
-                    error: "运行已停止。",
-                  },
-                }
-              : node
-          );
+      const merged = mergeCanvasUpserts(currentSnapshot, {
+        edges: projection.edges,
+        nodes: projection.nodes,
       });
-      setEdges((current) =>
-        mergeCanvasUpserts(
-          { edges: current, nodes: nodesRef.current },
-          { edges: projection.edges, nodes: projection.nodes }
-        ).edges
-          .filter(
-            (edge) =>
-              !stoppedPendingResultNodeIds.has(edge.source) &&
-              !stoppedPendingResultNodeIds.has(edge.target)
-          )
-          .map((edge) =>
-            runWasStopped && edge.target === runId && edge.data?.active
-              ? { ...edge, data: { ...edge.data, active: false } }
-              : edge
-          )
-      );
+      const nextNodes = runWasStopped
+        ? merged.nodes
+            .filter((node) => !stoppedPendingResultNodeIds.has(node.id))
+            .map((node) =>
+              node.id === runId && node.data.kind === "run"
+                ? {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      status: "error" as const,
+                      error: "运行已停止。",
+                    },
+                  }
+                : node
+            )
+        : merged.nodes;
+      const nextEdges = merged.edges
+        .filter(
+          (edge) =>
+            !stoppedPendingResultNodeIds.has(edge.source) &&
+            !stoppedPendingResultNodeIds.has(edge.target)
+        )
+        .map((edge) =>
+          runWasStopped && edge.target === runId && edge.data?.active
+            ? { ...edge, data: { ...edge.data, active: false } }
+            : edge
+        );
+
+      nodesRef.current = nextNodes;
+      edgesRef.current = nextEdges;
+
+      startTransition(() => {
+        setDebugRunId(runId);
+        setDebugEvents(runtimeEvents);
+        setNodes(nextNodes);
+        setEdges(nextEdges);
+      });
     },
     [acknowledgeRunCanvasPatchPersistence, setEdges, setNodes]
+  );
+
+  const flushQueuedStreamProjection = useCallback(() => {
+    if (streamProjectionTimer.current) {
+      window.clearTimeout(streamProjectionTimer.current);
+      streamProjectionTimer.current = null;
+    }
+
+    const queued = queuedStreamProjection.current;
+    if (!queued) {
+      return;
+    }
+
+    queuedStreamProjection.current = null;
+    commitStreamedRuntimeEvents(queued.events, { replace: queued.replace });
+  }, [commitStreamedRuntimeEvents]);
+
+  const clearQueuedStreamProjection = useCallback(() => {
+    if (streamProjectionTimer.current) {
+      window.clearTimeout(streamProjectionTimer.current);
+      streamProjectionTimer.current = null;
+    }
+    queuedStreamProjection.current = null;
+  }, []);
+
+  useEffect(() => clearQueuedStreamProjection, [clearQueuedStreamProjection]);
+
+  const projectStreamedRuntimeEvents = useCallback(
+    (
+      events: StreamedRuntimeEvents,
+      options: { flush?: boolean; replace?: boolean } = {}
+    ) => {
+      const previous = queuedStreamProjection.current;
+      queuedStreamProjection.current = {
+        events: dedupeRuntimeEvents([...(previous?.events ?? []), ...events]),
+        replace: Boolean(previous?.replace || options.replace),
+      };
+
+      if (options.flush) {
+        flushQueuedStreamProjection();
+        return;
+      }
+
+      if (streamProjectionTimer.current) {
+        return;
+      }
+
+      streamProjectionTimer.current = window.setTimeout(() => {
+        streamProjectionTimer.current = null;
+        flushQueuedStreamProjection();
+      }, STREAM_PROJECTION_THROTTLE_MS);
+    },
+    [flushQueuedStreamProjection]
   );
 
   const markRunError = useCallback(
@@ -1132,6 +1195,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   );
 
   const { messages, sendMessage, status, error, stop } = useChat({
+    experimental_throttle: STREAM_PROJECTION_THROTTLE_MS,
     transport: new DefaultChatTransport({
       api: "/api/agent-run",
       credentials: "same-origin",
@@ -1150,7 +1214,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           runNodeId: runId,
           messageStartIndex: activeRunMessageStartIndex.current,
         }),
-        { replace: true }
+        { flush: true, replace: true }
       );
 
       if (isAbort) {
@@ -1167,6 +1231,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       }
     },
     onError: (nextError) => {
+      flushQueuedStreamProjection();
       reconcileRunFromPersistedTrace(activeRunId.current, nextError.message);
     },
   });
@@ -1374,6 +1439,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     hasLoadedProject.current = false;
     activeRunId.current = null;
     activeRunMessageStartIndex.current = 0;
+    clearQueuedStreamProjection();
     streamedRuntimeEvents.current = [];
     streamedAgentTextByRunId.current.clear();
     dirtyNodeIdsRef.current.clear();
@@ -1486,7 +1552,13 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         autoLayoutFrame.current = null;
       }
     };
-  }, [mergePersistedRunTrace, projectId, setEdges, setNodes]);
+  }, [
+    clearQueuedStreamProjection,
+    mergePersistedRunTrace,
+    projectId,
+    setEdges,
+    setNodes,
+  ]);
 
   useEffect(() => {
     if (!traceRunId || !loadedProjectId) {
@@ -1904,6 +1976,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       setDebugOpen(true);
       activeRunMessageStartIndex.current = messagesRef.current.length;
       clearTraceReconcileTimers();
+      clearQueuedStreamProjection();
       streamedRuntimeEvents.current = streamedRuntimeEvents.current.filter(
         (event) => event.runNodeId !== draft.runNode.id
       );
@@ -2003,6 +2076,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     },
     [
       buildPendingCanvasSaveInput,
+      clearQueuedStreamProjection,
       clearTraceReconcileTimers,
       commitCanvasMutation,
       composerMode,
@@ -4157,6 +4231,7 @@ function PromptNode({
       handles={{ source: true, target: true }}
       minHeight={64}
       minWidth={180}
+      nodeId={id}
       selected={selected}
       style={getResizableNodeStyle(width, height)}
     >
@@ -4209,6 +4284,7 @@ function StickyNoteNode({
       handles={{ source: true, target: true }}
       minHeight={120}
       minWidth={160}
+      nodeId={id}
       selected={selected}
       style={getResizableNodeStyle(width, height)}
     >
@@ -4253,6 +4329,7 @@ function ShapeNode({
       handles={{ source: true, target: true }}
       minHeight={72}
       minWidth={96}
+      nodeId={id}
       selected={selected}
       style={getResizableNodeStyle(width, height)}
     >
@@ -4423,7 +4500,7 @@ function ArtifactFrame({
   );
 }
 
-function ArtifactLikeNode({ data, selected, width, height }: ArtifactLikeNodeProps) {
+function ArtifactLikeNode({ data, id, selected, width, height }: ArtifactLikeNodeProps) {
   const label = getArtifactNodeLabel(data);
   const metaLine = getArtifactMetaLine(data);
   const contentUrl = getArtifactContentUrl(data.artifact);
@@ -4508,6 +4585,7 @@ function ArtifactLikeNode({ data, selected, width, height }: ArtifactLikeNodePro
         handles={{ source: true, target: true }}
         minHeight={160}
         minWidth={180}
+        nodeId={id}
         selected={selected}
         style={getResizableNodeStyle(width, height)}
       >
@@ -4566,7 +4644,7 @@ function ArtifactPreviewDialog({
     open &&
       contentUrl &&
       isTextualArtifact(data) &&
-      (data.kind === "code" || !inlinePreview)
+      (data.kind === "code" || data.kind === "webpage" || !inlinePreview)
   );
   const loadedPreview = useTextArtifactContent(contentUrl, shouldFetchText);
   const loadState =
@@ -4586,6 +4664,8 @@ function ArtifactPreviewDialog({
     inlinePreview;
   const metaLine = getArtifactMetaLine(data);
   const codeLanguage = data.kind === "code" ? getCodeBlockLanguage(data) : null;
+  const isHtmlPreview =
+    data.kind === "webpage" || (data.kind === "code" && codeLanguage === "html");
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -4596,19 +4676,17 @@ function ArtifactPreviewDialog({
           {loadState === "loading" && <span>读取预览...</span>}
           {loadState === "error" && <span>无法读取预览</span>}
           {loadState === "binary" && <span>此产物可下载或打开查看</span>}
-          {previewText &&
-            data.kind === "code" &&
-            codeLanguage === "html" && (
-              <HtmlSourcePreview
-                className="artifact-preview-html"
-                defaultMode="preview"
-                filename={data.title}
-                html={previewText}
-                showLineNumbers
-                sourceLabel="html"
-                title={data.title}
-              />
-            )}
+          {previewText && isHtmlPreview && (
+            <HtmlSourcePreview
+              className="artifact-preview-html"
+              defaultMode="preview"
+              filename={data.title}
+              html={previewText}
+              showLineNumbers
+              sourceLabel="html"
+              title={data.title}
+            />
+          )}
           {previewText &&
             data.kind === "code" &&
             codeLanguage &&
@@ -4629,7 +4707,7 @@ function ArtifactPreviewDialog({
                 </CodeBlockHeader>
               </CodeBlock>
             )}
-          {previewText && data.kind !== "code" && (
+          {previewText && !isHtmlPreview && data.kind !== "code" && (
             <pre className="artifact-preview-text">{previewText}</pre>
           )}
           {!previewText && loadState === "idle" && <span>暂无预览</span>}
@@ -4654,6 +4732,7 @@ function ArtifactPreviewDialog({
 
 function CodeNode({
   data,
+  id,
   selected,
   width,
   height,
@@ -4746,6 +4825,7 @@ function CodeNode({
         handles={{ source: true, target: true }}
         minHeight={180}
         minWidth={180}
+        nodeId={id}
         selected={selected}
         style={getResizableNodeStyle(width, height)}
       >
@@ -4784,12 +4864,15 @@ function CodeNode({
 
 function HtmlPageNode({
   data,
+  id,
   selected,
   width,
   height,
 }: NodeProps<FlowNode<WebpageNodeData, "webpageNode">>) {
   const contentUrl = getArtifactContentUrl(data.artifact);
-  const inlineHtml = data.html?.trim() ? data.html : "";
+  const inlineHtml = data.html?.trim()
+    ? data.html
+    : readArtifactHtmlPreview(data.artifact) ?? "";
   const loadedHtml = useTextArtifactContent(
     contentUrl,
     !inlineHtml && Boolean(contentUrl),
@@ -4819,6 +4902,7 @@ function HtmlPageNode({
       handles={{ source: true, target: true }}
       minHeight={180}
       minWidth={180}
+      nodeId={id}
       selected={selected}
       style={getResizableNodeStyle(width, height)}
     >
@@ -4973,6 +5057,22 @@ function readArtifactPreviewText(
     readMetadataString(artifact.metadata?.content) ??
     readMetadataString(artifact.summary)
   );
+}
+
+function readArtifactHtmlPreview(
+  artifact: ArtifactLikeNodeProps["data"]["artifact"]
+) {
+  const html =
+    readMetadataString(artifact.preview) ??
+    readMetadataString(artifact.metadata?.html) ??
+    readMetadataString(artifact.metadata?.content) ??
+    readMetadataString(artifact.metadata?.preview);
+  if (!html || html.endsWith("…")) {
+    return undefined;
+  }
+  return /<!doctype\s+html/i.test(html) || /<html[\s>]/i.test(html)
+    ? html
+    : undefined;
 }
 
 function readMeaningfulSummary(
@@ -5458,6 +5558,7 @@ function MarkdownNode({
       handles={{ source: true, target: true }}
       minHeight={180}
       minWidth={180}
+      nodeId={id}
       selected={selected}
       style={getResizableNodeStyle(width, height)}
     >
@@ -5662,6 +5763,7 @@ function ImageResultNode({
         handles={{ source: true, target: true }}
         minHeight={24}
         minWidth={120}
+        nodeId={id}
         selected={selected}
         style={getResizableNodeStyle(width, height)}
       >

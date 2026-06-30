@@ -30,6 +30,9 @@ describe("file upload canvas nodes", () => {
     expect(
       classifyUploadedFile(new File([""], "notes.txt", { type: "text/plain" }))
     ).toBe("document");
+    expect(classifyUploadedFile(new File([""], "index.html", { type: "" }))).toBe(
+      "webpage"
+    );
   });
 
   it("creates image result nodes with storage-backed previews", async () => {
@@ -93,6 +96,30 @@ describe("file upload canvas nodes", () => {
 
     expect(node.data.content).toContain("上传预览");
     expect(node.data.artifact.metadata?.format).toBe("markdown");
+    expect(node.width).toBe(420);
+    expect(node.height).toBe(360);
+    expect(node.style).toMatchObject({ width: 420, height: 360 });
+  });
+
+  it("creates webpage preview nodes with default canvas dimensions", async () => {
+    const [node] = await createCanvasNodesFromFiles(
+      [new File(["<main>hello</main>"], "index.html", { type: "text/html" })],
+      { x: 30, y: 40 },
+      [],
+      { resolveUploadedFile: resolveTestUpload }
+    );
+
+    expect(node).toMatchObject({
+      id: expect.stringContaining("webpage-upload-webpage"),
+      type: "webpageNode",
+      width: 420,
+      height: 320,
+      style: { width: 420, height: 320 },
+      data: {
+        kind: "webpage",
+        title: "index.html",
+      },
+    });
   });
 
   it("uses full markdown text for canvas content instead of the storage preview", async () => {

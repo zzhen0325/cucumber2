@@ -442,9 +442,17 @@ export async function storeTextArtifactContent(
       artifact: record,
       contentText: input.content,
     });
+    return {
+      ...toArtifactRef(record),
+      uri: getArtifactContentUrl(input.projectId, record.id),
+    };
   }
 
-  return artifact;
+  return {
+    ...artifact,
+    metadata,
+    uri: getArtifactContentUrl(input.projectId, artifactId),
+  };
 }
 
 export async function storeAgentSkillPackage(input: StoreAgentSkillPackageInput) {

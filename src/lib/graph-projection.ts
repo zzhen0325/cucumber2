@@ -3,7 +3,12 @@ import {
   createPendingImageResultNodes,
   getImageResultNodeDimensions,
 } from "./graph";
-import { getPromptNodeDimensions } from "./canvas-node-dimensions";
+import {
+  getDefaultNodeDimensionProps,
+  getDefaultNodeDimensions,
+  getPromptNodeDimensions,
+  readNodeDimension as readStoredNodeDimension,
+} from "./canvas-node-dimensions";
 import type {
   AgentCanvasEdge,
   AgentCanvasNode,
@@ -1520,6 +1525,7 @@ function createArtifactCanvasNode({
     id: nodeId,
     type: nodeType,
     position: existingPosition ?? basePosition,
+    ...getDefaultNodeDimensionProps(kind),
     data:
       kind === "markdown"
         ? {
@@ -1595,11 +1601,12 @@ function createPendingArtifactResultNodes({
   requests.forEach((request, index) => {
     const nodeId = `${request.nodeIdPrefix}-pending-${runNode.id}-${index + 1}`;
     const existingPosition = getExistingPosition(existingNodes, nodeId);
+    const defaultDimensions = getDefaultNodeDimensions(request.kind);
     const preferredRect = {
       x: runNode.position.x + index * ARTIFACT_NODE_GAP_X,
       y: baseY,
-      width: request.kind === "markdown" || request.kind === "webpage" ? 420 : 240,
-      height: request.kind === "markdown" ? 360 : request.kind === "webpage" ? 320 : 132,
+      width: defaultDimensions?.width ?? 240,
+      height: defaultDimensions?.height ?? 132,
     };
     const x = resolvePendingArtifactX(preferredRect, [
       ...existingNodes,
@@ -1786,12 +1793,7 @@ function readNodeDimension(
   node: AgentCanvasNode,
   dimension: "height" | "width"
 ) {
-  const styleValue =
-    node.style && typeof node.style === "object" ? node.style[dimension] : null;
-  const value = node[dimension] ?? styleValue ?? node.measured?.[dimension];
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? value
-    : null;
+  return readStoredNodeDimension(node, dimension);
 }
 
 function getExistingOrProjectedNode(
@@ -1804,11 +1806,62 @@ function getExistingOrProjectedNode(
     return projected;
   }
 
+  const existingWidth = readExplicitNodeDimension(existing, "width");
+  const existingHeight = readExplicitNodeDimension(existing, "height");
+  const dimensionProps = mergeExistingDimensionProps(
+    projected,
+    existing,
+    existingWidth,
+    existingHeight
+  );
+
   return {
     ...projected,
+    ...dimensionProps,
     position: existing.position,
     selected: existing.selected,
   };
+}
+
+function mergeExistingDimensionProps(
+  projected: AgentCanvasNode,
+  existing: AgentCanvasNode,
+  existingWidth: number | null,
+  existingHeight: number | null
+): Partial<Pick<AgentCanvasNode, "height" | "style" | "width">> {
+  const projectedStyle =
+    projected.style && typeof projected.style === "object" ? projected.style : null;
+  const existingStyle =
+    existing.style && typeof existing.style === "object" ? existing.style : null;
+  const width = existingWidth ?? projected.width;
+  const height = existingHeight ?? projected.height;
+  const style =
+    projectedStyle || existingStyle || existingWidth || existingHeight
+      ? {
+          ...(projectedStyle ?? {}),
+          ...(existingStyle ?? {}),
+          width: existingWidth ?? projectedStyle?.width,
+          height: existingHeight ?? projectedStyle?.height,
+        }
+      : undefined;
+
+  return {
+    ...(width ? { width } : {}),
+    ...(height ? { height } : {}),
+    ...(style ? { style } : {}),
+  };
+}
+
+function readExplicitNodeDimension(
+  node: AgentCanvasNode,
+  dimension: "height" | "width"
+) {
+  const styleValue =
+    node.style && typeof node.style === "object" ? node.style[dimension] : null;
+  const value = node[dimension] ?? styleValue;
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : null;
 }
 
 function getExistingOrProjectedEdge(
@@ -1919,9 +1972,21 @@ function readHtmlArtifactContent(artifact: ArtifactRef) {
   return (
     readString(artifact.metadata?.html) ??
     readString(artifact.metadata?.content) ??
+    readCompleteHtmlPreview(artifact.preview) ??
+    readCompleteHtmlPreview(artifact.metadata?.preview) ??
     readHtmlFromDataUrl(artifact.contentRef) ??
     readHtmlFromDataUrl(artifact.uri)
   );
+}
+
+function readCompleteHtmlPreview(value: unknown) {
+  const preview = readString(value);
+  if (!preview || preview.endsWith("…")) {
+    return undefined;
+  }
+  return /<!doctype\s+html/i.test(preview) || /<html[\s>]/i.test(preview)
+    ? preview
+    : undefined;
 }
 
 function readHtmlFromDataUrl(value: string | undefined) {

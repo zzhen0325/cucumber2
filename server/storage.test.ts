@@ -161,6 +161,62 @@ describe("agent asset storage helpers", () => {
     );
   });
 
+  it("returns a full app-readable ref for stored text artifacts", async () => {
+    storageMocks.getAgentArtifactForUser.mockResolvedValueOnce({
+      bucketId: null,
+      contentRef: null,
+      createdAt: "2026-06-18T00:00:00.000Z",
+      createdBy: "user-1",
+      id: "text-record-1",
+      metadata: {
+        format: "html",
+        mimeType: "text/html",
+        previewKind: "webpage",
+        projectId: "project-1",
+        sourceRunNodeId: "run-1",
+      },
+      mimeType: "text/html",
+      origin: "runtime_materialized",
+      previewKind: "webpage",
+      previewText:
+        "<!doctype html><html><head><title>Demo</title></head><body>Demo</body></html>",
+      projectId: "project-1",
+      runNodeId: "run-1",
+      sizeBytes: 78,
+      sourceNodeId: null,
+      storagePath: null,
+      summary: "Demo",
+      title: "Demo.html",
+      toolCallId: null,
+      type: "webpage",
+      updatedAt: "2026-06-18T00:00:00.000Z",
+      uri: null,
+      version: 1,
+    } as never);
+
+    const artifact = await storeTextArtifactContent({
+      content:
+        "<!doctype html><html><head><title>Demo</title></head><body>Demo</body></html>",
+      projectId: "project-1",
+      runNodeId: "run-1",
+      sourceToolName: "create_text_artifact",
+      title: "Demo.html",
+      type: "webpage",
+      userId: "user-1",
+    });
+
+    expect(artifact).toMatchObject({
+      id: "text-record-1",
+      metadata: expect.objectContaining({
+        projectId: "project-1",
+        previewKind: "webpage",
+      }),
+      mimeType: "text/html",
+      type: "webpage",
+      uri: "/api/projects/project-1/artifacts/text-record-1/content",
+    });
+  });
+
   it("signs storage-backed image context only for the provider request", async () => {
     const context = await resolveStorageBackedImageContext([
       {
