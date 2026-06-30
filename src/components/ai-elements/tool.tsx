@@ -21,7 +21,7 @@ import { isValidElement } from "react";
 import { CodeBlock } from "./code-block";
 
 const TOOL_CLASS_NAME =
-  "tool-card not-prose group run-tool-card grid w-full min-w-0 gap-[5px] rounded-cuc-card border px-1.5 py-[5px]";
+  "tool-card not-prose group grid w-full min-w-0 gap-[5px] rounded-cuc-card border border-cuc-subtle-border bg-cuc-surface px-1.5 py-[5px] text-[length:var(--canvas-node-body-size)] leading-[var(--canvas-node-body-line)] [color:var(--run-text)]";
 const TOOL_HEADER_CLASS_NAME =
   "tool-card-header grid w-full min-w-0 cursor-pointer grid-cols-[minmax(0,1fr)_auto_13px] items-center gap-1.5 border-0 bg-transparent p-0 text-left text-inherit [font-family:inherit] data-[state=open]:[&_.tool-card-chevron]:rotate-180";
 const TOOL_HEADING_CLASS_NAME =
@@ -31,19 +31,19 @@ const TOOL_ICON_CLASS_NAME =
 const TOOL_COPY_CLASS_NAME = "tool-card-copy grid min-w-0 gap-px";
 const TOOL_TITLE_CLASS_NAME = "truncate font-medium";
 const TOOL_DESCRIPTION_CLASS_NAME =
-  "tool-card-description run-meta run-text-muted truncate";
+  "tool-card-description truncate text-[length:var(--canvas-node-meta-size)] leading-[var(--canvas-node-meta-line)] [color:var(--run-text-muted)]";
 const TOOL_STATUS_BADGE_CLASS_NAME =
-  "tool-status-badge run-tool-status py-0";
+  "tool-status-badge !inline-flex !h-[18px] items-center !gap-[3px] !border-0 !bg-cuc-run-surface-muted !px-[5px] !py-0 !text-cuc-run-text-muted text-[length:var(--canvas-node-meta-size)] !font-medium !leading-none whitespace-nowrap [&_svg]:shrink-0";
 const TOOL_CHEVRON_CLASS_NAME =
-  "tool-card-chevron run-text-muted transition-transform duration-[140ms] ease-[ease]";
+  "tool-card-chevron [color:var(--run-text-muted)] transition-transform duration-[140ms] ease-[ease]";
 const TOOL_CONTENT_CLASS_NAME = "tool-card-content grid min-w-0 gap-[5px]";
 const TOOL_IO_CLASS_NAME = "tool-card-io grid min-w-0 gap-[3px]";
 const TOOL_IO_HEADING_CLASS_NAME =
-  "run-meta run-text-muted m-0 font-medium";
+  "m-0 text-[length:var(--canvas-node-meta-size)] font-medium leading-[var(--canvas-node-meta-line)] [color:var(--run-text-muted)]";
 const TOOL_CODE_CLASS_NAME =
-  "tool-card-code run-code-block grid";
+  "tool-card-code grid min-w-0 [&>div[data-language]]:rounded-cuc-canvas [&>div[data-language]]:border-0 [&>div[data-language]]:bg-[rgb(246_246_243_/_72%)] [&>div[data-language]]:[color:var(--run-text)] [&_code]:text-[length:var(--canvas-node-meta-size)] [&_pre]:max-h-28 [&_pre]:overflow-auto [&_pre]:whitespace-pre-wrap [&_pre]:!bg-transparent [&_pre]:p-1.5 [&_pre]:text-[length:var(--canvas-node-body-size)] [&_pre]:!text-inherit [&_pre]:[overflow-wrap:break-word]";
 const TOOL_CODE_ERROR_CLASS_NAME =
-  "error run-code-error";
+  "rounded-cuc-canvas bg-cuc-danger-surface p-1.5 font-[inherit] text-[length:var(--canvas-node-body-size)] text-cuc-danger-deep [overflow-wrap:break-word] whitespace-pre-wrap";
 
 export type ToolProps = ComponentProps<typeof Collapsible>;
 
@@ -81,7 +81,7 @@ const getStatusBadge = (status: CanvasToolState, stateLabel?: string) => {
     <Badge
       className={cn(
         TOOL_STATUS_BADGE_CLASS_NAME,
-        status === "output-error" && "text-cuc-danger-strong"
+        status === "output-error" && "!text-cuc-danger-strong"
       )}
       variant="secondary"
     >

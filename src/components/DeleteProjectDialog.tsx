@@ -25,7 +25,7 @@ export function DeleteProjectDialog({
       }}
     >
       <DialogContent className="sm:max-w-sm" showCloseButton={false}>
-        <p className="text-sm font-medium text-foreground">
+        <p className="text-sm font-medium text-cuc-text">
           确定删除此项目？此操作无法撤销。
         </p>
         <div className="mt-4 flex items-center justify-end gap-3">
@@ -33,14 +33,14 @@ export function DeleteProjectDialog({
             variant="ghost"
             onClick={onCancel}
             disabled={deleting}
-            className="rounded-xl"
+            className="rounded-cuc-control"
           >
             取消
           </Button>
           <Button
             onClick={onConfirm}
             disabled={deleting}
-            className="rounded-xl bg-destructive text-white hover:bg-destructive/90"
+            className="rounded-cuc-control !bg-cuc-danger-strong !text-cuc-surface hover:!bg-cuc-danger-deep"
           >
             {deleting ? (
               <LoadingIndicator ariaLabel="删除中" size={16} />

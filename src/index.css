@@ -5,7 +5,6 @@
 @import "./styles/workspace-pages.css";
 @import "./styles/canvas-shell.css";
 @import "./styles/artifacts.css";
-@import "./styles/trace-panel.css";
 
 @source "../node_modules/@blocknote/shadcn";
 

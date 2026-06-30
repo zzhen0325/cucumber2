@@ -45,25 +45,25 @@ import type {
 } from "@/types/canvas";
 
 const RUN_CARD_CLASS_NAME =
-  "run-card min-h-9";
+  "min-h-9 !border-cuc-run-border !bg-cuc-accent [--run-text:var(--color-cuc-run-text)] [--run-text-muted:var(--color-cuc-run-text-muted)]";
 const RUN_CONTENT_CLASS_NAME =
   "run-content grid min-h-0 p-[14px] [grid-template-rows:auto_auto]";
 const RUN_CONTENT_RESIZED_CLASS_NAME =
   "h-full [grid-template-rows:auto_minmax(0,1fr)]";
 const RUN_HEADING_CLASS_NAME =
-  "run-heading run-title run-text grid h-[34px] grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-1 px-2.5";
+  "run-heading grid h-[34px] grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-1 px-2.5 text-[length:var(--canvas-node-title-size)] leading-[var(--canvas-node-title-line)] [color:var(--run-text)]";
 const RUN_HEADING_MAIN_CLASS_NAME =
   "run-heading-main flex min-w-0 items-center gap-[5px]";
 const RUN_TITLE_CLASS_NAME =
-  "run-title min-w-0 flex-[0_1_auto] overflow-hidden text-ellipsis whitespace-nowrap";
+  "min-w-0 flex-[0_1_auto] overflow-hidden text-ellipsis whitespace-nowrap";
 const RUN_TITLE_SHIMMER_CLASS_NAME =
-  `${RUN_TITLE_CLASS_NAME} shimmer-run-text`;
+  `${RUN_TITLE_CLASS_NAME} [--ai-shimmer-text:var(--run-text)]`;
 const RUN_HEADER_SUMMARY_CLASS_NAME =
-  "run-header-summary run-meta run-text-muted min-w-[34px] flex-[1_1_auto] overflow-hidden text-ellipsis whitespace-nowrap before:mr-1.5 before:text-cuc-ink/42 before:content-['·']";
+  "run-header-summary min-w-[34px] flex-[1_1_auto] overflow-hidden text-ellipsis whitespace-nowrap text-[length:var(--canvas-node-meta-size)] leading-[var(--canvas-node-meta-line)] [color:var(--run-text-muted)] before:mr-1.5 before:text-cuc-ink/42 before:content-['·']";
 const RUN_HEADING_ACTIONS_CLASS_NAME =
   "run-heading-actions flex shrink-0 items-center gap-0.5";
 const RUN_ICON_BUTTON_CLASS_NAME =
-  "run-icon-button";
+  "grid size-[18px] cursor-pointer place-items-center rounded-cuc-round border-0 bg-transparent [color:var(--run-text)] transition-[background-color,color,opacity] duration-[140ms] ease-[ease]";
 const RUN_RETRY_BUTTON_CLASS_NAME =
   `${RUN_ICON_BUTTON_CLASS_NAME} run-retry-button nodrag nopan hover:bg-cuc-run-surface-muted hover:text-cuc-danger-strong`;
 const RUN_TRACE_BUTTON_CLASS_NAME =
@@ -81,9 +81,9 @@ const RUN_CONVERSATION_FLOW_CLASS_NAME =
 const RUN_AGENT_TEXT_REGION_CLASS_NAME =
   "run-agent-text-region nodrag nopan nowheel min-w-0 max-h-none overflow-visible overscroll-contain [scrollbar-width:thin]";
 const AGENT_TEXT_OUTPUT_CLASS_NAME =
-  "agent-text-output run-body run-text block h-auto m-0 whitespace-pre-wrap [overflow-wrap:anywhere] [&_p]:m-0 [&_p+p]:mt-1";
+  "agent-text-output block h-auto m-0 whitespace-pre-wrap text-[length:var(--canvas-node-body-size)] leading-[var(--canvas-node-body-line)] [color:var(--run-text)] [overflow-wrap:anywhere] [&_p]:m-0 [&_p+p]:mt-1";
 const AGENT_TEXT_MUTED_CLASS_NAME =
-  "run-text-muted shimmer-run-muted";
+  "[color:var(--run-text-muted)] [--ai-shimmer-text:var(--run-text-muted)]";
 const AGENT_REASONING_CLASS_NAME =
   "agent-reasoning mt-1.5 grid min-w-0 gap-1";
 const AGENT_MESSAGE_LIST_CLASS_NAME =
@@ -91,13 +91,13 @@ const AGENT_MESSAGE_LIST_CLASS_NAME =
 const RUN_FLOW_ENTRY_CLASS_NAME =
   "run-flow-entry agent-message grid min-w-0 grid-cols-[17px_minmax(0,1fr)] gap-[5px]";
 const RUN_FLOW_MARKER_CLASS_NAME =
-  "run-flow-marker";
+  "relative grid justify-items-center after:absolute after:bottom-[-7px] after:top-[15px] after:w-px after:bg-cuc-run-divider after:content-['']";
 const RUN_FLOW_MARKER_LAST_CLASS_NAME = "after:hidden";
 const RUN_FLOW_MARKER_ICON_CLASS_NAME =
-  "run-flow-marker-icon";
+  "z-[1] grid size-[15px] place-items-center rounded-cuc-round border border-cuc-run-marker-border bg-cuc-run-surface [color:var(--run-text)]";
 const RUN_FLOW_BODY_CLASS_NAME = "run-flow-body grid min-w-0 gap-1";
 const RUN_FLOW_HEADING_CLASS_NAME =
-  "run-flow-heading run-meta run-text-muted flex min-w-0 items-center gap-1";
+  "run-flow-heading flex min-w-0 items-center gap-1 text-[length:var(--canvas-node-meta-size)] leading-[var(--canvas-node-meta-line)] [color:var(--run-text-muted)]";
 const RUN_FLOW_HEADING_NAME_CLASS_NAME =
   "overflow-hidden text-ellipsis whitespace-nowrap font-medium";
 const RUN_FLOW_BADGE_CLASS_NAME = "shrink-0 text-cuc-success";
@@ -108,7 +108,7 @@ const RUN_TOOL_LIST_CLASS_NAME = "run-tool-list grid min-w-0 gap-[5px]";
 const TOOL_CALL_ERROR_LINE_CLASS_NAME =
   "tool-call-error-line grid grid-cols-[minmax(0,1fr)_auto] items-start gap-[5px]";
 const TOOL_CALL_ERROR_SNIPPET_CLASS_NAME =
-  "tool-call-error-snippet run-meta line-clamp-2 overflow-hidden text-cuc-danger-deep [overflow-wrap:anywhere]";
+  "tool-call-error-snippet line-clamp-2 overflow-hidden text-[length:var(--canvas-node-meta-size)] leading-[var(--canvas-node-meta-line)] text-cuc-danger-deep [overflow-wrap:anywhere]";
 const TOOL_CALL_RETRY_CLASS_NAME =
   "tool-call-retry nodrag nopan grid size-4 cursor-pointer place-items-center rounded-cuc-round border-0 bg-cuc-run-surface-muted text-cuc-danger-strong hover:bg-cuc-run-surface-hover";
 
@@ -591,8 +591,8 @@ export function ToolPartView({
   return (
     <Tool
       className={cn(
-        "run-tool-card",
-        toolPart.state === "output-error" && "error"
+        toolPart.state === "output-error" &&
+          "border-cuc-danger-border bg-cuc-danger-surface"
       )}
       onOpenChange={setOpen}
       open={open}

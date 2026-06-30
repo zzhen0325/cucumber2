@@ -142,12 +142,12 @@ export function WorkspaceShell({
   }
 
   return (
-    <div className="flex h-[100dvh] flex-col bg-background md:flex-row">
+    <div className="flex h-[100dvh] flex-col bg-cuc-canvas md:flex-row">
       <AppSidebar view={view} onViewChange={setView} onLogout={onLogout} />
 
       <main className="relative flex-1 overflow-auto pb-14 md:pb-0">
         {error && (
-          <div className="absolute inset-x-0 top-0 z-20 bg-destructive/10 px-6 py-2 text-center text-sm text-destructive">
+          <div className="absolute inset-x-0 top-0 z-20 bg-cuc-danger-surface px-6 py-2 text-center text-sm text-cuc-danger-strong">
             {error}
           </div>
         )}

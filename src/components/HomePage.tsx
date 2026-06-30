@@ -1,11 +1,21 @@
 import { motion } from "framer-motion";
-import { ChevronRightIcon as ChevronRight, AddIcon as Plus } from "@proicons/react";
+import { ChevronRightIcon as ChevronRight } from "@proicons/react";
 import { useCallback, useRef, useState } from "react";
 
 import { CucumberLogo } from "@/components/icons/cucumber-logo";
+import {
+  PROJECT_CARD_CLASS_NAME,
+  PROJECT_CARD_META_CLASS_NAME,
+  PROJECT_CARD_TITLE_CLASS_NAME,
+  PROJECT_CREATE_CARD_CLASS_NAME,
+} from "@/components/project-card-classnames";
+import {
+  ProjectCreateGlyph,
+  ProjectPreview,
+} from "@/components/ProjectCard";
 import type { AppUser } from "@/lib/auth-storage";
 import type { ProjectSummary } from "@/lib/project-storage";
-import { cn, formatDate } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 
 /** Maximum number of recent projects shown on the home page. */
 const RECENT_PROJECTS_LIMIT = 4;
@@ -37,13 +47,6 @@ const cardItem = {
     transition: { duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] as const },
   },
 };
-
-const cardClassName =
-  "grid aspect-[286/208] min-w-0 grid-rows-[minmax(0,1fr)_auto_auto] gap-1.5 rounded-cuc-card border-[0.5px] border-cuc-border bg-cuc-surface p-2 text-left text-cuc-text shadow-none hover:border-[rgba(141,149,165,0.5)] max-[760px]:p-[7px]";
-const cardTitleClassName =
-  "truncate text-xs font-medium leading-4 text-cuc-text max-[760px]:text-[11px] max-[760px]:leading-[15px]";
-const cardMetaClassName =
-  "truncate text-[10px] leading-[13px] text-cuc-text-muted max-[760px]:text-[9px] max-[760px]:leading-3";
 
 type HomePageProps = {
   user: AppUser;
@@ -139,16 +142,11 @@ export function HomePage({
             whileTap={{ scale: 0.98 }}
             type="button"
             onClick={onCreate}
-            className={cn(
-              cardClassName,
-              "grid-rows-[auto_auto_auto] place-content-center justify-items-center text-center"
-            )}
+            className={PROJECT_CREATE_CARD_CLASS_NAME}
           >
-            <span className="mb-0.5 grid size-cuc-tool place-items-center rounded-cuc-floating bg-cuc-node text-cuc-ink">
-              <Plus size={18} />
-            </span>
-            <span className={cardTitleClassName}>新建项目</span>
-            <span className={cardMetaClassName}>打开一张空白画布</span>
+            <ProjectCreateGlyph />
+            <span className={PROJECT_CARD_TITLE_CLASS_NAME}>新建项目</span>
+            <span className={PROJECT_CARD_META_CLASS_NAME}>打开一张空白画布</span>
           </motion.button>
 
           {!loading &&
@@ -159,11 +157,11 @@ export function HomePage({
                 whileHover={{ y: -2 }}
                 type="button"
                 onClick={() => onOpenProject(project.id)}
-                className={cardClassName}
+                className={PROJECT_CARD_CLASS_NAME}
               >
-                <ProjectPreview tone={previewTone(project.id)} />
-                <span className={cardTitleClassName}>{project.title}</span>
-                <span className={cardMetaClassName}>
+                <ProjectPreview projectId={project.id} />
+                <span className={PROJECT_CARD_TITLE_CLASS_NAME}>{project.title}</span>
+                <span className={PROJECT_CARD_META_CLASS_NAME}>
                   {project.nodeCount} 节点 · {project.imageCount} 图片 · 更新于{" "}
                   {formatDate(project.updatedAt)}
                 </span>
@@ -178,33 +176,6 @@ export function HomePage({
         )}
       </div>
     </div>
-  );
-}
-
-function ProjectPreview({ tone }: { tone: number }) {
-  return (
-    <span className="relative block min-h-0 overflow-hidden rounded-cuc-canvas border-[0.5px] border-cuc-canvas-border bg-cuc-canvas">
-      <span className="absolute left-[37%] top-[37%] block h-px w-[31%] origin-left rotate-[13deg] border-t border-dashed border-cuc-edge" />
-      <span className="absolute left-[43%] top-[61%] block h-px w-[28%] origin-left -rotate-[18deg] border-t border-dashed border-cuc-edge" />
-      <span
-        className={cn(
-          "absolute left-[12%] top-[18%] block h-[22%] w-[31%] rounded-cuc-control-lg border-[0.5px] border-cuc-node-border bg-cuc-node",
-          tone === 3 && "bg-[#f1f0e8]"
-        )}
-      />
-      <span
-        className={cn(
-          "absolute right-[10%] top-[31%] block h-[26%] w-[34%] rounded-cuc-control-lg border-[0.5px] border-cuc-node-border bg-cuc-node",
-          tone === 1 && "bg-[#eef2e8]"
-        )}
-      />
-      <span
-        className={cn(
-          "absolute bottom-[15%] left-[29%] block h-[24%] w-[36%] rounded-cuc-control-lg border-[0.5px] border-cuc-node-border bg-cuc-node",
-          tone === 2 && "bg-[#edf1f6]"
-        )}
-      />
-    </span>
   );
 }
 
@@ -270,12 +241,4 @@ function HomePrompt({ onSubmit }: { onSubmit: (prompt: string) => void }) {
       </button>
     </div>
   );
-}
-
-function previewTone(id: string): number {
-  let hash = 0;
-  for (let i = 0; i < id.length; i += 1) {
-    hash = (hash * 31 + id.charCodeAt(i)) % 4;
-  }
-  return hash;
 }

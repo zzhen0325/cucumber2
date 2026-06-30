@@ -82,10 +82,10 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
   const features = isLogin ? LOGIN_FEATURES : REGISTER_FEATURES;
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="flex min-h-screen bg-cuc-surface-warm">
       {/* Left panel — dark brand showcase (desktop only) */}
-      <div className="relative hidden overflow-hidden bg-black px-16 text-white lg:flex lg:w-1/2 lg:flex-col lg:justify-center">
-        <div className="pointer-events-none absolute -left-1/4 -top-1/4 h-[80%] w-[80%] rounded-full bg-white/[0.03] blur-[100px]" />
+      <div className="relative hidden overflow-hidden bg-cuc-ink px-16 text-cuc-surface lg:flex lg:w-1/2 lg:flex-col lg:justify-center">
+        <div className="pointer-events-none absolute -left-1/4 -top-1/4 h-[80%] w-[80%] rounded-full bg-cuc-surface/[0.03] blur-[100px]" />
 
         <motion.div initial="hidden" animate="visible" className="relative z-10">
           <motion.div
@@ -108,14 +108,14 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
           <motion.p
             variants={fadeUp}
             custom={2}
-            className="mb-10 max-w-md text-lg text-white/60"
+            className="mb-10 max-w-md text-lg text-cuc-surface/60"
           >
             {isLogin
               ? "登录后从你上次离开的地方继续。"
               : "用名称和密码注册，随时回到同一块画布。"}
           </motion.p>
 
-          <ul className="space-y-4 text-sm text-white/50">
+          <ul className="space-y-4 text-sm text-cuc-surface/50">
             {features.map((text, index) => (
               <motion.li
                 key={text}
@@ -123,7 +123,7 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
                 custom={index + 3}
                 className="flex items-start gap-3"
               >
-                <span className="mt-1.5 block h-1.5 w-1.5 shrink-0 rounded-full bg-white" />
+                <span className="mt-1.5 block h-1.5 w-1.5 shrink-0 rounded-full bg-cuc-surface" />
                 {text}
               </motion.li>
             ))}
@@ -150,7 +150,7 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
               <h2 className="text-2xl font-semibold tracking-tight">
                 {isLogin ? "进入项目" : "创建账号"}
               </h2>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-cuc-text-muted">
                 用名称和密码继续你的 Agent Canvas
               </p>
             </motion.div>
@@ -161,7 +161,7 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
                   initial={{ opacity: 0, y: -8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
-                  className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+                  className="rounded-cuc-card border border-cuc-danger-border bg-cuc-danger-surface px-4 py-3 text-sm text-cuc-danger-strong"
                   role="alert"
                   aria-live="polite"
                 >
@@ -215,7 +215,7 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
 
             <motion.p
               variants={fadeIn}
-              className="text-center text-sm text-muted-foreground"
+              className="text-center text-sm text-cuc-text-muted"
             >
               {isLogin ? "还没有账号？" : "已有账号？"}{" "}
               <button
@@ -226,7 +226,7 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
                   );
                   setError(null);
                 }}
-                className="font-medium text-foreground underline underline-offset-4"
+                className="font-medium text-cuc-text underline underline-offset-4"
               >
                 {isLogin ? "创建一个" : "去登录"}
               </button>

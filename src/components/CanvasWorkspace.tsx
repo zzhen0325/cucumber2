@@ -341,7 +341,7 @@ const IMAGE_RESULT_COUNT_STORAGE_KEY = "cucumber:image-result-count";
 const IMAGE_PROVIDER_STORAGE_KEY = "cucumber:image-provider";
 const TRACE_RECONCILE_DELAYS_MS = [0, 1500, 4000, 8000] as const;
 const SHELL_ICON_BUTTON_CLASS =
-  "grid place-items-center border-0 bg-transparent text-[#5c5c5c] cursor-pointer [&:hover:not(:disabled)]:bg-cuc-surface-warm [&:hover:not(:disabled)]:text-cuc-text disabled:cursor-default disabled:opacity-[0.38]";
+  "grid place-items-center border-0 bg-transparent text-cuc-text-tertiary cursor-pointer [&:hover:not(:disabled)]:bg-cuc-surface-warm [&:hover:not(:disabled)]:text-cuc-text disabled:cursor-default disabled:opacity-[0.38]";
 const TOP_ICON_BUTTON_CLASS =
   "grid h-cuc-control place-items-center border-0 bg-transparent text-cuc-text-heading cursor-pointer hover:bg-cuc-surface/72 hover:text-cuc-text-heading";
 const TOP_CONTROL_BUTTON_CLASS = cn(
@@ -365,11 +365,11 @@ const COMPOSER_MODE_SWITCH_CLASS =
 const COMPOSER_MODE_BUTTON_CLASS =
   "inline-flex h-7 min-w-7 cursor-pointer items-center justify-center gap-1.5 rounded-[10px] border-0 bg-transparent px-2 text-[13px] leading-5 text-cuc-control-dark disabled:cursor-not-allowed disabled:opacity-[0.58]";
 const COMPOSER_SKILL_MENU_CLASS =
-  "max-h-60 w-full overflow-auto rounded-cuc-floating border-[0.5px] border-cuc-border bg-cuc-surface p-1.5 shadow-[0_6px_18px_rgba(41,37,100,0.08)]";
+  "max-h-60 w-full overflow-auto rounded-cuc-floating border-[0.5px] border-cuc-border bg-cuc-surface p-1.5 shadow-cuc-menu";
 const COMPOSER_SKILL_OPTION_CLASS =
   "grid min-h-cuc-tool w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 rounded-cuc-image border-0 bg-transparent px-2.5 text-left text-[13px] leading-[18px] text-cuc-text outline-0 hover:bg-cuc-control-hover focus-visible:bg-cuc-control-hover";
 const COMPOSER_TOKEN_CLASS =
-  "inline-flex max-w-44 min-w-0 items-center gap-[5px] rounded-cuc-pill border-[0.5px] border-cuc-control-border bg-[#f5f5f5] px-[7px] py-[3px] text-xs leading-4 text-cuc-control-dark";
+  "inline-flex max-w-44 min-w-0 items-center gap-[5px] rounded-cuc-pill border-[0.5px] border-cuc-control-border bg-cuc-control-token px-[7px] py-[3px] text-xs leading-4 text-cuc-control-dark";
 const COMPOSER_TOKEN_KIND_CLASS =
   "flex-none text-[11px] text-cuc-text-soft";
 const COMPOSER_TOKEN_LABEL_CLASS =
@@ -393,7 +393,80 @@ const COMPOSER_SUBMIT_BUTTON_CLASS =
 const COMPOSER_SELECT_CONTENT_CLASS =
   "border-cuc-border bg-cuc-surface text-cuc-text";
 const COMPOSER_SELECT_TRIGGER_CLASS =
-  "h-cuc-control rounded-cuc-control border-[0.5px] border-cuc-border bg-cuc-control-surface text-xs font-medium text-[#333842] shadow-none hover:bg-cuc-control-hover disabled:opacity-[0.58] data-[disabled]:opacity-[0.58] aria-disabled:opacity-[0.58]";
+  "h-cuc-control rounded-cuc-control border-[0.5px] border-cuc-border bg-cuc-control-surface text-xs font-medium text-cuc-control-text shadow-none hover:bg-cuc-control-hover disabled:opacity-[0.58] data-[disabled]:opacity-[0.58] aria-disabled:opacity-[0.58]";
+const ARTIFACT_CARD_BASE_CLASS =
+  "overflow-hidden !rounded-cuc-card border border-cuc-border-muted bg-cuc-surface";
+const ARTIFACT_CARD_CLASS = cn(
+  ARTIFACT_CARD_BASE_CLASS,
+  "h-[240px] min-h-[160px] w-[240px]"
+);
+const MARKDOWN_CARD_CLASS = cn(ARTIFACT_CARD_BASE_CLASS, "h-[450px] w-[360px]");
+const CODE_CARD_CLASS = cn(ARTIFACT_CARD_BASE_CLASS, "h-[450px] w-[360px]");
+const HTML_PAGE_CARD_CLASS = cn(ARTIFACT_CARD_BASE_CLASS, "h-[720px] w-[1280px]");
+const ARTIFACT_FRAME_CLASS =
+  "relative grid h-full min-h-0 grid-rows-[32px_minmax(0,1fr)] p-0";
+const ARTIFACT_FRAME_HEADER_CLASS =
+  "flex h-8 min-w-0 items-center justify-between gap-2 border-b border-cuc-border-soft bg-cuc-surface-subtle py-0 pl-3 pr-2.5";
+const ARTIFACT_FRAME_TITLE_CLASS =
+  "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-normal leading-4 text-cuc-ink";
+const ARTIFACT_FRAME_ACTIONS_CLASS =
+  "inline-flex flex-none items-center gap-2";
+const ARTIFACT_FRAME_ACTION_BUTTON_CLASS =
+  "inline-grid size-5 cursor-pointer place-items-center rounded-cuc-canvas border-0 bg-transparent p-0 text-cuc-ink hover:bg-cuc-ink/8 focus-visible:bg-cuc-ink/8 focus-visible:outline-none disabled:cursor-default disabled:opacity-[0.32]";
+const ARTIFACT_CONTENT_CLASS =
+  "grid min-h-0 content-start gap-2 overflow-hidden px-3 pb-3 pt-2.5";
+const ARTIFACT_HEADING_CLASS =
+  "flex min-w-0 items-center gap-[5px] text-cuc-node-meta text-cuc-text-muted";
+const ARTIFACT_ICON_CLASS =
+  "grid size-5 flex-none place-items-center rounded-cuc-round bg-cuc-surface-warm text-cuc-ink";
+const ARTIFACT_BODY_TEXT_CLASS =
+  "copyable-text nodrag nopan m-0 line-clamp-3 overflow-hidden text-cuc-node-body text-cuc-text-muted [overflow-wrap:anywhere]";
+const ARTIFACT_META_CLASS =
+  "copyable-text nodrag nopan overflow-hidden text-ellipsis whitespace-nowrap text-cuc-node-meta text-cuc-text-subtle";
+const ARTIFACT_NODE_TOOLBAR_CLASS =
+  "pointer-events-auto inline-flex items-center gap-1 rounded-cuc-pill border border-cuc-border-muted bg-cuc-surface/96 p-1 shadow-cuc-popover";
+const ARTIFACT_NODE_TOOLBAR_BUTTON_CLASS =
+  "inline-grid size-cuc-toolbar-button min-w-cuc-toolbar-button cursor-pointer place-items-center rounded-cuc-round border-0 bg-transparent text-cuc-text hover:bg-cuc-accent hover:text-cuc-ink focus-visible:bg-cuc-accent focus-visible:text-cuc-ink focus-visible:outline-none disabled:cursor-default disabled:opacity-[0.36]";
+const UPLOAD_STATE_CLASS =
+  "w-fit rounded-cuc-pill bg-cuc-ink/12 px-[7px] py-0.5 text-cuc-node-meta font-semibold text-cuc-ink";
+const UPLOAD_STATE_ERROR_CLASS =
+  "bg-cuc-danger-surface text-cuc-danger-deep";
+const ARTIFACT_UPLOAD_STATE_POSITION_CLASS = "absolute bottom-2.5 left-2.5";
+const IMAGE_UPLOAD_STATE_POSITION_CLASS =
+  "absolute left-[9px] top-[9px] shadow-[0_4px_16px_rgb(0_0_0_/_8%)]";
+const IMAGE_NODE_TOOLBAR_CLASS =
+  "pointer-events-auto inline-flex items-center gap-1 rounded-cuc-control border border-cuc-border-muted bg-cuc-surface/96 p-1 shadow-cuc-popover";
+const IMAGE_NODE_TOOLBAR_BUTTON_CLASS =
+  "inline-grid size-cuc-toolbar-button min-w-cuc-toolbar-button cursor-pointer place-items-center rounded-cuc-round border-0 bg-transparent text-cuc-text hover:bg-cuc-accent hover:text-cuc-ink focus-visible:bg-cuc-accent focus-visible:text-cuc-ink focus-visible:outline-none";
+const IMAGE_RESULT_CARD_CLASS =
+  "relative size-full min-h-cuc-icon-button overflow-visible !rounded-cuc-image bg-transparent";
+const IMAGE_RESULT_FRAME_CLASS =
+  "size-full overflow-hidden rounded-[inherit]";
+const IMAGE_RESULT_FRAME_READY_CLASS = "cuc-checkerboard";
+const IMAGE_RESULT_FRAME_LOADING_CLASS =
+  "grid place-items-center border border-cuc-border-muted bg-cuc-surface";
+const IMAGE_RESULT_FRAME_ERROR_CLASS =
+  "grid place-items-center border border-cuc-danger-border bg-cuc-surface";
+const IMAGE_RESULT_IMAGE_CLASS =
+  "block size-full object-cover";
+const IMAGE_RESULT_PLACEHOLDER_CLASS =
+  "pointer-events-none grid justify-items-center gap-1 text-cuc-node-body text-cuc-text";
+const IMAGE_RESULT_PLACEHOLDER_META_CLASS =
+  "max-w-[180px] overflow-hidden text-ellipsis whitespace-nowrap text-cuc-node-meta text-cuc-text-muted";
+const IMAGE_PREVIEW_DIALOG_CLASS =
+  "image-preview-dialog w-[min(1120px,calc(100vw-40px))] max-w-[min(1120px,calc(100vw-40px))] max-h-[calc(100vh-40px)] gap-2.5 overflow-hidden rounded-cuc-control border border-cuc-border-muted bg-cuc-surface p-3.5 shadow-cuc-dialog";
+const IMAGE_PREVIEW_STAGE_CLASS =
+  "cuc-checkerboard grid min-h-[220px] max-h-[calc(100vh-154px)] place-items-center overflow-auto rounded-cuc-popover";
+const IMAGE_PREVIEW_IMAGE_CLASS =
+  "block max-h-[calc(100vh-170px)] max-w-full object-contain";
+const IMAGE_RESULT_FOOTER_CLASS =
+  "pointer-events-none absolute bottom-[-44px] right-[72px] flex h-[31px] w-[95.5px] items-center justify-center gap-[7px] rounded-cuc-panel border border-cuc-border-muted bg-cuc-ink text-cuc-node-body text-cuc-surface shadow-cuc-popover";
+const CODE_CONTENT_CLASS =
+  "grid min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-2 overflow-hidden p-2.5";
+const MARKDOWN_CONTENT_CLASS =
+  "grid min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-2 overflow-hidden p-2.5";
+const HTML_PAGE_CONTENT_CLASS =
+  "grid min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-2 overflow-hidden p-2.5";
 
 function getSelectedNodeIds(nodes: AgentCanvasNode[]) {
   return nodes.filter((node) => node.selected).map((node) => node.id);
@@ -4802,7 +4875,7 @@ function ShapeNode({
 }: NodeProps<FlowNode<ShapeNodeData, "shapeNode">>) {
   const { onShapeLabelChange, readOnly } = useContext(ManualNodeEditingContext);
   const visualClassName = cn(
-    "relative grid size-full place-items-center rounded-cuc-node border border-input bg-cuc-surface/88 shadow-cuc-card",
+    "relative grid size-full place-items-center rounded-cuc-node border border-cuc-border bg-cuc-surface/88 shadow-cuc-card",
     data.shape === "ellipse" && "rounded-cuc-pill",
     data.shape === "pill" && "rounded-cuc-pill",
     data.shape === "diamond" &&
@@ -4917,17 +4990,21 @@ function ArtifactFrame({
   }, [data, downloadText, downloadUrl]);
 
   return (
-    <NodeContent className="artifact-frame p-0">
-      <div className="artifact-frame-header">
+    <NodeContent className={ARTIFACT_FRAME_CLASS}>
+      <div className={ARTIFACT_FRAME_HEADER_CLASS}>
         <span
-          className="artifact-frame-title copyable-text nodrag nopan"
+          className={cn(
+            ARTIFACT_FRAME_TITLE_CLASS,
+            "copyable-text nodrag nopan"
+          )}
           title={displayName}
         >
           {displayName}
         </span>
-        <div className="artifact-frame-actions nodrag nopan">
+        <div className={cn(ARTIFACT_FRAME_ACTIONS_CLASS, "nodrag nopan")}>
           <button
             aria-label="复制产物内容"
+            className={ARTIFACT_FRAME_ACTION_BUTTON_CLASS}
             disabled={!canCopy}
             onClick={(event) => {
               if (event.detail === 0) {
@@ -4948,6 +5025,7 @@ function ArtifactFrame({
           </button>
           <button
             aria-label="下载产物"
+            className={ARTIFACT_FRAME_ACTION_BUTTON_CLASS}
             disabled={!canDownload}
             onClick={(event) => {
               if (event.detail === 0) {
@@ -4970,7 +5048,13 @@ function ArtifactFrame({
       </div>
       <div className={className}>{children}</div>
       {data.upload && (
-        <span className={`upload-state artifact-frame-upload ${data.upload.status}`}>
+        <span
+          className={cn(
+            UPLOAD_STATE_CLASS,
+            ARTIFACT_UPLOAD_STATE_POSITION_CLASS,
+            data.upload.status === "error" && UPLOAD_STATE_ERROR_CLASS
+          )}
+        >
           {data.upload.status === "error" ? "上传失败" : "上传中"}
         </span>
       )}
@@ -5001,13 +5085,14 @@ function ArtifactLikeNode({ data, selected, width, height }: ArtifactLikeNodePro
       {selected && (
         <NodeToolbar
           align="end"
-          className="artifact-node-toolbar nodrag nopan nowheel"
+          className={cn(ARTIFACT_NODE_TOOLBAR_CLASS, "nodrag nopan nowheel")}
           isVisible={selected}
           offset={10}
           position={Position.Top}
         >
           <button
             aria-label="预览产物"
+            className={ARTIFACT_NODE_TOOLBAR_BUTTON_CLASS}
             disabled={!canPreview}
             onClick={(event) => {
               stopNodeToolbarEvent(event);
@@ -5022,6 +5107,7 @@ function ArtifactLikeNode({ data, selected, width, height }: ArtifactLikeNodePro
           </button>
           <button
             aria-label="打开产物"
+            className={ARTIFACT_NODE_TOOLBAR_BUTTON_CLASS}
             disabled={!contentUrl}
             onClick={(event) => {
               stopNodeToolbarEvent(event);
@@ -5038,6 +5124,7 @@ function ArtifactLikeNode({ data, selected, width, height }: ArtifactLikeNodePro
           </button>
           <button
             aria-label="下载产物"
+            className={ARTIFACT_NODE_TOOLBAR_BUTTON_CLASS}
             disabled={!contentUrl}
             onClick={(event) => {
               stopNodeToolbarEvent(event);
@@ -5056,11 +5143,7 @@ function ArtifactLikeNode({ data, selected, width, height }: ArtifactLikeNodePro
       )}
 
       <Node
-        className={
-          selected
-            ? `selected artifact-card ${data.kind}`
-            : `artifact-card ${data.kind}`
-        }
+        className={cn(ARTIFACT_CARD_CLASS, data.kind, selected && "selected")}
         handles={{ source: true, target: true }}
         minHeight={160}
         minWidth={180}
@@ -5068,25 +5151,25 @@ function ArtifactLikeNode({ data, selected, width, height }: ArtifactLikeNodePro
         style={getResizableNodeStyle(width, height)}
       >
         <ArtifactFrame
-          className="artifact-content"
+          className={ARTIFACT_CONTENT_CLASS}
           copyText={inlinePreview ?? loadedCardText ?? summary}
           data={data}
           downloadText={inlinePreview ?? loadedCardText ?? summary}
           downloadUrl={contentUrl}
         >
-          <div className="artifact-heading">
-            <span className="artifact-icon">
+          <div className={ARTIFACT_HEADING_CLASS}>
+            <span className={ARTIFACT_ICON_CLASS}>
               <ArtifactNodeIcon kind={data.kind} />
             </span>
             <span className="copyable-text nodrag nopan">{label}</span>
           </div>
           {summary && (
-            <p className="artifact-body-text copyable-text nodrag nopan" title={summary}>
+            <p className={ARTIFACT_BODY_TEXT_CLASS} title={summary}>
               {summary}
             </p>
           )}
           {metaLine && (
-            <small className="artifact-meta copyable-text nodrag nopan">
+            <small className={ARTIFACT_META_CLASS}>
               {metaLine}
             </small>
           )}
@@ -5240,13 +5323,14 @@ function CodeNode({
       {selected && (
         <NodeToolbar
           align="end"
-          className="artifact-node-toolbar nodrag nopan nowheel"
+          className={cn(ARTIFACT_NODE_TOOLBAR_CLASS, "nodrag nopan nowheel")}
           isVisible={selected}
           offset={10}
           position={Position.Top}
         >
           <button
             aria-label="预览代码"
+            className={ARTIFACT_NODE_TOOLBAR_BUTTON_CLASS}
             disabled={!canPreview}
             onClick={(event) => {
               stopNodeToolbarEvent(event);
@@ -5261,6 +5345,7 @@ function CodeNode({
           </button>
           <button
             aria-label="打开代码文件"
+            className={ARTIFACT_NODE_TOOLBAR_BUTTON_CLASS}
             disabled={!contentUrl}
             onClick={(event) => {
               stopNodeToolbarEvent(event);
@@ -5277,6 +5362,7 @@ function CodeNode({
           </button>
           <button
             aria-label="下载代码文件"
+            className={ARTIFACT_NODE_TOOLBAR_BUTTON_CLASS}
             disabled={!contentUrl}
             onClick={(event) => {
               stopNodeToolbarEvent(event);
@@ -5295,7 +5381,7 @@ function CodeNode({
       )}
 
       <Node
-        className={selected ? "selected code-card" : "code-card"}
+        className={cn(CODE_CARD_CLASS, selected && "selected")}
         handles={{ source: true, target: true }}
         minHeight={180}
         minWidth={180}
@@ -5303,7 +5389,7 @@ function CodeNode({
         style={getResizableNodeStyle(width, height)}
       >
         <ArtifactFrame
-          className="code-content"
+          className={CODE_CONTENT_CLASS}
           copyText={codeText}
           data={data}
           downloadText={codeText}
@@ -5318,7 +5404,7 @@ function CodeNode({
             />
           </div>
           {metaLine && (
-            <small className="artifact-meta copyable-text nodrag nopan">
+            <small className={ARTIFACT_META_CLASS}>
               {metaLine}
             </small>
           )}
@@ -5368,11 +5454,7 @@ function HtmlPageNode({
 
   return (
     <Node
-      className={
-        selected
-          ? "selected html-page-card"
-          : "html-page-card"
-      }
+      className={cn(HTML_PAGE_CARD_CLASS, selected && "selected")}
       handles={{ source: true, target: true }}
       minHeight={180}
       minWidth={180}
@@ -5380,12 +5462,12 @@ function HtmlPageNode({
       style={getResizableNodeStyle(width, height)}
     >
       <ArtifactFrame
-        className="html-page-content"
+        className={HTML_PAGE_CONTENT_CLASS}
         copyText={htmlText}
-          data={data}
-          downloadText={htmlText}
-          downloadUrl={contentUrl}
-        >
+        data={data}
+        downloadText={htmlText}
+        downloadUrl={contentUrl}
+      >
         <div className="html-page-frame nodrag nopan nowheel">
           {htmlText ? (
             <iframe
@@ -6011,11 +6093,7 @@ function MarkdownNode({
 
   return (
     <Node
-      className={
-        selected
-          ? "selected markdown-card"
-          : "markdown-card"
-      }
+      className={cn(MARKDOWN_CARD_CLASS, selected && "selected")}
       handles={{ source: true, target: true }}
       minHeight={180}
       minWidth={180}
@@ -6023,7 +6101,7 @@ function MarkdownNode({
       style={getResizableNodeStyle(width, height)}
     >
       <ArtifactFrame
-        className="markdown-content"
+        className={MARKDOWN_CONTENT_CLASS}
         copyText={editorData.content}
         data={data}
         downloadText={editorData.content}
@@ -6045,7 +6123,7 @@ function MarkdownNode({
           </Suspense>
         </div>
         {metaLine && (
-          <small className="artifact-meta copyable-text nodrag nopan">
+          <small className={ARTIFACT_META_CLASS}>
             {metaLine}
           </small>
         )}
@@ -6132,13 +6210,14 @@ function ImageResultNode({
       {isReady && (
         <NodeToolbar
           align="end"
-          className="image-node-toolbar nodrag nopan nowheel"
+          className={cn(IMAGE_NODE_TOOLBAR_CLASS, "nodrag nopan nowheel")}
           isVisible={selected}
           offset={12}
           position={Position.Top}
         >
           <button
             aria-label="放大查看图片"
+            className={IMAGE_NODE_TOOLBAR_BUTTON_CLASS}
             onClick={(event) => {
               stopNodeToolbarEvent(event);
               setPreviewOpen(true);
@@ -6152,6 +6231,7 @@ function ImageResultNode({
           </button>
           <button
             aria-label="高清放大图片"
+            className={IMAGE_NODE_TOOLBAR_BUTTON_CLASS}
             onClick={(event) => {
               stopNodeToolbarEvent(event);
               onUpscale(id);
@@ -6165,6 +6245,7 @@ function ImageResultNode({
           </button>
           <button
             aria-label="抠图图片"
+            className={IMAGE_NODE_TOOLBAR_BUTTON_CLASS}
             onClick={(event) => {
               stopNodeToolbarEvent(event);
               onMatting(id);
@@ -6178,6 +6259,7 @@ function ImageResultNode({
           </button>
           <button
             aria-label="下载图片"
+            className={IMAGE_NODE_TOOLBAR_BUTTON_CLASS}
             onClick={(event) => {
               stopNodeToolbarEvent(event);
               void handleDownload();
@@ -6191,6 +6273,7 @@ function ImageResultNode({
           </button>
           <button
             aria-label="复制图片"
+            className={IMAGE_NODE_TOOLBAR_BUTTON_CLASS}
             onClick={(event) => {
               stopNodeToolbarEvent(event);
               void handleCopy();
@@ -6214,29 +6297,50 @@ function ImageResultNode({
       )}
 
       <Node
-        className={selected ? "selected result-card" : "result-card"}
+        className={cn(IMAGE_RESULT_CARD_CLASS, selected && "selected")}
         handles={{ source: true, target: true }}
         minHeight={24}
         minWidth={120}
         selected={selected}
         style={getResizableNodeStyle(width, height)}
       >
-        <div className={`result-image-frame ${status}`}>
+        <div
+          className={cn(
+            IMAGE_RESULT_FRAME_CLASS,
+            status === "ready" && IMAGE_RESULT_FRAME_READY_CLASS,
+            status === "loading" && IMAGE_RESULT_FRAME_LOADING_CLASS,
+            status === "error" && IMAGE_RESULT_FRAME_ERROR_CLASS
+          )}
+        >
           {data.image.url ? (
-            <img src={data.image.url} alt={data.image.title ?? "Generated result"} />
+            <img
+              className={IMAGE_RESULT_IMAGE_CLASS}
+              src={data.image.url}
+              alt={data.image.title ?? "Generated result"}
+            />
           ) : (
-            <div className="result-placeholder" aria-label={data.image.title}>
+            <div className={IMAGE_RESULT_PLACEHOLDER_CLASS} aria-label={data.image.title}>
               {status === "loading" && (
                 <LoadingIndicator ariaLabel="图片生成中" size={20} />
               )}
-              <span>{status === "error" ? "生成失败" : "生成中"}</span>
-              {requestLabel && <small>{requestLabel}</small>}
+              <span className="font-semibold">{status === "error" ? "生成失败" : "生成中"}</span>
+              {requestLabel && (
+                <small className={IMAGE_RESULT_PLACEHOLDER_META_CLASS}>
+                  {requestLabel}
+                </small>
+              )}
             </div>
           )}
         </div>
         {selected && isReady && <NodeFooterLike image={data.image} />}
         {data.upload && (
-          <span className={`upload-state image-upload-state ${data.upload.status}`}>
+          <span
+            className={cn(
+              UPLOAD_STATE_CLASS,
+              IMAGE_UPLOAD_STATE_POSITION_CLASS,
+              data.upload.status === "error" && UPLOAD_STATE_ERROR_CLASS
+            )}
+          >
             {data.operation === "upscale"
               ? data.upload.status === "error"
                 ? "放大失败"
@@ -6253,11 +6357,15 @@ function ImageResultNode({
       </Node>
 
       <Dialog onOpenChange={setPreviewOpen} open={isPreviewOpen}>
-        <DialogContent className="image-preview-dialog nodrag nopan nowheel">
+        <DialogContent className={cn(IMAGE_PREVIEW_DIALOG_CLASS, "nodrag nopan nowheel")}>
           <DialogTitle>{data.image.title ?? "Generated image"}</DialogTitle>
           <DialogDescription>{requestLabel || "图片预览"}</DialogDescription>
-          <div className="image-preview-stage">
-            <img src={data.image.url} alt={data.image.title ?? "Generated result"} />
+          <div className={IMAGE_PREVIEW_STAGE_CLASS}>
+            <img
+              className={IMAGE_PREVIEW_IMAGE_CLASS}
+              src={data.image.url}
+              alt={data.image.title ?? "Generated result"}
+            />
           </div>
         </DialogContent>
       </Dialog>
@@ -6533,9 +6641,9 @@ function formatImageRequestLabel(request: ImageResultNodeData["request"]) {
 
 function NodeFooterLike({ image }: { image: GeneratedImage }) {
   return (
-    <div className="result-footer">
-      <span>{image.title ?? "Generated image"}</span>
-      <span>Follow up</span>
+    <div className={IMAGE_RESULT_FOOTER_CLASS}>
+      <span className="sr-only">{image.title ?? "Generated image"}</span>
+      <span className="font-normal text-cuc-surface">Follow up</span>
     </div>
   );
 }

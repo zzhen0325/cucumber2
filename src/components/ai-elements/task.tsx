@@ -27,14 +27,14 @@ type TaskIcon = ComponentType<{
 
 const TASK_CLASS_NAME = "task not-prose min-w-0";
 const TASK_TRIGGER_CLASS_NAME =
-  "task-trigger run-trigger flex";
+  "task-trigger flex w-full min-w-0 cursor-pointer items-center justify-between gap-1 rounded-cuc-card border-[0.5px] border-cuc-run-border bg-transparent p-1 text-left text-cuc-label-8 [color:var(--run-text-muted)] hover:bg-cuc-run-border";
 const TASK_TRIGGER_LABEL_CLASS_NAME =
-  "task-trigger-label run-trigger-label";
+  "task-trigger-label flex min-w-0 items-center gap-[5px] [&_em]:shrink-0 [&_em]:whitespace-nowrap [&_em]:not-italic [&_em]:[color:var(--run-text-muted)] [&_em]:before:mr-[5px] [&_em]:before:text-cuc-ink/38 [&_em]:before:content-['·'] [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:font-medium [&_span]:[color:var(--run-text-muted)]";
 const TASK_TRIGGER_CHEVRON_CLASS_NAME =
-  "task-trigger-chevron run-trigger-chevron";
+  "task-trigger-chevron [color:var(--run-text-muted)] transition-transform duration-[140ms] ease-[ease]";
 const TASK_CONTENT_CLASS_NAME = "task-content grid min-w-0 gap-[5px] pt-[5px]";
 const TASK_ITEM_CLASS_NAME =
-  "task-item run-meta run-text-muted grid min-w-0 grid-cols-[16px_minmax(0,1fr)] gap-1.5 [&:last-child_.task-item-line]:hidden";
+  "task-item grid min-w-0 grid-cols-[16px_minmax(0,1fr)] gap-1.5 text-[length:var(--canvas-node-meta-size)] leading-[var(--canvas-node-meta-line)] [color:var(--run-text-muted)] [&:last-child_.task-item-line]:hidden";
 const TASK_ITEM_MARKER_CLASS_NAME =
   "task-item-marker relative grid justify-items-center";
 const TASK_ITEM_ICON_CLASS_NAME =
@@ -45,9 +45,9 @@ const TASK_ITEM_BODY_CLASS_NAME = "task-item-body grid min-w-0 gap-[3px]";
 const TASK_ITEM_TITLE_CLASS_NAME =
   "task-item-title min-w-0 overflow-hidden text-inherit [text-overflow:ellipsis]";
 const TASK_ITEM_DESCRIPTION_CLASS_NAME =
-  "task-item-description run-text-muted truncate";
+  "task-item-description truncate [color:var(--run-text-muted)]";
 const TASK_ITEM_FILE_CLASS_NAME =
-  "task-item-file run-text-muted truncate";
+  "task-item-file truncate [color:var(--run-text-muted)]";
 
 export type TaskProps = ComponentProps<typeof Collapsible>;
 
@@ -139,7 +139,7 @@ export const TaskItem = memo(function TaskItem({
         TASK_ITEM_CLASS_NAME,
         `status-${status}`,
         (status === "completed" || status === "in_progress") &&
-          "run-text",
+          "[color:var(--run-text)]",
         status === "error" && "text-cuc-danger-strong",
         className
       )}

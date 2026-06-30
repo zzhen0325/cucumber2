@@ -47,14 +47,14 @@ export function AppSidebar({ view, onViewChange, onLogout }: AppSidebarProps) {
   return (
     <>
       {/* Desktop sidebar rail */}
-      <aside className="hidden h-screen w-[60px] flex-col items-center gap-1 border-r border-border bg-white py-3 md:flex">
+      <aside className="hidden h-screen w-[60px] flex-col items-center gap-1 border-r border-cuc-border bg-cuc-surface py-3 md:flex">
         <div className="mb-1 flex h-9 w-9 items-center justify-center">
           <motion.div
             whileHover={{ scale: 1.1, rotate: 8 }}
             whileTap={{ scale: 0.9 }}
             transition={{ type: "spring", stiffness: 400, damping: 17 }}
           >
-            <CucumberLogo className="size-7 text-foreground" />
+            <CucumberLogo className="size-7 text-cuc-text" />
           </motion.div>
         </div>
 
@@ -77,7 +77,7 @@ export function AppSidebar({ view, onViewChange, onLogout }: AppSidebarProps) {
           className="flex h-9 w-9 items-center justify-center rounded-full"
         >
           <motion.span
-            className="h-5 w-5 text-muted-foreground"
+            className="h-5 w-5 text-cuc-text-muted"
             whileHover={{ scale: 1.15 }}
             whileTap={{ scale: 0.9 }}
             transition={{ type: "spring", stiffness: 400, damping: 17 }}
@@ -89,7 +89,7 @@ export function AppSidebar({ view, onViewChange, onLogout }: AppSidebarProps) {
 
       {/* Mobile bottom navigation bar */}
       <nav
-        className="fixed inset-x-0 bottom-0 z-40 flex items-center justify-around border-t border-border bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm md:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 flex items-center justify-around border-t border-cuc-border bg-cuc-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm md:hidden"
         aria-label="主导航"
       >
         {NAV_ITEMS.map((item) => {
@@ -102,7 +102,7 @@ export function AppSidebar({ view, onViewChange, onLogout }: AppSidebarProps) {
               aria-label={item.label}
               className={cn(
                 "flex min-h-[48px] min-w-[48px] flex-col items-center justify-center gap-0.5 px-2 py-1.5 transition-colors",
-                active ? "text-foreground" : "text-muted-foreground"
+                active ? "text-cuc-text" : "text-cuc-text-muted"
               )}
             >
               <item.icon className="h-5 w-5" />
@@ -116,7 +116,7 @@ export function AppSidebar({ view, onViewChange, onLogout }: AppSidebarProps) {
           type="button"
           onClick={() => void onLogout()}
           aria-label="退出登录"
-          className="flex min-h-[48px] min-w-[48px] flex-col items-center justify-center gap-0.5 px-2 py-1.5 text-muted-foreground transition-colors"
+          className="flex min-h-[48px] min-w-[48px] flex-col items-center justify-center gap-0.5 px-2 py-1.5 text-cuc-text-muted transition-colors"
         >
           <LogOut className="h-5 w-5" />
           <span className="text-[10px] font-medium leading-none">退出</span>
@@ -148,14 +148,14 @@ function NavButton({
       {active && (
         <motion.span
           layoutId="sidebar-active"
-          className="absolute inset-0 rounded-full  bg-primary/10"
+          className="absolute inset-0 rounded-full bg-cuc-primary-surface"
           transition={{ type: "spring", stiffness: 350, damping: 30 }}
         />
       )}
       <motion.span
         className={cn(
           "relative h-5 w-5",
-          active ? "text-foreground" : "text-muted-foreground"
+          active ? "text-cuc-text" : "text-cuc-text-muted"
         )}
         whileHover={{ scale: 1.15 }}
         whileTap={{ scale: 0.9 }}
