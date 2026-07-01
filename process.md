@@ -2,6 +2,18 @@
 
 本文记录 2026-06-11 Agent v2 正式切换后的变更。
 
+## 2026-07-01 Sticky Note Toolbar
+
+- 手动便签节点选中后显示节点局部 toolbar，可直接修改便签颜色、粗体、斜体、下划线和字号；这些修改写入 `StickyNoteNodeData.textStyle` / `color` 并通过现有 `canvasPatch` 增量保存，不创建 Agent Run、不新增 Trace 表或平行画布状态。
+
+## 2026-07-01 Storage Trust and Conflict Guardrails
+
+- 对象存储签名边界收紧：运行时上游 context 会剥离 `contentRef`、`imageUrl`、`storageBucket` 和 `storagePath`；图片工具、模型 input image、toolbar 放大/抠图在签发 R2 read URL 前必须通过 `artifactId + projectId + userId` 从 `agent_artifacts` 重新解析真实 bucket/path。
+- 外部 `canvasPatch` 图结构写入必须携带 `expectedVersion`；前端保存、`/api/agent-run` pending patch、toolbar 放大/抠图和 materializer 都不再在版本冲突后用服务器最新 version 静默重放本地整节点。连续 materialize 冲突保留 Trace 事实日志并记录物化失败，避免无版本兜底覆盖用户新画布。
+- `/api/projects/:projectId/artifacts/:artifactId/content` 对对象存储 artifact 改为鉴权后 302 到短期 R2 signed read URL；文本 artifact 仍从 `agent_artifact_contents` 返回 JSON。
+- R2/DB 非事务边界新增 best-effort 补偿：上传完成在 artifact 登记前失败会删除已 PUT 对象；生成图对象登记失败会删除刚写入对象；项目 soft delete 成功后异步清理该项目已登记 R2 对象。进程崩溃、历史孤儿对象和跨实例一致性仍需要后续 reconcile/GC job。
+- 实时同步、viewport 增量加载和跨实例 Agent Run lease 尚未接入；当前仍是打开时完整快照 + 单进程 active run map。
+
 ## 2026-07-01 Task Graph Normalization Boundary
 
 - Task Frame 新增 `workflow` 摘要，用 `mode`、输入模态、目标产物、required capabilities、required agents 和 ordered stages 表达 hybrid / multi-step 请求；`task.domain` 仍保留为兼容的主领域提示，但不再假设用户意图能被单一 bucket 完整覆盖。

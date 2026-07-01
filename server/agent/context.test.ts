@@ -43,10 +43,18 @@ describe("agent context", () => {
       "image-1",
     ]);
     expect(input.upstreamContext[1]).toMatchObject({
-      contentRef: "r2://agent-assets/projects/project-1/runs/run-1/artifacts/artifact-1.png",
       type: "image",
-      imageUrl: "/api/projects/project-1/artifacts/artifact-1/content",
     });
+    expect(input.upstreamContext[1].artifact).toMatchObject({
+      id: "artifact-1",
+      type: "image",
+    });
+    expect(input.upstreamContext[1].contentRef).toBeUndefined();
+    expect(input.upstreamContext[1].imageUrl).toBeUndefined();
+    expect(input.upstreamContext[1].artifact?.contentRef).toBeUndefined();
+    expect(input.upstreamContext[1].artifact?.metadata ?? {}).not.toHaveProperty(
+      "storagePath"
+    );
     expect(JSON.stringify(input.upstreamContext)).not.toContain("signed");
   });
 

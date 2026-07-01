@@ -15,6 +15,7 @@ import {
 import {
   createPresignedReadUrl,
   createPresignedUploadUrl,
+  deleteObject,
   getObject,
   getR2AssetsBucket,
   getR2SignedReadTtlSeconds,
@@ -105,6 +106,11 @@ type StoreAgentSkillPackageInput = {
   skillName: string;
 };
 
+type ResolveStorageBackedImageContextOptions = {
+  projectId: string;
+  userId: string;
+};
+
 export function getStorageContentRef(bucket: string, path: string) {
   return `r2://${bucket}/${path}`;
 }
@@ -128,6 +134,17 @@ export function getArtifactStorageContentRef(artifact: ArtifactRef) {
   const bucket = readString(artifact.metadata?.storageBucket);
   const path = readString(artifact.metadata?.storagePath);
   return bucket && path ? getStorageContentRef(bucket, path) : null;
+}
+
+export function getAgentArtifactRecordStorageContentRef(
+  artifact: Pick<AgentArtifactRecord, "bucketId" | "contentRef" | "storagePath">
+) {
+  if (artifact.contentRef && parseStorageContentRef(artifact.contentRef)) {
+    return artifact.contentRef;
+  }
+  return artifact.bucketId && artifact.storagePath
+    ? getStorageContentRef(artifact.bucketId, artifact.storagePath)
+    : null;
 }
 
 export function getArtifactContentUrl(projectId: string, artifactId: string) {
@@ -180,107 +197,119 @@ export async function completeSignedAssetUpload(
   assertExpectedUploadPath(input);
   assertAllowedAssetSize(input.sizeBytes);
 
+  let registered = false;
   const artifactId = `upload-${input.uploadId}`;
-  const artifactType = getArtifactTypeForUploadKind(input.kind);
-  const inputMimeType = normalizeMimeType(input.mimeType);
-  const infoStartedAt = performance.now();
-  const objectInfo = await getStoredObjectInfo(input.bucket, input.path);
-  const infoMs = elapsedStorageMs(infoStartedAt);
-  if (
-    objectInfo.sizeBytes !== null &&
-    objectInfo.sizeBytes !== input.sizeBytes
-  ) {
-    throw new Error("Uploaded asset size does not match the signed upload.");
+  try {
+    const artifactType = getArtifactTypeForUploadKind(input.kind);
+    const inputMimeType = normalizeMimeType(input.mimeType);
+    const infoStartedAt = performance.now();
+    const objectInfo = await getStoredObjectInfo(input.bucket, input.path);
+    const infoMs = elapsedStorageMs(infoStartedAt);
+    if (
+      objectInfo.sizeBytes !== null &&
+      objectInfo.sizeBytes !== input.sizeBytes
+    ) {
+      throw new Error("Uploaded asset size does not match the signed upload.");
+    }
+    const mimeType =
+      objectInfo?.mimeType || inputMimeType || "application/octet-stream";
+    const shouldReadObjectBytes = isLikelyTextualAsset(mimeType, input.path);
+    const downloadStartedAt = performance.now();
+    const objectBytes = shouldReadObjectBytes
+      ? await readStoredObjectBytes(input.bucket, input.path)
+      : null;
+    const downloadMs = objectBytes ? elapsedStorageMs(downloadStartedAt) : 0;
+    const sizeBytes =
+      objectInfo.sizeBytes ?? objectBytes?.byteLength ?? input.sizeBytes;
+    const previewKind = getPreviewKindForUploadKind(input.kind);
+    const metadata = compactRecord({
+      byteSize: sizeBytes,
+      createdBy: input.userId,
+      digest: objectBytes ? createSha256Digest(objectBytes) : undefined,
+      fileName: input.fileName,
+      format: getUploadFormat(input.kind),
+      height: input.height,
+      mimeType,
+      origin: "user_upload",
+      preview: input.preview,
+      previewKind,
+      projectId: input.projectId,
+      size: sizeBytes,
+      sourceToolName: "upload",
+      storageBucket: input.bucket,
+      storagePath: input.path,
+      summary: input.summary,
+      uploadKind: input.kind,
+      uploadedAt: new Date().toISOString(),
+      width: input.width,
+    });
+
+    const registerStartedAt = performance.now();
+    const record = await registerAgentArtifact({
+      bucketId: input.bucket,
+      contentRef: getStorageContentRef(input.bucket, input.path),
+      createdBy: input.userId,
+      id: artifactId,
+      metadata,
+      mimeType,
+      origin: "user_upload",
+      projectId: input.projectId,
+      sizeBytes,
+      skipProjectAccessCheck: true,
+      storagePath: input.path,
+      title: input.title ?? input.fileName,
+      type: artifactType,
+      uri:
+        artifactType === "image"
+          ? getArtifactContentUrl(input.projectId, artifactId)
+          : null,
+      userId: input.userId,
+    });
+    const registerMs = elapsedStorageMs(registerStartedAt);
+
+    if (!record) {
+      throw new Error("Project not found.");
+    }
+    registered = true;
+
+    const indexStartedAt = performance.now();
+    await indexArtifactForKnowledge({
+      artifact: record,
+      contentText: objectBytes
+        ? readKnowledgeTextFromBytes({
+            bytes: objectBytes,
+            mimeType,
+            path: input.path,
+          })
+        : undefined,
+    }).catch((error: unknown) => {
+      console.error("[upload:knowledge-index]", error);
+    });
+    const indexMs = elapsedStorageMs(indexStartedAt);
+
+    console.info("[upload:complete]", {
+      artifactId,
+      downloadMs,
+      fileName: input.fileName,
+      infoMs,
+      kind: input.kind,
+      mimeType,
+      readObjectInfo: Boolean(objectInfo),
+      readObjectBytes: Boolean(objectBytes),
+      registerMs,
+      sizeBytes,
+      indexMs,
+      totalMs: elapsedStorageMs(totalStartedAt),
+      uploadId: input.uploadId,
+    });
+
+    return toArtifactRef(record);
+  } catch (error) {
+    if (!registered) {
+      await deleteStoredObjectQuietly(input.bucket, input.path, "upload-complete");
+    }
+    throw error;
   }
-  const mimeType =
-    objectInfo?.mimeType || inputMimeType || "application/octet-stream";
-  const shouldReadObjectBytes = isLikelyTextualAsset(mimeType, input.path);
-  const downloadStartedAt = performance.now();
-  const objectBytes = shouldReadObjectBytes
-    ? await readStoredObjectBytes(input.bucket, input.path)
-    : null;
-  const downloadMs = objectBytes ? elapsedStorageMs(downloadStartedAt) : 0;
-  const sizeBytes = objectInfo.sizeBytes ?? objectBytes?.byteLength ?? input.sizeBytes;
-  const previewKind = getPreviewKindForUploadKind(input.kind);
-  const metadata = compactRecord({
-    byteSize: sizeBytes,
-    createdBy: input.userId,
-    digest: objectBytes ? createSha256Digest(objectBytes) : undefined,
-    fileName: input.fileName,
-    format: getUploadFormat(input.kind),
-    height: input.height,
-    mimeType,
-    origin: "user_upload",
-    preview: input.preview,
-    previewKind,
-    projectId: input.projectId,
-    size: sizeBytes,
-    sourceToolName: "upload",
-    storageBucket: input.bucket,
-    storagePath: input.path,
-    summary: input.summary,
-    uploadKind: input.kind,
-    uploadedAt: new Date().toISOString(),
-    width: input.width,
-  });
-
-  const registerStartedAt = performance.now();
-  const record = await registerAgentArtifact({
-    bucketId: input.bucket,
-    contentRef: getStorageContentRef(input.bucket, input.path),
-    createdBy: input.userId,
-    id: artifactId,
-    metadata,
-    mimeType,
-    origin: "user_upload",
-    projectId: input.projectId,
-    sizeBytes,
-    skipProjectAccessCheck: true,
-    storagePath: input.path,
-    title: input.title ?? input.fileName,
-    type: artifactType,
-    uri:
-      artifactType === "image"
-        ? getArtifactContentUrl(input.projectId, artifactId)
-        : null,
-    userId: input.userId,
-  });
-  const registerMs = elapsedStorageMs(registerStartedAt);
-
-  if (!record) {
-    throw new Error("Project not found.");
-  }
-
-  const indexStartedAt = performance.now();
-  await indexArtifactForKnowledge({
-    artifact: record,
-    contentText: objectBytes
-      ? readKnowledgeTextFromBytes({
-          bytes: objectBytes,
-          mimeType,
-          path: input.path,
-        })
-      : undefined,
-  });
-  const indexMs = elapsedStorageMs(indexStartedAt);
-
-  console.info("[upload:complete]", {
-    artifactId,
-    downloadMs,
-    fileName: input.fileName,
-    infoMs,
-    kind: input.kind,
-    mimeType,
-    readObjectInfo: Boolean(objectInfo),
-    readObjectBytes: Boolean(objectBytes),
-    registerMs,
-    sizeBytes,
-    indexMs,
-    totalMs: elapsedStorageMs(totalStartedAt),
-    uploadId: input.uploadId,
-  });
-
-  return toArtifactRef(record);
 }
 
 export async function storeGeneratedImageFromUrl(
@@ -327,59 +356,70 @@ export async function storeGeneratedImageFromBytes(
     path,
   });
 
-  const provider =
-    typeof input.metadata?.provider === "string"
-      ? input.metadata.provider
-      : "seedream";
-  const origin =
-    provider === "coze"
-      ? "coze_generated"
-      : provider === "byteartist"
-        ? "byteartist_generated"
-        : "seedream_generated";
-  const metadata = compactRecord({
-    ...input.metadata,
-    byteSize: input.bytes.byteLength,
-    createdBy: input.userId,
-    digest: createSha256Digest(input.bytes),
-    mimeType,
-    origin,
-    previewKind: "image",
-    projectId: input.projectId,
-    size: input.bytes.byteLength,
-    sourceRunNodeId: input.runNodeId,
-    sourceToolName:
-      input.sourceToolName ??
-      (input.metadata?.operation === "upscale" ? "upscale_image" : "generate_image"),
-    storageBucket: bucket,
-    storagePath: path,
-  });
-  const record = await registerAgentArtifact({
-    bucketId: bucket,
-    contentRef: getStorageContentRef(bucket, path),
-    createdBy: input.userId,
-    id: input.artifactId,
-    metadata,
-    mimeType,
-    origin,
-    projectId: input.projectId,
-    runNodeId: input.runNodeId,
-    sizeBytes: input.bytes.byteLength,
-    sourceNodeId: input.sourceNodeId,
-    storagePath: path,
-    title: input.title,
-    type: "image",
-    uri: getArtifactContentUrl(input.projectId, input.artifactId),
-    userId: input.userId,
-  });
+  let registered = false;
+  try {
+    const provider =
+      typeof input.metadata?.provider === "string"
+        ? input.metadata.provider
+        : "seedream";
+    const origin =
+      provider === "coze"
+        ? "coze_generated"
+        : provider === "byteartist"
+          ? "byteartist_generated"
+          : "seedream_generated";
+    const metadata = compactRecord({
+      ...input.metadata,
+      byteSize: input.bytes.byteLength,
+      createdBy: input.userId,
+      digest: createSha256Digest(input.bytes),
+      mimeType,
+      origin,
+      previewKind: "image",
+      projectId: input.projectId,
+      size: input.bytes.byteLength,
+      sourceRunNodeId: input.runNodeId,
+      sourceToolName:
+        input.sourceToolName ??
+        (input.metadata?.operation === "upscale" ? "upscale_image" : "generate_image"),
+      storageBucket: bucket,
+      storagePath: path,
+    });
+    const record = await registerAgentArtifact({
+      bucketId: bucket,
+      contentRef: getStorageContentRef(bucket, path),
+      createdBy: input.userId,
+      id: input.artifactId,
+      metadata,
+      mimeType,
+      origin,
+      projectId: input.projectId,
+      runNodeId: input.runNodeId,
+      sizeBytes: input.bytes.byteLength,
+      sourceNodeId: input.sourceNodeId,
+      storagePath: path,
+      title: input.title,
+      type: "image",
+      uri: getArtifactContentUrl(input.projectId, input.artifactId),
+      userId: input.userId,
+    });
 
-  if (!record) {
-    throw new Error("Project not found.");
+    if (!record) {
+      throw new Error("Project not found.");
+    }
+    registered = true;
+
+    await indexArtifactForKnowledge({ artifact: record }).catch((error: unknown) => {
+      console.error("[generated-image:knowledge-index]", error);
+    });
+
+    return toArtifactRef(record);
+  } catch (error) {
+    if (!registered) {
+      await deleteStoredObjectQuietly(bucket, path, "generated-image");
+    }
+    throw error;
   }
-
-  await indexArtifactForKnowledge({ artifact: record });
-
-  return toArtifactRef(record);
 }
 
 export async function storeTextArtifactContent(
@@ -516,6 +556,36 @@ export async function createSignedArtifactReadUrl(
   return createSignedStorageReadUrl(artifact.bucketId, artifact.storagePath);
 }
 
+export async function deleteStoredObject(
+  artifact: Pick<AgentArtifactRecord, "bucketId" | "storagePath">
+) {
+  if (!artifact.bucketId || !artifact.storagePath) {
+    return false;
+  }
+
+  await deleteObject(artifact.bucketId, artifact.storagePath);
+  return true;
+}
+
+export async function deleteStoredObjects(
+  artifacts: Array<Pick<AgentArtifactRecord, "bucketId" | "storagePath">>
+) {
+  const results = await Promise.allSettled(
+    artifacts.map((artifact) => deleteStoredObject(artifact))
+  );
+  const failed = results.filter((result) => result.status === "rejected");
+  if (failed.length) {
+    console.error("[storage:delete-objects]", { failed: failed.length });
+  }
+  return {
+    attempted: artifacts.length,
+    deleted: results.filter(
+      (result) => result.status === "fulfilled" && result.value
+    ).length,
+    failed: failed.length,
+  };
+}
+
 export async function readArtifactContent(
   artifact: Pick<
     AgentArtifactRecord,
@@ -536,7 +606,8 @@ export async function readArtifactContent(
 }
 
 export async function resolveStorageBackedImageContext(
-  items: UpstreamContextItem[]
+  items: UpstreamContextItem[],
+  options: ResolveStorageBackedImageContextOptions
 ): Promise<UpstreamContextItem[]> {
   return Promise.all(
     items.map(async (item) => {
@@ -544,27 +615,69 @@ export async function resolveStorageBackedImageContext(
         return item;
       }
 
-      const contentRef =
-        item.contentRef ??
-        (item.artifact ? getArtifactStorageContentRef(item.artifact) : null);
-      const parsed = contentRef ? parseStorageContentRef(contentRef) : null;
-      if (!contentRef || !parsed) {
-        return item;
+      const trusted = item.artifact
+        ? await resolveTrustedStorageArtifact({
+            artifact: item.artifact,
+            expectedType: "image",
+            projectId: options.projectId,
+            userId: options.userId,
+          })
+        : null;
+      if (!trusted) {
+        return {
+          ...item,
+          contentRef: undefined,
+          imageUrl: undefined,
+        };
       }
 
       return {
         ...item,
-        artifact: item.artifact
-          ? {
-              ...item.artifact,
-              contentRef,
-            }
-          : item.artifact,
-        contentRef,
-        imageUrl: await createSignedStorageReadUrl(parsed.bucket, parsed.path),
+        artifact: trusted.artifact,
+        contentRef: trusted.contentRef,
+        imageUrl: await createSignedStorageReadUrl(trusted.bucket, trusted.path),
       };
     })
   );
+}
+
+export async function resolveTrustedStorageArtifact({
+  artifact,
+  expectedType,
+  projectId,
+  userId,
+}: {
+  artifact: Pick<ArtifactRef, "id">;
+  expectedType?: ArtifactType;
+  projectId: string;
+  userId: string;
+}) {
+  const record = await getAgentArtifactForUser({
+    artifactId: artifact.id,
+    projectId,
+    userId,
+  });
+  if (!record || (expectedType && record.type !== expectedType)) {
+    return null;
+  }
+
+  const contentRef = getAgentArtifactRecordStorageContentRef(record);
+  const parsed = contentRef ? parseStorageContentRef(contentRef) : null;
+  if (!contentRef || !parsed) {
+    return null;
+  }
+
+  return {
+    artifact: {
+      ...toArtifactRef(record),
+      contentRef,
+      uri: record.uri ?? getArtifactContentUrl(projectId, record.id),
+    },
+    bucket: parsed.bucket,
+    contentRef,
+    path: parsed.path,
+    record,
+  };
 }
 
 async function createSignedStorageReadUrl(bucket: string, path: string) {
@@ -573,6 +686,18 @@ async function createSignedStorageReadUrl(bucket: string, path: string) {
     expiresIn: getR2SignedReadTtlSeconds(),
     path,
   });
+}
+
+async function deleteStoredObjectQuietly(
+  bucket: string,
+  path: string,
+  reason: string
+) {
+  try {
+    await deleteObject(bucket, path);
+  } catch (error) {
+    console.error("[storage:cleanup]", { bucket, error, path, reason });
+  }
 }
 
 async function getStoredObjectInfo(bucket: string, path: string) {

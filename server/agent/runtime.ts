@@ -386,7 +386,11 @@ export async function buildAgentRunnerInput(
   input: AgentRunInput,
   prompt: string
 ): Promise<string | AgentInputItem[]> {
-  const images = await resolveModelInputImages(input.upstreamContext, input.selectedNodeIds);
+  const images = await resolveModelInputImages(input.upstreamContext, {
+    projectId: input.projectId,
+    selectedNodeIds: input.selectedNodeIds,
+    userId: input.userId,
+  });
   if (!images.length) {
     return prompt;
   }
@@ -408,7 +412,15 @@ export async function buildAgentRunnerInput(
 
 async function resolveModelInputImages(
   upstreamContext: UpstreamContextItem[],
-  selectedNodeIds: string[]
+  {
+    projectId,
+    selectedNodeIds,
+    userId,
+  }: {
+    projectId: string;
+    selectedNodeIds: string[];
+    userId: string;
+  }
 ) {
   const selectedNodeIdSet = new Set(selectedNodeIds);
   const imageItems = upstreamContext
@@ -425,7 +437,10 @@ async function resolveModelInputImages(
     return [];
   }
 
-  const resolved = await resolveStorageBackedImageContext(imageItems);
+  const resolved = await resolveStorageBackedImageContext(imageItems, {
+    projectId,
+    userId,
+  });
   return resolved.filter(
     (item): item is UpstreamContextItem & { type: "image"; imageUrl: string } =>
       item.type === "image" && isModelReadableImageUrl(item.imageUrl)

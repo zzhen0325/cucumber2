@@ -1,4 +1,5 @@
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
@@ -116,6 +117,15 @@ export async function headObject(bucket: string, path: string) {
     mimeType: response.ContentType,
     sizeBytes: response.ContentLength ?? null,
   };
+}
+
+export async function deleteObject(bucket: string, path: string) {
+  await getR2Client().send(
+    new DeleteObjectCommand({
+      Bucket: bucket,
+      Key: path,
+    })
+  );
 }
 
 export async function createPresignedUploadUrl({

@@ -520,6 +520,36 @@ export async function softDeleteProject(projectId: string, userId: string) {
   return Boolean(data);
 }
 
+export async function listProjectStorageObjectsForUser(
+  projectId: string,
+  userId: string
+) {
+  const existing = await getProjectRow(projectId);
+  if (!canAccessProject(userId, mapProjectAccess(existing))) {
+    return [];
+  }
+
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("agent_artifacts")
+    .select("bucket_id,storage_path")
+    .eq("project_id", projectId)
+    .not("bucket_id", "is", null)
+    .not("storage_path", "is", null)
+    .is("deleted_at", null)
+    .returns<Array<{ bucket_id: string | null; storage_path: string | null }>>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data.flatMap((row) =>
+    row.bucket_id && row.storage_path
+      ? [{ bucketId: row.bucket_id, storagePath: row.storage_path }]
+      : []
+  );
+}
+
 export async function listAgentSkillDefinitions() {
   const client = getSupabaseClient();
   const { data, error } = await client

@@ -207,10 +207,20 @@ export type ImageResultNodeData = {
   upload?: LocalUploadState;
 };
 
+export type StickyNoteColor = "yellow" | "green" | "blue" | "pink";
+export type StickyNoteTextSize = "small" | "medium" | "large";
+export type StickyNoteTextStyle = {
+  bold?: boolean;
+  italic?: boolean;
+  size?: StickyNoteTextSize;
+  underline?: boolean;
+};
+
 export type StickyNoteNodeData = {
   kind: "stickyNote";
   text: string;
-  color: "yellow" | "green" | "blue" | "pink";
+  color: StickyNoteColor;
+  textStyle?: StickyNoteTextStyle;
   createdAt: string;
 };
 

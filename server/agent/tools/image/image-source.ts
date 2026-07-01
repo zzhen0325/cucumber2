@@ -1,8 +1,7 @@
 import type { ArtifactRef, UpstreamContextItem } from "../../../../src/types/canvas.ts";
 import {
-  getArtifactStorageContentRef,
-  parseStorageContentRef,
   readArtifactContent,
+  resolveTrustedStorageArtifact,
   resolveStorageBackedImageContext,
   storeGeneratedImageFromBytes,
   storeGeneratedImageFromUrl,
@@ -18,24 +17,42 @@ export type ResolvedImageSource = {
   title?: string;
 };
 
-export async function readImageArtifactBytes(artifact: ArtifactRef | undefined) {
+export async function readImageArtifactBytes(
+  artifact: ArtifactRef | undefined,
+  {
+    projectId,
+    userId,
+  }: {
+    projectId: string;
+    userId: string;
+  }
+) {
   if (!artifact || artifact.type !== "image") {
     throw new Error("Selected source artifact is not an image.");
   }
-  const contentRef = getArtifactStorageContentRef(artifact);
-  const parsed = contentRef ? parseStorageContentRef(contentRef) : null;
-  if (!parsed) {
+  const trusted = await resolveTrustedStorageArtifact({
+    artifact,
+    expectedType: "image",
+    projectId,
+    userId,
+  });
+  if (!trusted) {
     throw new Error("Selected image is not backed by object storage.");
   }
   const content = await readArtifactContent({
-    bucketId: parsed.bucket,
-    mimeType: artifact.mimeType ?? readString(artifact.metadata?.mimeType) ?? null,
+    bucketId: trusted.bucket,
+    mimeType:
+      trusted.artifact.mimeType ??
+      artifact.mimeType ??
+      readString(artifact.metadata?.mimeType) ??
+      null,
     sizeBytes:
+      trusted.artifact.sizeBytes ??
       artifact.sizeBytes ??
       readNumber(artifact.metadata?.byteSize) ??
       readNumber(artifact.metadata?.size) ??
       null,
-    storagePath: parsed.path,
+    storagePath: trusted.path,
   });
   if (!content.mimeType.startsWith("image/")) {
     throw new Error(`Selected source artifact is not an image (${content.mimeType}).`);
@@ -59,7 +76,10 @@ export async function resolveSingleSourceImage(
     throw new Error(emptyMessage);
   }
 
-  const [resolved] = await resolveStorageBackedImageContext([source]);
+  const [resolved] = await resolveStorageBackedImageContext([source], {
+    projectId: context.projectId,
+    userId: context.userId,
+  });
   if (resolved.type !== "image" || !resolved.imageUrl) {
     throw new Error("Selected image cannot be resolved for image processing.");
   }

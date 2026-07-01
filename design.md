@@ -88,6 +88,7 @@
 - 复用 `src/components/ui/*` 和 `src/components/ai-elements/*`，不要临时复制一套组件风格。
 - 画布节点应继续基于 `Node` / `NodeContent` 等 AI Elements 包装组件。
 - 画布内跨节点复用的 class 合同优先放在 `src/components/design-system/canvas-patterns.ts`，页面私有常量保留在页面文件内。
+- 便签节点选中后使用节点局部 toolbar 编辑颜色和字体样式；颜色使用现有便签色 swatch，粗体/斜体/下划线/字号使用图标按钮，不新增全局属性面板。
 - 表单输入优先复用 Prompt Input / Input Group 的圆角、边框和轻阴影语言。
 - 画布输入器内展示选中节点 token，不展示 raw node id；图像模式参数使用轻量下拉控件承载模型、比例和数量。
 - 浮层、弹窗和菜单保持轻量，不遮挡核心画布操作。

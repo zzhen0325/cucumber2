@@ -8,6 +8,7 @@ const storageMocks = vi.hoisted(() => {
     method: "PUT" as const,
     signedUrl: "https://upload.example/object.png",
   }));
+  const deleteObject = vi.fn(async () => undefined);
   const getObject = vi.fn();
   const headObject = vi.fn();
   const putObject = vi.fn(async () => undefined);
@@ -51,8 +52,9 @@ const storageMocks = vi.hoisted(() => {
 
   return {
     createPresignedReadUrl,
-    createPresignedUploadUrl,
-    getAgentArtifactForUser,
+      createPresignedUploadUrl,
+      deleteObject,
+      getAgentArtifactForUser,
     getObject,
     headObject,
     putObject,
@@ -65,6 +67,7 @@ const storageMocks = vi.hoisted(() => {
 vi.mock("./r2-storage.ts", () => ({
   createPresignedReadUrl: storageMocks.createPresignedReadUrl,
   createPresignedUploadUrl: storageMocks.createPresignedUploadUrl,
+  deleteObject: storageMocks.deleteObject,
   getObject: storageMocks.getObject,
   getR2AssetsBucket: () => "agent-assets",
   getR2SignedReadTtlSeconds: () => 600,
@@ -91,7 +94,6 @@ const {
   createSignedAssetUpload,
   completeSignedAssetUpload,
   getArtifactContentUrl,
-  getArtifactStorageContentRef,
   getStorageContentRef,
   parseStorageContentRef,
   resolveStorageBackedImageContext,
@@ -103,7 +105,9 @@ describe("agent asset storage helpers", () => {
   beforeEach(() => {
     storageMocks.createPresignedReadUrl.mockClear();
     storageMocks.createPresignedUploadUrl.mockClear();
-    storageMocks.getAgentArtifactForUser.mockClear();
+    storageMocks.deleteObject.mockClear();
+    storageMocks.getAgentArtifactForUser.mockReset();
+    storageMocks.getAgentArtifactForUser.mockResolvedValue(null as never);
     storageMocks.getObject.mockReset();
     storageMocks.headObject.mockReset();
     storageMocks.putObject.mockClear();
@@ -218,6 +222,31 @@ describe("agent asset storage helpers", () => {
   });
 
   it("signs storage-backed image context only for the provider request", async () => {
+    storageMocks.getAgentArtifactForUser.mockResolvedValueOnce({
+      bucketId: "agent-assets",
+      contentRef: "r2://agent-assets/projects/project-1/uploads/upload-1/reference.png",
+      createdAt: "2026-06-18T00:00:00.000Z",
+      createdBy: "user-1",
+      id: "artifact-1",
+      metadata: {},
+      mimeType: "image/png",
+      origin: "user_upload",
+      previewKind: "image",
+      previewText: null,
+      projectId: "project-1",
+      runNodeId: null,
+      sizeBytes: 2048,
+      sourceNodeId: null,
+      storagePath: "projects/project-1/uploads/upload-1/reference.png",
+      summary: null,
+      title: "reference.png",
+      toolCallId: null,
+      type: "image",
+      updatedAt: "2026-06-18T00:00:00.000Z",
+      uri: "/api/projects/project-1/artifacts/artifact-1/content",
+      version: 1,
+    } as never);
+
     const context = await resolveStorageBackedImageContext([
       {
         artifact: {
@@ -233,9 +262,17 @@ describe("agent asset storage helpers", () => {
         nodeId: "image-1",
         type: "image",
       },
-    ]);
+    ], {
+      projectId: "project-1",
+      userId: "user-1",
+    });
 
     expect(context[0].imageUrl).toBe("https://signed.example/object.png");
+    expect(storageMocks.getAgentArtifactForUser).toHaveBeenCalledWith({
+      artifactId: "artifact-1",
+      projectId: "project-1",
+      userId: "user-1",
+    });
     expect(storageMocks.createPresignedReadUrl).toHaveBeenCalledWith({
       bucket: "agent-assets",
       expiresIn: 600,
@@ -243,20 +280,40 @@ describe("agent asset storage helpers", () => {
     });
   });
 
-  it("recovers storage refs from artifact metadata for migrated image contexts", async () => {
+  it("uses DB storage refs instead of node artifact metadata for migrated image contexts", async () => {
+    storageMocks.getAgentArtifactForUser.mockResolvedValueOnce({
+      bucketId: "agent-assets",
+      contentRef: null,
+      createdAt: "2026-06-18T00:00:00.000Z",
+      createdBy: "user-1",
+      id: "artifact-1",
+      metadata: {},
+      mimeType: "image/png",
+      origin: "user_upload",
+      previewKind: "image",
+      previewText: null,
+      projectId: "project-1",
+      runNodeId: null,
+      sizeBytes: 2048,
+      sourceNodeId: null,
+      storagePath: "projects/project-1/uploads/upload-1/reference.png",
+      summary: null,
+      title: "reference.png",
+      toolCallId: null,
+      type: "image",
+      updatedAt: "2026-06-18T00:00:00.000Z",
+      uri: "/api/projects/project-1/artifacts/artifact-1/content",
+      version: 1,
+    } as never);
     const artifact = {
       id: "artifact-1",
       metadata: {
         storageBucket: "agent-assets",
-        storagePath: "projects/project-1/uploads/upload-1/reference.png",
+        storagePath: "projects/project-1/uploads/forged/reference.png",
       },
       type: "image" as const,
       uri: "/api/projects/project-1/artifacts/artifact-1/content",
     };
-
-    expect(getArtifactStorageContentRef(artifact)).toBe(
-      "r2://agent-assets/projects/project-1/uploads/upload-1/reference.png"
-    );
 
     const context = await resolveStorageBackedImageContext([
       {
@@ -265,7 +322,10 @@ describe("agent asset storage helpers", () => {
         nodeId: "image-1",
         type: "image",
       },
-    ]);
+    ], {
+      projectId: "project-1",
+      userId: "user-1",
+    });
 
     expect(context[0]).toMatchObject({
       contentRef:
@@ -280,6 +340,32 @@ describe("agent asset storage helpers", () => {
       expiresIn: 600,
       path: "projects/project-1/uploads/upload-1/reference.png",
     });
+  });
+
+  it("does not sign node-provided storage refs without a matching DB artifact", async () => {
+    const context = await resolveStorageBackedImageContext([
+      {
+        artifact: {
+          contentRef:
+            "r2://agent-assets/projects/project-1/uploads/forged/reference.png",
+          id: "artifact-1",
+          type: "image",
+          uri: "/api/projects/project-1/artifacts/artifact-1/content",
+        },
+        contentRef:
+          "r2://agent-assets/projects/project-1/uploads/forged/reference.png",
+        imageUrl: "/api/projects/project-1/artifacts/artifact-1/content",
+        nodeId: "image-1",
+        type: "image",
+      },
+    ], {
+      projectId: "project-1",
+      userId: "user-1",
+    });
+
+    expect(context[0].imageUrl).toBeUndefined();
+    expect(context[0].contentRef).toBeUndefined();
+    expect(storageMocks.createPresignedReadUrl).not.toHaveBeenCalled();
   });
 
   it("creates R2 presigned upload contracts", async () => {
@@ -413,5 +499,59 @@ describe("agent asset storage helpers", () => {
     const knowledgeCall = knowledgeCalls.at(-1)?.[0];
     expect(JSON.stringify(knowledgeCall)).toContain("Brief");
     expect(JSON.stringify(knowledgeCall)).toContain("Hello");
+  });
+
+  it("cleans up uploaded R2 objects when upload completion cannot register an artifact", async () => {
+    storageMocks.headObject.mockResolvedValueOnce({
+      mimeType: "image/png",
+      sizeBytes: 2048,
+    });
+    storageMocks.registerAgentArtifact.mockResolvedValueOnce(null as never);
+
+    await expect(
+      completeSignedAssetUpload({
+        bucket: "agent-assets",
+        fileName: "reference.png",
+        height: 900,
+        kind: "image",
+        mimeType: "image/png",
+        path: "projects/project-1/uploads/upload-3/reference.png",
+        projectId: "project-1",
+        sizeBytes: 2048,
+        summary: "上传图片 reference.png",
+        title: "reference.png",
+        uploadId: "upload-3",
+        userId: "user-1",
+        width: 1600,
+      })
+    ).rejects.toThrow("Project not found.");
+
+    expect(storageMocks.deleteObject).toHaveBeenCalledWith(
+      "agent-assets",
+      "projects/project-1/uploads/upload-3/reference.png"
+    );
+  });
+
+  it("cleans up generated image objects when artifact registration fails", async () => {
+    storageMocks.registerAgentArtifact.mockResolvedValueOnce(null as never);
+
+    await expect(
+      storeGeneratedImageFromBytes({
+        artifactId: "generated-1",
+        bytes: new Uint8Array([1, 2, 3]),
+        metadata: { provider: "byteartist" },
+        mimeType: "image/png",
+        projectId: "project-1",
+        runNodeId: "run-1",
+        sourceToolName: "generate_image",
+        title: "Generated image",
+        userId: "user-1",
+      })
+    ).rejects.toThrow("Project not found.");
+
+    expect(storageMocks.deleteObject).toHaveBeenCalledWith(
+      "agent-assets",
+      "projects/project-1/runs/run-1/artifacts/generated-1.png"
+    );
   });
 });

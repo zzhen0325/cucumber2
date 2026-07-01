@@ -36,11 +36,16 @@ import {
   GlobeIcon as Globe2,
   FullScreenMaximizeIcon as Maximize2,
   PencilIcon as Pencil,
+  PaintBucketIcon as PaintBucket,
   SearchIcon as Search,
   SparkleIcon as Sparkles,
   SquareIcon as Square,
   NoteIcon as StickyNote,
+  TextBoldIcon as TextBold,
+  TextFontSizeIcon as TextFontSize,
   TextIcon as Type,
+  TextItalicIcon as TextItalic,
+  TextUnderlineIcon as TextUnderline,
   TriangleIcon as Triangle,
 } from "@proicons/react";
 import {
@@ -59,7 +64,10 @@ import {
   useState,
 } from "react";
 import type {
+  ChangeEvent as ReactChangeEvent,
+  CompositionEvent as ReactCompositionEvent,
   CSSProperties,
+  FocusEvent as ReactFocusEvent,
   FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
@@ -174,7 +182,6 @@ import {
   updateProject,
   updateTextArtifactContent,
   upscaleProjectImage,
-  ProjectVersionConflictError,
   type SaveProjectCanvasPatchInput,
 } from "@/lib/project-storage";
 import {
@@ -232,7 +239,10 @@ import type {
   PromptNodeData,
   ShapeNodeData,
   ShapeVariant,
+  StickyNoteColor,
   StickyNoteNodeData,
+  StickyNoteTextSize,
+  StickyNoteTextStyle,
   WebpageNodeData,
 } from "@/types/canvas";
 
@@ -284,12 +294,19 @@ const ManualNodeEditingContext = createContext<{
   onPromptTextChange: (nodeId: string, prompt: string) => void;
   readOnly: boolean;
   onShapeLabelChange: (nodeId: string, label: string) => void;
+  onStickyColorChange: (nodeId: string, color: StickyNoteColor) => void;
   onStickyTextChange: (nodeId: string, text: string) => void;
+  onStickyTextStyleChange: (
+    nodeId: string,
+    patch: Partial<StickyNoteTextStyle>
+  ) => void;
 }>({
   onPromptTextChange: () => undefined,
   readOnly: true,
   onShapeLabelChange: () => undefined,
+  onStickyColorChange: () => undefined,
   onStickyTextChange: () => undefined,
+  onStickyTextStyleChange: () => undefined,
 });
 const ImageNodeActionContext = createContext<{
   onMatting: (nodeId: string) => void;
@@ -505,6 +522,44 @@ const manualNodeTemplates: ManualNodeTemplate[] = [
   { icon: Triangle, kind: "shape", label: "三角形", shape: "triangle", tool: "triangle" },
   { icon: CircleDot, kind: "shape", label: "胶囊", shape: "pill", tool: "pill" },
   { icon: Frame, kind: "shape", label: "框架", shape: "frame", tool: "frame" },
+];
+
+const STICKY_NOTE_COLORS: Array<{
+  color: StickyNoteColor;
+  label: string;
+  swatchClassName: string;
+}> = [
+  {
+    color: "yellow",
+    label: "黄色",
+    swatchClassName: "border-note-yellow-border bg-note-yellow-bg",
+  },
+  {
+    color: "green",
+    label: "绿色",
+    swatchClassName: "border-ink/25 bg-note-green-bg",
+  },
+  {
+    color: "blue",
+    label: "蓝色",
+    swatchClassName: "border-note-blue-border bg-note-blue-bg",
+  },
+  {
+    color: "pink",
+    label: "粉色",
+    swatchClassName: "border-note-pink-border bg-note-pink-bg",
+  },
+];
+const STICKY_NOTE_TEXT_SIZE_LABELS: Record<StickyNoteTextSize, string> = {
+  small: "小",
+  medium: "中",
+  large: "大",
+};
+const DEFAULT_STICKY_NOTE_TEXT_SIZE: StickyNoteTextSize = "medium";
+const STICKY_NOTE_TEXT_SIZE_ORDER: StickyNoteTextSize[] = [
+  "small",
+  "medium",
+  "large",
 ];
 
 export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
@@ -1924,7 +1979,6 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         setStorageStatus("saving");
       }
 
-      const maxConflictRetries = 3;
       let saved = true;
 
       try {
@@ -1938,39 +1992,23 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
             break;
           }
 
-          for (let attempt = 0; ; attempt += 1) {
-            try {
-              const pendingCanvasSaveInput =
-                buildPendingCanvasSaveInput(currentProjectId);
-              const { project } = await saveProjectCanvasPatch(
-                pendingCanvasSaveInput,
-                options.keepalive ? { keepalive: true } : undefined
-              );
+          const pendingCanvasSaveInput =
+            buildPendingCanvasSaveInput(currentProjectId);
+          const { project } = await saveProjectCanvasPatch(
+            pendingCanvasSaveInput,
+            options.keepalive ? { keepalive: true } : undefined
+          );
 
-              projectVersionRef.current = project.version;
-              dirtyNodeIdsRef.current.clear();
-              dirtyEdgeIdsRef.current.clear();
-              deletedNodeIdsRef.current.clear();
-              deletedEdgeIdsRef.current.clear();
-              dirtyProjectMetaRef.current = false;
-              if (shouldReportStatus) {
-                setLoadedProjectId(project.id);
-                setStorageStatus("saved");
-                setStorageError(null);
-              }
-              break;
-            } catch (nextError: unknown) {
-              if (
-                nextError instanceof ProjectVersionConflictError &&
-                attempt < maxConflictRetries
-              ) {
-                // Re-align to the server version and retry with our latest local
-                // state (last-write-wins, but with an ordered version handshake).
-                projectVersionRef.current = nextError.project.version;
-                continue;
-              }
-              throw nextError;
-            }
+          projectVersionRef.current = project.version;
+          dirtyNodeIdsRef.current.clear();
+          dirtyEdgeIdsRef.current.clear();
+          deletedNodeIdsRef.current.clear();
+          deletedEdgeIdsRef.current.clear();
+          dirtyProjectMetaRef.current = false;
+          if (shouldReportStatus) {
+            setLoadedProjectId(project.id);
+            setStorageStatus("saved");
+            setStorageError(null);
           }
         } while (pendingSaveRef.current);
       } catch (nextError: unknown) {
@@ -2828,9 +2866,6 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           setStorageError(null);
           requestCanvasFit([result.node.id]);
         } catch (nextError: unknown) {
-          if (nextError instanceof ProjectVersionConflictError) {
-            projectVersionRef.current = nextError.project.version;
-          }
           setNodes((current) => {
             const next = current.map((node) =>
               node.id === pendingId && node.data.kind === "imageResult"
@@ -2968,9 +3003,6 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           setStorageError(null);
           requestCanvasFit([result.node.id]);
         } catch (nextError: unknown) {
-          if (nextError instanceof ProjectVersionConflictError) {
-            projectVersionRef.current = nextError.project.version;
-          }
           setNodes((current) => {
             const next = current.map((node) =>
               node.id === pendingId && node.data.kind === "imageResult"
@@ -3316,6 +3348,80 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     [commitCanvasMutation, isReplayMode]
   );
 
+  const handleStickyColorChange = useCallback(
+    (nodeId: string, color: StickyNoteColor) => {
+      if (isReplayMode) {
+        return;
+      }
+
+      const previous = { edges: edgesRef.current, nodes: nodesRef.current };
+      let changed = false;
+      const nextNodes = nodesRef.current.map((node) => {
+        if (node.id !== nodeId || node.data.kind !== "stickyNote") {
+          return node;
+        }
+        if (node.data.color === color) {
+          return node;
+        }
+        changed = true;
+        return { ...node, data: { ...node.data, color } };
+      });
+      if (!changed) {
+        return;
+      }
+
+      commitCanvasMutation({
+        reason: "text-edit",
+        patch: diffCanvasPatch(previous, {
+          edges: edgesRef.current,
+          nodes: nextNodes,
+        }),
+        persist: true,
+      });
+    },
+    [commitCanvasMutation, isReplayMode]
+  );
+
+  const handleStickyTextStyleChange = useCallback(
+    (nodeId: string, patch: Partial<StickyNoteTextStyle>) => {
+      if (isReplayMode) {
+        return;
+      }
+
+      const previous = { edges: edgesRef.current, nodes: nodesRef.current };
+      let changed = false;
+      const nextNodes = nodesRef.current.map((node) => {
+        if (node.id !== nodeId || node.data.kind !== "stickyNote") {
+          return node;
+        }
+
+        const nextTextStyle = normalizeStickyNoteTextStyle({
+          ...node.data.textStyle,
+          ...patch,
+        });
+        if (areStickyNoteTextStylesEqual(node.data.textStyle, nextTextStyle)) {
+          return node;
+        }
+
+        changed = true;
+        return { ...node, data: { ...node.data, textStyle: nextTextStyle } };
+      });
+      if (!changed) {
+        return;
+      }
+
+      commitCanvasMutation({
+        reason: "text-edit",
+        patch: diffCanvasPatch(previous, {
+          edges: edgesRef.current,
+          nodes: nextNodes,
+        }),
+        persist: true,
+      });
+    },
+    [commitCanvasMutation, isReplayMode]
+  );
+
   const handleShapeLabelChange = useCallback(
     (nodeId: string, label: string) => {
       if (isReplayMode) {
@@ -3405,7 +3511,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
               onPromptTextChange: handlePromptTextChange,
               readOnly: isReplayMode,
               onShapeLabelChange: handleShapeLabelChange,
+              onStickyColorChange: handleStickyColorChange,
               onStickyTextChange: handleStickyTextChange,
+              onStickyTextStyleChange: handleStickyTextStyleChange,
             }}
           >
             <ImageNodeActionContext.Provider value={imageNodeActions}>
@@ -4453,6 +4561,156 @@ function getClientError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+type ImeEditableTextElement = HTMLInputElement | HTMLTextAreaElement;
+
+function useImeSafeTextValue(
+  value: string,
+  onValueChange: (value: string) => void
+) {
+  const [draftValue, setDraftValue] = useState(value);
+  const isComposingRef = useRef(false);
+  const committedValueRef = useRef(value);
+
+  useEffect(() => {
+    if (isComposingRef.current) {
+      return;
+    }
+
+    committedValueRef.current = value;
+    setDraftValue(value);
+  }, [value]);
+
+  const commitValue = useCallback(
+    (nextValue: string) => {
+      if (committedValueRef.current === nextValue) {
+        return;
+      }
+
+      committedValueRef.current = nextValue;
+      onValueChange(nextValue);
+    },
+    [onValueChange]
+  );
+
+  const handleChange = useCallback(
+    (event: ReactChangeEvent<ImeEditableTextElement>) => {
+      const nextValue = event.currentTarget.value;
+      setDraftValue(nextValue);
+
+      if (isComposingRef.current || isComposingNativeEvent(event.nativeEvent)) {
+        return;
+      }
+
+      commitValue(nextValue);
+    },
+    [commitValue]
+  );
+
+  const handleCompositionStart = useCallback(() => {
+    isComposingRef.current = true;
+  }, []);
+
+  const handleCompositionEnd = useCallback(
+    (event: ReactCompositionEvent<ImeEditableTextElement>) => {
+      isComposingRef.current = false;
+      const nextValue = event.currentTarget.value;
+      setDraftValue(nextValue);
+      commitValue(nextValue);
+    },
+    [commitValue]
+  );
+
+  const handleBlur = useCallback(
+    (event: ReactFocusEvent<ImeEditableTextElement>) => {
+      isComposingRef.current = false;
+      const nextValue = event.currentTarget.value;
+      setDraftValue(nextValue);
+      commitValue(nextValue);
+    },
+    [commitValue]
+  );
+
+  return {
+    draftValue,
+    handleBlur,
+    handleChange,
+    handleCompositionEnd,
+    handleCompositionStart,
+  };
+}
+
+function isComposingNativeEvent(event: Event) {
+  return "isComposing" in event && event.isComposing === true;
+}
+
+function normalizeStickyNoteTextStyle(
+  textStyle?: StickyNoteTextStyle
+): StickyNoteTextStyle | undefined {
+  const nextTextStyle: StickyNoteTextStyle = {};
+  const size = textStyle?.size ?? DEFAULT_STICKY_NOTE_TEXT_SIZE;
+
+  if (size !== DEFAULT_STICKY_NOTE_TEXT_SIZE) {
+    nextTextStyle.size = size;
+  }
+  if (textStyle?.bold) {
+    nextTextStyle.bold = true;
+  }
+  if (textStyle?.italic) {
+    nextTextStyle.italic = true;
+  }
+  if (textStyle?.underline) {
+    nextTextStyle.underline = true;
+  }
+
+  return Object.keys(nextTextStyle).length ? nextTextStyle : undefined;
+}
+
+function areStickyNoteTextStylesEqual(
+  first?: StickyNoteTextStyle,
+  second?: StickyNoteTextStyle
+) {
+  const firstStyle = normalizeStickyNoteTextStyle(first);
+  const secondStyle = normalizeStickyNoteTextStyle(second);
+  return (
+    Boolean(firstStyle?.bold) === Boolean(secondStyle?.bold) &&
+    Boolean(firstStyle?.italic) === Boolean(secondStyle?.italic) &&
+    Boolean(firstStyle?.underline) === Boolean(secondStyle?.underline) &&
+    (firstStyle?.size ?? DEFAULT_STICKY_NOTE_TEXT_SIZE) ===
+      (secondStyle?.size ?? DEFAULT_STICKY_NOTE_TEXT_SIZE)
+  );
+}
+
+function getNextStickyNoteTextSize(size: StickyNoteTextSize) {
+  const index = STICKY_NOTE_TEXT_SIZE_ORDER.indexOf(size);
+  return STICKY_NOTE_TEXT_SIZE_ORDER[
+    (index + 1) % STICKY_NOTE_TEXT_SIZE_ORDER.length
+  ];
+}
+
+function getStickyNoteTextareaStyle(
+  textStyle?: StickyNoteTextStyle
+): CSSProperties {
+  const size = textStyle?.size ?? DEFAULT_STICKY_NOTE_TEXT_SIZE;
+  const sizeStyle: Record<
+    StickyNoteTextSize,
+    Pick<CSSProperties, "fontSize" | "lineHeight">
+  > = {
+    small: { fontSize: "7px", lineHeight: "11px" },
+    medium: {
+      fontSize: "var(--component-text-node-body)",
+      lineHeight: "var(--component-text-node-body-line)",
+    },
+    large: { fontSize: "10px", lineHeight: "15px" },
+  };
+
+  return {
+    ...sizeStyle[size],
+    fontStyle: textStyle?.italic ? "italic" : "normal",
+    fontWeight: textStyle?.bold ? 600 : 400,
+    textDecorationLine: textStyle?.underline ? "underline" : "none",
+  };
+}
+
 function PromptNode({
   id,
   data,
@@ -4463,6 +4721,14 @@ function PromptNode({
   const { onPromptTextChange, readOnly } = useContext(ManualNodeEditingContext);
   const isExpanded = typeof height === "number" && height > 96;
   const isManualPrompt = Boolean(data.manual);
+  const handleManualPromptChange = useCallback(
+    (nextPrompt: string) => onPromptTextChange(id, nextPrompt),
+    [id, onPromptTextChange]
+  );
+  const manualPrompt = useImeSafeTextValue(
+    data.prompt,
+    handleManualPromptChange
+  );
 
   return (
     <Node
@@ -4484,11 +4750,14 @@ function PromptNode({
           <textarea
             aria-label="用户输入"
             className="nodrag nopan nowheel h-full w-full resize-none border-0 bg-transparent text-left text-ink text-node-body outline-0 [font:inherit] placeholder:text-ink/42"
-            onChange={(event) => onPromptTextChange(id, event.currentTarget.value)}
+            onBlur={manualPrompt.handleBlur}
+            onChange={manualPrompt.handleChange}
+            onCompositionEnd={manualPrompt.handleCompositionEnd}
+            onCompositionStart={manualPrompt.handleCompositionStart}
             placeholder="输入需求..."
             readOnly={readOnly}
             spellCheck={false}
-            value={data.prompt}
+            value={manualPrompt.draftValue}
           />
         ) : (
           <p
@@ -4510,35 +4779,162 @@ function StickyNoteNode({
   width,
   height,
 }: NodeProps<FlowNode<StickyNoteNodeData, "stickyNoteNode">>) {
-  const { onStickyTextChange, readOnly } = useContext(ManualNodeEditingContext);
+  const {
+    onStickyColorChange,
+    onStickyTextChange,
+    onStickyTextStyleChange,
+    readOnly,
+  } = useContext(ManualNodeEditingContext);
+  const textStyle = data.textStyle ?? {};
+  const textSize = textStyle.size ?? DEFAULT_STICKY_NOTE_TEXT_SIZE;
+  const handleTextChange = useCallback(
+    (nextText: string) => onStickyTextChange(id, nextText),
+    [id, onStickyTextChange]
+  );
+  const textValue = useImeSafeTextValue(data.text, handleTextChange);
 
   return (
-    <Node
-      className={cn(
-        "!h-[170px] !w-[220px] border-note-yellow-border !bg-note-yellow-bg shadow-note",
-        data.color === "green" && "border-ink/25 !bg-note-green-bg",
-        data.color === "blue" && "border-note-blue-border !bg-note-blue-bg",
-        data.color === "pink" && "border-note-pink-border !bg-note-pink-bg"
+    <>
+      {selected && !readOnly && (
+        <NodeToolbar
+          align="center"
+          className={cn(IMAGE_NODE_TOOLBAR_CLASS, "nodrag nopan nowheel gap-1.5")}
+          isVisible={selected}
+          offset={12}
+          position={Position.Top}
+        >
+          <PaintBucket aria-hidden="true" className="text-text-soft" size={14} />
+          <div className="inline-flex items-center gap-1" role="group" aria-label="便签颜色">
+            {STICKY_NOTE_COLORS.map((option) => (
+              <button
+                aria-label={`设置便签为${option.label}`}
+                aria-pressed={data.color === option.color}
+                className={cn(
+                  "inline-grid size-toolbar-button min-w-toolbar-button cursor-pointer place-items-center rounded-round border p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-border-active",
+                  option.swatchClassName,
+                  data.color === option.color &&
+                    "ring-2 ring-primary-border-active ring-offset-1 ring-offset-surface"
+                )}
+                key={option.color}
+                onClick={(event) => {
+                  stopNodeToolbarEvent(event);
+                  onStickyColorChange(id, option.color);
+                }}
+                onMouseDown={stopNodeToolbarEvent}
+                onPointerDown={stopNodeToolbarEvent}
+                title={option.label}
+                type="button"
+              />
+            ))}
+          </div>
+          <span className="h-5 w-px bg-border-muted" aria-hidden="true" />
+          <button
+            aria-label="切换便签粗体"
+            aria-pressed={Boolean(textStyle.bold)}
+            className={cn(
+              IMAGE_NODE_TOOLBAR_BUTTON_CLASS,
+              textStyle.bold && "bg-accent text-ink"
+            )}
+            onClick={(event) => {
+              stopNodeToolbarEvent(event);
+              onStickyTextStyleChange(id, { bold: !textStyle.bold });
+            }}
+            onMouseDown={stopNodeToolbarEvent}
+            onPointerDown={stopNodeToolbarEvent}
+            title="粗体"
+            type="button"
+          >
+            <TextBold size={14} />
+          </button>
+          <button
+            aria-label="切换便签斜体"
+            aria-pressed={Boolean(textStyle.italic)}
+            className={cn(
+              IMAGE_NODE_TOOLBAR_BUTTON_CLASS,
+              textStyle.italic && "bg-accent text-ink"
+            )}
+            onClick={(event) => {
+              stopNodeToolbarEvent(event);
+              onStickyTextStyleChange(id, { italic: !textStyle.italic });
+            }}
+            onMouseDown={stopNodeToolbarEvent}
+            onPointerDown={stopNodeToolbarEvent}
+            title="斜体"
+            type="button"
+          >
+            <TextItalic size={14} />
+          </button>
+          <button
+            aria-label="切换便签下划线"
+            aria-pressed={Boolean(textStyle.underline)}
+            className={cn(
+              IMAGE_NODE_TOOLBAR_BUTTON_CLASS,
+              textStyle.underline && "bg-accent text-ink"
+            )}
+            onClick={(event) => {
+              stopNodeToolbarEvent(event);
+              onStickyTextStyleChange(id, { underline: !textStyle.underline });
+            }}
+            onMouseDown={stopNodeToolbarEvent}
+            onPointerDown={stopNodeToolbarEvent}
+            title="下划线"
+            type="button"
+          >
+            <TextUnderline size={14} />
+          </button>
+          <button
+            aria-label={`切换便签字号，当前${STICKY_NOTE_TEXT_SIZE_LABELS[textSize]}`}
+            aria-pressed={textSize !== DEFAULT_STICKY_NOTE_TEXT_SIZE}
+            className={cn(
+              IMAGE_NODE_TOOLBAR_BUTTON_CLASS,
+              textSize !== DEFAULT_STICKY_NOTE_TEXT_SIZE && "bg-accent text-ink"
+            )}
+            onClick={(event) => {
+              stopNodeToolbarEvent(event);
+              onStickyTextStyleChange(id, {
+                size: getNextStickyNoteTextSize(textSize),
+              });
+            }}
+            onMouseDown={stopNodeToolbarEvent}
+            onPointerDown={stopNodeToolbarEvent}
+            title={`字号：${STICKY_NOTE_TEXT_SIZE_LABELS[textSize]}`}
+            type="button"
+          >
+            <TextFontSize size={14} />
+          </button>
+        </NodeToolbar>
       )}
-      handles={{ source: true, target: true }}
-      minHeight={120}
-      minWidth={160}
-      nodeId={id}
-      selected={selected}
-      style={getResizableNodeStyle(width, height)}
-    >
-      <NodeContent className="h-full p-node-padding">
-        <textarea
-          aria-label="便签内容"
-          className="nodrag nopan nowheel h-full w-full resize-none border-0 bg-transparent text-node-body text-text outline-0 [font:inherit] placeholder:text-text/42"
-          onChange={(event) => onStickyTextChange(id, event.currentTarget.value)}
-          placeholder="写下想法..."
-          readOnly={readOnly}
-          spellCheck={false}
-          value={data.text}
-        />
-      </NodeContent>
-    </Node>
+      <Node
+        className={cn(
+          "!h-[170px] !w-[220px] border-note-yellow-border !bg-note-yellow-bg shadow-note",
+          data.color === "green" && "border-ink/25 !bg-note-green-bg",
+          data.color === "blue" && "border-note-blue-border !bg-note-blue-bg",
+          data.color === "pink" && "border-note-pink-border !bg-note-pink-bg"
+        )}
+        handles={{ source: true, target: true }}
+        minHeight={120}
+        minWidth={160}
+        nodeId={id}
+        selected={selected}
+        style={getResizableNodeStyle(width, height)}
+      >
+        <NodeContent className="h-full p-node-padding">
+          <textarea
+            aria-label="便签内容"
+            className="nodrag nopan nowheel h-full w-full resize-none border-0 bg-transparent text-text outline-0 [font:inherit] placeholder:text-text/42"
+            onBlur={textValue.handleBlur}
+            onChange={textValue.handleChange}
+            onCompositionEnd={textValue.handleCompositionEnd}
+            onCompositionStart={textValue.handleCompositionStart}
+            placeholder="写下想法..."
+            readOnly={readOnly}
+            spellCheck={false}
+            style={getStickyNoteTextareaStyle(textStyle)}
+            value={textValue.draftValue}
+          />
+        </NodeContent>
+      </Node>
+    </>
   );
 }
 
@@ -4550,6 +4946,11 @@ function ShapeNode({
   height,
 }: NodeProps<FlowNode<ShapeNodeData, "shapeNode">>) {
   const { onShapeLabelChange, readOnly } = useContext(ManualNodeEditingContext);
+  const handleLabelChange = useCallback(
+    (nextLabel: string) => onShapeLabelChange(id, nextLabel),
+    [id, onShapeLabelChange]
+  );
+  const labelValue = useImeSafeTextValue(data.label, handleLabelChange);
   const visualClassName = cn(
     "relative grid size-full place-items-center rounded-node border border-border bg-surface/88 shadow-card",
     data.shape === "ellipse" && "rounded-pill",
@@ -4577,10 +4978,13 @@ function ShapeNode({
           <input
             aria-label="形状标签"
             className="nodrag nopan w-[min(80%,140px)] border-0 bg-transparent text-center text-node-title text-text outline-0 [font:inherit]"
-            onChange={(event) => onShapeLabelChange(id, event.currentTarget.value)}
+            onBlur={labelValue.handleBlur}
+            onChange={labelValue.handleChange}
+            onCompositionEnd={labelValue.handleCompositionEnd}
+            onCompositionStart={labelValue.handleCompositionStart}
             readOnly={readOnly}
             spellCheck={false}
-            value={data.label}
+            value={labelValue.draftValue}
           />
         </div>
       </NodeContent>

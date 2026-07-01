@@ -305,7 +305,9 @@ export function buildAgentRunInput({
     projectSnapshot.edges,
     { budget: DEFAULT_UPSTREAM_CONTEXT_BUDGET }
   );
-  const upstreamContext = contextCollection.items;
+  const upstreamContext = contextCollection.items.map(
+    sanitizeUpstreamContextItemForRuntime
+  );
   const contextNodeIds = uniqueNodeIds([
     ...referenceNodeIds,
     ...upstreamContext.map((item) => item.nodeId),
@@ -513,6 +515,40 @@ function shouldHydrateArtifactContent(item: UpstreamContextItem) {
         item.type === "webpage" ||
         item.type === "tool_result")
   );
+}
+
+function sanitizeUpstreamContextItemForRuntime(
+  item: UpstreamContextItem
+): UpstreamContextItem {
+  return {
+    ...item,
+    artifact: sanitizeArtifactRefForRuntime(item.artifact),
+    contentRef: undefined,
+    imageUrl: undefined,
+  };
+}
+
+function sanitizeArtifactRefForRuntime(
+  artifact: ArtifactRef | undefined
+): ArtifactRef | undefined {
+  if (!artifact) {
+    return undefined;
+  }
+
+  const { contentRef: _contentRef, metadata, ...rest } = artifact;
+  if (!metadata) {
+    return rest;
+  }
+
+  const {
+    storageBucket: _storageBucket,
+    storagePath: _storagePath,
+    ...safeMetadata
+  } = metadata;
+  return {
+    ...rest,
+    metadata: Object.keys(safeMetadata).length ? safeMetadata : undefined,
+  };
 }
 
 function readArtifactContentText(

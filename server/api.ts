@@ -64,6 +64,7 @@ import {
   isSupabaseConfigured,
   listAgentEventsForUser,
   listAgentSkillDefinitions,
+  listProjectStorageObjectsForUser,
   listProjects,
   softDeleteAgentSkillDefinition,
   softDeleteProject,
@@ -90,12 +91,12 @@ import {
 } from "./artifact-content-store.ts";
 import {
   createSignedAssetUpload,
+  createSignedArtifactReadUrl,
   completeSignedAssetUpload,
+  deleteStoredObjects,
   downloadAgentSkillPackage,
   isObjectStorageConfigured,
   MAX_AGENT_ASSET_BYTES,
-  readArtifactContent,
-  getArtifactStorageContentRef,
   resolveStorageBackedImageContext,
   storeGeneratedImageFromBytes,
   storeAgentSkillPackage,
@@ -185,15 +186,34 @@ const projectPatchSchema = z
     message: "No project updates provided.",
   });
 
-const canvasPatchPayloadSchema = z.object({
-  expectedVersion: z.number().int().nonnegative().optional(),
-  nodeUpserts: z.array(z.unknown()).optional(),
-  nodeDeletes: z.array(z.string()).optional(),
-  edgeUpserts: z.array(z.unknown()).optional(),
-  edgeDeletes: z.array(z.string()).optional(),
-  selectedNodeId: z.string().nullable().optional(),
-  lastRunId: z.string().nullable().optional(),
-});
+type CanvasPatchPayload = {
+  expectedVersion?: number;
+  nodeUpserts?: unknown[];
+  nodeDeletes?: string[];
+  edgeUpserts?: unknown[];
+  edgeDeletes?: string[];
+  selectedNodeId?: string | null;
+  lastRunId?: string | null;
+};
+
+const canvasPatchPayloadSchema = z
+  .object({
+    expectedVersion: z.number().int().nonnegative().optional(),
+    nodeUpserts: z.array(z.unknown()).optional(),
+    nodeDeletes: z.array(z.string()).optional(),
+    edgeUpserts: z.array(z.unknown()).optional(),
+    edgeDeletes: z.array(z.string()).optional(),
+    selectedNodeId: z.string().nullable().optional(),
+    lastRunId: z.string().nullable().optional(),
+  })
+  .refine(
+    (value: CanvasPatchPayload) =>
+      !hasCanvasGraphUpdates(value) || value.expectedVersion !== undefined,
+    {
+      message: "expectedVersion is required for canvas graph updates.",
+      path: ["expectedVersion"],
+    }
+  );
 
 const canvasPatchSaveSchema = canvasPatchPayloadSchema
   .refine((value) => Object.keys(value).length > 0, {
@@ -231,7 +251,7 @@ const uploadCompleteSchema = z.object({
 });
 
 const imageUpscaleSchema = z.object({
-  expectedVersion: z.number().int().nonnegative().optional(),
+  expectedVersion: z.number().int().nonnegative(),
   resolution: z.enum(["4k", "8k"]).default("4k"),
   scale: z.number().int().min(0).max(100).default(50),
   sourceNodeId: z.string().trim().min(1).max(260),
@@ -239,7 +259,7 @@ const imageUpscaleSchema = z.object({
 
 const imageMattingSchema = z.object({
   background: z.enum(["transparent", "white", "neutral"]).default("transparent"),
-  expectedVersion: z.number().int().nonnegative().optional(),
+  expectedVersion: z.number().int().nonnegative(),
   sourceNodeId: z.string().trim().min(1).max(260),
 });
 
@@ -293,7 +313,7 @@ const textArtifactUpdateSchema = textArtifactCreateSchema.partial({
   type: true,
 }).extend({
   contentFormat: artifactContentFormatSchema,
-  expectedVersion: z.number().int().nonnegative().optional(),
+  expectedVersion: z.number().int().nonnegative(),
   mimeType: z.string().trim().min(1).max(200),
 });
 
@@ -747,12 +767,16 @@ app.delete("/api/projects/:projectId", async (c) => {
   }
 
   const projectId = z.string().uuid().parse(c.req.param("projectId"));
+  const storageObjects = await listProjectStorageObjectsForUser(projectId, user.id);
   const deleted = await softDeleteProject(projectId, user.id);
   if (!deleted) {
     return notFound(c);
   }
 
   deleteCachedUploadProjectMeta(user.id, projectId);
+  void deleteStoredObjects(storageObjects).catch((error: unknown) => {
+    console.error("[project:delete-storage]", error);
+  });
   return c.json({ ok: true });
 });
 
@@ -899,6 +923,10 @@ app.post("/api/projects/:projectId/images/upscale", async (c) => {
   if (!project) {
     return notFound(c);
   }
+  const versionConflict = createVersionConflictResponse(c, project, input.expectedVersion);
+  if (versionConflict) {
+    return versionConflict;
+  }
 
   try {
     assertImageProviderConfigured("upscale");
@@ -927,7 +955,10 @@ app.post("/api/projects/:projectId/images/upscale", async (c) => {
       prompt: sourceCheck.prompt,
       type: "image",
     },
-  ]);
+  ], {
+    projectId,
+    userId: user.id,
+  });
 
   if (!imageUrl) {
     return c.json({ error: "无法为选中图片生成服务端可读 URL。" }, 400);
@@ -998,24 +1029,10 @@ app.post("/api/projects/:projectId/images/upscale", async (c) => {
     });
   } catch (error) {
     if (error instanceof ProjectVersionConflictError) {
-      const updatedProject = await applyCanvasPatchForUser({
-        edgeUpserts: canvasPatch.edgeUpserts,
-        expectedVersion: error.project.version,
-        nodeUpserts: canvasPatch.nodeUpserts,
-        projectId,
-        selectedNodeId: node.id,
-        userId: user.id,
-      });
-      if (!updatedProject) {
-        return notFound(c);
-      }
-      return c.json({
-        artifact,
-        canvasPatch,
-        edge,
-        node,
-        project: updatedProject,
-      });
+      return c.json(
+        { error: error.message, code: "version_conflict", project: error.project },
+        409
+      );
     }
     throw error;
   }
@@ -1032,6 +1049,10 @@ app.post("/api/projects/:projectId/images/matting", async (c) => {
   const project = await loadCanvasSnapshotForUser(projectId, user.id);
   if (!project) {
     return notFound(c);
+  }
+  const versionConflict = createVersionConflictResponse(c, project, input.expectedVersion);
+  if (versionConflict) {
+    return versionConflict;
   }
 
   try {
@@ -1061,7 +1082,10 @@ app.post("/api/projects/:projectId/images/matting", async (c) => {
       prompt: sourceCheck.prompt,
       type: "image",
     },
-  ]);
+  ], {
+    projectId,
+    userId: user.id,
+  });
 
   if (!imageUrl) {
     return c.json({ error: "无法为选中图片生成服务端可读 URL。" }, 400);
@@ -1125,24 +1149,10 @@ app.post("/api/projects/:projectId/images/matting", async (c) => {
     });
   } catch (error) {
     if (error instanceof ProjectVersionConflictError) {
-      const updatedProject = await applyCanvasPatchForUser({
-        edgeUpserts: canvasPatch.edgeUpserts,
-        expectedVersion: error.project.version,
-        nodeUpserts: canvasPatch.nodeUpserts,
-        projectId,
-        selectedNodeId: node.id,
-        userId: user.id,
-      });
-      if (!updatedProject) {
-        return notFound(c);
-      }
-      return c.json({
-        artifact,
-        canvasPatch,
-        edge,
-        node,
-        project: updatedProject,
-      });
+      return c.json(
+        { error: error.message, code: "version_conflict", project: error.project },
+        409
+      );
     }
     throw error;
   }
@@ -1256,13 +1266,12 @@ app.get("/api/projects/:projectId/artifacts/:artifactId/content", async (c) => {
     return notFound(c);
   }
 
-  const content = await readArtifactContent(artifact);
-  const headers = new Headers({
-    "Cache-Control": "private, max-age=300",
-    "Content-Length": String(content.sizeBytes),
-    "Content-Type": content.mimeType,
-  });
-  return new Response(content.bytes, { headers });
+  if (!artifact.bucketId || !artifact.storagePath) {
+    return c.json({ error: "Artifact is not backed by stored content." }, 404);
+  }
+
+  const signedUrl = await createSignedArtifactReadUrl(artifact);
+  return c.redirect(signedUrl, 302);
 });
 
 app.delete("/api/agent-run", async (c) => {
@@ -1313,20 +1322,31 @@ app.post("/api/agent-run", async (c) => {
     parsedCanvasContext.selectedNodeIds,
     parsedCanvasContext.selectedNodeId ?? null
   );
-  const project = parsedCanvasPatch
-    ? await applyAgentRunCanvasPatchAndLoadSnapshot({
-        canvasPatch: parsedCanvasPatch,
-        projectId,
-        userId: user.id,
-      })
-    : await waitForProjectSnapshotForRun({
-        projectId,
-        promptNodeId: parsedCanvasContext.promptNodeId ?? null,
-        runNodeId,
-        selectedNodeIds,
-        signal: c.req.raw.signal,
-        userId: user.id,
-      });
+  let project: CanvasProject | null;
+  try {
+    project = parsedCanvasPatch
+      ? await applyAgentRunCanvasPatchAndLoadSnapshot({
+          canvasPatch: parsedCanvasPatch,
+          projectId,
+          userId: user.id,
+        })
+      : await waitForProjectSnapshotForRun({
+          projectId,
+          promptNodeId: parsedCanvasContext.promptNodeId ?? null,
+          runNodeId,
+          selectedNodeIds,
+          signal: c.req.raw.signal,
+          userId: user.id,
+        });
+  } catch (error) {
+    if (error instanceof ProjectVersionConflictError) {
+      return c.json(
+        { error: error.message, code: "version_conflict", project: error.project },
+        409
+      );
+    }
+    throw error;
+  }
 
   if (!project) {
     return notFound(c);
@@ -1514,37 +1534,21 @@ async function applyAgentRunCanvasPatchAndLoadSnapshot({
   projectId: string;
   userId: string;
 }) {
-  const maxConflictRetries = 3;
-  let expectedVersion = canvasPatch.expectedVersion;
-
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      const project = await applyCanvasPatchForUser({
-        projectId,
-        userId,
-        expectedVersion,
-        nodeUpserts: canvasPatch.nodeUpserts as AgentCanvasNode[] | undefined,
-        nodeDeletes: canvasPatch.nodeDeletes,
-        edgeUpserts: canvasPatch.edgeUpserts as AgentCanvasEdge[] | undefined,
-        edgeDeletes: canvasPatch.edgeDeletes,
-        selectedNodeId: canvasPatch.selectedNodeId,
-        lastRunId: canvasPatch.lastRunId,
-      });
-      if (!project) {
-        return null;
-      }
-      return loadCanvasSnapshotForUser(projectId, userId);
-    } catch (error) {
-      if (
-        error instanceof ProjectVersionConflictError &&
-        attempt < maxConflictRetries
-      ) {
-        expectedVersion = error.project.version;
-        continue;
-      }
-      throw error;
-    }
+  const project = await applyCanvasPatchForUser({
+    projectId,
+    userId,
+    expectedVersion: canvasPatch.expectedVersion,
+    nodeUpserts: canvasPatch.nodeUpserts as AgentCanvasNode[] | undefined,
+    nodeDeletes: canvasPatch.nodeDeletes,
+    edgeUpserts: canvasPatch.edgeUpserts as AgentCanvasEdge[] | undefined,
+    edgeDeletes: canvasPatch.edgeDeletes,
+    selectedNodeId: canvasPatch.selectedNodeId,
+    lastRunId: canvasPatch.lastRunId,
+  });
+  if (!project) {
+    return null;
   }
+  return loadCanvasSnapshotForUser(projectId, userId);
 }
 
 function hasAgentRunSnapshot(
@@ -1593,6 +1597,20 @@ function hasCanvasPatchPayloadUpdates(
     (patch.edgeDeletes?.length ?? 0) > 0 ||
     "selectedNodeId" in patch ||
     "lastRunId" in patch
+  );
+}
+
+function hasCanvasGraphUpdates(
+  patch: Pick<
+    CanvasPatchPayload,
+    "edgeDeletes" | "edgeUpserts" | "nodeDeletes" | "nodeUpserts"
+  >
+) {
+  return (
+    (patch.nodeUpserts?.length ?? 0) > 0 ||
+    (patch.nodeDeletes?.length ?? 0) > 0 ||
+    (patch.edgeUpserts?.length ?? 0) > 0 ||
+    (patch.edgeDeletes?.length ?? 0) > 0
   );
 }
 
@@ -1687,6 +1705,27 @@ function getActiveAgentRunKey(
   return `${userId}:${projectId}:${runNodeId}`;
 }
 
+function createVersionConflictResponse(
+  c: Context,
+  project: ProjectMeta | CanvasProject,
+  expectedVersion: number | undefined
+) {
+  if (expectedVersion === undefined || project.version === expectedVersion) {
+    return null;
+  }
+
+  const { edges: _edges, nodes: _nodes, ...projectMeta } =
+    project as CanvasProject;
+  return c.json(
+    {
+      code: "version_conflict",
+      error: "Project version conflict.",
+      project: projectMeta,
+    },
+    409
+  );
+}
+
 type ImageProcessingOperation = "matting" | "upscale";
 
 function getImageProcessingSourceImage(
@@ -1713,24 +1752,16 @@ function getImageProcessingSourceImage(
   }
 
   const artifact = node.data.artifact ?? node.data.image.artifact;
-  const contentRef =
-    artifact && artifact.type === "image"
-      ? getArtifactStorageContentRef(artifact)
-      : null;
-  if (!artifact || artifact.type !== "image" || !contentRef) {
+  if (!artifact || artifact.type !== "image" || !artifact.id) {
     return {
       ok: false,
-      error: `图片未保存到对象存储，无法由服务端安全${operationLabel}。`,
+      error: `图片缺少可信 artifact，无法由服务端安全${operationLabel}。`,
     };
   }
-  const storageBackedArtifact = {
-    ...artifact,
-    contentRef,
-  };
 
   return {
     ok: true,
-    artifact: storageBackedArtifact,
+    artifact,
     image: node.data.image,
     node: node as AgentCanvasNode & { data: ImageResultNodeData },
     prompt: node.data.prompt,

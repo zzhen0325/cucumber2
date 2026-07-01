@@ -209,7 +209,10 @@ vi.mock("../../../storage.ts", () => ({
     mimeType: "image/png",
     sizeBytes: 3,
   }),
-  resolveStorageBackedImageContext: (items: UpstreamContextItem[]) =>
+  resolveStorageBackedImageContext: (
+    items: UpstreamContextItem[],
+    _options: { projectId: string; userId: string }
+  ) =>
     resolveStorageBackedImageContext(items),
   storeGeneratedImageFromBytes: (
     input: Parameters<typeof storeGeneratedImageFromBytes>[0]

@@ -103,7 +103,11 @@ pnpm dev
 - 画布只保存 `/api/projects/:projectId/artifacts/:artifactId/content` 和 `r2://agent-assets/...` 稳定引用；实际读取由服务端校验权限后从 R2 读取，图片 provider 引用在调用前签发短期 R2 read URL。
 - `POST /api/projects/:projectId/uploads/sign` 返回 R2 通用上传合同：`bucket`、`path`、`contentRef`、`signedUrl`、`method: "PUT"`、`headers`、`expiresIn` 和 `uploadId`。前端直接 `fetch` 到 presigned URL，再调用 `/complete` 注册 artifact。
 - Artifact metadata 公共字段包括 `mimeType`、`byteSize`、`sourceRunNodeId`、`sourceToolName`、`createdBy` 和 `previewKind`；当写入路径已经持有对象字节时会附带 `digest`。上传完成阶段会先 HEAD 验证对象和大小，文本类对象会继续读取正文用于索引，图片和其他二进制对象不整文件回读。
-- 画布保存使用 `canvasPatch` 增量写入 `nodes/edges` JSON；打开项目仍读取完整快照。
+- 画布保存使用 `canvasPatch` 增量写入 `nodes/edges` JSON；node/edge 图结构写入必须携带 `expectedVersion`，版本冲突直接返回 `409 version_conflict`，不会用服务器最新 version 静默重放本地整节点。
+- `node_json` 里的 `contentRef`、`storageBucket` 和 `storagePath` 只视为 UI 投影/历史 hint；Agent 上下文和图片工具签名 URL 前必须通过 `artifactId + projectId + userId` 重新读取 `agent_artifacts`。
+- 对象 artifact 的 `/content` 读取在服务端鉴权后重定向到短期 R2 signed read URL，避免 API 进程全量代理大对象；文本类 artifact 内容仍从 `agent_artifact_contents` 返回。
+- R2 与 DB 之间没有跨系统事务；当前实现对上传完成/生成图登记失败做 best-effort 对象清理，删除项目后异步清理已登记对象。仍需要后台 reconcile/GC 任务覆盖进程崩溃和历史孤儿对象。
+- 打开项目仍读取完整快照；实时同步、viewport 增量加载和跨实例 Agent Run lease 是后续架构项。
 
 Supabase Storage 到 R2 的一次性迁移脚本：
 

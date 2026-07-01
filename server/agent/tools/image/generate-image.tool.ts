@@ -206,7 +206,11 @@ export async function executeGenerateImageTool({
   };
 
   const upstreamContext = await resolveStorageBackedImageContext(
-    context.upstreamContext
+    context.upstreamContext,
+    {
+      projectId: context.projectId,
+      userId: context.userId,
+    }
   );
 
   if (imageProvider.provider === "coze") {

@@ -81,21 +81,7 @@ export async function materializeAgentRunSnapshot({
     }
   }
 
-  const current = await requireProject(projectId, userId);
-  const next = materializeSnapshot(current, runEvents, runNodeId);
-  const canvasPatch = diffCanvasPatch(
-    { nodes: current.nodes, edges: current.edges },
-    next
-  );
-  return applyCanvasPatchForUser({
-    projectId,
-    userId,
-    nodeUpserts: canvasPatch.nodeUpserts,
-    nodeDeletes: canvasPatch.nodeDeletes,
-    edgeUpserts: canvasPatch.edgeUpserts,
-    edgeDeletes: canvasPatch.edgeDeletes,
-    lastRunId: runNodeId,
-  });
+  throw new Error("Run materialization conflicted with newer canvas changes.");
 }
 
 export function materializeSnapshot(
@@ -166,12 +152,4 @@ function getNodeArtifactIdForRun(
   }
 
   return null;
-}
-
-async function requireProject(projectId: string, userId: string) {
-  const project = await loadCanvasSnapshotForUser(projectId, userId);
-  if (!project) {
-    throw new Error("Project not found.");
-  }
-  return project;
 }
