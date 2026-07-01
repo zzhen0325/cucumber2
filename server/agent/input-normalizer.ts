@@ -236,20 +236,59 @@ type NormalizeInput = {
 
 type NormalizeAgentInputOptions = {
   maxOutputImages?: number;
+  onCacheStatus?: (status: InputNormalizerCacheStatus) => void;
   signal?: AbortSignal;
+};
+
+export type InputNormalizerCacheStatus = {
+  cacheHit: boolean;
+  promptCharCount: number;
+  upstreamContextCount: number;
 };
 
 let normalizerRunner: Runner | undefined;
 let normalizerAgent: Agent<unknown, typeof normalizedAgentInputSchema> | undefined;
 
+const inputNormalizerCacheVersion = "task-frame-light-context-v1";
+const inputNormalizerCacheMaxEntries = 128;
+const inputNormalizerCacheTtlMs = 10 * 60 * 1000;
+const normalizerContextLimit = 12;
+const normalizerTitleCharLimit = 160;
+const normalizerSummaryCharLimit = 600;
+const normalizerPromptCharLimit = 600;
+
+const inputNormalizerCache = new Map<
+  string,
+  { expiresAt: number; value: NormalizedAgentInput }
+>();
+
 export async function normalizeAgentInput(
   input: NormalizeInput,
   options: NormalizeAgentInputOptions = {}
 ): Promise<NormalizedAgentInput> {
+  assertNotAborted(options.signal);
+  const prompt = buildNormalizerPrompt(input, options.maxOutputImages);
+  const cacheKey = buildInputNormalizerCacheKey(input, options.maxOutputImages);
+  const cached = readInputNormalizerCache(cacheKey);
+  if (cached) {
+    options.onCacheStatus?.({
+      cacheHit: true,
+      promptCharCount: prompt.length,
+      upstreamContextCount: Math.min(input.upstreamContext.length, normalizerContextLimit),
+    });
+    return cloneNormalizedAgentInput(cached);
+  }
+
+  options.onCacheStatus?.({
+    cacheHit: false,
+    promptCharCount: prompt.length,
+    upstreamContextCount: Math.min(input.upstreamContext.length, normalizerContextLimit),
+  });
+
   const agent = createInputNormalizerAgent();
   const result = await getNormalizerRunner().run(
     agent,
-    buildNormalizerPrompt(input, options.maxOutputImages),
+    prompt,
     {
       maxTurns: 1,
       signal: options.signal,
@@ -259,7 +298,9 @@ export async function normalizeAgentInput(
     throw new Error("Input normalization did not produce a structured result.");
   }
 
-  return finalizeNormalizedAgentInput(result.finalOutput, input.message);
+  const normalized = finalizeNormalizedAgentInput(result.finalOutput, input.message);
+  writeInputNormalizerCache(cacheKey, normalized);
+  return cloneNormalizedAgentInput(normalized);
 }
 
 export function createInputNormalizerAgent() {
@@ -373,19 +414,11 @@ export function getExplicitConstraints(
     .map((entry) => entry.value);
 }
 
-function buildNormalizerPrompt(input: NormalizeInput, maxOutputImages?: number) {
-  const upstreamSummary = input.upstreamContext
-    .map(({ content, contentFormat, mimeType, nodeId, prompt, summary, title, type }) => ({
-      content,
-      contentFormat,
-      mimeType,
-      nodeId,
-      prompt,
-      summary,
-      title,
-      type,
-    }))
-    .slice(0, 12);
+export function buildNormalizerPrompt(
+  input: NormalizeInput,
+  maxOutputImages?: number
+) {
+  const upstreamSummary = buildLightNormalizerContext(input.upstreamContext);
 
   return [
     `User request: ${input.message}`,
@@ -393,6 +426,132 @@ function buildNormalizerPrompt(input: NormalizeInput, maxOutputImages?: number) 
     maxOutputImages ? `Max image result count: ${maxOutputImages}` : "",
     `Trusted upstream context summary: ${JSON.stringify(upstreamSummary)}`,
   ].filter(Boolean).join("\n\n");
+}
+
+export function clearInputNormalizerCacheForTests() {
+  inputNormalizerCache.clear();
+}
+
+export function buildInputNormalizerCacheKeyForTests(
+  input: NormalizeInput,
+  maxOutputImages?: number
+) {
+  return buildInputNormalizerCacheKey(input, maxOutputImages);
+}
+
+function buildLightNormalizerContext(input: NormalizeInput["upstreamContext"]) {
+  return input
+    .slice(0, normalizerContextLimit)
+    .map(({ content, contentFormat, mimeType, nodeId, prompt, summary, title, type }) => ({
+      contentAvailable: Boolean(content),
+      contentFormat,
+      mimeType,
+      nodeId,
+      prompt: limitText(prompt, normalizerPromptCharLimit),
+      summary: limitText(summary, normalizerSummaryCharLimit),
+      title: limitText(title, normalizerTitleCharLimit),
+      type,
+    }));
+}
+
+function buildInputNormalizerCacheKey(
+  input: NormalizeInput,
+  maxOutputImages?: number
+) {
+  return JSON.stringify({
+    context: buildLightNormalizerContext(input.upstreamContext),
+    maxOutputImages: maxOutputImages ?? null,
+    message: input.message,
+    selectedNodeId: input.selectedNodeId,
+    version: inputNormalizerCacheVersion,
+  });
+}
+
+function readInputNormalizerCache(key: string) {
+  const entry = inputNormalizerCache.get(key);
+  if (!entry) {
+    return null;
+  }
+  if (entry.expiresAt <= Date.now()) {
+    inputNormalizerCache.delete(key);
+    return null;
+  }
+  inputNormalizerCache.delete(key);
+  inputNormalizerCache.set(key, entry);
+  return cloneNormalizedAgentInput(entry.value);
+}
+
+function writeInputNormalizerCache(key: string, value: NormalizedAgentInput) {
+  inputNormalizerCache.set(key, {
+    expiresAt: Date.now() + inputNormalizerCacheTtlMs,
+    value: cloneNormalizedAgentInput(value),
+  });
+
+  while (inputNormalizerCache.size > inputNormalizerCacheMaxEntries) {
+    const oldestKey = inputNormalizerCache.keys().next().value;
+    if (oldestKey === undefined) {
+      break;
+    }
+    inputNormalizerCache.delete(oldestKey);
+  }
+}
+
+function cloneNormalizedAgentInput(input: NormalizedAgentInput): NormalizedAgentInput {
+  return {
+    rawInput: input.rawInput,
+    task: { ...input.task },
+    userGoal: { ...input.userGoal },
+    routing: {
+      ...input.routing,
+      candidateAgents: [...input.routing.candidateAgents],
+    },
+    inputs: {
+      text: input.inputs.text,
+      images: input.inputs.images.map((image) => ({ ...image })),
+      files: input.inputs.files.map((file) => ({ ...file })),
+    },
+    constraints: {
+      explicit: input.constraints.explicit.map((constraint) => ({ ...constraint })),
+      inferred: input.constraints.inferred.map((constraint) => ({ ...constraint })),
+    },
+    ambiguities: input.ambiguities.map((ambiguity) => ({
+      ...ambiguity,
+      options: [...(ambiguity.options ?? [])],
+    })),
+    workflow: {
+      mode: input.workflow.mode,
+      inputModalities: [...input.workflow.inputModalities],
+      outputArtifacts: [...input.workflow.outputArtifacts],
+      requiredAgents: [...input.workflow.requiredAgents],
+      requiredCapabilities: [...input.workflow.requiredCapabilities],
+      stages: input.workflow.stages.map((stage) => ({
+        ...stage,
+        dependsOn: [...(stage.dependsOn ?? [])],
+        inputModalities: [...(stage.inputModalities ?? [])],
+        outputArtifacts: [...(stage.outputArtifacts ?? [])],
+      })),
+    },
+  };
+}
+
+function limitText(value: string | undefined, maxChars: number) {
+  const normalized = value ? normalizeText(value) : "";
+  if (!normalized) {
+    return undefined;
+  }
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxChars)}...[truncated]`;
+}
+
+function assertNotAborted(signal: AbortSignal | undefined) {
+  if (!signal?.aborted) {
+    return;
+  }
+  const error = new Error("The operation was aborted.");
+  error.name = "AbortError";
+  throw error;
 }
 
 function uniqueAgents(agents: PrimaryAgent[]): PrimaryAgent[] {

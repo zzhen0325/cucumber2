@@ -102,11 +102,7 @@ export const ToolHeader = ({
         <strong className="truncate font-medium">
           {title ?? toolType.split("-").slice(1).join("-")}
         </strong>
-        {description && (
-          <span className="tool-card-description truncate text-[length:var(--canvas-node-meta-size)] leading-[var(--canvas-node-meta-line)] [color:var(--run-text-muted)]">
-            {description}
-          </span>
-        )}
+      
       </span>
     </div>
     {getStatusBadge(state, stateLabel)}

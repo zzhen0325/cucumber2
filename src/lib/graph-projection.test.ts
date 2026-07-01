@@ -207,7 +207,7 @@ describe("agent event graph projection", () => {
     });
   });
 
-  it("projects pending image nodes from normalized image input before tool input", () => {
+  it("does not project pending image nodes from normalized image input before tool input", () => {
     const projection = projectRunTraceToCanvas({
       runNodeId: "run-1",
       events: [
@@ -234,15 +234,10 @@ describe("agent event graph projection", () => {
     const imageNodes = projection.nodes.filter(
       (node) => node.data.kind === "imageResult"
     );
-    expect(imageNodes).toHaveLength(2);
-    expect(imageNodes[0].data).toMatchObject({
-      kind: "imageResult",
-      status: "loading",
-      request: { index: 1, count: 2, aspectRatio: "16:9" },
-    });
+    expect(imageNodes).toHaveLength(0);
   });
 
-  it("projects pending image nodes with per-variant request metadata", () => {
+  it("does not project pending image variant nodes from normalized constraints", () => {
     const projection = projectRunTraceToCanvas({
       runNodeId: "run-1",
       events: [
@@ -272,12 +267,7 @@ describe("agent event graph projection", () => {
     const imageNodes = projection.nodes.filter(
       (node) => node.data.kind === "imageResult"
     );
-    expect(imageNodes).toHaveLength(2);
-    expect(imageNodes.map((node) => node.data.kind === "imageResult" && node.data.request))
-      .toEqual([
-        { index: 1, count: 2, width: 1125, height: 450, aspectRatio: "5:2" },
-        { index: 2, count: 2, width: 900, height: 1200, aspectRatio: "3:4" },
-      ]);
+    expect(imageNodes).toHaveLength(0);
   });
 
   it("does not project failed image nodes when image decomposition fails before generation starts", () => {
@@ -340,7 +330,7 @@ describe("agent event graph projection", () => {
     });
   });
 
-  it("projects pending artifact nodes from normalized non-image input", () => {
+  it("does not project pending artifact nodes from normalized non-image input", () => {
     const projection = projectRunTraceToCanvas({
       runNodeId: "run-1",
       events: [
@@ -358,24 +348,12 @@ describe("agent event graph projection", () => {
       ],
     });
 
-    const pendingDocument = projection.nodes.find(
-      (node) => node.id === "markdown-pending-run-1-1"
-    );
-    expect(pendingDocument?.data).toMatchObject({
-      kind: "markdown",
-      artifact: {
-        id: "pending-run-1-markdown-1",
-        type: "doc",
-        metadata: { pending: true },
-      },
-      runId: "run-1",
-      summary: "正在生成，结果会自动写入这个节点。",
-    });
     expect(
-      projection.edges.some(
-        (edge) => edge.source === "run-1" && edge.target === "markdown-pending-run-1-1"
-      )
-    ).toBe(true);
+      projection.nodes.some((node) => node.id.startsWith("markdown-pending-"))
+    ).toBe(false);
+    expect(
+      projection.nodes.some((node) => node.data.kind === "markdown")
+    ).toBe(false);
   });
 
   it("does not project pending markdown nodes for plain text answers", () => {
@@ -405,7 +383,7 @@ describe("agent event graph projection", () => {
     ).toBe(false);
   });
 
-  it("reuses pending artifact nodes when the final artifact arrives", () => {
+  it("projects real artifact nodes after normalized non-image input", () => {
     const projection = projectRunTraceToCanvas({
       projectId: "project-1",
       runNodeId: "run-1",
@@ -442,7 +420,7 @@ describe("agent event graph projection", () => {
     );
     expect(documentNodes).toHaveLength(1);
     expect(documentNodes[0]).toMatchObject({
-      id: "markdown-pending-run-1-1",
+      id: "markdown-doc-1",
       data: {
         kind: "markdown",
         artifact: { id: "doc-1" },
@@ -494,7 +472,7 @@ describe("agent event graph projection", () => {
     );
     expect(documentNodes).toHaveLength(1);
     expect(documentNodes[0]).toMatchObject({
-      id: "markdown-pending-run-1-1",
+      id: "markdown-text-1",
       data: {
         kind: "markdown",
         artifact: {
@@ -567,7 +545,7 @@ describe("agent event graph projection", () => {
     });
   });
 
-  it("keeps HTML page tasks on webpage pending nodes even when classified under code domain", () => {
+  it("projects HTML page artifacts as webpage nodes even when normalized under code domain", () => {
     const html =
       "<!doctype html><html><head><title>Landing</title></head><body><main>Aside AI</main></body></html>";
     const projection = projectRunTraceToCanvas({
@@ -634,7 +612,7 @@ describe("agent event graph projection", () => {
       projection.edges.some((edge) => edge.target.startsWith("code-pending-run-1"))
     ).toBe(false);
     expect(
-      projection.nodes.find((node) => node.id === "webpage-pending-run-1-1")?.data
+      projection.nodes.find((node) => node.id === "webpage-text-html-1")?.data
     ).toMatchObject({
       artifact: { id: "text-html-1", type: "webpage" },
       html,

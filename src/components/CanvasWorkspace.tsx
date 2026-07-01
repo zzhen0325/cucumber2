@@ -418,6 +418,7 @@ const PAN_ON_DRAG_BUTTONS = [MIDDLE_MOUSE_BUTTON];
 const HAND_TOOL_PAN_ON_DRAG_BUTTONS = [LEFT_MOUSE_BUTTON, MIDDLE_MOUSE_BUTTON];
 const SHIFT_MULTI_SELECTION_KEYS = ["Shift", "ShiftLeft", "ShiftRight"];
 const TRACE_RECONCILE_DELAYS_MS = [0, 1500, 4000, 8000] as const;
+const ACTIVE_TRACE_POLL_INTERVAL_MS = 2500;
 const STREAM_PROJECTION_THROTTLE_MS = 50;
 
 function getSelectedNodeIds(nodes: AgentCanvasNode[]) {
@@ -548,6 +549,8 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     })
   );
   const traceReconcileTimers = useRef<number[]>([]);
+  const activeTracePollTimers = useRef(new Map<string, number>());
+  const activeTracePollGeneration = useRef(0);
   const traceRunIdRef = useRef<string | null>(null);
   const hasLoadedProject = useRef(false);
   const nodesRef = useRef(nodes);
@@ -751,6 +754,25 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   }, []);
 
   useEffect(() => clearTraceReconcileTimers, [clearTraceReconcileTimers]);
+
+  const clearActiveTracePollTimers = useCallback((runId?: string) => {
+    if (runId) {
+      const timer = activeTracePollTimers.current.get(runId);
+      if (timer) {
+        window.clearTimeout(timer);
+        activeTracePollTimers.current.delete(runId);
+      }
+      return;
+    }
+
+    for (const timer of activeTracePollTimers.current.values()) {
+      window.clearTimeout(timer);
+    }
+    activeTracePollTimers.current.clear();
+    activeTracePollGeneration.current += 1;
+  }, []);
+
+  useEffect(() => clearActiveTracePollTimers, [clearActiveTracePollTimers]);
 
   const acknowledgeRunCanvasPatchPersistence = useCallback(
     (events: StreamedRuntimeEvents) => {
@@ -1076,6 +1098,69 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       return hasTerminalEvent;
     },
     [acknowledgeRunCanvasPatchPersistence, releaseRunCanvasPatchPersistence, setEdges, setNodes]
+  );
+
+  const scheduleActiveRunTracePoll = useCallback(
+    function schedule(
+      projectId: string,
+      runId: string,
+      delayMs = 0,
+      generation = activeTracePollGeneration.current
+    ) {
+      if (activeTracePollTimers.current.has(runId)) {
+        return;
+      }
+
+      const timer = window.setTimeout(() => {
+        activeTracePollTimers.current.delete(runId);
+        if (
+          generation !== activeTracePollGeneration.current ||
+          loadedProjectIdRef.current !== projectId
+        ) {
+          return;
+        }
+
+        void loadRunTrace(projectId, runId)
+          .then(({ events }) => {
+            if (generation !== activeTracePollGeneration.current) {
+              return;
+            }
+            const reachedTerminal = events.length
+              ? mergePersistedRunTrace(runId, events)
+              : false;
+            if (
+              reachedTerminal ||
+              loadedProjectIdRef.current !== projectId ||
+              !isActiveRunNode(nodesRef.current, runId)
+            ) {
+              return;
+            }
+            schedule(
+              projectId,
+              runId,
+              ACTIVE_TRACE_POLL_INTERVAL_MS,
+              generation
+            );
+          })
+          .catch(() => {
+            if (
+              generation === activeTracePollGeneration.current &&
+              loadedProjectIdRef.current === projectId &&
+              isActiveRunNode(nodesRef.current, runId)
+            ) {
+              schedule(
+                projectId,
+                runId,
+                ACTIVE_TRACE_POLL_INTERVAL_MS,
+                generation
+              );
+            }
+          });
+      }, delayMs);
+
+      activeTracePollTimers.current.set(runId, timer);
+    },
+    [mergePersistedRunTrace]
   );
 
   const reconcileRunFromPersistedTrace = useCallback(
@@ -1521,6 +1606,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     activeRunId.current = null;
     abortAgentRunStreams();
     clearQueuedStreamProjection();
+    clearActiveTracePollTimers();
     streamedRuntimeEvents.current = [];
     streamedAgentTextByRunId.current.clear();
     dirtyNodeIdsRef.current.clear();
@@ -1599,18 +1685,18 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           });
         }
 
-        const lastRunId = project.lastRunId;
-        if (lastRunId) {
-          void loadRunTrace(project.id, lastRunId)
-            .then(({ events }) => {
-              if (!ignore && events.length) {
-                mergePersistedRunTrace(lastRunId, events);
-              }
-            })
-            .catch(() => {
-              // The saved canvas is still usable; trace hydration only repairs
-              // richer runtime projections when persisted events are available.
-            });
+        const traceHydrationRunIds = new Set(
+          selectedNodes.flatMap((node) =>
+            node.data.kind === "run" && isActiveRunStatus(node.data.status)
+              ? [node.id]
+              : []
+          )
+        );
+        if (project.lastRunId) {
+          traceHydrationRunIds.add(project.lastRunId);
+        }
+        for (const runId of traceHydrationRunIds) {
+          scheduleActiveRunTracePoll(project.id, runId);
         }
       })
       .catch((nextError: unknown) => {
@@ -1626,12 +1712,14 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       ignore = true;
       abortAgentRunStreams();
       clearQueuedStreamProjection();
+      clearActiveTracePollTimers();
     };
   }, [
     abortAgentRunStreams,
+    clearActiveTracePollTimers,
     clearQueuedStreamProjection,
-    mergePersistedRunTrace,
     projectId,
+    scheduleActiveRunTracePoll,
     setEdges,
     setNodes,
   ]);

@@ -9,7 +9,7 @@ import {
 } from "./materialize-run";
 
 describe("agent run materializer", () => {
-  it("treats normalized artifact input as a materialization trigger", () => {
+  it("treats normalized input as a non-blocking materialization trigger", () => {
     expect(shouldMaterializeRunEvent("input.normalized")).toBe(true);
     expect(shouldMaterializeRunEvent("agent.message.completed")).toBe(true);
   });
@@ -22,7 +22,7 @@ describe("agent run materializer", () => {
     expect(shouldBlockRunForMaterialization("run.failed")).toBe(true);
   });
 
-  it("writes pending artifact nodes from normalized non-image input", () => {
+  it("does not write pending artifact nodes from normalized non-image input", () => {
     const next = materializeSnapshot(
       projectSnapshot(),
       [
@@ -45,16 +45,10 @@ describe("agent run materializer", () => {
       "run-1"
     );
 
-    expect(next.nodes.find((node) => node.id === "markdown-pending-run-1-1")?.data)
-      .toMatchObject({
-        kind: "markdown",
-        artifact: {
-          id: "pending-run-1-markdown-1",
-          type: "doc",
-        },
-        runId: "run-1",
-        summary: "正在生成，结果会自动写入这个节点。",
-      });
+    expect(next.nodes.some((node) => node.id.startsWith("markdown-pending-")))
+      .toBe(false);
+    expect(next.nodes.some((node) => node.data.kind === "markdown"))
+      .toBe(false);
   });
 
   it("does not write pending artifact nodes for plain text answers", () => {

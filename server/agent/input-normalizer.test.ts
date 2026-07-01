@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { finalizeNormalizedAgentInput } from "./input-normalizer.ts";
+import {
+  buildInputNormalizerCacheKeyForTests,
+  buildNormalizerPrompt,
+  finalizeNormalizedAgentInput,
+} from "./input-normalizer.ts";
 import { selectAgentRoute } from "./task-router.ts";
 import { makeTaskFrame } from "./test-task-frame.ts";
 
@@ -9,6 +13,58 @@ function frame(overrides: Parameters<typeof makeTaskFrame>[0]) {
 }
 
 describe("finalizeNormalizedAgentInput", () => {
+  it("keeps full upstream content out of the normalizer prompt", () => {
+    const prompt = buildNormalizerPrompt({
+      message: "总结5个结论",
+      selectedNodeId: "doc-1",
+      upstreamContext: [
+        {
+          content: "FULL_ARTIFACT_BODY_SHOULD_NOT_BE_SENT",
+          contentFormat: "markdown",
+          mimeType: "text/markdown",
+          nodeId: "doc-1",
+          summary: "这是一份可用于路由判断的摘要",
+          title: "项目文档",
+          type: "doc",
+        },
+      ],
+    });
+
+    expect(prompt).toContain("\"contentAvailable\":true");
+    expect(prompt).toContain("这是一份可用于路由判断的摘要");
+    expect(prompt).not.toContain("FULL_ARTIFACT_BODY_SHOULD_NOT_BE_SENT");
+  });
+
+  it("keeps the normalizer cache key stable when only upstream content changes", () => {
+    const baseInput = {
+      message: "总结5个结论",
+      selectedNodeId: "doc-1",
+      upstreamContext: [
+        {
+          content: "first body",
+          contentFormat: "markdown",
+          mimeType: "text/markdown",
+          nodeId: "doc-1",
+          summary: "同一个路由摘要",
+          title: "项目文档",
+          type: "doc",
+        },
+      ],
+    };
+
+    expect(buildInputNormalizerCacheKeyForTests(baseInput)).toBe(
+      buildInputNormalizerCacheKeyForTests({
+        ...baseInput,
+        upstreamContext: [
+          {
+            ...baseInput.upstreamContext[0],
+            content: "second body",
+          },
+        ],
+      })
+    );
+  });
+
   it("validates and normalizes a model Task Frame without rule correction", () => {
     const candidate = frame({
       rawInput: "日本家居banner KV 16:9主体是女生打扫家里的插画,四张",

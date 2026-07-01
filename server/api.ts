@@ -7,6 +7,7 @@ import {
   createUIMessageStream,
   createUIMessageStreamResponse,
   type UIMessage,
+  type UIMessageStreamWriter,
 } from "ai";
 import { Hono, type Context } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
@@ -29,6 +30,7 @@ import type {
   ImageResultNodeData,
 } from "../src/types/canvas.ts";
 import { executeAgentRun } from "./agent/index.ts";
+import type { ExecuteAgentRunInput } from "./agent/context.ts";
 import { scheduleAgentRunPrewarm } from "./agent/prewarm.ts";
 import {
   assertImageProviderConfigured,
@@ -107,10 +109,19 @@ import {
 loadServerEnv();
 
 const app = new Hono();
-const activeAgentRuns = new Map<string, AbortController>();
+const activeAgentRuns = new Map<string, ActiveAgentRun>();
 const sessionCookieName = "cucumber_session";
 const SESSION_USER_CACHE_TTL_MS = 60 * 1000;
 const UPLOAD_PROJECT_CACHE_TTL_MS = 15 * 1000;
+
+type AgentRunStreamPart = Parameters<UIMessageStreamWriter<UIMessage>["write"]>[0];
+
+type ActiveAgentRun = {
+  controller: AbortController;
+  promise: Promise<void>;
+  streamParts: AgentRunStreamPart[];
+  subscribers: Set<UIMessageStreamWriter<UIMessage>>;
+};
 
 const sessionUserCache = new Map<
   string,
@@ -1269,7 +1280,7 @@ app.delete("/api/agent-run", async (c) => {
 
   const controller = activeAgentRuns.get(
     getActiveAgentRunKey(user.id, projectId, runNodeId)
-  );
+  )?.controller;
   controller?.abort();
   return c.json({ stopped: Boolean(controller) });
 });
@@ -1292,6 +1303,12 @@ app.post("/api/agent-run", async (c) => {
       : null;
   const projectId = z.string().uuid().parse(body.projectId);
   const runNodeId = z.string().min(1).parse(body.runNodeId);
+  const activeRunKey = getActiveAgentRunKey(user.id, projectId, runNodeId);
+  const existingRun = activeAgentRuns.get(activeRunKey);
+  if (existingRun) {
+    return createAgentRunStreamResponse(existingRun, messages);
+  }
+
   const selectedNodeIds = normalizeSelectedNodeIdsForRun(
     parsedCanvasContext.selectedNodeIds,
     parsedCanvasContext.selectedNodeId ?? null
@@ -1343,35 +1360,114 @@ app.post("/api/agent-run", async (c) => {
     });
   }
 
-  const activeRunKey = getActiveAgentRunKey(user.id, projectId, runNodeId);
-  const controller = new AbortController();
-  activeAgentRuns.set(activeRunKey, controller);
+  const activeRun = startActiveAgentRun({
+    activeRunKey,
+    input: {
+      canvasContext,
+      projectId,
+      projectSnapshot: project,
+      runNodeId,
+      canvasPatchApplied: Boolean(parsedCanvasPatch),
+      userId: user.id,
+    },
+  });
+  return createAgentRunStreamResponse(activeRun, messages);
+});
 
+function startActiveAgentRun({
+  activeRunKey,
+  input,
+}: {
+  activeRunKey: string;
+  input: Omit<ExecuteAgentRunInput, "signal" | "writer">;
+}) {
+  const controller = new AbortController();
+  const activeRun: ActiveAgentRun = {
+    controller,
+    promise: Promise.resolve(),
+    streamParts: [],
+    subscribers: new Set(),
+  };
+  const writer = createActiveAgentRunWriter(activeRun);
+
+  activeAgentRuns.set(activeRunKey, activeRun);
+  activeRun.promise = executeAgentRun({
+    ...input,
+    signal: controller.signal,
+    writer,
+  })
+    .catch((error: unknown) => {
+      console.error("[agent-run:background]", error);
+      throw error;
+    })
+    .finally(() => {
+      if (activeAgentRuns.get(activeRunKey) === activeRun) {
+        activeAgentRuns.delete(activeRunKey);
+      }
+    });
+  void activeRun.promise.catch(() => undefined);
+  return activeRun;
+}
+
+function createActiveAgentRunWriter(activeRun: ActiveAgentRun) {
+  return {
+    write(part: AgentRunStreamPart) {
+      activeRun.streamParts.push(part);
+      for (const subscriber of activeRun.subscribers) {
+        if (!safeWriteAgentRunStreamPart(subscriber, part)) {
+          activeRun.subscribers.delete(subscriber);
+        }
+      }
+    },
+  } as UIMessageStreamWriter<UIMessage>;
+}
+
+function createAgentRunStreamResponse(
+  activeRun: ActiveAgentRun,
+  messages: UIMessage[]
+) {
   const stream = createUIMessageStream({
     originalMessages: messages,
     execute: async ({ writer }) => {
+      const unsubscribe = subscribeToActiveAgentRun(activeRun, writer);
       try {
-        await executeAgentRun({
-          canvasContext,
-          projectId,
-          projectSnapshot: project,
-          runNodeId,
-          canvasPatchApplied: Boolean(parsedCanvasPatch),
-          signal: controller.signal,
-          userId: user.id,
-          writer,
-        });
+        await activeRun.promise;
       } finally {
-        if (activeAgentRuns.get(activeRunKey) === controller) {
-          activeAgentRuns.delete(activeRunKey);
-        }
+        unsubscribe();
       }
     },
     onError: getErrorMessage,
   });
 
   return createUIMessageStreamResponse({ stream });
-});
+}
+
+function subscribeToActiveAgentRun(
+  activeRun: ActiveAgentRun,
+  writer: UIMessageStreamWriter<UIMessage>
+) {
+  activeRun.subscribers.add(writer);
+  for (const part of activeRun.streamParts) {
+    safeWriteAgentRunStreamPart(writer, part);
+  }
+
+  return () => {
+    activeRun.subscribers.delete(writer);
+  };
+}
+
+function safeWriteAgentRunStreamPart(
+  writer: UIMessageStreamWriter<UIMessage>,
+  part: AgentRunStreamPart
+) {
+  try {
+    writer.write(part);
+    return true;
+  } catch {
+    // The browser may refresh or leave while the in-process run continues.
+    return false;
+  }
+}
 
 async function waitForProjectSnapshotForRun({
   projectId,

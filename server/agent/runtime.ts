@@ -654,8 +654,18 @@ export async function executeAgentRun({
         routerSource: quickRoute.routerSource,
         routeFallbackReason: quickRoute.fallbackReason,
       }));
+      let normalizerCacheStatus:
+        | {
+            cacheHit: boolean;
+            promptCharCount: number;
+            upstreamContextCount: number;
+          }
+        | undefined;
       try {
         const normalizedInput = await normalizeAgentInput(agentInput, {
+          onCacheStatus: (status) => {
+            normalizerCacheStatus = status;
+          },
           signal: input.signal,
         });
         agentInput = {
@@ -688,6 +698,10 @@ export async function executeAgentRun({
           route: quickRoute.route,
           routerSource: quickRoute.routerSource,
           routeFallbackReason: quickRoute.fallbackReason,
+          normalizerCacheHit: normalizerCacheStatus?.cacheHit,
+          normalizerPromptCharCount: normalizerCacheStatus?.promptCharCount,
+          normalizerUpstreamContextCount:
+            normalizerCacheStatus?.upstreamContextCount,
         })
       );
     }

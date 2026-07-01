@@ -8,6 +8,11 @@
 - `task-router` 对 `workflow.mode=hybrid|multi_step`、多 stage 或多 specialist 的任务统一选择 `manager_task` 作为编排入口，同时从 `workflow.requiredAgents` 和 stage agent 开放对应 specialist handoff；单一步骤 specialist 仍直达对应 Agent。
 - `workflow` 只描述任务图，不包含 tool args，不新增数据库 schema，也不绕过 artifact/canvas operation 事件投影。tool policy、run plan 和 skill retrieval 改为优先读取 workflow 的产物/能力信号，再回落到原有 `task.domain` / `intent`。
 
+## 2026-07-01 Background Agent Run Lifecycle
+
+- `/api/agent-run` 启动后端 in-process 后台执行，HTTP AI SDK stream 只作为当前页面的订阅者；页面刷新、导航或请求断开不会中止 Agent Run，只有 `DELETE /api/agent-run?projectId=...&runNodeId=...` 会 abort 对应 controller。
+- 刷新加载项目时，前端会对 `lastRunId` 和画布中仍为 `queued` / `running` 的 Run 节点拉取 `agent_run_events` 并继续轮询到终态；恢复仍只依赖持久化 Trace 和画布投影，不新增客户端可信运行状态。
+
 ## 2026-06-30 Parallel Agent Run Submission
 
 - 画布输入器提交后立即恢复为可输入/可再次提交状态；前端不再用单个 `useChat` 状态锁住 composer，而是每个 Run 独立启动 AI SDK stream，并按事件自带的 `runNodeId` 投影回对应 Run 节点。`lastRunId` 仍只表示最近一次运行，Trace、事件表和画布节点协议不新增平行状态。
@@ -50,6 +55,13 @@
 - `routerSource` 当前只区分 `quick-router` 和 `llm-normalizer`；`run.created`、`quick.route` 和 `input.normalized` Trace payload 记录 route、skippedSteps、prompt、可信上游摘要和归一化结果。没有新增数据库 schema，也没有改变客户端提交合同。
 - `run-plan` 优先从 normalized protocol 派生兼容 intent，避免模型或旧测试直接写入的 `intent` 覆盖 artifact/capability 事实。
 
+## 2026-07-01 Input Normalizer Latency
+
+- 为避免扩大不稳定的第一级规则判断，启动链路仍然只让 `Quick Router` 处理确定性 preflight；其余请求继续进入唯一 LLM Input Normalizer。
+- LLM Input Normalizer 的 upstream 输入瘦身为节点身份、类型、标题、摘要、原 prompt 和内容可用性标记，不再发送完整 artifact 正文；真实正文读取仍交给后续 specialist/runtime context。
+- `normalizeAgentInput` 增加进程内 TTL/LRU Task Frame 缓存。缓存 key 基于原始用户输入、选中节点、轻量 upstream 摘要和 `maxOutputImages`；只缓存成功的结构化输出，不缓存失败或取消。
+- `input.normalize` Trace 完成 payload 记录 `normalizerCacheHit`、瘦身后的 prompt 字符数和 upstream context 数量，便于定位 normalizer 延迟是否来自缓存未命中或输入过大。
+
 ## 2026-06-23 Run Node Conversation Flow
 
 - Run 节点信息层级调整为 Agent 对话优先：普通输出 delta（`output_text_delta`、Responses `response.output_text.delta` 和 refusal）会立即写入 `agent.message.*` 并同步进入 AI SDK `text-delta`；reasoning summary 写入 AI SDK `reasoning-*` part，并在 Run 节点用 AI Elements `Reasoning` 折叠展示，不再混入主回答文本；最终输出在没有被文本流覆盖时会补成 assistant 消息；Run Node 现在用 AI Elements `Reasoning` / `Task` / `Tool` / `MessageResponse` 分层渲染运行过程，计划和 handoff/skill 摘要进入 `Task`，工具调用进入 `Tool` 卡片，不再把图片等 artifact 摘要作为 Run 卡主内容展示。
@@ -82,13 +94,13 @@
 - HTML/webpage artifact 增加 Craft.js 编辑入口：右上角进入编辑弹窗，编辑态使用白名单 React 组件和 `query.serialize()` 保存到 artifact content 的 `content_json.format=craft-html-v1`，同时把渲染后的完整 HTML document 写入 `content_text` 作为 canonical 内容；`webpage` 节点只临时刷新 `data.html` 供当前会话预览，持久化时继续由 `toPersistableNode` 清理正文。
 - Agent Run 启动与 materialize 都从新的 node/edge 表读取/写入；上游 markdown/code/document/tool result/webpage 节点只从 `node_json` 读取 artifactId，再由服务端读取 `agent_artifacts` / `agent_artifact_contents` 注入受限长度正文；materialize 只在 `input.normalized`、artifact/canvas operation/run terminal/tool error 等关键事件后落盘，非终态事件后台排队，终态事件等待队列收敛。
 - 打开项目不再自动 hydrate last run trace，也不自动拉取 artifact full content；Trace 面板、artifact 预览和 Markdown 编辑器聚焦时才按需请求详情。
-- `input.normalized` 中已经确定会产出 artifact 时会立即投影并后台物化 pending 结果节点；该机制覆盖 image、markdown/document/diagram、code、webpage 和 data，不把“节点创建”绑到最终 artifact 生成完成之后，也不让中间落库阻塞后续 Agent 执行。真实 `artifact.created` 到达后复用同一个 pending 节点更新为 ready。
+- `input.normalized` 只记录 Task Frame、路由和 Trace 事实，不再据此预置 pending 结果节点；图片 loading 节点只来自真实 `generate_image` 工具输入，文本/code/webpage 等结果节点只在真实 `artifact.created` 到达后按 artifact id/type 幂等创建。
 
 ## 2026-06-17 Runtime Fast Path
 
 - `/api/agent-run` 入口保持 AI SDK HTTP stream 不变；最初的 `Quick Router` 本地规则层后来收缩为确定性 preflight，复杂语义路由见 2026-06-24 的 Fast Capability-Aware Router。Trace 仍在 `run.created` / `input.normalized` payload 中写入 route、routerSource、skippedSteps 和路由诊断字段。
 - `chat_agent_task` 使用缓存的 Chat Agent/Runner，不加载 skills、handoff 或动态计划；`simple_canvas` 只处理确定性的安全画布操作，并继续通过 canvas policy 写 `canvas.operation.*`。
-- `image_task` 可在 `input.normalized` 后由投影层先创建 loading 图片结果节点；完整图片 artifact 由 `generate_image`、`image_matting` 或 `upscale_image` 产生并按 artifact id 幂等物化，不重复生成结果节点；图片拆解由 `decompose_image` 创建 Markdown artifact 节点，图片理解直接在 Run 节点回复。
+- `image_task` 不再由 `input.normalized` 预置图片结果节点；只有 `generate_image` 工具输入会在运行中展示 loading 图片节点，完整图片 artifact 由 `generate_image`、`image_matting` 或 `upscale_image` 产生并按 artifact id 幂等物化，不重复生成结果节点；图片拆解由 `decompose_image` 创建 Markdown artifact 节点，图片理解直接在 Run 节点回复。
 - `manager_task`、direct specialist task 和 `image_task` 进入完整 Agent Runner；compact context、skill retrieval 和 tool prepare 在依赖允许时并行。`plan.build` 只在 Manager、图片或非空动态计划时写 Trace，简单任务不再写空计划步骤。
 - Agent world 进程级缓存 Chat、Manager、Document/Web/Research/Image agents、handoff registry、normalizer Agent 和 Runner；per-run instructions/context 仍从 `runContext` 注入，不写入单例。
 - `generate_image` 是 Image Agent 本地 function tool；简单生图和复杂图片任务统一进入 Image Agent。简单任务可直接调用 `generate_image`，需要风格系统、prompt 扩写、knowledge 或资源脚本时再按需调用对应工具。
