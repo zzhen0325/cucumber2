@@ -15,10 +15,7 @@ import type { CanvasOperation } from "../../src/types/runtime.ts";
 import type { CanvasProject } from "../canvas-store.ts";
 import type { ImageProviderSelection } from "../provider-config.ts";
 import type { AgentModelProviderName } from "./model-config.ts";
-import {
-  finalizeNormalizedAgentInput,
-  type NormalizedAgentInput,
-} from "./input-normalizer.ts";
+import type { NormalizedAgentInput } from "./task-frame.ts";
 import type { ActivatedAgentSkill, AgentSkillCard } from "./skills/types.ts";
 import { getTextArtifactContentForUser } from "../artifact-content-store.ts";
 
@@ -193,6 +190,7 @@ export type CucumberRunEvent =
       skillId: string;
       skillName: string;
     }
+  | { type: "task_frame_set"; normalizedInput: NormalizedAgentInput }
   | { type: "run_completed"; finalOutput?: string; artifactIds: string[] }
   | { type: "error"; message: string };
 
@@ -309,9 +307,7 @@ export function buildAgentRunInput({
     projectSnapshot.edges,
     { budget: DEFAULT_UPSTREAM_CONTEXT_BUDGET }
   );
-  const upstreamContext = contextCollection.items.map(
-    sanitizeUpstreamContextItemForRuntime
-  );
+  const upstreamContext = contextCollection.items.map(sanitizeUpstreamContextItem);
   const contextNodeIds = uniqueNodeIds([
     ...referenceNodeIds,
     ...upstreamContext.map((item) => item.nodeId),
@@ -363,7 +359,6 @@ export function buildAgentRunInput({
     imageResultCount: canvasContext.imageResultCount,
     imageProvider: canvasContext.imageProvider,
     inputMode: canvasContext.inputMode,
-    normalizedInput: buildExplicitImageModeInput(canvasContext),
     promptNodeId,
     projectVersion: projectSnapshot.version,
     projectId,
@@ -376,59 +371,6 @@ export function buildAgentRunInput({
     contextSummary,
     userId,
   };
-}
-
-function buildExplicitImageModeInput(
-  canvasContext: AgentRunRequestContext
-): NormalizedAgentInput | undefined {
-  if (canvasContext.inputMode !== "image") {
-    return undefined;
-  }
-
-  const explicit: Array<{ key: string; value: string; sourceText: string }> = [];
-  if (canvasContext.imageResultCount) {
-    explicit.push({
-      key: "output_count",
-      value: String(canvasContext.imageResultCount),
-      sourceText: "image composer count",
-    });
-  }
-  if (canvasContext.imageAspectRatio) {
-    explicit.push({
-      key: "aspect_ratio",
-      value: canvasContext.imageAspectRatio,
-      sourceText: "image composer aspect ratio",
-    });
-  }
-
-  return finalizeNormalizedAgentInput(
-    {
-      rawInput: canvasContext.prompt,
-      task: {
-        domain: "image",
-        intent: "image.generate",
-        action: "create",
-        confidence: 1,
-      },
-      userGoal: {
-        original: canvasContext.prompt,
-        normalized: canvasContext.prompt,
-      },
-      routing: {
-        primaryAgent: "image_agent",
-        candidateAgents: [],
-        reason: "explicit image composer mode",
-      },
-      inputs: {
-        text: canvasContext.prompt,
-        images: [],
-        files: [],
-      },
-      constraints: { explicit, inferred: [] },
-      ambiguities: [],
-    },
-    canvasContext.prompt
-  );
 }
 
 const maxHydratedArtifactContentChars = 12_000;
@@ -522,43 +464,6 @@ function shouldHydrateArtifactContent(item: UpstreamContextItem) {
   );
 }
 
-function sanitizeUpstreamContextItemForRuntime(
-  item: UpstreamContextItem
-): UpstreamContextItem {
-  return {
-    ...item,
-    artifact: sanitizeArtifactRefForRuntime(item.artifact),
-    contentRef: undefined,
-    imageUrl: undefined,
-  };
-}
-
-function sanitizeArtifactRefForRuntime(
-  artifact: ArtifactRef | undefined
-): ArtifactRef | undefined {
-  if (!artifact) {
-    return undefined;
-  }
-
-  const { contentRef, metadata, ...rest } = artifact;
-  void contentRef;
-  if (!metadata) {
-    return rest;
-  }
-
-  const {
-    storageBucket,
-    storagePath,
-    ...safeMetadata
-  } = metadata;
-  void storageBucket;
-  void storagePath;
-  return {
-    ...rest,
-    metadata: Object.keys(safeMetadata).length ? safeMetadata : undefined,
-  };
-}
-
 function readArtifactContentText(
   content: NonNullable<
     Awaited<ReturnType<typeof getTextArtifactContentForUser>>
@@ -596,6 +501,42 @@ function limitArtifactContentForContext(content: string) {
   return `${content.slice(0, maxHydratedArtifactContentChars)}\n...[artifact content truncated]`;
 }
 
+function sanitizeUpstreamContextItem(item: UpstreamContextItem): UpstreamContextItem {
+  const {
+    artifact,
+    contentRef,
+    imageUrl,
+    ...rest
+  } = item;
+  void contentRef;
+  void imageUrl;
+  return {
+    ...rest,
+    artifact: artifact ? sanitizeArtifactRefForRuntime(artifact) : undefined,
+  } as UpstreamContextItem;
+}
+
+function sanitizeArtifactRefForRuntime(artifact: ArtifactRef): ArtifactRef {
+  const { contentRef, metadata, ...rest } = artifact;
+  void contentRef;
+  if (!metadata) {
+    return rest;
+  }
+
+  const {
+    storageBucket,
+    storagePath,
+    ...safeMetadata
+  } = metadata;
+  void storageBucket;
+  void storagePath;
+
+  return {
+    ...rest,
+    metadata: Object.keys(safeMetadata).length ? safeMetadata : undefined,
+  };
+}
+
 export function buildCucumberAgentContext(input: AgentRunInput): CucumberAgentContext {
   const knownNodeIds = new Set(input.canvasSnapshot.nodes.map((node) => node.id));
   if (input.promptNodeId) {
@@ -604,8 +545,8 @@ export function buildCucumberAgentContext(input: AgentRunInput): CucumberAgentCo
   knownNodeIds.add(input.runNodeId);
 
   return {
-    canvasId: input.canvasId,
     agentProvider: input.agentProvider,
+    canvasId: input.canvasId,
     canvasSnapshot: input.canvasSnapshot,
     knownNodeIds: [...knownNodeIds],
     activatedSkills: [],

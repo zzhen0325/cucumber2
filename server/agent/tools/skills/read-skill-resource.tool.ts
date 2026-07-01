@@ -54,10 +54,6 @@ export const readSkillResourceTool = tool({
   parameters: readSkillResourceJsonSchema as never,
   strict: false,
   errorFunction: null,
-  isEnabled: async ({ runContext }) => {
-    const context = requireCucumberContext(runContext.context);
-    return context.activatedSkills.length > 0;
-  },
   async execute(rawArgs, runContext) {
     const context = requireCucumberContext(runContext?.context);
     const parsed = readSkillResourceInputSchema.safeParse(rawArgs);

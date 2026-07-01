@@ -1,52 +1,19 @@
 import type { CucumberAgentContext } from "../context.ts";
-import {
-  isImageDecomposeTask,
-  isImageInspectionTask,
-  isImageTask,
-  isTextArtifactTask,
-} from "../task-router.ts";
 
-const IMAGE_GENERATION_TOOLS = new Set([
-  "generate_image",
-  "expand_image_prompt",
-  "render_visual_style_prompt",
-]);
-
+// Task Frame is an observability and retrieval signal, not an execution
+// permission system. These helpers stay as stable call-site hooks while the
+// concrete tools enforce their own schemas, URL rules, storage policy, and
+// canvas-operation policy.
 export function assertImageToolAllowed(
   context: CucumberAgentContext,
   toolName: string
 ) {
-  const normalizedInput = context.normalizedInput;
-  if (!normalizedInput) {
-    return;
-  }
-
-  if (!isImageTask(normalizedInput)) {
-    throw new Error(
-      `tool_policy_rejected: ${toolName} can only run for image-domain tasks.`
-    );
-  }
-
-  // Generation tools must not run for image analysis/decomposition tasks.
-  // upscale_image and image_matting operate on an existing image and stay allowed.
-  if (IMAGE_GENERATION_TOOLS.has(toolName) && isImageInspectionTask(normalizedInput)) {
-    throw new Error(
-      `tool_policy_rejected: ${toolName} is blocked because this task is image analysis, not image generation.`
-    );
-  }
+  void context;
+  void toolName;
 }
 
 export function assertTextArtifactToolAllowed(context: CucumberAgentContext) {
-  const normalizedInput = context.normalizedInput;
-  if (!normalizedInput) {
-    return;
-  }
-
-  if (!isTextArtifactTask(normalizedInput)) {
-    throw new Error(
-      "tool_policy_rejected: create_text_artifact can only run for text or code domain tasks."
-    );
-  }
+  void context;
 }
 
 export function assertImageInspectionToolAllowed(
@@ -54,15 +21,7 @@ export function assertImageInspectionToolAllowed(
   toolName: string,
   requiredCapability: "image-decompose"
 ) {
+  void context;
+  void toolName;
   void requiredCapability;
-  const normalizedInput = context.normalizedInput;
-  if (!normalizedInput) {
-    return;
-  }
-
-  if (!isImageDecomposeTask(normalizedInput) && !isImageInspectionTask(normalizedInput)) {
-    throw new Error(
-      `tool_policy_rejected: ${toolName} requires an image analysis/decomposition task.`
-    );
-  }
 }

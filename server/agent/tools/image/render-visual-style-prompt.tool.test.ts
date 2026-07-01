@@ -2,6 +2,7 @@ import { RunContext } from "@openai/agents";
 import { describe, expect, it } from "vitest";
 
 import type { CucumberAgentContext } from "../../context.ts";
+import { makeTaskFrame } from "../../test-task-frame.ts";
 
 const { renderVisualStylePromptTool } = await import(
   "./render-visual-style-prompt.tool.ts"
@@ -184,6 +185,18 @@ function agentContext(
     producedArtifacts: [],
     projectId: "project-1",
     prompt: "黄瓜海报",
+    normalizedInput: makeTaskFrame({
+      rawInput: "黄瓜海报",
+      domain: "image",
+      intent: "image.generate",
+      action: "create",
+      primaryAgent: "image_agent",
+      workflow: {
+        outputArtifacts: ["image"],
+        requiredAgents: ["image_agent"],
+        requiredCapabilities: ["image-generation"],
+      },
+    }),
     runNodeId: "run-1",
     selectedNodeId: null,
     selectedNodeIds: [],

@@ -75,7 +75,7 @@ describe("buildRunPlan", () => {
 
     expect(plan).toMatchObject([
       { id: "document-brief", label: "梳理文档目标和上游素材", phase: "prepare" },
-      { id: "document-agent", label: "进入 Document Agent", phase: "route" },
+      { id: "document-tools", label: "选择文档工具和技能", phase: "route" },
       { id: "document-create", label: "创建文档内容", phase: "execute" },
       { id: "document-materialize", label: "投影为画布文档节点", phase: "materialize" },
     ]);
@@ -97,7 +97,7 @@ describe("buildRunPlan", () => {
 
     expect(plan).toMatchObject([
       { id: "html-brief", label: "梳理 HTML 产物目标和交互要求", phase: "prepare" },
-      { id: "document-agent", label: "进入 Document Agent", phase: "route" },
+      { id: "html-tools", label: "选择 HTML 文本产物工具", phase: "route" },
       { id: "html-create", label: "创建 HTML 页面", phase: "execute" },
       { id: "html-materialize", label: "投影为网页预览节点", phase: "materialize" },
     ]);
@@ -157,7 +157,7 @@ describe("buildRunPlan", () => {
       { id: "workflow-goal", label: "明确复合任务目标和依赖", phase: "prepare" },
       {
         id: "workflow-1-analyze-reference-route",
-        label: "进入 Image Agent：分析参考图的视觉线索",
+        label: "选择 image 能力：分析参考图的视觉线索",
         phase: "route",
       },
       {
@@ -167,7 +167,7 @@ describe("buildRunPlan", () => {
       },
       {
         id: "workflow-2-generate-image-route",
-        label: "进入 Image Agent：生成海报图片",
+        label: "选择 image 能力：生成海报图片",
         phase: "route",
       },
       {
@@ -177,7 +177,7 @@ describe("buildRunPlan", () => {
       },
       {
         id: "workflow-3-create-code-route",
-        label: "进入 Document Agent：生成 HTML 代码",
+        label: "选择 document 能力：生成 HTML 代码",
         phase: "route",
       },
       {

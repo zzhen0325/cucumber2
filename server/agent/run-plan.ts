@@ -3,7 +3,7 @@ import {
   getExplicitConstraint,
   getExplicitConstraints,
   type NormalizedAgentInput,
-} from "./input-normalizer.ts";
+} from "./task-frame.ts";
 import { isCompositeWorkflowTask } from "./task-router.ts";
 
 export type RunPlanPhase = "prepare" | "route" | "execute" | "materialize";
@@ -68,35 +68,35 @@ export function buildRunPlan(input: AgentRunInput): RuntimeRunPlanItem[] {
     case "document.create":
       return [
         step("document-brief", "梳理文档目标和上游素材", "prepare"),
-        step("document-agent", "进入 Document Agent", "route"),
+        step("document-tools", "选择文档工具和技能", "route"),
         step("document-create", "创建文档内容", "execute"),
         step("document-materialize", "投影为画布文档节点", "materialize"),
       ];
     case "document.edit":
       return [
         step("document-source", "读取上游文档和改写要求", "prepare"),
-        step("document-agent", "进入 Document Agent", "route"),
+        step("document-tools", "选择文档工具和技能", "route"),
         step("document-rewrite", "生成改写后的文档内容", "execute"),
         step("document-materialize", "投影为画布文档节点", "materialize"),
       ];
     case "web.fetch":
       return [
         step("web-boundary", "确认公开 URL 和访问边界", "prepare"),
-        step("web-agent", "进入 Web Agent", "route"),
+        step("web-tools", "选择网页读取工具", "route"),
         step("web-fetch", "抓取网页并保存内容", "execute"),
         step("web-materialize", "投影网页摘要节点", "materialize"),
       ];
     case "webpage.create":
       return [
         step("html-brief", "梳理 HTML 产物目标和交互要求", "prepare"),
-        step("document-agent", "进入 Document Agent", "route"),
+        step("html-tools", "选择 HTML 文本产物工具", "route"),
         step("html-create", "创建 HTML 页面", "execute"),
         step("html-materialize", "投影为网页预览节点", "materialize"),
       ];
     case "research.answer":
       return [
         step("research-sources", "梳理来源和搜索策略", "prepare"),
-        step("research-agent", "进入 Research Agent", "route"),
+        step("research-tools", "选择调研和引用工具", "route"),
         step("research-collect", "搜索或收集来源 citation", "execute"),
         step("research-artifact", "生成调研内容", "execute"),
         step("research-materialize", "投影调研结果节点", "materialize"),
@@ -104,35 +104,35 @@ export function buildRunPlan(input: AgentRunInput): RuntimeRunPlanItem[] {
     case "image.generate":
       return [
         step("image-brief", "整理画面要求和引用图", "prepare"),
-        step("image-agent", "进入 Image Agent", "route"),
+        step("image-tools", "选择图片工具和技能", "route"),
         step("image-generate", `生成${getImageCountLabel(input)}图片`, "execute"),
         step("image-materialize", "投影图片结果节点", "materialize"),
       ];
     case "image.matting":
       return [
         step("matting-source", "确认要抠图的图片", "prepare"),
-        step("image-agent", "进入 Image Agent", "route"),
+        step("matting-tools", "选择图片处理工具", "route"),
         step("image-matting", "生成主体抠图", "execute"),
         step("matting-materialize", "投影抠图结果节点", "materialize"),
       ];
     case "image.decompose":
       return [
         step("decompose-source", "确认要拆解的图片", "prepare"),
-        step("image-agent", "进入 Image Agent", "route"),
+        step("decompose-tools", "选择图片拆解工具", "route"),
         step("image-decompose", "生成图像拆解内容", "execute"),
         step("decompose-materialize", "投影拆解文档节点", "materialize"),
       ];
     case "image.upscale":
       return [
         step("upscale-source", "确认要高清放大的图片", "prepare"),
-        step("image-agent", "进入 Image Agent", "route"),
+        step("upscale-tools", "选择高清放大工具", "route"),
         step("image-upscale", "生成高清放大图片", "execute"),
         step("upscale-materialize", "投影高清图片结果", "materialize"),
       ];
     case "media.analyze":
       return [
         step("media-source", "确认要理解的图片", "prepare"),
-        step("image-agent", "进入 Image Agent", "route"),
+        step("media-tools", "判断是否需要图片工具", "route"),
         step("media-answer", "回答图片理解问题", "execute"),
       ];
     case "canvas.operation":
@@ -210,7 +210,7 @@ function buildWorkflowPlan(
   if (!stages.length) {
     return [
       step("workflow-goal", "明确复合任务目标和依赖", "prepare"),
-      step("workflow-orchestrate", "进入 Manager 编排必要 Agent", "route"),
+      step("workflow-orchestrate", "由 Super Agent 编排工具链路", "route"),
       step("workflow-execute", "执行多能力任务链路", "execute"),
       step("workflow-materialize", "投影复合任务产物", "materialize"),
     ];
@@ -224,7 +224,7 @@ function buildWorkflowPlan(
       return [
         step(
           `workflow-${stageIndex}-${id}-route`,
-          `进入 ${agentLabel(stage.agent)}：${stage.goal}`,
+          `选择 ${agentLabel(stage.agent)} 能力：${stage.goal}`,
           "route"
         ),
         step(`workflow-${stageIndex}-${id}-execute`, stage.goal, "execute"),
@@ -392,16 +392,16 @@ function step(id: string, label: string, phase: RunPlanPhase): RuntimeRunPlanIte
 function agentLabel(agent: NormalizedAgentInput["routing"]["primaryAgent"]) {
   switch (agent) {
     case "document_agent":
-      return "Document Agent";
+      return "document";
     case "image_agent":
-      return "Image Agent";
+      return "image";
     case "research_agent":
-      return "Research Agent";
+      return "research";
     case "web_agent":
-      return "Web Agent";
+      return "web";
     case "manager_agent":
     default:
-      return "Manager";
+      return "general";
   }
 }
 

@@ -3,6 +3,7 @@ export const toolScopeValues = [
   "read.artifact",
   "read.knowledge",
   "read.skill",
+  "write.task_frame",
   "write.artifact",
   "propose.canvas",
   "run.script",
@@ -37,6 +38,16 @@ const objectSchema = {
 } as const;
 
 export const toolRegistry = {
+  set_task_frame: {
+    id: "set_task_frame",
+    name: "set_task_frame",
+    traceLabel: "Set task frame",
+    requiredScopes: ["write.task_frame"],
+    producedArtifactTypes: [],
+    canCallExternalNetwork: false,
+    inputSchema: objectSchema,
+    outputSchema: objectSchema,
+  },
   activate_skill: {
     id: "activate_skill",
     name: "activate_skill",

@@ -13,9 +13,9 @@ import {
  *   const runner = new Runner({ model, modelProvider })
  *
  * `model` pins the model name the SDK passes into `modelProvider.getModel()`;
- * `modelProvider` owns the endpoint/client selection. This keeps Manager,
- * specialists, input normalization, and prompt-expansion agents on one
- * provider boundary without passing concrete Model instances through agents.
+ * `modelProvider` owns the endpoint/client selection. This keeps the Super
+ * Agent and prompt-expansion runs on one provider boundary without passing
+ * concrete Model instances through agents.
  */
 export type AgentModelConfiguration = {
   configured: boolean;
@@ -44,7 +44,6 @@ export type AgentRunnerModelConfig = {
 };
 
 const cachedProfiles = new Map<string, AgentModelProviderProfile>();
-let cachedInputNormalizerProfile: AgentModelProviderProfile | undefined;
 
 export function configureAgentModelProvider(
   providerOverride?: AgentModelProviderName
@@ -60,15 +59,6 @@ export function getAgentRunnerConfig(
     model: profile.model,
     modelProvider: profile.modelProvider,
     provider: profile.provider,
-    tracingDisabled: profile.tracingDisabled,
-  };
-}
-
-export function getInputNormalizerRunnerConfig() {
-  const profile = getInputNormalizerModelProviderProfile();
-  return {
-    model: profile.model,
-    modelProvider: profile.modelProvider,
     tracingDisabled: profile.tracingDisabled,
   };
 }
@@ -127,31 +117,6 @@ function getAgentModelProviderProfile(
 
   cachedProfiles.set(cacheKey, profile);
   return profile;
-}
-
-function getInputNormalizerModelProviderProfile(): AgentModelProviderProfile {
-  if (cachedInputNormalizerProfile !== undefined) {
-    return cachedInputNormalizerProfile;
-  }
-
-  const arkKey = process.env.ARK_API_KEY?.trim();
-  if (!arkKey) {
-    throw new Error("Input normalizer model is not configured. Set ARK_API_KEY.");
-  }
-
-  const model = "doubao-seed-2-0-mini-260428";
-  const client = new OpenAI({
-    apiKey: arkKey,
-    baseURL: readArkOpenAICompatibleBaseUrl(),
-  });
-  setTracingDisabled(true);
-  cachedInputNormalizerProfile = {
-    provider: "ark",
-    model,
-    modelProvider: new StaticModelProvider(new OpenAIResponsesModel(client, model)),
-    tracingDisabled: true,
-  };
-  return cachedInputNormalizerProfile;
 }
 
 function readAgentModelProviderProfile(

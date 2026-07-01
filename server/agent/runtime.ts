@@ -1,14 +1,9 @@
-import { Agent, Runner, type AgentInputItem } from "@openai/agents";
+import { Runner, type AgentInputItem } from "@openai/agents";
 
 import type { AgentEvent } from "../../src/types/runtime.ts";
 import type { CanvasOperation } from "../../src/types/runtime.ts";
 import type { UpstreamContextItem } from "../../src/types/canvas.ts";
-import { createDocumentAgent } from "./agents/document.agent.ts";
-import { createImageAgent } from "./agents/image.agent.ts";
-import { createManagerAgent } from "./agents/manager.agent.ts";
-import { createResearchAgent } from "./agents/research.agent.ts";
-import { createWebAgent } from "./agents/web.agent.ts";
-import { chatInstructions } from "./prompts/chat.instructions.ts";
+import { createSuperAgent } from "./agents/super.agent.ts";
 import {
   AgentContextValidationError,
   buildAgentRunInput,
@@ -16,7 +11,6 @@ import {
   hydrateAgentRunInputArtifacts,
   type AgentRunInput,
   type AgentRuntime,
-  type CucumberAgentContext,
   type CucumberRunEvent,
   type CucumberTextDeltaSource,
   type ExecuteAgentRunInput,
@@ -28,42 +22,24 @@ import {
 import { openAIStreamToCucumberEvents } from "./events/openai-stream-to-cucumber-events.ts";
 import { getAgentErrorMessage, isAbortError } from "./errors.ts";
 import {
-  normalizeAgentInput,
-  prewarmInputNormalizer,
-} from "./input-normalizer.ts";
-import { selectAgentRoute } from "./task-router.ts";
-import {
   materializeAgentRunSnapshot,
   shouldBlockRunForMaterialization,
   shouldMaterializeRunEvent,
 } from "./materialize-run.ts";
 import {
   getAgentRunnerConfig,
-  type AgentModelProviderName,
   type AgentRunnerModelConfig,
 } from "./model-config.ts";
-import { retrieveRelevantAgentSkills } from "./skills/skill-retrieval.ts";
-import { getAgentSkillRegistryCacheState } from "./skills/skill-registry.ts";
-import type { ActivatedAgentSkill } from "./skills/types.ts";
 import { resolveStorageBackedImageContext } from "../storage.ts";
-import { getAgentSkillDefinition } from "../supabase.ts";
 import { buildRunPlan } from "./run-plan.ts";
 import { redactTraceValue } from "./trace-redaction.ts";
 import { getToolTraceMetadata } from "./tool-registry.ts";
-import {
-  routeAgentRunQuick,
-  routeNormalizedAgentRun,
-  skippedStepsForNormalizedRoute,
-  type AgentRunRoute,
-  type QuickAgentRunRoute,
-} from "./quick-router.ts";
-import { validateCanvasOperations } from "./policy/canvas-operation-policy.ts";
+import type { NormalizedAgentInput } from "./task-frame.ts";
 
 const runners = new Map<string, Runner>();
-const chatRunners = new Map<string, Runner>();
-let chatAgent: Agent<CucumberAgentContext> | undefined;
 
 const MAX_RUN_INPUT_IMAGES = 4;
+const SUPERAGENT_ROUTE = "superagent_task";
 
 type RunPhase = "prepare" | "route" | "execute" | "materialize";
 
@@ -77,60 +53,15 @@ type RunPhaseTimer = {
 
 export class OpenAIAgentsRuntime implements AgentRuntime {
   async *run(input: AgentRunInput): AsyncIterable<CucumberRunEvent> {
-    const normalizedInput =
-      input.normalizedInput ??
-      (await normalizeAgentInput(input, { signal: input.signal }));
-    const normalizedRunInput = { ...input, normalizedInput };
-    const context = buildCucumberAgentContext(normalizedRunInput);
-    const skillPhase = startRunPhase(
-      "skills.retrieve",
-      "检索可用技能",
-      "route"
-    );
-    const skillRegistryWasCached = getAgentSkillRegistryCacheState().cached;
-    const skillTask = settlePromise(retrieveRelevantAgentSkills(normalizedRunInput));
-
-    yield runPhaseStarted(skillPhase);
-    try {
-      const skillResult = await skillTask;
-      if (skillResult.status === "rejected") {
-        throw skillResult.reason;
-      }
-      context.skillCandidates = skillResult.value;
-      yield runPhaseCompleted(skillPhase, {
-        cacheHit: skillRegistryWasCached,
-        candidateCount: context.skillCandidates.length,
-      });
-    } catch (error) {
-      yield runPhaseFailed(skillPhase, error);
-      throw error;
-    }
-    yield { type: "skill_retrieved", candidates: context.skillCandidates };
-    const forcedSkill = await activateForcedSkillForRun(context);
-    if (forcedSkill) {
-      yield {
-        type: "skill_activated",
-        skill: {
-          agentScope: forcedSkill.agentScope,
-          id: forcedSkill.id,
-          name: forcedSkill.name,
-          purpose: forcedSkill.purpose,
-          scripts: forcedSkill.scripts,
-          tags: forcedSkill.tags,
-        },
-      };
-    }
-    const startAgent = createStartingAgentForRun(
-      normalizedInput,
-      context.agentProvider
-    );
+    const context = buildCucumberAgentContext(input);
+    const startAgent = createSuperAgent(context.agentProvider);
 
     const agentStartPhase = startRunPhase(
       "agent.start",
       "启动 Agent Runner",
       "route"
     );
-    const maxTurns = 8;
+    const maxTurns = 10;
     yield runPhaseStarted(agentStartPhase, {
       agentName: startAgent.name,
       agentProvider: context.agentProvider ?? "auto",
@@ -139,8 +70,8 @@ export class OpenAIAgentsRuntime implements AgentRuntime {
     let runnerConfig: AgentRunnerModelConfig | undefined;
     try {
       runnerConfig = getAgentRunnerConfig(context.agentProvider);
-      const prompt = buildManagerRunPrompt(normalizedRunInput);
-      const runnerInput = await buildAgentRunnerInput(normalizedRunInput, prompt);
+      const prompt = buildSuperAgentRunPrompt(input);
+      const runnerInput = await buildAgentRunnerInput(input, prompt);
       stream = await getAgentRunner(runnerConfig).run(startAgent, runnerInput, {
         context,
         maxTurns,
@@ -176,77 +107,16 @@ function getAgentRunner(config: AgentRunnerModelConfig = getAgentRunnerConfig())
     return cachedRunner;
   }
   const runner = new Runner({
-    workflowName: "Cucumber Agent",
+    workflowName: "Cucumber Super Agent",
     ...toRunnerOptions(config),
   });
   runners.set(key, runner);
   return runner;
 }
 
-export async function* runChatAgent(
-  input: AgentRunInput
-): AsyncIterable<CucumberRunEvent> {
-  const context = buildCucumberAgentContext(input);
-  const chatPhase = startRunPhase("chat.start", "启动 Chat Agent", "execute");
-  yield runPhaseStarted(chatPhase, {
-    agentProvider: context.agentProvider ?? "auto",
-    route: "chat_agent_task",
-  });
-  let stream;
-  let runnerConfig: AgentRunnerModelConfig | undefined;
-  try {
-    runnerConfig = getAgentRunnerConfig(context.agentProvider);
-    stream = await getChatRunner(runnerConfig).run(
-      getChatAgent(),
-      buildChatPrompt(input),
-      {
-        context,
-        maxTurns: 1,
-        signal: input.signal,
-        stream: true,
-      }
-    );
-    yield runPhaseCompleted(chatPhase, {
-      model: runnerConfig.model,
-      modelProvider: runnerConfig.provider,
-      route: "chat_agent_task",
-    });
-  } catch (error) {
-    yield runPhaseFailed(chatPhase, error, {
-      agentProvider: context.agentProvider ?? "auto",
-      model: runnerConfig?.model,
-      modelProvider: runnerConfig?.provider,
-      route: "chat_agent_task",
-    });
-    throw error;
-  }
-  yield* openAIStreamToCucumberEvents(stream, context);
-}
-
 export function prewarmAgentRuntimeWorld() {
   getAgentRunner();
-  getChatRunner();
-  getChatAgent();
-  prewarmInputNormalizer();
-  createManagerAgent();
-  createImageAgent();
-  createDocumentAgent();
-  createResearchAgent();
-  createWebAgent();
-}
-
-function getChatRunner(config: AgentRunnerModelConfig = getAgentRunnerConfig()) {
-  const key = getRunnerConfigCacheKey(config);
-  const cachedRunner = chatRunners.get(key);
-  if (cachedRunner) {
-    return cachedRunner;
-  }
-  const runner = new Runner({
-    workflowName: "Cucumber Chat",
-    ...toRunnerOptions(config),
-  });
-  chatRunners.set(key, runner);
-  return runner;
+  createSuperAgent();
 }
 
 function getRunnerConfigCacheKey(config: AgentRunnerModelConfig) {
@@ -259,14 +129,6 @@ function toRunnerOptions(config: AgentRunnerModelConfig) {
     modelProvider: config.modelProvider,
     tracingDisabled: config.tracingDisabled,
   };
-}
-
-function getChatAgent() {
-  chatAgent ??= new Agent<CucumberAgentContext>({
-    name: "Cucumber Chat Agent",
-    instructions: (runContext) => chatInstructions(runContext.context),
-  });
-  return chatAgent;
 }
 
 function startRunPhase(
@@ -335,110 +197,11 @@ function elapsedRunPhaseMs(timer: RunPhaseTimer) {
   return Math.max(0, Date.now() - timer.startedMs);
 }
 
-function createStartingAgentForRun(
-  normalizedInput: NonNullable<AgentRunInput["normalizedInput"]>,
-  agentProvider?: AgentModelProviderName
-) {
-  switch (selectAgentRoute(normalizedInput)) {
-    case "document":
-      return createDocumentAgent();
-    case "image":
-      return createImageAgent();
-    case "research":
-      return createResearchAgent(agentProvider);
-    case "web":
-      return createWebAgent();
-    case "manager":
-    default:
-      return createManagerAgent(agentProvider);
-  }
-}
-
-async function settlePromise<T>(promise: Promise<T>) {
-  try {
-    return { status: "fulfilled" as const, value: await promise };
-  } catch (reason) {
-    return { status: "rejected" as const, reason };
-  }
-}
-
-async function activateForcedSkillForRun(
-  context: CucumberAgentContext
-): Promise<ActivatedAgentSkill | null> {
-  if (!context.forcedSkillId) {
-    return null;
-  }
-
-  const candidate = context.skillCandidates.find(
-    (skill) => skill.id === context.forcedSkillId
-  );
-  if (!candidate) {
-    throw new Error("Selected skill was not retrieved.");
-  }
-
-  const fullSkill = await getAgentSkillDefinition(candidate.id);
-  if (!fullSkill || !fullSkill.enabled) {
-    throw new Error("Selected skill is not available.");
-  }
-
-  const activated: ActivatedAgentSkill = {
-    ...candidate,
-    body: fullSkill.body,
-    frontmatter: fullSkill.frontmatter,
-    packageBucket: fullSkill.packageBucket,
-    packagePath: fullSkill.packagePath,
-    packageSha256: fullSkill.packageSha256,
-    packageSizeBytes: fullSkill.packageSizeBytes,
-    scripts: fullSkill.scripts,
-    skillMd: fullSkill.skillMd,
-    tags: fullSkill.tags,
-  };
-  context.activatedSkills.push(activated);
-  return activated;
-}
-
-function shouldWriteRunPlan(route: AgentRunRoute, itemCount: number) {
-  return route === "manager_task" || route === "image_task" || itemCount > 0;
-}
-
-function routeForRuntimeNormalizedInput(
-  input: AgentRunInput,
-  normalizedInput: NonNullable<AgentRunInput["normalizedInput"]>,
-  options: { allowSimpleChat?: boolean } = {}
-): AgentRunRoute {
-  return routeNormalizedAgentRun(input, normalizedInput, options);
-}
-
-function applyForcedSkillRoute(
-  input: AgentRunInput,
-  route: QuickAgentRunRoute
-): QuickAgentRunRoute {
-  if (!input.forcedSkillId) {
-    return route;
-  }
-
-  return {
-    ...route,
-    canvasOperations: undefined,
-    fallbackReason: route.fallbackReason ?? "forced_skill",
-    route: route.normalizedInput
-      ? routeForRuntimeNormalizedInput(input, route.normalizedInput, {
-          allowSimpleChat: false,
-        })
-      : "manager_task",
-    skippedSteps: route.normalizedInput ? ["input.normalize"] : [],
-  };
-}
-
 export async function buildAgentRunnerInput(
   input: AgentRunInput,
   prompt: string
 ): Promise<string | AgentInputItem[]> {
-  const images = await resolveModelInputImages(input.upstreamContext, {
-    projectId: input.projectId,
-    selectedNodeIds: input.selectedNodeIds,
-    userId: input.userId,
-  });
+  const images = await resolveModelInputImages(input);
   if (!images.length) {
     return prompt;
   }
@@ -459,19 +222,10 @@ export async function buildAgentRunnerInput(
 }
 
 async function resolveModelInputImages(
-  upstreamContext: UpstreamContextItem[],
-  {
-    projectId,
-    selectedNodeIds,
-    userId,
-  }: {
-    projectId: string;
-    selectedNodeIds: string[];
-    userId: string;
-  }
+  input: Pick<AgentRunInput, "projectId" | "selectedNodeIds" | "upstreamContext" | "userId">
 ) {
-  const selectedNodeIdSet = new Set(selectedNodeIds);
-  const imageItems = upstreamContext
+  const selectedNodeIdSet = new Set(input.selectedNodeIds);
+  const imageItems = input.upstreamContext
     .filter((item): item is UpstreamContextItem & { type: "image" } =>
       item.type === "image"
     )
@@ -486,8 +240,8 @@ async function resolveModelInputImages(
   }
 
   const resolved = await resolveStorageBackedImageContext(imageItems, {
-    projectId,
-    userId,
+    projectId: input.projectId,
+    userId: input.userId,
   });
   return resolved.filter(
     (item): item is UpstreamContextItem & { type: "image"; imageUrl: string } =>
@@ -510,7 +264,6 @@ export async function executeAgentRun({
     writer: streamWriter,
   });
   let agentInput: AgentRunInput | null = null;
-  let quickRoute: QuickAgentRunRoute | null = null;
   const textStreamId = `agent-text-${crypto.randomUUID()}`;
   const reasoningStreamId = `agent-reasoning-${crypto.randomUUID()}`;
   let messageStarted = false;
@@ -636,9 +389,7 @@ export async function executeAgentRun({
     }
   };
 
-  const shouldDeferRunMaterialization = () =>
-    quickRoute?.route === "chat_agent_task" ||
-    quickRoute?.route === "simple_canvas";
+  const shouldDeferRunMaterialization = () => false;
 
   try {
     const contextPhase = startRunPhase(
@@ -647,8 +398,6 @@ export async function executeAgentRun({
       "prepare"
     );
     agentInput = await hydrateAgentRunInputArtifacts(buildAgentRunInput(input));
-    quickRoute = routeAgentRunQuick(agentInput);
-    quickRoute = applyForcedSkillRoute(agentInput, quickRoute);
     await writeRunEvent({
       projectId: input.projectId,
       runNodeId: input.runNodeId,
@@ -668,10 +417,8 @@ export async function executeAgentRun({
         selectedNodeIds: agentInput.selectedNodeIds,
         contextSummary: agentInput.contextSummary,
         upstreamContext: agentInput.upstreamContext,
-        route: quickRoute.route,
-        routerSource: quickRoute.routerSource,
-        skippedSteps: quickRoute.skippedSteps,
-        routeFallbackReason: quickRoute.fallbackReason,
+        route: SUPERAGENT_ROUTE,
+        routerSource: "superagent",
         runtime: "openai-agents-sdk",
       }),
     });
@@ -683,165 +430,6 @@ export async function executeAgentRun({
         upstreamContextCount: agentInput.upstreamContext.length,
       })
     );
-
-    const routePhase = startRunPhase(
-      "quick.route",
-      "整理用户需求",
-      "prepare"
-    );
-    await writeRunPhaseEvent(runPhaseStarted(routePhase, {
-      route: quickRoute.route,
-      routerSource: quickRoute.routerSource,
-    }));
-    await writeRunPhaseEvent(
-      runPhaseCompleted(routePhase, {
-        route: quickRoute.route,
-        routerSource: quickRoute.routerSource,
-        skippedSteps: quickRoute.skippedSteps,
-        routeFallbackReason: quickRoute.fallbackReason,
-      })
-    );
-
-    if (quickRoute.normalizedInput && !quickRoute.requiresModelNormalization) {
-      agentInput = {
-        ...agentInput,
-        normalizedInput: quickRoute.normalizedInput,
-      };
-    } else {
-      const normalizePhase = startRunPhase(
-        "input.normalize",
-        "整理用户需求",
-        "prepare"
-      );
-      await writeRunPhaseEvent(runPhaseStarted(normalizePhase, {
-        route: quickRoute.route,
-        routerSource: quickRoute.routerSource,
-        routeFallbackReason: quickRoute.fallbackReason,
-      }));
-      let normalizerCacheStatus:
-        | {
-            cacheHit: boolean;
-            promptCharCount: number;
-            upstreamContextCount: number;
-          }
-        | undefined;
-      try {
-        const normalizedInput = await normalizeAgentInput(agentInput, {
-          onCacheStatus: (status) => {
-            normalizerCacheStatus = status;
-          },
-          signal: input.signal,
-        });
-        agentInput = {
-          ...agentInput,
-          normalizedInput,
-        };
-        const route = routeForRuntimeNormalizedInput(agentInput, normalizedInput, {
-          allowSimpleChat: !agentInput.forcedSkillId,
-        });
-        quickRoute = {
-          ...quickRoute,
-          route,
-          routerSource: "llm-normalizer",
-          skippedSteps: skippedStepsForNormalizedRoute(route),
-        };
-      } catch (error) {
-        await writeRunPhaseEvent(runPhaseFailed(normalizePhase, error, {
-          route: quickRoute.route,
-          routerSource: quickRoute.routerSource,
-        }));
-        throw error;
-      }
-      const modelNormalizedInput = agentInput.normalizedInput;
-      await writeRunPhaseEvent(
-        runPhaseCompleted(normalizePhase, {
-          intent: modelNormalizedInput?.task.intent,
-          action: modelNormalizedInput?.task.action,
-          domain: modelNormalizedInput?.task.domain,
-          primaryAgent: modelNormalizedInput?.routing.primaryAgent,
-          route: quickRoute.route,
-          routerSource: quickRoute.routerSource,
-          routeFallbackReason: quickRoute.fallbackReason,
-          normalizerCacheHit: normalizerCacheStatus?.cacheHit,
-          normalizerPromptCharCount: normalizerCacheStatus?.promptCharCount,
-          normalizerUpstreamContextCount:
-            normalizerCacheStatus?.upstreamContextCount,
-        })
-      );
-    }
-    const normalizedInput = agentInput.normalizedInput;
-    if (!normalizedInput) {
-      throw new Error("Input normalization did not produce a normalized input.");
-    }
-    await writeRunEvent({
-      projectId: input.projectId,
-      runNodeId: input.runNodeId,
-      stepId: "input",
-      type: "input.normalized",
-      payload: buildRedactedPayload({
-        agentProvider: agentInput.agentProvider ?? "auto",
-        normalizedInput: agentInput.normalizedInput,
-        imageAspectRatio: agentInput.imageAspectRatio,
-        imageResultCount: agentInput.imageResultCount,
-        imageProvider: agentInput.imageProvider,
-        inputMode: agentInput.inputMode,
-        prompt: agentInput.message,
-        promptNodeId: agentInput.promptNodeId,
-        selectedNodeId: agentInput.selectedNodeId,
-        selectedNodeIds: agentInput.selectedNodeIds,
-        contextSummary: agentInput.contextSummary,
-        upstreamContext: agentInput.upstreamContext,
-        route: quickRoute.route,
-        routerSource: quickRoute.routerSource,
-        skippedSteps: quickRoute.skippedSteps,
-        routeFallbackReason: quickRoute.fallbackReason,
-        runtime: "openai-agents-sdk",
-      }),
-    });
-
-    if (quickRoute.route === "simple_canvas") {
-      await executeSimpleCanvasRoute(quickRoute, agentInput);
-      await completeRun();
-      return;
-    }
-
-    if (quickRoute.route === "chat_agent_task") {
-      await consumeRunEvents(runChatAgent(agentInput));
-      await completeRun();
-      return;
-    }
-
-    const runPlan = buildRunPlan(agentInput);
-    if (shouldWriteRunPlan(quickRoute.route, runPlan.length)) {
-      const planPhase = startRunPhase(
-        "plan.build",
-        "生成运行计划",
-        "prepare"
-      );
-      await writeRunPhaseEvent(runPhaseStarted(planPhase, {
-        route: quickRoute.route,
-      }));
-      if (runPlan.length > 0) {
-        await writeRunEvent({
-          projectId: input.projectId,
-          runNodeId: input.runNodeId,
-          stepId: "plan",
-          type: "run.plan.created",
-          payload: {
-            items: runPlan,
-            retryFrom: agentInput.retryFrom ?? null,
-            route: quickRoute.route,
-            runtime: "openai-agents-sdk",
-          },
-        });
-      }
-      await writeRunPhaseEvent(
-        runPhaseCompleted(planPhase, {
-          itemCount: runPlan.length,
-          route: quickRoute.route,
-        })
-      );
-    }
 
     await consumeRunEvents(agentRuntime.run(agentInput));
     await completeRun();
@@ -919,10 +507,15 @@ export async function executeAgentRun({
           type: "agent.active",
           payload: {
             agentName: event.agentName,
-            route: quickRoute?.route,
+            route: SUPERAGENT_ROUTE,
             runtime: "openai-agents-sdk",
           },
         });
+        continue;
+      }
+
+      if (event.type === "task_frame_set") {
+        await writeTaskFrameEvent(event.normalizedInput);
         continue;
       }
 
@@ -951,7 +544,7 @@ export async function executeAgentRun({
               uses: skill.uses,
             })),
             cacheState: "memory",
-            route: quickRoute?.route,
+            route: SUPERAGENT_ROUTE,
             runtime: "openai-agents-sdk",
           },
         });
@@ -965,7 +558,7 @@ export async function executeAgentRun({
           stepId: "activate_skill",
           type: "skill.activated",
           payload: {
-            route: quickRoute?.route,
+            route: SUPERAGENT_ROUTE,
             runtime: "openai-agents-sdk",
             skill: event.skill,
           },
@@ -1000,7 +593,7 @@ export async function executeAgentRun({
               input: inputRedaction?.summary,
               output: outputRedaction?.summary,
             },
-            route: quickRoute?.route,
+            route: SUPERAGENT_ROUTE,
             runtime: "openai-agents-sdk",
             scriptName: event.scriptName,
             skillId: event.skillId,
@@ -1020,7 +613,7 @@ export async function executeAgentRun({
           type: event.type === "handoff_requested" ? "handoff.requested" : "handoff.completed",
           payload: {
             fromAgent: event.fromAgent,
-            route: quickRoute?.route,
+            route: SUPERAGENT_ROUTE,
             runtime: "openai-agents-sdk",
             toAgent: event.toAgent,
           },
@@ -1108,7 +701,7 @@ export async function executeAgentRun({
           payload: {
             artifact: event.artifact,
             canvasNodeId: event.canvasNodeId,
-            route: quickRoute?.route,
+            route: SUPERAGENT_ROUTE,
             runtime: "openai-agents-sdk",
             toolName,
           },
@@ -1126,6 +719,74 @@ export async function executeAgentRun({
         throw new Error(event.message);
       }
     }
+  }
+
+  async function writeTaskFrameEvent(normalizedInput: NormalizedAgentInput) {
+    if (!agentInput) {
+      throw new Error("Task frame arrived before agent input was built.");
+    }
+    agentInput = {
+      ...agentInput,
+      normalizedInput,
+    };
+    await writeRunEvent({
+      projectId: input.projectId,
+      runNodeId: input.runNodeId,
+      stepId: "input",
+      type: "input.normalized",
+      payload: buildRedactedPayload({
+        agentProvider: agentInput.agentProvider ?? "auto",
+        imageAspectRatio: agentInput.imageAspectRatio,
+        imageProvider: agentInput.imageProvider,
+        imageResultCount: agentInput.imageResultCount,
+        inputMode: agentInput.inputMode,
+        normalizedInput,
+        prompt: agentInput.message,
+        promptNodeId: agentInput.promptNodeId,
+        route: SUPERAGENT_ROUTE,
+        routerSource: "superagent",
+        selectedNodeId: agentInput.selectedNodeId,
+        selectedNodeIds: agentInput.selectedNodeIds,
+        source: "set_task_frame",
+        upstreamContext: agentInput.upstreamContext,
+        runtime: "openai-agents-sdk",
+      }),
+    });
+
+    const runPlan = buildRunPlan(agentInput);
+    if (!runPlan.length) {
+      return;
+    }
+
+    const planPhase = startRunPhase(
+      "plan.build",
+      "生成运行计划",
+      "prepare"
+    );
+    await writeRunPhaseEvent(runPhaseStarted(planPhase, {
+      route: SUPERAGENT_ROUTE,
+      source: "set_task_frame",
+    }));
+    await writeRunEvent({
+      projectId: input.projectId,
+      runNodeId: input.runNodeId,
+      stepId: "plan",
+      type: "run.plan.created",
+      payload: {
+        items: runPlan,
+        retryFrom: agentInput.retryFrom ?? null,
+        route: SUPERAGENT_ROUTE,
+        runtime: "openai-agents-sdk",
+        source: "set_task_frame",
+      },
+    });
+    await writeRunPhaseEvent(
+      runPhaseCompleted(planPhase, {
+        itemCount: runPlan.length,
+        route: SUPERAGENT_ROUTE,
+        source: "set_task_frame",
+      })
+    );
   }
 
   function startToolTrace(toolName: string, toolCallId: string | undefined) {
@@ -1168,42 +829,6 @@ export async function executeAgentRun({
     };
   }
 
-  async function executeSimpleCanvasRoute(
-    route: QuickAgentRunRoute,
-    inputForRun: AgentRunInput
-  ) {
-    const context = buildCucumberAgentContext(inputForRun);
-    const validation = validateCanvasOperations({
-      knownNodeIds: context.knownNodeIds,
-      operations: route.canvasOperations ?? [],
-      projectId: input.projectId,
-      runNodeId: input.runNodeId,
-    });
-    const accepted = validation.accepted.map((item) => item.operation);
-    if (accepted.length) {
-      for (const type of ["canvas.operation.proposed", "canvas.operation.applied"] as const) {
-        const writtenEvents = await writeCanvasOperationEvents({
-          operations: accepted,
-          projectId: input.projectId,
-          runNodeId: input.runNodeId,
-          type,
-          writer: eventWriter,
-        });
-        for (const writtenEvent of writtenEvents) {
-          await trackEvent(writtenEvent);
-        }
-      }
-    }
-    if (validation.rejected.length) {
-      await writeCanvasOperationRejections(validation.rejected);
-    }
-    if (!accepted.length) {
-      throw new Error("Simple canvas operation was rejected by policy.");
-    }
-    finalOutput = "已在画布上完成操作。";
-    await writeAgentTextDelta(finalOutput);
-  }
-
   async function writeCanvasOperationRejections(
     rejections: Array<{ operation: CanvasOperation; reason: string }>
   ) {
@@ -1216,7 +841,7 @@ export async function executeAgentRun({
         payload: {
           operation: rejected.operation,
           reason: rejected.reason,
-          route: quickRoute?.route,
+          route: SUPERAGENT_ROUTE,
           runtime: "openai-agents-sdk",
         },
         errorText: `Canvas operation ${rejected.operation.id} was rejected: ${rejected.reason}.`,
@@ -1247,8 +872,8 @@ export async function executeAgentRun({
         artifactIds,
         durationMs: Math.max(0, Math.round(Date.now() - runStartedMs)),
         finalOutput,
-        route: quickRoute?.route,
-        routerSource: quickRoute?.routerSource,
+        route: SUPERAGENT_ROUTE,
+        routerSource: "superagent",
         runtime: "openai-agents-sdk",
         status: "completed",
       },
@@ -1615,7 +1240,7 @@ async function writeCanvasOperationEvents({
   return writtenEvents;
 }
 
-function buildManagerRunPrompt(input: AgentRunInput) {
+function buildSuperAgentRunPrompt(input: AgentRunInput) {
   const imageContext = input.upstreamContext
     .filter((item) => item.type === "image")
     .map(({ nodeId, type, prompt, summary, title, priority }) => ({
@@ -1629,7 +1254,7 @@ function buildManagerRunPrompt(input: AgentRunInput) {
   return [
     `User request: ${input.message}`,
     input.normalizedInput
-      ? `Normalized input: ${JSON.stringify(input.normalizedInput)}`
+      ? `Existing task frame: ${JSON.stringify(input.normalizedInput)}`
       : "",
     `Project id: ${input.projectId}`,
     `Run node id: ${input.runNodeId}`,
@@ -1652,15 +1277,5 @@ function buildManagerRunPrompt(input: AgentRunInput) {
           "Resume from the failed step when possible. Preserve already completed upstream work and do not repeat completed tool work unless it is required to recover.",
         ].join("\n")
       : "",
-  ].filter(Boolean).join("\n\n");
-}
-
-function buildChatPrompt(input: AgentRunInput) {
-  return [
-    `User request: ${input.message}`,
-    input.normalizedInput
-      ? `Normalized input: ${JSON.stringify(input.normalizedInput)}`
-      : "",
-    "Answer directly and concisely. Do not create canvas artifacts or claim that tools were used.",
   ].filter(Boolean).join("\n\n");
 }

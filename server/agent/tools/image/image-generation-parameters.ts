@@ -22,7 +22,7 @@ export type ImageGenerationParameters = {
   width?: number;
 };
 
-// Parameter resolution with zero fallback. The Image Agent decides prompt,
+// Parameter resolution with zero fallback. The Super Agent decides prompt,
 // resultCount, dimensions, aspectRatio, and variants from the Task Frame
 // constraints and passes them as tool args. This layer only cleans and validates
 // those args; it does not parse final parameters out of raw text.
@@ -56,7 +56,7 @@ export function normalizeImageGenerationParameters({
 
   const prompt = normalizeContentPrompt(candidatePrompt ?? "");
   if (!prompt) {
-    throw new Error("Image Agent did not produce an image content prompt.");
+    throw new Error("Super Agent did not produce an image content prompt.");
   }
 
   return {

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""withoutBG Focus bridge for Cucumber Image Agent.
+"""withoutBG Focus bridge for Cucumber Super Agent.
 
 Uses the Apache-2.0 withoutbg project:
 https://github.com/withoutbg/withoutbg

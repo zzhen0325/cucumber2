@@ -249,6 +249,18 @@ function buildContext(
     producedArtifacts: [],
     pendingEvents: [],
     prompt: "生成一张黄瓜海报",
+    normalizedInput: makeTaskFrame({
+      rawInput: "生成一张黄瓜海报",
+      domain: "image",
+      intent: "image.generate",
+      action: "create",
+      primaryAgent: "image_agent",
+      workflow: {
+        outputArtifacts: ["image"],
+        requiredAgents: ["image_agent"],
+        requiredCapabilities: ["image-generation"],
+      },
+    }),
     selectedNodeId: null,
     skillCandidates: [],
     upstreamContext: [],

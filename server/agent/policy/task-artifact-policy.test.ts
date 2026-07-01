@@ -9,7 +9,16 @@ import {
 } from "./task-artifact-policy.ts";
 
 describe("task artifact policy", () => {
-  it("rejects image generation for non-image (diagram/text) tasks", () => {
+  it("does not require set_task_frame before execution tools", () => {
+    expect(() =>
+      assertTextArtifactToolAllowed(context())
+    ).not.toThrow();
+    expect(() =>
+      assertImageToolAllowed(context(), "generate_image")
+    ).not.toThrow();
+  });
+
+  it("does not use Task Frame as a hard execution gate", () => {
     expect(() =>
       assertImageToolAllowed(
         context({
@@ -23,59 +32,8 @@ describe("task artifact policy", () => {
         }),
         "generate_image"
       )
-    ).toThrow("tool_policy_rejected");
-  });
-
-  it("allows text artifacts for text-domain diagram tasks", () => {
-    expect(() =>
-      assertTextArtifactToolAllowed(
-        context({
-          normalizedInput: makeTaskFrame({
-            rawInput: "生成一个流程时序图",
-            domain: "text",
-            intent: "document.create",
-            action: "create",
-            primaryAgent: "document_agent",
-          }),
-        })
-      )
     ).not.toThrow();
-  });
 
-  it("allows text artifact creation for generated HTML webpage tasks", () => {
-    expect(() =>
-      assertTextArtifactToolAllowed(
-        context({
-          normalizedInput: makeTaskFrame({
-            rawInput: "做个 30 秒 HTML 动画",
-            domain: "text",
-            intent: "webpage.create",
-            action: "create",
-            primaryAgent: "document_agent",
-          }),
-        })
-      )
-    ).not.toThrow();
-  });
-
-  it("rejects image generation for generated HTML webpage tasks", () => {
-    expect(() =>
-      assertImageToolAllowed(
-        context({
-          normalizedInput: makeTaskFrame({
-            rawInput: "做个 30 秒 HTML 动画",
-            domain: "text",
-            intent: "webpage.create",
-            action: "create",
-            primaryAgent: "document_agent",
-          }),
-        }),
-        "generate_image"
-      )
-    ).toThrow("tool_policy_rejected");
-  });
-
-  it("rejects text artifact creation for image tasks", () => {
     expect(() =>
       assertTextArtifactToolAllowed(
         context({
@@ -88,25 +46,17 @@ describe("task artifact policy", () => {
           }),
         })
       )
-    ).toThrow("tool_policy_rejected");
-  });
+    ).not.toThrow();
 
-  it("allows image generation tools for hybrid workflows with image output", () => {
     expect(() =>
       assertImageToolAllowed(
         context({
           normalizedInput: makeTaskFrame({
-            rawInput: "分析这张图并生成海报",
-            domain: "mixed",
-            intent: "analysis.then.image",
-            action: "create",
-            primaryAgent: "manager_agent",
-            workflow: {
-              mode: "multi_step",
-              outputArtifacts: ["image"],
-              requiredAgents: ["image_agent"],
-              requiredCapabilities: ["media-analysis", "image-generation"],
-            },
+            rawInput: "分析这张图的风格",
+            domain: "image",
+            intent: "media.analyze",
+            action: "analyze",
+            primaryAgent: "image_agent",
           }),
         }),
         "generate_image"
@@ -114,7 +64,7 @@ describe("task artifact policy", () => {
     ).not.toThrow();
   });
 
-  it("allows text artifacts for hybrid workflows with code or document output", () => {
+  it("keeps compatibility helpers permissive for existing tool call sites", () => {
     expect(() =>
       assertTextArtifactToolAllowed(
         context({
@@ -133,26 +83,6 @@ describe("task artifact policy", () => {
         })
       )
     ).not.toThrow();
-  });
-
-  it("blocks image generation for image analysis tasks", () => {
-    expect(() =>
-      assertImageToolAllowed(
-        context({
-          normalizedInput: makeTaskFrame({
-            rawInput: "分析这张图的风格",
-            domain: "image",
-            intent: "media.analyze",
-            action: "analyze",
-            primaryAgent: "image_agent",
-          }),
-        }),
-        "generate_image"
-      )
-    ).toThrow("tool_policy_rejected");
-  });
-
-  it("allows image matting for image transform tasks", () => {
     expect(() =>
       assertImageToolAllowed(
         context({
@@ -167,9 +97,6 @@ describe("task artifact policy", () => {
         "image_matting"
       )
     ).not.toThrow();
-  });
-
-  it("allows image inspection tools for image analysis tasks", () => {
     expect(() =>
       assertImageInspectionToolAllowed(
         context({

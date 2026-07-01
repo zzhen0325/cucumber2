@@ -34,7 +34,7 @@ describe("task router", () => {
     expect(selectAgentRoute(null)).toBe("manager");
   });
 
-  it("collects candidate specialist routes for composite tasks", () => {
+  it("collects candidate capability routes for composite tasks", () => {
     expect(
       selectAgentRoutesForTask(
         makeTaskFrame({
@@ -45,7 +45,7 @@ describe("task router", () => {
     ).toEqual(["web", "research", "document"]);
   });
 
-  it("routes hybrid workflows through Manager while preserving required specialists", () => {
+  it("classifies hybrid workflows as general orchestration while preserving required capabilities", () => {
     const frame = makeTaskFrame({
       domain: "mixed",
       intent: "hybrid.visual.code.create",

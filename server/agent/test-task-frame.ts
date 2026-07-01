@@ -1,4 +1,4 @@
-import type { NormalizedAgentInput, PrimaryAgent, TaskAction, TaskDomain } from "./input-normalizer.ts";
+import type { NormalizedAgentInput, PrimaryAgent, TaskAction, TaskDomain } from "./task-frame.ts";
 
 export function makeTaskFrame(
   overrides: {

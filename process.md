@@ -2,23 +2,21 @@
 
 本文记录 2026-06-11 Agent v2 正式切换后的变更。
 
-## 2026-07-01 Sticky Note Toolbar
+## 2026-07-01 Super Agent Runtime
 
-- 手动便签节点选中后显示节点局部 toolbar，可直接修改便签颜色、粗体、斜体、下划线和字号；这些修改写入 `StickyNoteNodeData.textStyle` / `color` 并通过现有 `canvasPatch` 增量保存，不创建 Agent Run、不新增 Trace 表或平行画布状态。
-
-## 2026-07-01 Storage Trust and Conflict Guardrails
-
-- 对象存储签名边界收紧：运行时上游 context 会剥离 `contentRef`、`imageUrl`、`storageBucket` 和 `storagePath`；图片工具、模型 input image、toolbar 放大/抠图在签发 R2 read URL 前必须通过 `artifactId + projectId + userId` 从 `agent_artifacts` 重新解析真实 bucket/path。
-- 外部 `canvasPatch` 图结构写入必须携带 `expectedVersion`；前端保存、`/api/agent-run` pending patch、toolbar 放大/抠图和 materializer 都不再在版本冲突后用服务器最新 version 静默重放本地整节点。连续 materialize 冲突保留 Trace 事实日志并记录物化失败，避免无版本兜底覆盖用户新画布。
-- `/api/projects/:projectId/artifacts/:artifactId/content` 对对象存储 artifact 改为鉴权后 302 到短期 R2 signed read URL；文本 artifact 仍从 `agent_artifact_contents` 返回 JSON。
-- R2/DB 非事务边界新增 best-effort 补偿：上传完成在 artifact 登记前失败会删除已 PUT 对象；生成图对象登记失败会删除刚写入对象；项目 soft delete 成功后异步清理该项目已登记 R2 对象。进程崩溃、历史孤儿对象和跨实例一致性仍需要后续 reconcile/GC job。
-- 实时同步、viewport 增量加载和跨实例 Agent Run lease 尚未接入；当前仍是打开时完整快照 + 单进程 active run map。
+- Agent runtime 从 Chat Agent、Manager、Document/Web/Research/Image specialist 和 handoff registry 收敛为单一 `Cucumber Super Agent`。`POST /api/agent-run`、Trace 表、artifact 物化和 canvas operation policy 保持不变；变化只发生在 Agents SDK 执行层。
+- `server/agent/agents/super.agent.ts` 是唯一执行 Agent 定义，挂载 skill、knowledge、canvas、document、web、research 和 image 工具；旧 specialist agent 文件、handoff registry 和旧 prompt 文件删除。
+- 独立 `Quick Router` 和 `Cucumber Input Normalizer` 删除。runtime 不再在 Super Agent 前做语义分类、路由或结构化 LLM 预处理；所有可执行请求直接进入 `superagent_task`。
+- Super Agent 按需调用内部工具 `set_task_frame`，自己输出 Task Frame / workflow。runtime 将该结果写为 `input.normalized`，再基于它检索 skill cards、生成可见 run plan；Task Frame 是 trace/plan/skill retrieval 依据，不是执行工具的硬门禁。
+- Run plan 文案从“进入某某 Agent”改为“选择某类工具/能力”；复杂 workflow 由 Super Agent 自己基于用户原文、可信画布上下文、`set_task_frame`、可用工具、skill cards、已激活技能和 runtime policy 动态编排。
+- 简单问答、文本改写、文档产物、网页抓取、research、图片生成/抠图/拆解/高清和画布操作都通过同一个 Runner 执行；是否调用工具由 Super Agent 判断，工具仍负责发出 artifact/canvas/skill/tool 事件，不能直接写画布节点。
+- SDK stream 仍能解析历史 handoff 事件，用于旧 Run Trace 回放；当前 runtime 不再主动产生 handoff。
 
 ## 2026-07-01 Task Graph Normalization Boundary
 
-- Task Frame 新增 `workflow` 摘要，用 `mode`、输入模态、目标产物、required capabilities、required agents 和 ordered stages 表达 hybrid / multi-step 请求；`task.domain` 仍保留为兼容的主领域提示，但不再假设用户意图能被单一 bucket 完整覆盖。
-- `task-router` 对 `workflow.mode=hybrid|multi_step`、多 stage 或多 specialist 的任务统一选择 `manager_task` 作为编排入口，同时从 `workflow.requiredAgents` 和 stage agent 开放对应 specialist handoff；单一步骤 specialist 仍直达对应 Agent。
-- `workflow` 只描述任务图，不包含 tool args，不新增数据库 schema，也不绕过 artifact/canvas operation 事件投影。tool policy、run plan 和 skill retrieval 改为优先读取 workflow 的产物/能力信号，再回落到原有 `task.domain` / `intent`。
+- Task Frame 新增 `workflow` 摘要，用 `mode`、输入模态、目标产物、required capabilities、required agents 和 ordered stages 表达 hybrid / multi-step 请求；`task.domain` 仍保留为兼容的主领域提示，但不再假设用户意图能被单一 bucket 完整覆盖。当前 Task Frame 可由 Super Agent 按需通过 `set_task_frame` 输出，而不是前置 normalizer agent 输出。
+- `task-router` 现在只提供 capability 分类 helper，供 skill retrieval 和 run plan 使用；它不再决定 runtime start agent，也不作为工具执行门禁。
+- `workflow` 只描述任务图，不包含 tool args，不新增数据库 schema，也不绕过 artifact/canvas operation 事件投影。run plan 和 skill retrieval 可优先读取 workflow 的产物/能力信号，再回落到原有 `task.domain` / `intent`；工具执行仍由 Super Agent 选择，并由各工具自己的 schema、URL/storage/canvas policy 校验。
 
 ## 2026-07-01 Background Agent Run Lifecycle
 
@@ -49,17 +47,23 @@
 
 ## 2026-06-25 Reusable Text Artifact Boundary
 
+> Historical: this pre-Super-Agent boundary was superseded on 2026-07-01 by Super Agent-owned `set_task_frame`.
+
 - Input Normalizer 继续只输出 Task Frame，不新增独立 Output Planner 或 `responseMode` 状态；可复用、可复制、可编辑的文本产物由 Document Agent 和 artifact tools 根据 Task Frame 自行落成最终 artifact 参数。
 - 模板、提示词模板、完整提示词、可复制/直接使用方案、设定稿、规范和 IP 三视图模板等生产型文本请求归一化为 `document/markdown` artifact，并由 Document Agent 通过 `create_text_artifact` 创建画布文档；明确要求生成真实图片/海报/插画时仍走 Image Agent。
 - 简单解释、为什么/是什么类问答继续保持轻量 Task Frame，由 Cucumber Chat Agent 在 Run 节点直接回复。
 
 ## 2026-06-24 Input Normalizer And Manager Boundary
 
+> Historical: the standalone Input Normalizer/Manager boundary was superseded on 2026-07-01 by the single Super Agent and `set_task_frame`.
+
 - `server/agent/input-normalizer.ts` 保持为 Task Frame 生成与规格化边界；specialist route 选择拆到 `server/agent/task-router.ts`，由 runtime、quick router、handoff registry、tool policy 和 skill retrieval 共用同一套 route 判断。
 - Manager prompt 收窄为通用 fallback 与复合任务编排：运行时已经先完成可信上下文重建、快速路由和输入归一化；明确的单一 specialist 任务直接启动对应 Agent，只有短答 fallback、提示词/文本改写、knowledge 问答、受限画布操作和复合任务才由 Manager 处理。
 - Run plan 的 route 文案从“委派 XX Agent”调整为“进入 XX Agent”，覆盖直接启动 specialist 和 Manager handoff 两种路径，避免把单一任务误读成一定经过 Manager。
 
 ## 2026-06-24 Input Routing Boundary
+
+> Historical: the Quick Router and LLM Input Normalizer path was removed on 2026-07-01.
 
 - Agent Run 路由当前收敛为两层：`Quick Router` 只做确定性 preflight（寒暄、图片生成元信息直返、简单 canvas operation、已有 normalized image-mode input）；其余请求直接进入唯一 LLM Input Normalizer，不再串行跑第二个语义路由模型。
 - 内部 `agent-capability-manifest` 集中描述 Manager、Document、Web、Research 和 Image route 的 agent 名称、产物类型、required tools、核心 capabilities 和负能力边界；specialist registry、task-router 和 skill retrieval 共用该清单，减少 prompt/工具/route 配置漂移。
@@ -68,6 +72,8 @@
 - `run-plan` 优先从 normalized protocol 派生兼容 intent，避免模型或旧测试直接写入的 `intent` 覆盖 artifact/capability 事实。
 
 ## 2026-07-01 Input Normalizer Latency
+
+> Historical: this latency optimization was superseded the same day by removing the standalone Input Normalizer.
 
 - 为避免扩大不稳定的第一级规则判断，启动链路仍然只让 `Quick Router` 处理确定性 preflight；其余请求继续进入唯一 LLM Input Normalizer。
 - LLM Input Normalizer 的 upstream 输入瘦身为节点身份、类型、标题、摘要、原 prompt 和内容可用性标记，不再发送完整 artifact 正文；真实正文读取仍交给后续 specialist/runtime context。
@@ -109,6 +115,8 @@
 - `input.normalized` 只记录 Task Frame、路由和 Trace 事实，不再据此预置 pending 结果节点；图片 loading 节点只来自真实 `generate_image` 工具输入，文本/code/webpage 等结果节点只在真实 `artifact.created` 到达后按 artifact id/type 幂等创建。
 
 ## 2026-06-17 Runtime Fast Path
+
+> Historical: the Quick Router and specialist-route fast path described here was superseded by the single Super Agent runtime.
 
 - `/api/agent-run` 入口保持 AI SDK HTTP stream 不变；最初的 `Quick Router` 本地规则层后来收缩为确定性 preflight，复杂语义路由见 2026-06-24 的 Fast Capability-Aware Router。Trace 仍在 `run.created` / `input.normalized` payload 中写入 route、routerSource、skippedSteps 和路由诊断字段。
 - `chat_agent_task` 使用缓存的 Chat Agent/Runner，不加载 skills、handoff 或动态计划；`simple_canvas` 只处理确定性的安全画布操作，并继续通过 canvas policy 写 `canvas.operation.*`。
@@ -227,6 +235,8 @@
 
 ## 2026-06-13 Input Normalization
 
+> Historical: standalone input normalization was replaced by Super Agent-owned `set_task_frame` on 2026-07-01.
+
 - Agent Run 在 Manager 启动前通过 `server/agent/input-normalizer.ts` 生成结构化 `normalizedInput`，并写入 `input.normalized` Trace。
 - Input Normalizer 只输出 Task Frame：`task`、`userGoal`、`routing`、`inputs`、`constraints` 和 `ambiguities`。图片数量、尺寸、比例等用户硬约束只进入 `constraints.explicit`（如 `output_count`、`dimension`、`aspect_ratio`），不会在 normalizer 中变成 `resultCount`、`dimensions`、`aspectRatio` 或 `variants`；Image Agent 必须自己把这些约束转换成 `generate_image` 的最终 tool args。扩图、扩画布、拓展尺寸和 outpaint 归一化为 `image.generate`，不是 `image.upscale`；只有纯高清、超清、4K/8K 或提升清晰度才进入 `upscale_image`。
 - 分析、评估或给建议类视觉 brief（如图片、海报、banner、KV 需求）默认归一化为 `text.answer`；只有用户明确要求生成、创建或渲染图片时才进入 `image.generate`。如果请求明确指向选中/上游实际图片，风格拆解归一化为 `image.decompose`，内容理解/信息提取归一化为 `media.analyze` 并由 Image Agent 直接看图回答，抠图/去背景归一化为 `image.matting`。
@@ -264,8 +274,8 @@
 - 用户拖拽或粘贴文件会先插入本地预览节点并后台上传；浏览器通过 `/api/projects/:projectId/uploads/sign` 获取 R2 presigned `PUT` URL 后直传，再调用 `/complete` 写入 `agent_artifacts`，成功后用真实 artifact 节点替换本地节点。
 - 本地上传中/失败的节点不会进入项目持久化或 Agent upstream context；上传失败会留在画布上展示错误状态。
 - `generate_image` 和 `upscale_image` 收到 provider URL 后由服务端下载并上传到 `agent-assets`，随后才发 `artifact.created`；转存失败会走 `tool.error`/`run.failed`，不会生成假成功结果节点。toolbar 高清放大和抠图同样先转存再把真实节点写回项目。
-- 上游图片引用对 Manager prompt 仍隐藏真实 URL；调用 Seedream/Coze/ByteArtist 前，服务端仅根据 `r2://agent-assets/...` 临时签发 provider 可读 URL。
-- Agent 模型 provider 使用 Agents SDK 官方 `ModelProvider` + `Runner({ model, modelProvider })` 写法；默认优先级为 Super Relay、Ark、DeepSeek、OpenAI。前端输入器可为本轮 Run 选择 `agentProvider`，`auto` 沿用服务端优先级；Manager、specialist 和 prompt expansion 使用同一本轮 provider，input normalizer 仍固定 Ark。
+- 上游图片引用对 Agent prompt 仍隐藏真实 URL；调用 Seedream/Coze/ByteArtist 前，服务端仅根据 `r2://agent-assets/...` 临时签发 provider 可读 URL。
+- Agent 模型 provider 使用 Agents SDK 官方 `ModelProvider` + `Runner({ model, modelProvider })` 写法；默认优先级为 Super Relay、Ark、DeepSeek、OpenAI。前端输入器可为本轮 Run 选择 `agentProvider`，`auto` 沿用服务端优先级；Super Agent 和 prompt expansion 使用同一本轮 provider。
 - 媒体 provider 独立暴露：图片生成 provider 和图片抠图 provider 已接入配置检查；视频 provider 仅进入 `/api/health` 配置面，尚未启用 `generate_video`、video artifact 或画布投影。
 - 私有预览统一走 `/api/projects/:projectId/artifacts/:artifactId/content`，服务端校验项目权限后从 R2 读取对象内容。
 - P1 typed artifact shell：非图片 artifact 节点统一展示标题、摘要、来源工具/Run、创建时间、大小、预览/打开/下载入口；短文本最终回复保留在 Run 节点，只有 Document/Web/Research 等工具真实创建 artifact 时才物化为 Markdown/document/webpage 节点。
