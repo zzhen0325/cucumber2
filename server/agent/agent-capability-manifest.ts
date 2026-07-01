@@ -1,9 +1,9 @@
 import type { ArtifactType } from "../../src/types/canvas.ts";
-import type { SpecialistRoute } from "./task-router.ts";
+import type { CapabilityRoute } from "./task-router.ts";
 import { listToolRegistryEntries } from "./tool-registry.ts";
 
 export type AgentCapabilityRoute = {
-  route: SpecialistRoute;
+  route: CapabilityRoute;
   agentName: string;
   artifactKinds: string[];
   requiredCapabilities: string[];
@@ -27,7 +27,7 @@ export type AgentCapabilityManifest = {
 const routeCapabilities = [
   {
     route: "manager",
-    agentName: "Cucumber Manager",
+    agentName: "Super Agent general tools",
     artifactKinds: ["canvas"],
     requiredCapabilities: ["canvas-operation", "knowledge-answer"],
     negativeCapabilities: [],
@@ -40,11 +40,11 @@ const routeCapabilities = [
       "propose_canvas_operations",
     ],
     description:
-      "Fallback and composite-task coordinator for knowledge answers, canvas operation proposals, skill activation, and handoff decisions.",
+      "General Super Agent capability for knowledge answers, skill activation, canvas operation proposals, and dynamic workflow decisions.",
   },
   {
     route: "document",
-    agentName: "Cucumber Document Agent",
+    agentName: "Super Agent document tools",
     artifactKinds: ["diagram", "document", "markdown", "code", "webpage"],
     requiredCapabilities: [
       "markdown-artifact",
@@ -58,22 +58,22 @@ const routeCapabilities = [
     producedArtifactTypes: ["doc", "code", "webpage"],
     requiredTools: ["create_text_artifact"],
     description:
-      "Text artifact specialist for markdown, documents, diagrams, HTML/webpage demos, code drafts, PRDs, briefs, and summaries.",
+      "Document capability for markdown, documents, diagrams, HTML/webpage demos, code drafts, PRDs, briefs, and summaries.",
   },
   {
     route: "web",
-    agentName: "Cucumber Web Agent",
+    agentName: "Super Agent web tools",
     artifactKinds: ["webpage"],
     requiredCapabilities: ["web-fetch"],
     negativeCapabilities: [],
     producedArtifactTypes: ["webpage"],
     requiredTools: ["fetch_webpage"],
     description:
-      "Web specialist for fetching, reading, saving, or summarizing one public http(s) webpage as an artifact.",
+      "Web capability for fetching, reading, saving, or summarizing one public http(s) webpage as an artifact.",
   },
   {
     route: "research",
-    agentName: "Cucumber Research Agent",
+    agentName: "Super Agent research tools",
     artifactKinds: ["document", "markdown"],
     requiredCapabilities: ["research", "source-based-answer", "citations"],
     negativeCapabilities: [],
@@ -84,11 +84,11 @@ const routeCapabilities = [
       "create_research_artifact",
     ],
     description:
-      "Research specialist for web-backed comparison, synthesis, and cited answers over public web search, explicit URLs, or trusted canvas sources.",
+      "Research capability for web-backed comparison, synthesis, and cited answers over public web search, explicit URLs, or trusted canvas sources.",
   },
   {
     route: "image",
-    agentName: "Cucumber Image Agent",
+    agentName: "Super Agent image tools",
     artifactKinds: ["image", "markdown", "document"],
     requiredCapabilities: [
       "image-generation",
@@ -107,7 +107,7 @@ const routeCapabilities = [
       "upscale_image",
     ],
     description:
-      "Image specialist for image generation, outpainting, matting/background removal, image decomposition, native multimodal media understanding, and upscaling.",
+      "Image capability for image generation, outpainting, matting/background removal, image decomposition, native multimodal media understanding, and upscaling.",
   },
 ] satisfies AgentCapabilityRoute[];
 
@@ -116,7 +116,7 @@ export function listAgentCapabilityRoutes(): AgentCapabilityRoute[] {
 }
 
 export function getAgentCapabilityRoute(
-  route: SpecialistRoute
+  route: CapabilityRoute
 ): AgentCapabilityRoute | null {
   return routeCapabilities.find((definition) => definition.route === route) ?? null;
 }

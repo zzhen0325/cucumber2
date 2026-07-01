@@ -2,6 +2,7 @@ import { RunContext } from "@openai/agents";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CucumberAgentContext } from "../../context.ts";
+import { makeTaskFrame } from "../../test-task-frame.ts";
 
 const mocks = vi.hoisted(() => ({
   getAgentRunnerConfig: vi.fn(),
@@ -148,6 +149,18 @@ function agentContext(
     producedArtifacts: [],
     pendingEvents: [],
     prompt: "黄瓜海报",
+    normalizedInput: makeTaskFrame({
+      rawInput: "黄瓜海报",
+      domain: "image",
+      intent: "image.generate",
+      action: "create",
+      primaryAgent: "image_agent",
+      workflow: {
+        outputArtifacts: ["image"],
+        requiredAgents: ["image_agent"],
+        requiredCapabilities: ["image-generation"],
+      },
+    }),
     selectedNodeId: null,
     skillCandidates: [],
     upstreamContext: [],

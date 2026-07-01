@@ -14,10 +14,7 @@ import type {
 import type { CanvasOperation } from "../../src/types/runtime.ts";
 import type { CanvasProject } from "../canvas-store.ts";
 import type { ImageProviderSelection } from "../provider-config.ts";
-import {
-  finalizeNormalizedAgentInput,
-  type NormalizedAgentInput,
-} from "./input-normalizer.ts";
+import type { NormalizedAgentInput } from "./task-frame.ts";
 import type { ActivatedAgentSkill, AgentSkillCard } from "./skills/types.ts";
 import { getTextArtifactContentForUser } from "../artifact-content-store.ts";
 
@@ -190,6 +187,7 @@ export type CucumberRunEvent =
       skillId: string;
       skillName: string;
     }
+  | { type: "task_frame_set"; normalizedInput: NormalizedAgentInput }
   | { type: "run_completed"; finalOutput?: string; artifactIds: string[] }
   | { type: "error"; message: string };
 
@@ -356,7 +354,6 @@ export function buildAgentRunInput({
     imageResultCount: canvasContext.imageResultCount,
     imageProvider: canvasContext.imageProvider,
     inputMode: canvasContext.inputMode,
-    normalizedInput: buildExplicitImageModeInput(canvasContext),
     promptNodeId,
     projectVersion: projectSnapshot.version,
     projectId,
@@ -369,59 +366,6 @@ export function buildAgentRunInput({
     contextSummary,
     userId,
   };
-}
-
-function buildExplicitImageModeInput(
-  canvasContext: AgentRunRequestContext
-): NormalizedAgentInput | undefined {
-  if (canvasContext.inputMode !== "image") {
-    return undefined;
-  }
-
-  const explicit: Array<{ key: string; value: string; sourceText: string }> = [];
-  if (canvasContext.imageResultCount) {
-    explicit.push({
-      key: "output_count",
-      value: String(canvasContext.imageResultCount),
-      sourceText: "image composer count",
-    });
-  }
-  if (canvasContext.imageAspectRatio) {
-    explicit.push({
-      key: "aspect_ratio",
-      value: canvasContext.imageAspectRatio,
-      sourceText: "image composer aspect ratio",
-    });
-  }
-
-  return finalizeNormalizedAgentInput(
-    {
-      rawInput: canvasContext.prompt,
-      task: {
-        domain: "image",
-        intent: "image.generate",
-        action: "create",
-        confidence: 1,
-      },
-      userGoal: {
-        original: canvasContext.prompt,
-        normalized: canvasContext.prompt,
-      },
-      routing: {
-        primaryAgent: "image_agent",
-        candidateAgents: [],
-        reason: "explicit image composer mode",
-      },
-      inputs: {
-        text: canvasContext.prompt,
-        images: [],
-        files: [],
-      },
-      constraints: { explicit, inferred: [] },
-      ambiguities: [],
-    },
-    canvasContext.prompt
-  );
 }
 
 const maxHydratedArtifactContentChars = 12_000;

@@ -3,16 +3,16 @@ import type {
   PrimaryAgent,
   TaskAction,
   WorkflowArtifact,
-} from "./input-normalizer.ts";
+} from "./task-frame.ts";
 
-export type SpecialistRoute =
+export type CapabilityRoute =
   | "document"
   | "image"
   | "manager"
   | "research"
   | "web";
 
-const PRIMARY_AGENT_ROUTE: Record<PrimaryAgent, SpecialistRoute> = {
+const PRIMARY_AGENT_ROUTE: Record<PrimaryAgent, CapabilityRoute> = {
   image_agent: "image",
   document_agent: "document",
   web_agent: "web",
@@ -22,7 +22,7 @@ const PRIMARY_AGENT_ROUTE: Record<PrimaryAgent, SpecialistRoute> = {
 
 export function selectAgentRoute(
   input?: NormalizedAgentInput | null
-): SpecialistRoute {
+): CapabilityRoute {
   if (!input) {
     return "manager";
   }
@@ -34,11 +34,11 @@ export function selectAgentRoute(
 
 export function selectAgentRoutesForTask(
   input?: NormalizedAgentInput | null
-): Exclude<SpecialistRoute, "manager">[] {
+): Exclude<CapabilityRoute, "manager">[] {
   if (!input) {
     return [];
   }
-  const routes = new Set<Exclude<SpecialistRoute, "manager">>();
+  const routes = new Set<Exclude<CapabilityRoute, "manager">>();
   for (const agent of uniqueAgents([
     input.routing.primaryAgent,
     ...input.routing.candidateAgents,

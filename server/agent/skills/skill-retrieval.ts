@@ -4,7 +4,7 @@ import type { AgentRunInput } from "../context.ts";
 import type {
   NormalizedAgentInput,
   WorkflowArtifact,
-} from "../input-normalizer.ts";
+} from "../task-frame.ts";
 import {
   isImageGenerationTask,
 } from "../task-router.ts";
@@ -16,8 +16,19 @@ const MAX_SKILL_CANDIDATES = 6;
 const imageIntentPattern =
   /(生成图片|生图|出图|画一张|画个|图片|海报|插画|参考图|高清|超清|放大|upscale|4k|8k|image|poster|illustration)/i;
 
+type SkillRetrievalInput = Pick<
+  AgentRunInput,
+  | "canvasSnapshot"
+  | "forcedSkillId"
+  | "message"
+  | "normalizedInput"
+  | "selectedNodeId"
+  | "selectedNodeIds"
+  | "upstreamContext"
+>;
+
 export async function retrieveRelevantAgentSkills(
-  input: AgentRunInput
+  input: SkillRetrievalInput
 ): Promise<AgentSkillCard[]> {
   const skills = (await listCachedAgentSkillDefinitions()).filter((skill) => skill.enabled);
   const forcedSkill = input.forcedSkillId
@@ -55,7 +66,7 @@ export async function retrieveRelevantAgentSkills(
   ].slice(0, MAX_SKILL_CANDIDATES);
 }
 
-function shouldSkipSkillRetrieval(input: AgentRunInput) {
+function shouldSkipSkillRetrieval(input: SkillRetrievalInput) {
   const normalizedInput = input.normalizedInput;
   return Boolean(
     normalizedInput &&
@@ -83,7 +94,7 @@ export function hasBuiltInImageIntent(input: Pick<AgentRunInput, "message" | "up
   );
 }
 
-function buildSkillRetrievalQuery(input: AgentRunInput) {
+function buildSkillRetrievalQuery(input: SkillRetrievalInput) {
   const selectedNode = input.selectedNodeId
     ? input.canvasSnapshot.nodes.find((node) => node.id === input.selectedNodeId)
     : undefined;

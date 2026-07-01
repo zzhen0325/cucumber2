@@ -41,13 +41,6 @@ export const activateSkillTool = tool({
   parameters: activateSkillJsonSchema as never,
   strict: false,
   errorFunction: null,
-  isEnabled: async ({ runContext }) => {
-    const context = requireCucumberContext(runContext.context);
-    return (
-      context.skillCandidates.length > 0 &&
-      context.activatedSkills.length < MAX_ACTIVATED_SKILLS_PER_RUN
-    );
-  },
   async execute(rawArgs, runContext) {
     const context = requireCucumberContext(runContext?.context);
     const parsed = activateSkillInputSchema.safeParse(rawArgs);

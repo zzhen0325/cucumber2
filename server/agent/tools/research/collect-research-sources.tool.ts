@@ -1,6 +1,7 @@
 import { tool } from "@openai/agents";
 import { z } from "zod";
 
+import type { CucumberAgentContext } from "../../context.ts";
 import {
   extractHtmlTitle,
   extractReadableText,
@@ -54,7 +55,8 @@ export const collectResearchSourcesTool = tool({
   parameters: collectResearchSourcesJsonSchema as never,
   strict: false,
   errorFunction: null,
-  async execute(rawArgs, _runContext, details) {
+  async execute(rawArgs, runContext, details) {
+    requireCucumberContext(runContext?.context);
     const parsed = collectResearchSourcesInputSchema.safeParse(rawArgs);
     if (!parsed.success) {
       return {
@@ -83,3 +85,10 @@ export const collectResearchSourcesTool = tool({
     };
   },
 });
+
+function requireCucumberContext(context: unknown): CucumberAgentContext {
+  if (!context || typeof context !== "object") {
+    throw new Error("Cucumber agent context is missing.");
+  }
+  return context as CucumberAgentContext;
+}

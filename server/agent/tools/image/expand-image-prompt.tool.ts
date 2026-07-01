@@ -82,7 +82,7 @@ function getPromptExpansionRunner() {
 
 function buildPromptExpansionInstructions(skillBody: string) {
   return [
-    "You are running one activated Agent Skill for Cucumber Image Agent.",
+    "You are running one activated image prompt skill for Cucumber Super Agent.",
     "Follow the skill instructions exactly. Return only the final expanded image prompt, with no analysis, labels, JSON, markdown fence, or alternatives.",
     "<skill_content name=\"image_prompt_expansion\">",
     skillBody,

@@ -2,6 +2,7 @@ import { RunContext } from "@openai/agents";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CucumberAgentContext } from "../../context.ts";
+import { makeTaskFrame } from "../../test-task-frame.ts";
 import { publicWebFetchTestHooks } from "../web/public-web-fetch.ts";
 
 const mocks = vi.hoisted(() => ({
@@ -129,6 +130,18 @@ function agentContext(
     producedArtifacts: [],
     projectId: "project-1",
     prompt: "调研 https://example.com",
+    normalizedInput: makeTaskFrame({
+      rawInput: "调研 https://example.com",
+      domain: "web",
+      intent: "research.answer",
+      action: "analyze",
+      primaryAgent: "research_agent",
+      workflow: {
+        outputArtifacts: ["research", "doc"],
+        requiredAgents: ["research_agent"],
+        requiredCapabilities: ["research", "citations"],
+      },
+    }),
     runNodeId: "run-1",
     selectedNodeId: null,
     selectedNodeIds: [],

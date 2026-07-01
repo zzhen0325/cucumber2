@@ -127,7 +127,7 @@ describe("agent context", () => {
     });
   });
 
-  it("normalizes explicit image composer controls into an image task", () => {
+  it("carries explicit image composer controls for the Super Agent task frame", () => {
     const input = buildAgentRunInput({
       userId: "user-1",
       projectId: "project-1",
@@ -143,16 +143,7 @@ describe("agent context", () => {
       projectSnapshot: snapshot(),
     });
 
-    expect(input.normalizedInput).toMatchObject({
-      task: { domain: "image", intent: "image.generate", action: "create" },
-      routing: { primaryAgent: "image_agent" },
-      constraints: {
-        explicit: [
-          { key: "output_count", value: "3" },
-          { key: "aspect_ratio", value: "9:16" },
-        ],
-      },
-    });
+    expect(input.normalizedInput).toBeUndefined();
     expect(buildCucumberAgentContext(input)).toMatchObject({
       imageAspectRatio: "9:16",
       imageResultCount: 3,

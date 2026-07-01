@@ -55,10 +55,6 @@ export const runSkillScriptTool = tool({
   parameters: runSkillScriptJsonSchema as never,
   strict: false,
   errorFunction: null,
-  isEnabled: async ({ runContext }) => {
-    const context = requireCucumberContext(runContext.context);
-    return context.activatedSkills.some((skill) => skill.scripts.length > 0);
-  },
   async execute(rawArgs, runContext, details) {
     const context = requireCucumberContext(runContext?.context);
     const parsed = runSkillScriptInputSchema.safeParse(rawArgs);

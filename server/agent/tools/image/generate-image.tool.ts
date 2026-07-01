@@ -63,35 +63,35 @@ export const generateImageJsonSchema = {
     prompt: {
       type: "string",
       description:
-        "The image description to render. Required: derive it from raw prompt, normalized input constraints, and trusted context before calling this tool. Reference images attached on the canvas are resolved by the server and are NOT visible to you; providers that cannot accept images receive a server-authored text prompt instead.",
+        "The image description to render. Required: derive it from the raw prompt, trusted context, input-mode controls, and any available Task Frame constraints before calling this tool. Reference images attached on the canvas are resolved by the server and are NOT visible to you; providers that cannot accept images receive a server-authored text prompt instead.",
     },
     aspectRatio: {
       type: "string",
       description:
-        "Optional output aspect ratio such as 16:9, 9:16, or 1:1. Prefer this when normalized input provides an aspect ratio.",
+        "Optional output aspect ratio such as 16:9, 9:16, or 1:1. Prefer this when the user, input mode, or available Task Frame includes an aspect ratio constraint.",
     },
     width: {
       type: "integer",
       minimum: 1,
       description:
-        "Optional explicit output width in pixels. Use with height when normalized input provides exact dimensions.",
+        "Optional explicit output width in pixels. Use with height when the user, input mode, or available Task Frame includes exact dimensions.",
     },
     height: {
       type: "integer",
       minimum: 1,
       description:
-        "Optional explicit output height in pixels. Use with width when normalized input provides exact dimensions.",
+        "Optional explicit output height in pixels. Use with width when the user, input mode, or available Task Frame includes exact dimensions.",
     },
     resultCount: {
       type: "integer",
       minimum: 1,
       description:
-        "How many images to generate. Match the number the user asked for after reading normalized input constraints; defaults to 1 when omitted.",
+        "How many images to generate. Match the number the user asked for or selected in input mode; also honor available Task Frame constraints. Defaults to 1 when omitted.",
     },
     variants: {
       type: "array",
       description:
-        "Optional list of output size variants. Use one item per requested output dimension when normalized input provides multiple dimensions; do not also pass width/height for the batch.",
+        "Optional list of output size variants. Use one item per requested output dimension when the user, input mode, or available Task Frame includes multiple dimensions; do not also pass width/height for the batch.",
       items: {
         type: "object",
         additionalProperties: false,

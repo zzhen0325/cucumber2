@@ -35,7 +35,7 @@ const createTextArtifactInputSchema = z.object({
 export const createTextArtifactTool = tool({
   name: "create_text_artifact",
   description:
-    "Create a trusted text artifact for the canvas. Use this only from a specialist that is producing a markdown or document result. It writes artifact content through Cucumber runtime storage and emits an artifact event; it does not directly mutate canvas nodes.",
+    "Create a trusted text artifact for the canvas. Use this when the Super Agent is producing a markdown, document, HTML, or code result. It writes artifact content through Cucumber runtime storage and emits an artifact event; it does not directly mutate canvas nodes.",
   parameters: createTextArtifactInputSchema,
   strict: true,
   errorFunction: null,

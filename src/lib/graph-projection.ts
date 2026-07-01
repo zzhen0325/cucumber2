@@ -915,7 +915,7 @@ function buildRunSummaryItems(events: RunStepTraceEvent[]): RunSummaryItem[] {
       kind: "handoff",
       label: "Handoff",
       detail: handoffs
-        .map((event) => readString(event.payload.toAgent) ?? "specialist")
+        .map((event) => readString(event.payload.toAgent) ?? "agent")
         .join(" -> "),
     });
   }

@@ -36,7 +36,7 @@ import { cn, formatDate } from "@/lib/utils";
 
 const NEW_SKILL_TEMPLATE = `---
 name: canvas-helper
-description: Help the Manager reason about a focused canvas workflow.
+description: Help the Super Agent reason about a focused canvas workflow.
 agent_scope: general
 purpose: canvas
 tags:
