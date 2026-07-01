@@ -16,6 +16,7 @@ export type AgentEventWriter = {
     metadata?: Record<string, string>;
   }) => Promise<AgentEvent>;
   writeToolOutput: (input: {
+    durationMs?: number;
     stepId: string;
     toolCallId: string;
     toolName: string;
@@ -23,6 +24,7 @@ export type AgentEventWriter = {
     metadata?: Record<string, string>;
   }) => Promise<AgentEvent>;
   writeToolError: (input: {
+    durationMs?: number;
     stepId: string;
     toolCallId: string;
     toolName: string;
@@ -137,6 +139,7 @@ export function createAgentEventWriter({
         stepId: input.stepId,
         type: "tool.output",
         payload: {
+          durationMs: input.durationMs,
           toolCallId: input.toolCallId,
           toolName: input.toolName,
           output: redacted.value,
@@ -179,6 +182,7 @@ export function createAgentEventWriter({
         stepId: input.stepId,
         type: "tool.error",
         payload: {
+          durationMs: input.durationMs,
           toolCallId: input.toolCallId,
           toolName: input.toolName,
           input: redactedInput.value,

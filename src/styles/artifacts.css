@@ -283,6 +283,292 @@
   white-space: nowrap;
 }
 
+.html-craft-editor-dialog {
+  width: min(1440px, calc(100vw - 40px));
+  max-width: min(1440px, calc(100vw - 40px));
+  height: min(900px, calc(100vh - 40px));
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 16px;
+  border-color: var(--semantic-color-border-soft);
+  border-radius: var(--component-radius-node);
+  background: var(--semantic-color-surface);
+}
+
+.html-craft-editor-shell {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: 160px minmax(0, 1fr) 280px;
+  gap: 12px;
+}
+
+.html-craft-palette,
+.html-craft-side-panel {
+  display: grid;
+  min-height: 0;
+  align-content: start;
+  gap: 8px;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--semantic-color-border-soft);
+  border-radius: var(--component-radius-control-lg);
+  background: var(--semantic-color-surface-subtle);
+}
+
+.html-craft-side-panel {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.html-craft-panel-title {
+  color: var(--semantic-color-text-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.html-craft-palette-button {
+  display: inline-flex;
+  width: 100%;
+  height: 34px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--semantic-color-border-soft);
+  border-radius: var(--component-radius-control);
+  background: var(--semantic-color-surface);
+  color: var(--semantic-color-text);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.html-craft-palette-button:hover {
+  background: var(--semantic-color-surface-warm);
+}
+
+.html-craft-stage {
+  position: relative;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--semantic-color-border-soft);
+  border-radius: var(--component-radius-control-lg);
+  background:
+    linear-gradient(45deg, color-mix(in srgb, var(--semantic-color-ink) 4%, transparent) 25%, transparent 25%),
+    linear-gradient(-45deg, color-mix(in srgb, var(--semantic-color-ink) 4%, transparent) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, color-mix(in srgb, var(--semantic-color-ink) 4%, transparent) 75%),
+    linear-gradient(-45deg, transparent 75%, color-mix(in srgb, var(--semantic-color-ink) 4%, transparent) 75%);
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
+  background-size: 16px 16px;
+}
+
+.html-craft-loading {
+  display: grid;
+  height: 100%;
+  min-height: 360px;
+  place-items: center;
+  color: var(--semantic-color-text-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.html-craft-node {
+  position: relative;
+  min-width: 24px;
+  min-height: 24px;
+  outline: 1px solid transparent;
+  outline-offset: 2px;
+}
+
+.html-craft-node.is-selected {
+  outline-color: var(--semantic-color-primary);
+}
+
+.html-craft-page {
+  min-height: 100%;
+}
+
+.html-craft-page-inner {
+  min-height: 480px;
+  margin: 0 auto;
+}
+
+.html-craft-section:empty,
+.html-craft-card:empty {
+  min-height: 80px;
+}
+
+.html-craft-text {
+  white-space: pre-wrap;
+}
+
+.html-craft-image {
+  display: block;
+}
+
+.html-craft-image-empty {
+  display: grid;
+  min-height: 120px;
+  place-items: center;
+  border: 1px dashed var(--semantic-color-border);
+  border-radius: var(--component-radius-control-lg);
+  color: var(--semantic-color-text-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.html-craft-button {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--semantic-color-primary);
+  font-weight: 600;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.html-craft-button-primary {
+  background: var(--semantic-color-primary);
+  color: var(--semantic-color-primary-foreground);
+}
+
+.html-craft-button-secondary {
+  background: transparent;
+  color: var(--semantic-color-primary);
+}
+
+.html-craft-spacer {
+  border-radius: var(--component-radius-control);
+  background: color-mix(in srgb, var(--semantic-color-primary) 10%, transparent);
+}
+
+.html-craft-raw-block {
+  min-height: 120px;
+}
+
+.html-craft-raw-editable {
+  width: 100%;
+  min-height: 160px;
+  padding: 12px;
+  border: 1px dashed transparent;
+  border-radius: var(--component-radius-control-lg);
+  background: var(--semantic-color-surface);
+  cursor: text;
+  outline: none;
+}
+
+.html-craft-raw-editable:focus {
+  border-color: var(--semantic-color-primary);
+}
+
+.html-craft-raw-editable:empty::before {
+  color: var(--semantic-color-text-muted);
+  content: attr(data-placeholder);
+}
+
+.html-craft-inspector {
+  display: grid;
+  min-height: 0;
+  align-content: start;
+  gap: 10px;
+  overflow: auto;
+}
+
+.html-craft-selected-name {
+  margin: 0;
+  color: var(--semantic-color-text);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.html-craft-field {
+  display: grid;
+  gap: 5px;
+  color: var(--semantic-color-text-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.html-craft-input,
+.html-craft-select,
+.html-craft-textarea {
+  width: 100%;
+  border-color: var(--semantic-color-border-soft);
+  background: var(--semantic-color-surface);
+  color: var(--semantic-color-text);
+  font-size: 13px;
+}
+
+.html-craft-select {
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--semantic-color-border-soft);
+  border-radius: var(--component-radius-control);
+}
+
+.html-craft-textarea {
+  min-height: 86px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  line-height: 18px;
+}
+
+.html-craft-color-input {
+  height: 34px;
+  padding: 3px;
+  border-color: var(--semantic-color-border-soft);
+  background: var(--semantic-color-surface);
+}
+
+.html-craft-save-panel {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--semantic-color-border-soft);
+}
+
+.html-craft-save-button {
+  width: 100%;
+}
+
+.html-craft-muted,
+.html-craft-error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.html-craft-muted {
+  color: var(--semantic-color-text-muted);
+}
+
+.html-craft-error {
+  color: var(--semantic-color-danger);
+}
+
+@media (max-width: 920px) {
+  .html-craft-editor-dialog {
+    height: calc(100vh - 24px);
+    max-width: calc(100vw - 24px);
+  }
+
+  .html-craft-editor-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(360px, 1fr) auto;
+  }
+
+  .html-craft-palette {
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+    overflow-x: auto;
+  }
+
+  .html-craft-palette-button {
+    width: auto;
+  }
+}
+
 .blocknote-body {
   min-height: 0;
   overflow: auto;

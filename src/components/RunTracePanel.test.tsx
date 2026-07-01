@@ -64,18 +64,56 @@ describe("run trace summary", () => {
     ];
 
     const summary = summarizeRunTrace(events);
+    expect(summary.steps).toHaveLength(1);
     expect(summary.steps[0]).toMatchObject({
-      durationLabel: "20ms",
-      label: "整理用户需求",
-      status: "success",
-    });
-    expect(summary.steps[1]).toMatchObject({
       durationLabel: "1.3s",
       label: "整理用户需求",
       status: "success",
     });
     expect(summarizeTraceEvent(events[1])).toBe("整理用户需求 · 20ms");
     expect(summarizeTraceEvent(events[2])).toBe("整理用户需求 · 1.3s");
+  });
+
+  it("shows image tool duration from payloads and older event timestamps", () => {
+    const withPayload: AgentEvent[] = [
+      event("tool.input", {
+        toolCallId: "call-1",
+        toolName: "generate_image",
+      }, "generate_image"),
+      event("tool.output", {
+        durationMs: 145_200,
+        toolCallId: "call-1",
+        toolName: "generate_image",
+      }, "generate_image"),
+    ];
+    expect(summarizeRunTrace(withPayload).steps[0]).toMatchObject({
+      durationLabel: "145s",
+      label: "generate_image",
+      status: "success",
+    });
+    expect(summarizeTraceEvent(withPayload[1])).toBe("generate_image · 145s");
+
+    const fromTimestamps: AgentEvent[] = [
+      {
+        ...event("tool.input", {
+          toolCallId: "call-1",
+          toolName: "generate_image",
+        }, "generate_image"),
+        createdAt: "2026-06-11T00:00:00.000Z",
+      },
+      {
+        ...event("tool.output", {
+          toolCallId: "call-1",
+          toolName: "generate_image",
+        }, "generate_image"),
+        createdAt: "2026-06-11T00:02:25.000Z",
+      },
+    ];
+    expect(summarizeRunTrace(fromTimestamps).steps[0]).toMatchObject({
+      durationLabel: "145s",
+      label: "generate_image",
+      status: "success",
+    });
   });
 
   it("summarizes normalized input, context, skills, tool errors, and rejected operations", () => {

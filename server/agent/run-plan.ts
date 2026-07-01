@@ -4,6 +4,7 @@ import {
   getExplicitConstraints,
   type NormalizedAgentInput,
 } from "./input-normalizer.ts";
+import { isCompositeWorkflowTask } from "./task-router.ts";
 
 export type RunPlanPhase = "prepare" | "route" | "execute" | "materialize";
 
@@ -53,11 +54,16 @@ export function buildRunPlan(input: AgentRunInput): RuntimeRunPlanItem[] {
     return [];
   }
 
-  const intent = getPlanIntent(input);
   if (input.retryFrom) {
     return retryPlan(input);
   }
 
+  const workflowPlan = buildWorkflowPlan(input.normalizedInput);
+  if (workflowPlan.length) {
+    return workflowPlan;
+  }
+
+  const intent = getPlanIntent(input);
   switch (intent) {
     case "document.create":
       return [
@@ -175,6 +181,9 @@ function shouldCreateRunPlan(input: AgentRunInput) {
   if (input.retryFrom) {
     return true;
   }
+  if (isCompositeWorkflowTask(input.normalizedInput)) {
+    return true;
+  }
 
   const intent = getPlanIntent(input);
   if (intent === "unsupported" || intent === "prompt.edit") {
@@ -188,6 +197,41 @@ function shouldCreateRunPlan(input: AgentRunInput) {
   }
 
   return hasComplexitySignal(input);
+}
+
+function buildWorkflowPlan(
+  normalizedInput: NormalizedAgentInput | undefined
+): RuntimeRunPlanItem[] {
+  if (!isCompositeWorkflowTask(normalizedInput) || !normalizedInput) {
+    return [];
+  }
+
+  const stages = normalizedInput.workflow.stages;
+  if (!stages.length) {
+    return [
+      step("workflow-goal", "明确复合任务目标和依赖", "prepare"),
+      step("workflow-orchestrate", "进入 Manager 编排必要 Agent", "route"),
+      step("workflow-execute", "执行多能力任务链路", "execute"),
+      step("workflow-materialize", "投影复合任务产物", "materialize"),
+    ];
+  }
+
+  return [
+    step("workflow-goal", "明确复合任务目标和依赖", "prepare"),
+    ...stages.flatMap((stage, index) => {
+      const stageIndex = index + 1;
+      const id = sanitizeStepId(stage.id || `stage-${stageIndex}`);
+      return [
+        step(
+          `workflow-${stageIndex}-${id}-route`,
+          `进入 ${agentLabel(stage.agent)}：${stage.goal}`,
+          "route"
+        ),
+        step(`workflow-${stageIndex}-${id}-execute`, stage.goal, "execute"),
+      ];
+    }),
+    step("workflow-materialize", "投影复合任务产物", "materialize"),
+  ];
 }
 
 function getPlanIntent(input: AgentRunInput): PlanIntent {
@@ -343,6 +387,32 @@ function getImageCountLabel(input: AgentRunInput) {
 
 function step(id: string, label: string, phase: RunPlanPhase): RuntimeRunPlanItem {
   return { id, label, phase };
+}
+
+function agentLabel(agent: NormalizedAgentInput["routing"]["primaryAgent"]) {
+  switch (agent) {
+    case "document_agent":
+      return "Document Agent";
+    case "image_agent":
+      return "Image Agent";
+    case "research_agent":
+      return "Research Agent";
+    case "web_agent":
+      return "Web Agent";
+    case "manager_agent":
+    default:
+      return "Manager";
+  }
+}
+
+function sanitizeStepId(value: string) {
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 32) || "stage"
+  );
 }
 
 function normalizeText(value: string) {

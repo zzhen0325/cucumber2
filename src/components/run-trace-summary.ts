@@ -162,8 +162,10 @@ export function summarizeTraceEvent(event: RunStepTraceEvent) {
 
   if (event.type === "tool.error") {
     const toolName = readString(event.payload.toolName) ?? event.stepId;
+    const duration = formatDurationMs(readNumber(event.payload.durationMs));
     const error = event.errorText ?? readString(event.payload.errorText);
-    return error ? `${toolName}: ${error}` : `${toolName} 调用失败`;
+    const prefix = [toolName, duration].filter(Boolean).join(" · ");
+    return error ? `${prefix}: ${error}` : `${prefix} 调用失败`;
   }
 
   if (event.type === "canvas.operation.rejected") {
@@ -196,7 +198,12 @@ export function summarizeTraceEvent(event: RunStepTraceEvent) {
   }
 
   if (event.type === "tool.input" || event.type === "tool.output") {
-    return readString(event.payload.toolName) ?? summarizeUnknown(event.payload);
+    const toolName = readString(event.payload.toolName);
+    const duration =
+      event.type === "tool.output"
+        ? formatDurationMs(readNumber(event.payload.durationMs))
+        : undefined;
+    return [toolName, duration].filter(Boolean).join(" · ") || summarizeUnknown(event.payload);
   }
 
   return summarizeUnknown(event.payload);
@@ -210,9 +217,10 @@ function buildTraceSteps(events: RunStepTraceEvent[]) {
   const steps = new Map<
     string,
     {
-      durationLabel?: string;
+      durationMs?: number;
       id: string;
       label: string;
+      startedAtMs?: number;
       status: "running" | "success" | "error";
       toolName?: string;
     }
@@ -231,16 +239,24 @@ function buildTraceSteps(events: RunStepTraceEvent[]) {
     ) {
       continue;
     }
+    const stepId = getTraceSummaryStepId(event);
+    const previous = steps.get(stepId);
     const toolName =
       event.type.startsWith("run.step.")
         ? getRunStepDisplayLabel(event)
         : event.type.startsWith("skill.script.")
         ? readString(event.payload.scriptName) ?? event.stepId
         : readString(event.payload.toolName) ?? event.stepId;
-    steps.set(event.stepId, {
-      durationLabel: formatDurationMs(readNumber(event.payload.durationMs)),
-      id: event.stepId,
+    const startedAtMs =
+      event.type === "tool.input"
+        ? parseTimestampMs(event.createdAt)
+        : previous?.startedAtMs;
+    const durationMs = getTraceStepDurationMs(event, previous);
+    steps.set(stepId, {
+      durationMs,
+      id: stepId,
       label: toolName,
+      startedAtMs,
       status:
         event.type === "tool.error" || event.type === "skill.script.failed"
           || event.type === "run.step.failed"
@@ -253,7 +269,66 @@ function buildTraceSteps(events: RunStepTraceEvent[]) {
       toolName,
     });
   }
-  return [...steps.values()];
+  return [...steps.values()].map((step) => ({
+    id: step.id,
+    label: step.label,
+    status: step.status,
+    toolName: step.toolName,
+    durationLabel: formatDurationMs(step.durationMs),
+  }));
+}
+
+function getTraceSummaryStepId(event: RunStepTraceEvent) {
+  if (
+    event.type.startsWith("run.step.") &&
+    (event.stepId === "quick.route" || event.stepId === "input.normalize")
+  ) {
+    return "requirement.normalize";
+  }
+  return event.stepId;
+}
+
+function getTraceStepDurationMs(
+  event: RunStepTraceEvent,
+  previous:
+    | {
+        durationMs?: number;
+        startedAtMs?: number;
+      }
+    | undefined
+) {
+  const payloadDuration = readNumber(event.payload.durationMs);
+  if (event.type === "tool.output" || event.type === "tool.error") {
+    if (payloadDuration !== undefined) {
+      return Math.max(0, Math.round(payloadDuration));
+    }
+    const completedAtMs = parseTimestampMs(event.createdAt);
+    if (
+      previous?.startedAtMs !== undefined &&
+      completedAtMs !== undefined &&
+      completedAtMs > previous.startedAtMs
+    ) {
+      return Math.round(completedAtMs - previous.startedAtMs);
+    }
+    return previous?.durationMs;
+  }
+
+  if (event.type === "run.step.completed" || event.type === "run.step.failed") {
+    if (payloadDuration === undefined) {
+      return previous?.durationMs;
+    }
+    if (getTraceSummaryStepId(event) === "requirement.normalize") {
+      return Math.max(0, Math.round((previous?.durationMs ?? 0) + payloadDuration));
+    }
+    return Math.max(0, Math.round(payloadDuration));
+  }
+
+  return previous?.durationMs;
+}
+
+function parseTimestampMs(value: string) {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : undefined;
 }
 
 function getRunStepDisplayLabel(event: RunStepTraceEvent) {

@@ -1,7 +1,10 @@
 import type { AgentCanvasNode } from "../../../src/types/canvas.ts";
 import type { AgentSkillDefinitionSummary } from "../../supabase.ts";
 import type { AgentRunInput } from "../context.ts";
-import type { NormalizedAgentInput } from "../input-normalizer.ts";
+import type {
+  NormalizedAgentInput,
+  WorkflowArtifact,
+} from "../input-normalizer.ts";
 import {
   isImageGenerationTask,
 } from "../task-router.ts";
@@ -129,7 +132,7 @@ function scoreSkill(
   const lowerText = query.text.toLowerCase();
   // Suppress image skills unless this is an image generation task. Text/code/
   // canvas tasks and image analysis/inspection tasks must not surface image skills.
-  const suppressImage = Boolean(query.normalizedInput)
+  const suppressImage = query.normalizedInput
     ? !isImageGenerationTask(query.normalizedInput)
     : false;
   const skillIsImage = isImageSkill(skill);
@@ -218,7 +221,7 @@ function scoreCapabilityMatch(
   let score = 0;
   const reasons: string[] = [];
   const { action, domain, intent } = normalizedInput.task;
-  const derivedKinds = deriveArtifactKinds(domain);
+  const derivedKinds = deriveArtifactKinds(normalizedInput);
   const intentTokens = new Set(tokenize(intent));
 
   for (const capability of skill.capabilities) {
@@ -248,18 +251,54 @@ function scoreCapabilityMatch(
   return { reasons, score: Math.max(0, score) };
 }
 
-function deriveArtifactKinds(domain: NormalizedAgentInput["task"]["domain"]): Set<string> {
-  switch (domain) {
+function deriveArtifactKinds(input: NormalizedAgentInput): Set<string> {
+  const workflowKinds = new Set<string>();
+  for (const artifact of [
+    ...input.workflow.outputArtifacts,
+    ...input.workflow.stages.flatMap((stage) => stage.outputArtifacts ?? []),
+  ]) {
+    for (const kind of artifactKindsForWorkflowArtifact(artifact)) {
+      workflowKinds.add(kind);
+    }
+  }
+  if (workflowKinds.size) {
+    return workflowKinds;
+  }
+
+  switch (input.task.domain) {
     case "image":
       return new Set(["image"]);
     case "code":
       return new Set(["code"]);
     case "canvas":
       return new Set(["canvas"]);
+    case "data":
+      return new Set(["dataset"]);
+    case "web":
+      return new Set(["webpage"]);
     case "text":
       return new Set(["markdown", "document", "diagram", "webpage"]);
     default:
       return new Set<string>();
+  }
+}
+
+function artifactKindsForWorkflowArtifact(artifact: WorkflowArtifact): string[] {
+  switch (artifact) {
+    case "diagram":
+      return ["diagram", "markdown"];
+    case "doc":
+      return ["document", "markdown"];
+    case "research":
+      return ["document", "markdown", "research"];
+    case "canvas_operation":
+      return ["canvas"];
+    case "dataset":
+      return ["dataset", "data"];
+    case "answer":
+      return ["markdown"];
+    default:
+      return [artifact];
   }
 }
 

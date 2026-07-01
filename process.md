@@ -2,9 +2,19 @@
 
 本文记录 2026-06-11 Agent v2 正式切换后的变更。
 
-## 2026-06-30 Canvas Auto Layout Trigger Boundary
+## 2026-07-01 Task Graph Normalization Boundary
 
-- 新增或删除画布节点/边不再隐式触发全图 auto layout；节点创建入口继续负责自己的初始落点，用户显式点击画布自动布局按钮时才通过 `auto-layout` mutation 重排并保存。
+- Task Frame 新增 `workflow` 摘要，用 `mode`、输入模态、目标产物、required capabilities、required agents 和 ordered stages 表达 hybrid / multi-step 请求；`task.domain` 仍保留为兼容的主领域提示，但不再假设用户意图能被单一 bucket 完整覆盖。
+- `task-router` 对 `workflow.mode=hybrid|multi_step`、多 stage 或多 specialist 的任务统一选择 `manager_task` 作为编排入口，同时从 `workflow.requiredAgents` 和 stage agent 开放对应 specialist handoff；单一步骤 specialist 仍直达对应 Agent。
+- `workflow` 只描述任务图，不包含 tool args，不新增数据库 schema，也不绕过 artifact/canvas operation 事件投影。tool policy、run plan 和 skill retrieval 改为优先读取 workflow 的产物/能力信号，再回落到原有 `task.domain` / `intent`。
+
+## 2026-06-30 Parallel Agent Run Submission
+
+- 画布输入器提交后立即恢复为可输入/可再次提交状态；前端不再用单个 `useChat` 状态锁住 composer，而是每个 Run 独立启动 AI SDK stream，并按事件自带的 `runNodeId` 投影回对应 Run 节点。`lastRunId` 仍只表示最近一次运行，Trace、事件表和画布节点协议不新增平行状态。
+
+## 2026-06-30 Canvas Add/Delete Focus Boundary
+
+- 画布视口聚焦从节点数量变化中解耦：删除节点不会因为 `nodeCount` 变化触发自动 `fitView`；新增节点由创建入口显式请求聚焦。点击创建和粘贴节点会先寻找附近不遮挡已有节点的落点，拖拽创建继续尊重用户画出的区域。
 
 ## 2026-06-28 Agent Tool Schema Boundary
 
@@ -69,6 +79,7 @@
 - `CanvasWorkspace` 改为 dirty node/edge id 集合保存，不再用整图 JSON digest。React Flow change、run draft、手动创建、粘贴、上传完成、Markdown/shape/text 编辑和 auto layout 都进入 `commitCanvasMutation`。
 - `toPersistableNode` 会清理 selected/dragging/measured 等运行时字段、跳过本地 upload 节点、移除 markdown/code/document/tool/webpage 正文类字段，并在 node_json 超过 64KB 时拒绝保存。
 - 文本类 artifact 内容新增 create/update/read API；Markdown 正文 debounce 保存到 `agent_artifact_contents`，节点只保存 artifact ref、summary/preview/version 等轻量信息。`saveProjectSnapshot` 会先 flush 待保存正文再写 canvas patch，避免用户编辑后立刻启动 Agent 时服务端读到旧正文；图片和二进制内容走私有对象存储。
+- HTML/webpage artifact 增加 Craft.js 编辑入口：右上角进入编辑弹窗，编辑态使用白名单 React 组件和 `query.serialize()` 保存到 artifact content 的 `content_json.format=craft-html-v1`，同时把渲染后的完整 HTML document 写入 `content_text` 作为 canonical 内容；`webpage` 节点只临时刷新 `data.html` 供当前会话预览，持久化时继续由 `toPersistableNode` 清理正文。
 - Agent Run 启动与 materialize 都从新的 node/edge 表读取/写入；上游 markdown/code/document/tool result/webpage 节点只从 `node_json` 读取 artifactId，再由服务端读取 `agent_artifacts` / `agent_artifact_contents` 注入受限长度正文；materialize 只在 `input.normalized`、artifact/canvas operation/run terminal/tool error 等关键事件后落盘，非终态事件后台排队，终态事件等待队列收敛。
 - 打开项目不再自动 hydrate last run trace，也不自动拉取 artifact full content；Trace 面板、artifact 预览和 Markdown 编辑器聚焦时才按需请求详情。
 - `input.normalized` 中已经确定会产出 artifact 时会立即投影并后台物化 pending 结果节点；该机制覆盖 image、markdown/document/diagram、code、webpage 和 data，不把“节点创建”绑到最终 artifact 生成完成之后，也不让中间落库阻塞后续 Agent 执行。真实 `artifact.created` 到达后复用同一个 pending 节点更新为 ready。

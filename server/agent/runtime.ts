@@ -471,6 +471,14 @@ export async function executeAgentRun({
   let materializationQueued = false;
   let materializationDrainPromise: Promise<void> | null = null;
   const runEvents: AgentEvent[] = [];
+  const activeToolTraces = new Map<
+    string,
+    {
+      startedMs: number;
+      toolName: string;
+    }
+  >();
+  const activeToolTraceIdsByName = new Map<string, string[]>();
 
   const trackEvent = async (event: AgentEvent) => {
     runEvents.push(event);
@@ -942,10 +950,11 @@ export async function executeAgentRun({
 
       if (event.type === "tool_started") {
         await finishAgentMessage();
+        const toolCallId = startToolTrace(event.toolName, event.toolCallId);
         await trackEvent(
           await eventWriter.writeToolInput({
             stepId: event.toolName,
-            toolCallId: event.toolCallId ?? `${event.toolName}-${crypto.randomUUID()}`,
+            toolCallId,
             toolName: event.toolName,
             toolInput: event.input ?? {},
             metadata: { runtime: "openai-agents-sdk" },
@@ -955,10 +964,12 @@ export async function executeAgentRun({
       }
 
       if (event.type === "tool_completed") {
+        const toolTrace = finishToolTrace(event.toolName, event.toolCallId);
         await trackEvent(
           await eventWriter.writeToolOutput({
+            durationMs: toolTrace.durationMs,
             stepId: event.toolName,
-            toolCallId: event.toolCallId ?? `${event.toolName}-${crypto.randomUUID()}`,
+            toolCallId: toolTrace.toolCallId,
             toolName: event.toolName,
             output: event.output ?? {},
             metadata: { runtime: "openai-agents-sdk" },
@@ -968,10 +979,12 @@ export async function executeAgentRun({
       }
 
       if (event.type === "tool_failed") {
+        const toolTrace = finishToolTrace(event.toolName, event.toolCallId);
         await trackEvent(
           await eventWriter.writeToolError({
+            durationMs: toolTrace.durationMs,
             stepId: event.toolName,
-            toolCallId: event.toolCallId ?? `${event.toolName}-${crypto.randomUUID()}`,
+            toolCallId: toolTrace.toolCallId,
             toolName: event.toolName,
             input: event.input,
             inputWritten: true,
@@ -1033,6 +1046,46 @@ export async function executeAgentRun({
         throw new Error(event.message);
       }
     }
+  }
+
+  function startToolTrace(toolName: string, toolCallId: string | undefined) {
+    const resolvedToolCallId = toolCallId ?? `${toolName}-${crypto.randomUUID()}`;
+    activeToolTraces.set(resolvedToolCallId, {
+      startedMs: Date.now(),
+      toolName,
+    });
+    activeToolTraceIdsByName.set(toolName, [
+      ...(activeToolTraceIdsByName.get(toolName) ?? []),
+      resolvedToolCallId,
+    ]);
+    return resolvedToolCallId;
+  }
+
+  function finishToolTrace(toolName: string, toolCallId: string | undefined) {
+    const matchingToolCallId =
+      toolCallId && activeToolTraces.has(toolCallId)
+        ? toolCallId
+        : toolCallId ?? activeToolTraceIdsByName.get(toolName)?.[0];
+    const resolvedToolCallId =
+      matchingToolCallId ?? `${toolName}-${crypto.randomUUID()}`;
+    const activeTrace = activeToolTraces.get(resolvedToolCallId);
+    if (!activeTrace) {
+      return { toolCallId: resolvedToolCallId };
+    }
+
+    activeToolTraces.delete(resolvedToolCallId);
+    const remainingToolIds = (activeToolTraceIdsByName.get(activeTrace.toolName) ?? [])
+      .filter((id) => id !== resolvedToolCallId);
+    if (remainingToolIds.length) {
+      activeToolTraceIdsByName.set(activeTrace.toolName, remainingToolIds);
+    } else {
+      activeToolTraceIdsByName.delete(activeTrace.toolName);
+    }
+
+    return {
+      durationMs: Math.max(0, Math.round(Date.now() - activeTrace.startedMs)),
+      toolCallId: resolvedToolCallId,
+    };
   }
 
   async function executeSimpleCanvasRoute(

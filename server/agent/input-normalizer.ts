@@ -11,7 +11,10 @@ export const taskDomainValues = [
   "text",
   "code",
   "canvas",
+  "data",
   "figma",
+  "mixed",
+  "web",
   "unknown",
 ] as const;
 
@@ -43,12 +46,49 @@ export const imageRoleValues = [
 ] as const;
 
 export const ambiguitySeverityValues = ["low", "medium", "high"] as const;
+export const workflowModeValues = [
+  "single",
+  "hybrid",
+  "multi_step",
+  "unknown",
+] as const;
+export const workflowModalityValues = [
+  "text",
+  "image",
+  "code",
+  "document",
+  "webpage",
+  "data",
+  "canvas",
+  "figma",
+  "unknown",
+] as const;
+export const workflowArtifactValues = [
+  "answer",
+  "canvas_operation",
+  "code",
+  "dataset",
+  "decision",
+  "diagram",
+  "doc",
+  "file",
+  "image",
+  "markdown",
+  "memory",
+  "research",
+  "tool_result",
+  "webpage",
+  "unknown",
+] as const;
 
 const taskDomainSchema = z.enum(taskDomainValues);
 const taskActionSchema = z.enum(taskActionValues);
 const primaryAgentSchema = z.enum(primaryAgentValues);
 const imageRoleSchema = z.enum(imageRoleValues);
 const ambiguitySeveritySchema = z.enum(ambiguitySeverityValues);
+const workflowModeSchema = z.enum(workflowModeValues);
+const workflowModalitySchema = z.enum(workflowModalityValues);
+const workflowArtifactSchema = z.enum(workflowArtifactValues);
 
 const taskSchema = z.object({
   domain: taskDomainSchema,
@@ -109,6 +149,25 @@ const ambiguitySchema = z.object({
   severity: ambiguitySeveritySchema,
 });
 
+const workflowStageSchema = z.object({
+  id: z.string().trim().min(1),
+  goal: z.string().trim().min(1),
+  action: taskActionSchema,
+  agent: primaryAgentSchema,
+  inputModalities: z.array(workflowModalitySchema).optional(),
+  outputArtifacts: z.array(workflowArtifactSchema).optional(),
+  dependsOn: z.array(z.string()).optional(),
+});
+
+const workflowSchema = z.object({
+  mode: workflowModeSchema.optional(),
+  inputModalities: z.array(workflowModalitySchema).optional(),
+  outputArtifacts: z.array(workflowArtifactSchema).optional(),
+  requiredAgents: z.array(primaryAgentSchema).optional(),
+  requiredCapabilities: z.array(z.string().trim().min(1)).optional(),
+  stages: z.array(workflowStageSchema).optional(),
+});
+
 export const normalizedAgentInputSchema = z.object({
   rawInput: z.string().optional(),
   task: taskSchema,
@@ -117,6 +176,7 @@ export const normalizedAgentInputSchema = z.object({
   inputs: inputsSchema,
   constraints: constraintsSchema.optional(),
   ambiguities: z.array(ambiguitySchema).optional(),
+  workflow: workflowSchema.optional(),
 });
 
 export type NormalizedAgentInput = {
@@ -138,6 +198,14 @@ export type NormalizedAgentInput = {
     inferred: Array<z.infer<typeof inferredConstraintSchema>>;
   };
   ambiguities: Array<z.infer<typeof ambiguitySchema>>;
+  workflow: {
+    mode: WorkflowMode;
+    inputModalities: WorkflowModality[];
+    outputArtifacts: WorkflowArtifact[];
+    requiredAgents: PrimaryAgent[];
+    requiredCapabilities: string[];
+    stages: WorkflowStage[];
+  };
 };
 
 export type TaskDomain = z.infer<typeof taskDomainSchema>;
@@ -146,6 +214,10 @@ export type PrimaryAgent = z.infer<typeof primaryAgentSchema>;
 export type ImageRole = z.infer<typeof imageRoleSchema>;
 export type ExplicitConstraint = z.infer<typeof explicitConstraintSchema>;
 export type InferredConstraint = z.infer<typeof inferredConstraintSchema>;
+export type WorkflowMode = z.infer<typeof workflowModeSchema>;
+export type WorkflowModality = z.infer<typeof workflowModalitySchema>;
+export type WorkflowArtifact = z.infer<typeof workflowArtifactSchema>;
+export type WorkflowStage = z.infer<typeof workflowStageSchema>;
 
 type NormalizeInput = {
   message: string;
@@ -196,16 +268,21 @@ export function createInputNormalizerAgent() {
     instructions: [
       "You are the Cucumber Input Normalizer. Convert the user's request into a compact Task Frame for routing.",
       "Do not execute the task. Classify and route only. Never emit domain-specific tool parameters (no resultCount, dimensions, aspectRatio, prompt text, variants). Each sub-agent derives its own final parameters from constraints.",
-      "Output shape: task{domain,intent,action,confidence}, userGoal{original,normalized}, routing{primaryAgent,candidateAgents,reason}, inputs{text,images,files}, constraints{explicit,inferred}, ambiguities.",
-      "task.domain is one of image, text, code, canvas, figma, unknown.",
+      "Output shape: task{domain,intent,action,confidence}, userGoal{original,normalized}, routing{primaryAgent,candidateAgents,reason}, inputs{text,images,files}, constraints{explicit,inferred}, ambiguities, workflow{mode,inputModalities,outputArtifacts,requiredAgents,requiredCapabilities,stages}.",
+      "task.domain is one of image, text, code, canvas, data, figma, mixed, web, unknown. Use mixed when no single domain owns the request.",
       "task.action is one of create, edit, analyze, transform, extract, upscale, unknown.",
       "task.intent is a short free-text label such as image.generate, image.matting, image.decompose, image.upscale, media.analyze, document.create, document.edit, webpage.create, web.fetch, research.answer, code.create, data.analyze, canvas.operation, prompt.edit, text.answer.",
       "task.confidence is 0..1 self-assessed classification confidence.",
       "routing.primaryAgent is one of image_agent, document_agent, web_agent, research_agent, manager_agent. routing.candidateAgents lists other plausible agents.",
+      "Think of the user request as a task graph, not as a fixed bucket. Single-step requests may have workflow.mode=single and one primaryAgent. Hybrid or multi-step requests must use workflow.mode=hybrid or multi_step, routing.primaryAgent=manager_agent, and workflow.requiredAgents/candidateAgents/stages to name every specialist that may be needed.",
+      "workflow.inputModalities is one or more of text, image, code, document, webpage, data, canvas, figma, unknown. workflow.outputArtifacts is one or more of answer, image, doc, markdown, diagram, code, webpage, dataset, canvas_operation, research, decision, tool_result, file, memory, unknown.",
+      "workflow.requiredCapabilities should name semantic capabilities such as media-analysis, image-generation, markdown-artifact, code-artifact, web-fetch, research, canvas-operation. Keep names short and reusable.",
+      "workflow.stages is an ordered high-level plan only. Each stage has id, goal, action, agent, inputModalities, outputArtifacts, dependsOn. Do not include tool arguments, URLs fabricated from context, or final content.",
       "Route image generation, outpainting/canvas expansion, matting/background removal, image decomposition, media understanding, and upscaling to image_agent.",
       "Route markdown, documents, diagrams (sequence/flowchart -> mermaid), HTML/H5/webpage demos, code drafts, PRDs, briefs, summaries, and reusable text templates to document_agent.",
       "Route single public webpage fetch/read/summarize to web_agent. Route web-search-backed cited research/comparison to research_agent.",
       "Route plain answers, smalltalk, prompt/text edits, image-metadata questions, canvas node/shape operations, and anything ambiguous to manager_agent.",
+      "If the request combines analysis and generation, or asks for image + text + code, or names a multi-step workflow, do not force it into the final artifact's bucket. Mark workflow.mode=hybrid or multi_step, make manager_agent primary, and list the involved specialists.",
       "The words visual, 视觉, H5, campaign, product, marketing usually describe domain or context. They do not by themselves make the task image generation.",
       "Questions asking which tools, models, providers, APIs, SDKs, platforms, or open-source/free resources exist are plain answers: domain=text, action=analyze, intent=text.answer, primaryAgent=manager_agent. The phrase 图片生成工具 / image generation API is the subject being asked about, not a request to generate an image.",
       "Questions asking why/how image generation works, fails, costs, or which model/provider/seed/size an existing image used are answers (domain=text or image, action=analyze, intent=text.answer or media.analyze), never image creation.",
@@ -276,6 +353,7 @@ export function finalizeNormalizedAgentInput(
       options: ambiguity.options ?? [],
       severity: ambiguity.severity,
     })),
+    workflow: normalizeWorkflow(parsed.workflow),
   };
 }
 
@@ -319,6 +397,35 @@ function buildNormalizerPrompt(input: NormalizeInput, maxOutputImages?: number) 
 
 function uniqueAgents(agents: PrimaryAgent[]): PrimaryAgent[] {
   return [...new Set(agents)];
+}
+
+function normalizeWorkflow(
+  workflow: z.infer<typeof workflowSchema> | undefined
+): NormalizedAgentInput["workflow"] {
+  return {
+    mode: workflow?.mode ?? "single",
+    inputModalities: uniqueValues(workflow?.inputModalities ?? []),
+    outputArtifacts: uniqueValues(workflow?.outputArtifacts ?? []),
+    requiredAgents: uniqueAgents(workflow?.requiredAgents ?? []),
+    requiredCapabilities: uniqueStrings(workflow?.requiredCapabilities ?? []),
+    stages: (workflow?.stages ?? []).map((stage) => ({
+      id: stage.id,
+      goal: stage.goal,
+      action: stage.action,
+      agent: stage.agent,
+      inputModalities: uniqueValues(stage.inputModalities ?? []),
+      outputArtifacts: uniqueValues(stage.outputArtifacts ?? []),
+      dependsOn: uniqueStrings(stage.dependsOn ?? []),
+    })),
+  };
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.map((value) => normalizeText(value)).filter(Boolean))];
+}
+
+function uniqueValues<T extends string>(values: T[]): T[] {
+  return [...new Set(values)];
 }
 
 function normalizeNullableText(value: string | null | undefined) {

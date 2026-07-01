@@ -103,6 +103,92 @@ describe("buildRunPlan", () => {
     ]);
   });
 
+  it("creates stage-aware plans for hybrid workflows", () => {
+    const plan = buildRunPlan(
+      input({
+        message: "分析这张图，生成海报和 HTML 代码",
+        normalizedInput: makeTaskFrame({
+          rawInput: "分析这张图，生成海报和 HTML 代码",
+          domain: "mixed",
+          intent: "hybrid.visual.code.create",
+          action: "create",
+          primaryAgent: "manager_agent",
+          workflow: {
+            mode: "hybrid",
+            outputArtifacts: ["image", "code"],
+            requiredAgents: ["image_agent", "document_agent"],
+            requiredCapabilities: [
+              "media-analysis",
+              "image-generation",
+              "code-artifact",
+            ],
+            stages: [
+              {
+                id: "analyze-reference",
+                goal: "分析参考图的视觉线索",
+                action: "analyze",
+                agent: "image_agent",
+                inputModalities: ["image"],
+                outputArtifacts: ["answer"],
+              },
+              {
+                id: "generate-image",
+                goal: "生成海报图片",
+                action: "create",
+                agent: "image_agent",
+                outputArtifacts: ["image"],
+                dependsOn: ["analyze-reference"],
+              },
+              {
+                id: "create-code",
+                goal: "生成 HTML 代码",
+                action: "create",
+                agent: "document_agent",
+                outputArtifacts: ["code"],
+                dependsOn: ["generate-image"],
+              },
+            ],
+          },
+        }),
+      })
+    );
+
+    expect(plan).toMatchObject([
+      { id: "workflow-goal", label: "明确复合任务目标和依赖", phase: "prepare" },
+      {
+        id: "workflow-1-analyze-reference-route",
+        label: "进入 Image Agent：分析参考图的视觉线索",
+        phase: "route",
+      },
+      {
+        id: "workflow-1-analyze-reference-execute",
+        label: "分析参考图的视觉线索",
+        phase: "execute",
+      },
+      {
+        id: "workflow-2-generate-image-route",
+        label: "进入 Image Agent：生成海报图片",
+        phase: "route",
+      },
+      {
+        id: "workflow-2-generate-image-execute",
+        label: "生成海报图片",
+        phase: "execute",
+      },
+      {
+        id: "workflow-3-create-code-route",
+        label: "进入 Document Agent：生成 HTML 代码",
+        phase: "route",
+      },
+      {
+        id: "workflow-3-create-code-execute",
+        label: "生成 HTML 代码",
+        phase: "execute",
+      },
+      { id: "workflow-materialize", label: "投影复合任务产物", phase: "materialize" },
+    ]);
+  });
+
   it("skips simple single-image plans but plans multi-image work", () => {
     expect(
       buildRunPlan(

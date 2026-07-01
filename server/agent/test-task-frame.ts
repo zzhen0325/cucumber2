@@ -16,6 +16,7 @@ export function makeTaskFrame(
     explicit?: NormalizedAgentInput["constraints"]["explicit"];
     inferred?: NormalizedAgentInput["constraints"]["inferred"];
     ambiguities?: NormalizedAgentInput["ambiguities"];
+    workflow?: Partial<NormalizedAgentInput["workflow"]>;
   } = {}
 ): NormalizedAgentInput {
   const rawInput = overrides.rawInput ?? "task";
@@ -46,5 +47,13 @@ export function makeTaskFrame(
       inferred: overrides.inferred ?? [],
     },
     ambiguities: overrides.ambiguities ?? [],
+    workflow: {
+      mode: overrides.workflow?.mode ?? "single",
+      inputModalities: overrides.workflow?.inputModalities ?? [],
+      outputArtifacts: overrides.workflow?.outputArtifacts ?? [],
+      requiredAgents: overrides.workflow?.requiredAgents ?? [],
+      requiredCapabilities: overrides.workflow?.requiredCapabilities ?? [],
+      stages: overrides.workflow?.stages ?? [],
+    },
   };
 }

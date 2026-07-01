@@ -195,6 +195,60 @@ describe("specialist agent registry", () => {
       )
     ).toBe(false);
   });
+
+  it("enables specialists from hybrid workflow required agents and stages", () => {
+    const context = agentContext({
+      normalizedInput: makeTaskFrame({
+        rawInput: "分析这张图，生成海报和 HTML 代码",
+        domain: "mixed",
+        intent: "hybrid.visual.code.create",
+        action: "create",
+        primaryAgent: "manager_agent",
+        workflow: {
+          mode: "hybrid",
+          outputArtifacts: ["image", "code"],
+          requiredAgents: ["image_agent", "document_agent"],
+          requiredCapabilities: ["media-analysis", "image-generation", "code-artifact"],
+          stages: [
+            {
+              id: "generate-image",
+              goal: "生成海报",
+              action: "create",
+              agent: "image_agent",
+              outputArtifacts: ["image"],
+            },
+            {
+              id: "create-code",
+              goal: "生成 HTML 代码",
+              action: "create",
+              agent: "document_agent",
+              outputArtifacts: ["code"],
+              dependsOn: ["generate-image"],
+            },
+          ],
+        },
+      }),
+    });
+
+    expect(
+      isSpecialistEnabledForContext(
+        { enabledRoutes: ["image"], handoffPolicy: () => false },
+        context
+      )
+    ).toBe(true);
+    expect(
+      isSpecialistEnabledForContext(
+        { enabledRoutes: ["document"], handoffPolicy: () => false },
+        context
+      )
+    ).toBe(true);
+    expect(
+      isSpecialistEnabledForContext(
+        { enabledRoutes: ["web"], handoffPolicy: () => false },
+        context
+      )
+    ).toBe(false);
+  });
 });
 
 function agentContext(

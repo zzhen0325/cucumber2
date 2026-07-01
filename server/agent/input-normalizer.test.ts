@@ -119,6 +119,91 @@ describe("finalizeNormalizedAgentInput", () => {
     expect(normalized.inputs.files).toEqual([]);
     expect(normalized.ambiguities).toEqual([]);
     expect(normalized.routing.candidateAgents).toEqual([]);
+    expect(normalized.workflow).toEqual({
+      mode: "single",
+      inputModalities: [],
+      outputArtifacts: [],
+      requiredAgents: [],
+      requiredCapabilities: [],
+      stages: [],
+    });
+  });
+
+  it("preserves hybrid workflow structure without turning it into tool params", () => {
+    const normalized = finalizeNormalizedAgentInput(
+      {
+        task: {
+          domain: "mixed",
+          intent: "hybrid.visual.code.create",
+          action: "create",
+          confidence: 0.86,
+        },
+        userGoal: {
+          original: "分析这张图，生成一版海报和对应 HTML 代码",
+          normalized: "分析参考图后生成图片和 HTML 代码产物",
+        },
+        routing: {
+          primaryAgent: "manager_agent",
+          candidateAgents: ["image_agent", "document_agent"],
+        },
+        inputs: {
+          text: "分析这张图，生成一版海报和对应 HTML 代码",
+          images: [{ id: "image-1", role: "reference" }],
+        },
+        workflow: {
+          mode: "hybrid",
+          inputModalities: ["text", "image"],
+          outputArtifacts: ["image", "code"],
+          requiredAgents: ["image_agent", "document_agent"],
+          requiredCapabilities: [
+            "media-analysis",
+            "image-generation",
+            "code-artifact",
+          ],
+          stages: [
+            {
+              id: "analyze-reference",
+              goal: "分析参考图的视觉线索",
+              action: "analyze",
+              agent: "image_agent",
+              inputModalities: ["image", "text"],
+              outputArtifacts: ["answer"],
+            },
+            {
+              id: "generate-image",
+              goal: "生成一版海报图片",
+              action: "create",
+              agent: "image_agent",
+              outputArtifacts: ["image"],
+              dependsOn: ["analyze-reference"],
+            },
+            {
+              id: "create-html",
+              goal: "生成对应 HTML 代码",
+              action: "create",
+              agent: "document_agent",
+              outputArtifacts: ["code"],
+              dependsOn: ["generate-image"],
+            },
+          ],
+        },
+      },
+      "分析这张图，生成一版海报和对应 HTML 代码"
+    );
+
+    expect(normalized.workflow).toMatchObject({
+      mode: "hybrid",
+      inputModalities: ["text", "image"],
+      outputArtifacts: ["image", "code"],
+      requiredAgents: ["image_agent", "document_agent"],
+      requiredCapabilities: [
+        "media-analysis",
+        "image-generation",
+        "code-artifact",
+      ],
+    });
+    expect(normalized.workflow.stages).toHaveLength(3);
+    expect(normalized.constraints.explicit).toEqual([]);
   });
 
   it("throws on an invalid primary agent", () => {

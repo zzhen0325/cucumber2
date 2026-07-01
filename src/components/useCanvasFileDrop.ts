@@ -21,6 +21,7 @@ type UseCanvasFileDropOptions = {
   nodes: AgentCanvasNode[];
   projectId: string | null;
   commitCanvasMutation?: (mutation: CanvasLocalMutation) => void;
+  onNodesAdded?: (nodeIds: string[]) => void;
   setEdges: Dispatch<SetStateAction<AgentCanvasEdge[]>>;
   setNodes: Dispatch<SetStateAction<AgentCanvasNode[]>>;
 };
@@ -35,6 +36,7 @@ export function useCanvasFileDrop({
   commitCanvasMutation,
   edges,
   nodes,
+  onNodesAdded,
   projectId,
   setEdges,
   setNodes,
@@ -115,6 +117,7 @@ export function useCanvasFileDrop({
           ...clearSelectedNodes(current),
           ...preparedUploads.map((item) => ({ ...item.localNode, selected: true })),
         ]);
+        onNodesAdded?.(preparedUploads.map((item) => item.localNode.id));
         setUploadError(null);
 
         for (const item of preparedUploads) {
@@ -177,7 +180,15 @@ export function useCanvasFileDrop({
         return false;
       }
     },
-    [canUploadFiles, commitCanvasMutation, nodes, projectId, setEdges, setNodes]
+    [
+      canUploadFiles,
+      commitCanvasMutation,
+      nodes,
+      onNodesAdded,
+      projectId,
+      setEdges,
+      setNodes,
+    ]
   );
 
   const handleFileDragEnter = useCallback(

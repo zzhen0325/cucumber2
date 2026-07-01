@@ -286,6 +286,77 @@ describe("skill retrieval", () => {
     );
   });
 
+  it("keeps image skills available for hybrid workflows that produce images", async () => {
+    mocks.listAgentSkillDefinitions.mockResolvedValue([
+      skill({
+        agentScope: "image",
+        bindings: {
+          agents: ["Cucumber Image Agent"],
+          scopes: ["tool.image.prompt", "tool.image.generate"],
+          tools: ["render_visual_style_prompt", "generate_image"],
+        },
+        capabilities: [
+          {
+            artifact: { kind: "image", subtype: "poster", format: "png" },
+            requiredCapabilities: ["image-generation"],
+            negativeCapabilities: [],
+          },
+        ],
+        name: "visual-prompt-cookbook",
+        purpose: "prompt_expansion",
+        tags: ["style-json"],
+        triggers: { canvasKinds: [], keywords: ["海报"] },
+      }),
+      skill({
+        agentScope: "document",
+        bindings: {
+          agents: ["Cucumber Document Agent"],
+          scopes: ["tool.doc.create", "write.artifact"],
+          tools: ["create_text_artifact"],
+        },
+        capabilities: [
+          {
+            artifact: { kind: "code", subtype: "html", format: "html" },
+            requiredCapabilities: ["code-artifact"],
+            negativeCapabilities: [],
+          },
+        ],
+        name: "html-code-writer",
+        produces: ["code"],
+        purpose: "code",
+        triggers: { canvasKinds: [], keywords: ["HTML"] },
+        uses: ["create_text_artifact"],
+      }),
+    ]);
+
+    const candidates = await retrieveRelevantAgentSkills(
+      input({
+        message: "分析这张图，生成海报和 HTML 代码",
+        normalizedInput: makeTaskFrame({
+          rawInput: "分析这张图，生成海报和 HTML 代码",
+          domain: "mixed",
+          intent: "hybrid.visual.code.create image-generation code-artifact",
+          action: "create",
+          primaryAgent: "manager_agent",
+          workflow: {
+            mode: "hybrid",
+            outputArtifacts: ["image", "code"],
+            requiredAgents: ["image_agent", "document_agent"],
+            requiredCapabilities: [
+              "media-analysis",
+              "image-generation",
+              "code-artifact",
+            ],
+          },
+        }),
+      })
+    );
+
+    expect(candidates.map((candidate) => candidate.name)).toEqual(
+      expect.arrayContaining(["visual-prompt-cookbook", "html-code-writer"])
+    );
+  });
+
   it("does not skip retrieval for complex signals even when normalized as an answer", async () => {
     mocks.listAgentSkillDefinitions.mockResolvedValue([
       skill({

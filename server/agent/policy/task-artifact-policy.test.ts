@@ -91,6 +91,50 @@ describe("task artifact policy", () => {
     ).toThrow("tool_policy_rejected");
   });
 
+  it("allows image generation tools for hybrid workflows with image output", () => {
+    expect(() =>
+      assertImageToolAllowed(
+        context({
+          normalizedInput: makeTaskFrame({
+            rawInput: "分析这张图并生成海报",
+            domain: "mixed",
+            intent: "analysis.then.image",
+            action: "create",
+            primaryAgent: "manager_agent",
+            workflow: {
+              mode: "multi_step",
+              outputArtifacts: ["image"],
+              requiredAgents: ["image_agent"],
+              requiredCapabilities: ["media-analysis", "image-generation"],
+            },
+          }),
+        }),
+        "generate_image"
+      )
+    ).not.toThrow();
+  });
+
+  it("allows text artifacts for hybrid workflows with code or document output", () => {
+    expect(() =>
+      assertTextArtifactToolAllowed(
+        context({
+          normalizedInput: makeTaskFrame({
+            rawInput: "生成海报并输出 HTML 代码",
+            domain: "mixed",
+            intent: "hybrid.visual.code.create",
+            action: "create",
+            primaryAgent: "manager_agent",
+            workflow: {
+              mode: "hybrid",
+              outputArtifacts: ["image", "code"],
+              requiredAgents: ["image_agent", "document_agent"],
+            },
+          }),
+        })
+      )
+    ).not.toThrow();
+  });
+
   it("blocks image generation for image analysis tasks", () => {
     expect(() =>
       assertImageToolAllowed(

@@ -11,6 +11,7 @@ export type CanvasMutationReason =
   | "paste"
   | "text-edit"
   | "markdown-edit"
+  | "html-edit"
   | "shape-edit"
   | "upload-complete"
   | "matting-pending"

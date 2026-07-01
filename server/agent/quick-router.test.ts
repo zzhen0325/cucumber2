@@ -237,6 +237,27 @@ describe("quick agent run router", () => {
     expect(route).toBe("image_task");
   });
 
+  it("routes normalized hybrid workflows to Manager orchestration", () => {
+    const route = routeNormalizedAgentRun(
+      input({ message: "分析这张图，生成海报和 HTML 代码" }),
+      makeTaskFrame({
+        rawInput: "分析这张图，生成海报和 HTML 代码",
+        domain: "mixed",
+        intent: "hybrid.visual.code.create",
+        action: "create",
+        primaryAgent: "manager_agent",
+        workflow: {
+          mode: "hybrid",
+          outputArtifacts: ["image", "code"],
+          requiredAgents: ["image_agent", "document_agent"],
+          requiredCapabilities: ["media-analysis", "image-generation", "code-artifact"],
+        },
+      })
+    );
+
+    expect(route).toBe("manager_task");
+  });
+
   it("routes normalized document artifacts to document tasks", () => {
     const route = routeNormalizedAgentRun(
       input({ message: "写一份 PRD" }),

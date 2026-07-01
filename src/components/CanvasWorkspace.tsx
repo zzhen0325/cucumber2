@@ -16,8 +16,7 @@ import {
   type NodeTypes,
   type ReactFlowInstance,
 } from "@xyflow/react";
-import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
+import { DefaultChatTransport, readUIMessageStream, type UIMessage } from "ai";
 import type { BundledLanguage } from "shiki";
 import {
   ArrowLeftIcon as ArrowLeft,
@@ -36,6 +35,7 @@ import {
   BranchIcon as Workflow,
   GlobeIcon as Globe2,
   FullScreenMaximizeIcon as Maximize2,
+  PencilIcon as Pencil,
   SearchIcon as Search,
   SparkleIcon as Sparkles,
   SquareIcon as Square,
@@ -78,6 +78,10 @@ import {
 } from "@/components/ai-elements/code-block";
 import { Edge } from "@/components/ai-elements/edge";
 import { FileUploadOverlay } from "@/components/FileUploadOverlay";
+import {
+  HtmlCraftEditor,
+  type HtmlCraftEditorSavePayload,
+} from "@/components/HtmlCraftEditor";
 import { HtmlSourcePreview } from "@/components/HtmlSourcePreview";
 import { LoadingIndicator } from "@/components/LoadingIndicator";
 import { LoadingScreen } from "@/components/LoadingScreen";
@@ -191,9 +195,17 @@ import {
 } from "@/lib/graph";
 import { getPromptNodeDimensions } from "@/lib/canvas-node-dimensions";
 import {
+  getNodesRelativeBounds,
+  resolveNonOverlappingCanvasPosition,
+} from "@/lib/canvas-placement";
+import {
   getArtifactHtmlBaseUrl,
   prepareHtmlPreviewDocument,
 } from "@/lib/html-preview";
+import {
+  createCraftHtmlContentJson,
+  readCraftHtmlStateFromArtifactPayload,
+} from "@/lib/html-craft";
 import {
   applyCanvasPatch,
   diffCanvasPatch,
@@ -204,7 +216,6 @@ import type { RunStepTraceEvent } from "@/lib/graph-projection";
 import {
   agentTextFromMessages,
   projectRuntimeEventsToCanvas,
-  runtimeEventsFromMessageParts,
   runtimeEventsFromMessages,
 } from "@/lib/runtime-event-renderer";
 import { cn } from "@/lib/utils";
@@ -262,6 +273,13 @@ const MarkdownNodeEditingContext = createContext<{
   readOnly: true,
   onChange: () => undefined,
 });
+const HtmlNodeEditingContext = createContext<{
+  onSave: (input: HtmlNodeSaveInput) => Promise<void>;
+  readOnly: boolean;
+}>({
+  onSave: async () => undefined,
+  readOnly: true,
+});
 const ManualNodeEditingContext = createContext<{
   onPromptTextChange: (nodeId: string, prompt: string) => void;
   readOnly: boolean;
@@ -282,10 +300,20 @@ const ImageNodeActionContext = createContext<{
 });
 
 type StorageStatus = "loading" | "saving" | "saved" | "error";
+type HtmlNodeSaveInput = HtmlCraftEditorSavePayload & {
+  artifactId: string;
+  expectedVersion?: number;
+  nodeId: string;
+  sourceUrl?: string;
+  title: string;
+};
 type StreamedRuntimeEvents = ReturnType<typeof runtimeEventsFromMessages>;
 type PendingStreamProjection = {
   events: StreamedRuntimeEvents;
   replace: boolean;
+};
+type AgentRunStream = {
+  controller: AbortController;
 };
 type AgentRunRequestBody = {
   projectId: string;
@@ -505,18 +533,23 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   } | null>(null);
   const activeRunId = useRef<string | null>(null);
   const stoppedRunIds = useRef(new Set<string>());
-  const activeRunMessageStartIndex = useRef(0);
   const loadedProjectIdRef = useRef<string | null>(null);
   const streamedRuntimeEvents = useRef<StreamedRuntimeEvents>([]);
   const streamedAgentTextByRunId = useRef(new Map<string, string>());
-  const queuedStreamProjection = useRef<PendingStreamProjection | null>(null);
-  const streamProjectionTimer = useRef<ReturnType<typeof window.setTimeout> | null>(
-    null
+  const queuedStreamProjections = useRef(new Map<string, PendingStreamProjection>());
+  const streamProjectionTimers = useRef(
+    new Map<string, ReturnType<typeof window.setTimeout>>()
+  );
+  const agentRunStreams = useRef(new Map<string, AgentRunStream>());
+  const agentRunTransport = useRef(
+    new DefaultChatTransport<UIMessage>({
+      api: "/api/agent-run",
+      credentials: "same-origin",
+    })
   );
   const traceReconcileTimers = useRef<number[]>([]);
   const traceRunIdRef = useRef<string | null>(null);
   const hasLoadedProject = useRef(false);
-  const messagesRef = useRef<ReturnType<typeof useChat>["messages"]>([]);
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
   const selectionBeforeNodeChangeRef = useRef<string[]>([]);
@@ -788,14 +821,10 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
   const commitStreamedRuntimeEvents = useCallback(
     (
+      runId: string,
       events: StreamedRuntimeEvents,
       options: { replace?: boolean } = {}
     ) => {
-      const runId = activeRunId.current;
-      if (!runId) {
-        return;
-      }
-
       const nextEvents = events.filter((event) => event.runNodeId === runId);
       acknowledgeRunCanvasPatchPersistence(nextEvents);
       const streamedAgentText = streamedAgentTextByRunId.current.get(runId);
@@ -883,55 +912,76 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     [acknowledgeRunCanvasPatchPersistence, setEdges, setNodes]
   );
 
-  const flushQueuedStreamProjection = useCallback(() => {
-    if (streamProjectionTimer.current) {
-      window.clearTimeout(streamProjectionTimer.current);
-      streamProjectionTimer.current = null;
+  const flushQueuedStreamProjection = useCallback((runId: string) => {
+    const timer = streamProjectionTimers.current.get(runId);
+    if (timer) {
+      window.clearTimeout(timer);
+      streamProjectionTimers.current.delete(runId);
     }
 
-    const queued = queuedStreamProjection.current;
+    const queued = queuedStreamProjections.current.get(runId);
     if (!queued) {
       return;
     }
 
-    queuedStreamProjection.current = null;
-    commitStreamedRuntimeEvents(queued.events, { replace: queued.replace });
+    queuedStreamProjections.current.delete(runId);
+    commitStreamedRuntimeEvents(runId, queued.events, { replace: queued.replace });
   }, [commitStreamedRuntimeEvents]);
 
-  const clearQueuedStreamProjection = useCallback(() => {
-    if (streamProjectionTimer.current) {
-      window.clearTimeout(streamProjectionTimer.current);
-      streamProjectionTimer.current = null;
+  const clearQueuedStreamProjection = useCallback((runId?: string) => {
+    if (runId) {
+      const timer = streamProjectionTimers.current.get(runId);
+      if (timer) {
+        window.clearTimeout(timer);
+        streamProjectionTimers.current.delete(runId);
+      }
+      queuedStreamProjections.current.delete(runId);
+      return;
     }
-    queuedStreamProjection.current = null;
+
+    for (const timer of streamProjectionTimers.current.values()) {
+      window.clearTimeout(timer);
+    }
+    streamProjectionTimers.current.clear();
+    queuedStreamProjections.current.clear();
   }, []);
 
   useEffect(() => clearQueuedStreamProjection, [clearQueuedStreamProjection]);
 
+  const abortAgentRunStreams = useCallback(() => {
+    const streams = [...agentRunStreams.current.values()];
+    agentRunStreams.current.clear();
+    for (const stream of streams) {
+      stream.controller.abort();
+    }
+  }, []);
+
   const projectStreamedRuntimeEvents = useCallback(
     (
+      runId: string,
       events: StreamedRuntimeEvents,
       options: { flush?: boolean; replace?: boolean } = {}
     ) => {
-      const previous = queuedStreamProjection.current;
-      queuedStreamProjection.current = {
+      const previous = queuedStreamProjections.current.get(runId);
+      queuedStreamProjections.current.set(runId, {
         events: dedupeRuntimeEvents([...(previous?.events ?? []), ...events]),
         replace: Boolean(previous?.replace || options.replace),
-      };
+      });
 
       if (options.flush) {
-        flushQueuedStreamProjection();
+        flushQueuedStreamProjection(runId);
         return;
       }
 
-      if (streamProjectionTimer.current) {
+      if (streamProjectionTimers.current.has(runId)) {
         return;
       }
 
-      streamProjectionTimer.current = window.setTimeout(() => {
-        streamProjectionTimer.current = null;
-        flushQueuedStreamProjection();
+      const timer = window.setTimeout(() => {
+        streamProjectionTimers.current.delete(runId);
+        flushQueuedStreamProjection(runId);
       }, STREAM_PROJECTION_THROTTLE_MS);
+      streamProjectionTimers.current.set(runId, timer);
     },
     [flushQueuedStreamProjection]
   );
@@ -1186,51 +1236,94 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     [setEdges, setNodes]
   );
 
-  const { messages, sendMessage, status, error, stop } = useChat({
-    experimental_throttle: STREAM_PROJECTION_THROTTLE_MS,
-    transport: new DefaultChatTransport({
-      api: "/api/agent-run",
-      credentials: "same-origin",
-    }),
-    onData: (dataPart) => {
-      projectStreamedRuntimeEvents(runtimeEventsFromMessageParts([dataPart]));
-    },
-    onFinish: ({ messages: finalMessages, isAbort, isDisconnect, isError }) => {
-      const runId = activeRunId.current;
-      if (!runId) {
-        return;
-      }
+  const runAgentStream = useCallback(
+    async ({
+      promptText,
+      requestBody,
+      runId,
+    }: {
+      promptText: string;
+      requestBody: AgentRunRequestBody;
+      runId: string;
+    }) => {
+      const controller = new AbortController();
+      agentRunStreams.current.set(runId, { controller });
 
-      projectStreamedRuntimeEvents(
-        runtimeEventsFromMessages(finalMessages, {
-          runNodeId: runId,
-          messageStartIndex: activeRunMessageStartIndex.current,
-        }),
-        { flush: true, replace: true }
-      );
-
-      if (isAbort) {
-        markRunStopped(runId);
-      } else if (isDisconnect) {
-        reconcileRunFromPersistedTrace(runId, "Agent 连接已中断。");
-      } else if (isError) {
-        reconcileRunFromPersistedTrace(runId, "Agent 流式响应异常。");
-      } else if (!isError) {
-        settleRunIfOutputReady(runId);
-        window.requestAnimationFrame(() => {
-          settleRunIfOutputReady(runId);
+      try {
+        const stream = await agentRunTransport.current.sendMessages({
+          abortSignal: controller.signal,
+          body: requestBody,
+          chatId: runId,
+          messageId: undefined,
+          messages: [
+            {
+              id: `${runId}-user`,
+              parts: [{ text: promptText, type: "text" }],
+              role: "user",
+            },
+          ],
+          trigger: "submit-message",
         });
+        let finalMessage: UIMessage | undefined;
+        const messageStream = readUIMessageStream<UIMessage>({
+          stream,
+          terminateOnError: true,
+        });
+
+        for await (const message of messageStream) {
+          finalMessage = message;
+          const runtimeEvents = runtimeEventsFromMessages([message], { runNodeId: runId });
+          const streamedAgentText = agentTextFromMessages([message]);
+          if (streamedAgentText) {
+            streamedAgentTextByRunId.current.set(runId, streamedAgentText);
+          }
+          projectStreamedRuntimeEvents(runId, runtimeEvents, { replace: true });
+        }
+
+        const finalEvents = finalMessage
+          ? runtimeEventsFromMessages([finalMessage], { runNodeId: runId })
+          : [];
+        projectStreamedRuntimeEvents(runId, finalEvents, {
+          flush: true,
+          replace: true,
+        });
+
+        if (hasTerminalRunEvent(finalEvents)) {
+          settleRunIfOutputReady(runId);
+          window.requestAnimationFrame(() => {
+            settleRunIfOutputReady(runId);
+          });
+        } else {
+          reconcileRunFromPersistedTrace(runId, "Agent 流式响应异常。");
+        }
+      } catch (nextError: unknown) {
+        flushQueuedStreamProjection(runId);
+        if (controller.signal.aborted) {
+          if (agentRunStreams.current.get(runId)?.controller === controller) {
+            markRunStopped(runId);
+          }
+          return;
+        }
+        reconcileRunFromPersistedTrace(runId, getClientError(nextError));
+      } finally {
+        if (agentRunStreams.current.get(runId)?.controller === controller) {
+          agentRunStreams.current.delete(runId);
+        }
       }
     },
-    onError: (nextError) => {
-      flushQueuedStreamProjection();
-      reconcileRunFromPersistedTrace(activeRunId.current, nextError.message);
-    },
-  });
+    [
+      flushQueuedStreamProjection,
+      markRunStopped,
+      projectStreamedRuntimeEvents,
+      reconcileRunFromPersistedTrace,
+      settleRunIfOutputReady,
+    ]
+  );
 
   const handleStop = useCallback(() => {
     const runId = activeRunId.current;
-    void stop();
+    const stream = runId ? agentRunStreams.current.get(runId) : null;
+    stream?.controller.abort();
     markRunStopped(runId);
 
     const projectId = loadedProjectIdRef.current;
@@ -1251,16 +1344,12 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       .catch((stopError: unknown) => {
         markRunError(runId, `停止 Agent 失败：${getClientError(stopError)}`);
       });
-  }, [markRunError, markRunStopped, stop]);
+  }, [markRunError, markRunStopped]);
 
   const selectedNodeIds = useMemo(
     () => nodes.filter((node) => node.selected).map((node) => node.id),
     [nodes]
   );
-
-  useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
 
   const selectedNodes = useMemo(() => {
     const selectedNodeIdSet = new Set(selectedNodeIds);
@@ -1306,7 +1395,6 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     persistedSelectedNodeIdRef.current = persistedSelectedNodeId;
   }, [persistedSelectedNodeId]);
 
-  const isBusy = status === "submitted" || status === "streaming";
   const canEditComposer =
     Boolean(loadedProjectId) &&
     storageStatus !== "loading" &&
@@ -1317,7 +1405,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     !hasLocalUploadNodes;
   const skillSlashQuery = getSkillSlashQuery(prompt);
   const showSkillMenu =
-    skillSlashQuery !== null && canEditComposer && !isBusy && !isReplayMode;
+    skillSlashQuery !== null && canEditComposer && !isReplayMode;
   const canUploadFiles =
     Boolean(loadedProjectId) &&
     storageStatus !== "loading" &&
@@ -1328,6 +1416,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     commitCanvasMutation,
     edges,
     nodes,
+    onNodesAdded: requestCanvasFit,
     projectId: loadedProjectId,
     setEdges,
     setNodes,
@@ -1430,7 +1519,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
     hasLoadedProject.current = false;
     activeRunId.current = null;
-    activeRunMessageStartIndex.current = 0;
+    abortAgentRunStreams();
     clearQueuedStreamProjection();
     streamedRuntimeEvents.current = [];
     streamedAgentTextByRunId.current.clear();
@@ -1535,8 +1624,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
     return () => {
       ignore = true;
+      abortAgentRunStreams();
+      clearQueuedStreamProjection();
     };
   }, [
+    abortAgentRunStreams,
     clearQueuedStreamProjection,
     mergePersistedRunTrace,
     projectId,
@@ -1934,7 +2026,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       selectedNodeIds?: string[];
     }) => {
       const value = promptText.trim();
-      if (!value || isBusy) {
+      if (!value) {
         return;
       }
       const projectId = loadedProjectIdRef.current;
@@ -1958,9 +2050,8 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       setDebugRunId(draft.runNode.id);
       setDebugEvents([]);
       setDebugOpen(true);
-      activeRunMessageStartIndex.current = messagesRef.current.length;
       clearTraceReconcileTimers();
-      clearQueuedStreamProjection();
+      clearQueuedStreamProjection(draft.runNode.id);
       streamedRuntimeEvents.current = streamedRuntimeEvents.current.filter(
         (event) => event.runNodeId !== draft.runNode.id
       );
@@ -2015,7 +2106,6 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         if (isActiveRunNode(nodesRef.current, draft.runNode.id)) {
           markRunError(draft.runNode.id, "项目内容保存失败，Agent 未启动。");
         }
-        void stop();
         return;
       }
 
@@ -2039,23 +2129,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         setForcedSkill(null);
       }
 
-      try {
-        await sendMessage(
-          { text: value },
-          {
-            body: requestBody,
-          }
-        );
-      } catch (sendError: unknown) {
-        pendingRunCanvasPatchAcksRef.current.delete(draft.runNode.id);
-        if (atomicRunSaveRevisionRef.current === requestRevision) {
-          atomicRunSaveRevisionRef.current = null;
-        }
-        if (isActiveRunNode(nodesRef.current, draft.runNode.id)) {
-          markRunError(draft.runNode.id, `Agent 启动失败：${getClientError(sendError)}`);
-        }
-        throw sendError;
-      }
+      void runAgentStream({
+        promptText: value,
+        requestBody,
+        runId: draft.runNode.id,
+      });
     },
     [
       buildPendingCanvasSaveInput,
@@ -2068,13 +2146,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       imageAspectRatio,
       imageProvider,
       imageResultCount,
-      isBusy,
       markRunError,
       requestCanvasFit,
-      sendMessage,
+      runAgentStream,
       showUploadError,
       storageError,
-      stop,
     ]
   );
 
@@ -2086,11 +2162,6 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       if (isReplayModeRef.current) {
         setStorageStatus("error");
         setStorageError("Run 回放模式为只读，退出回放后再重试。");
-        return;
-      }
-      if (isBusy) {
-        setStorageStatus("error");
-        setStorageError("Agent 正在运行，请稍后重试。");
         return;
       }
 
@@ -2124,7 +2195,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         ),
       });
     },
-    [isBusy, startAgentRun]
+    [startAgentRun]
   );
 
   useEffect(() => {
@@ -2237,12 +2308,6 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     saveProjectSnapshot,
   ]);
 
-  useEffect(() => {
-    if (error) {
-      reconcileRunFromPersistedTrace(activeRunId.current, error.message);
-    }
-  }, [error, reconcileRunFromPersistedTrace]);
-
   useEffect(
     () => () => {
       for (const timer of artifactContentSaveTimersRef.current.values()) {
@@ -2252,30 +2317,6 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     },
     []
   );
-
-  useEffect(() => {
-    const runId = activeRunId.current;
-    if (!runId) {
-      return;
-    }
-
-    const runtimeEvents = runtimeEventsFromMessages(messages, {
-      runNodeId: runId,
-      messageStartIndex: activeRunMessageStartIndex.current,
-    });
-    const streamedAgentText = agentTextFromMessages(messages, {
-      messageStartIndex: activeRunMessageStartIndex.current,
-    });
-    if (streamedAgentText) {
-      streamedAgentTextByRunId.current.set(runId, streamedAgentText);
-    }
-    projectStreamedRuntimeEvents(runtimeEvents, { replace: true });
-  }, [
-    loadedProjectId,
-    messages,
-    projectStreamedRuntimeEvents,
-    status,
-  ]);
 
   const handleCreationMouseDown = useCallback(
     (event: ReactMouseEvent) => {
@@ -2339,7 +2380,8 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           x: event.clientX,
           y: event.clientY,
         },
-        instance
+        instance,
+        nodesRef.current
       );
       const previous = {
         edges: edgesRef.current,
@@ -2357,6 +2399,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         patch: diffCanvasPatch(previous, next),
         persist: true,
       });
+      requestCanvasFit([node.id]);
       setCanvasTool("select");
     };
 
@@ -2367,7 +2410,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("mouseup", handleUp);
     };
-  }, [commitCanvasMutation, creationPreview]);
+  }, [commitCanvasMutation, creationPreview, requestCanvasFit]);
 
   const handleCopySelection = useCallback(() => {
     if (isReplayModeRef.current) {
@@ -2403,10 +2446,20 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     const minY = Math.min(...sourceNodes.map((node) => node.position.y));
 
     const pointer = pointerScreenRef.current;
-    const anchor =
+    const preferredAnchor =
       pointer && instance
         ? instance.screenToFlowPosition(pointer)
         : { x: minX + 32, y: minY + 32 };
+    const sourceBounds = getNodesRelativeBounds(sourceNodes, minX, minY);
+    const anchor = resolveNonOverlappingCanvasPosition(
+      {
+        x: preferredAnchor.x,
+        y: preferredAnchor.y,
+        width: sourceBounds.width,
+        height: sourceBounds.height,
+      },
+      nodesRef.current
+    );
 
     const idMap = new Map<string, string>();
     const pastedNodes = sourceNodes.map((source) => {
@@ -2441,7 +2494,8 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       patch: diffCanvasPatch(previous, next),
       persist: true,
     });
-  }, [commitCanvasMutation]);
+    requestCanvasFit(pastedNodes.map((node) => node.id));
+  }, [commitCanvasMutation, requestCanvasFit]);
 
   const handlePasteTextAsPromptNode = useCallback(
     (rawText: string) => {
@@ -2457,8 +2511,14 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
 
       const template = createManualPromptTemplate(promptText);
       const dimensions = getDefaultManualNodeDimensions(template);
-      const position = instance.screenToFlowPosition(
-        getCanvasPasteScreenPoint(pointerScreenRef.current)
+      const position = resolveNonOverlappingCanvasPosition(
+        {
+          ...instance.screenToFlowPosition(
+            getCanvasPasteScreenPoint(pointerScreenRef.current)
+          ),
+          ...dimensions,
+        },
+        nodesRef.current
       );
       const node = createManualCanvasNode(template, position, dimensions);
       const previous = { edges: edgesRef.current, nodes: nodesRef.current };
@@ -2474,10 +2534,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         patch: diffCanvasPatch(previous, next),
         persist: true,
       });
+      requestCanvasFit([node.id]);
 
       return true;
     },
-    [commitCanvasMutation]
+    [commitCanvasMutation, requestCanvasFit]
   );
 
   useEffect(() => {
@@ -2643,6 +2704,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           ),
           persist: false,
         });
+        requestCanvasFit([pendingId]);
         setStorageStatus("saving");
         setStorageError(null);
 
@@ -2676,6 +2738,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           });
           setStorageStatus("saved");
           setStorageError(null);
+          requestCanvasFit([result.node.id]);
         } catch (nextError: unknown) {
           if (nextError instanceof ProjectVersionConflictError) {
             projectVersionRef.current = nextError.project.version;
@@ -2710,7 +2773,14 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         imageProcessingInFlightRef.current.delete(operationKey);
       }
     },
-    [commitCanvasMutation, loadedProjectId, saveProjectSnapshot, setEdges, setNodes]
+    [
+      commitCanvasMutation,
+      loadedProjectId,
+      requestCanvasFit,
+      saveProjectSnapshot,
+      setEdges,
+      setNodes,
+    ]
   );
 
   const handleMattingImageNode = useCallback(
@@ -2774,6 +2844,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           ),
           persist: false,
         });
+        requestCanvasFit([pendingId]);
         setStorageStatus("saving");
         setStorageError(null);
 
@@ -2807,6 +2878,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           });
           setStorageStatus("saved");
           setStorageError(null);
+          requestCanvasFit([result.node.id]);
         } catch (nextError: unknown) {
           if (nextError instanceof ProjectVersionConflictError) {
             projectVersionRef.current = nextError.project.version;
@@ -2841,7 +2913,14 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         imageProcessingInFlightRef.current.delete(operationKey);
       }
     },
-    [commitCanvasMutation, loadedProjectId, saveProjectSnapshot, setEdges, setNodes]
+    [
+      commitCanvasMutation,
+      loadedProjectId,
+      requestCanvasFit,
+      saveProjectSnapshot,
+      setEdges,
+      setNodes,
+    ]
   );
 
   const imageNodeActions = useMemo(
@@ -3031,6 +3110,100 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     [isReplayMode, scheduleMarkdownArtifactContentSave, setNodes]
   );
 
+  const handleHtmlNodeSave = useCallback(
+    async ({
+      artifactId,
+      craftState,
+      expectedVersion,
+      html,
+      nodeId,
+      sourceUrl,
+      summary,
+      title,
+    }: HtmlNodeSaveInput) => {
+      if (isReplayMode) {
+        throw new Error("回放模式不可编辑 HTML。");
+      }
+
+      const projectId = loadedProjectIdRef.current;
+      if (!projectId) {
+        throw new Error("项目尚未加载，无法保存 HTML。");
+      }
+
+      setStorageStatus("saving");
+      setStorageError(null);
+
+      try {
+        const currentHtmlNode = nodesRef.current.find(
+          (node) => node.id === nodeId && node.data.kind === "webpage"
+        );
+        const version =
+          currentHtmlNode?.data.kind === "webpage"
+            ? currentHtmlNode.data.artifact.version
+            : expectedVersion;
+        const { artifact } = await updateTextArtifactContent({
+          artifactId,
+          contentFormat: "html",
+          contentJson: createCraftHtmlContentJson(craftState),
+          contentText: html,
+          expectedVersion: version,
+          metadata: {
+            editor: "craft",
+            format: "html",
+            mimeType: "text/html",
+            previewKind: "webpage",
+            ...(sourceUrl ? { sourceUrl } : {}),
+          },
+          mimeType: "text/html",
+          plainText: html,
+          previewKind: "webpage",
+          previewText: summary,
+          projectId,
+          summary,
+          title,
+          type: "webpage",
+        });
+
+        const previous = {
+          edges: edgesRef.current,
+          nodes: nodesRef.current,
+        };
+        const nextNodes = nodesRef.current.map((node) =>
+          node.id === nodeId && node.data.kind === "webpage"
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  artifact: {
+                    ...node.data.artifact,
+                    ...artifact,
+                    metadata: undefined,
+                  },
+                  html,
+                  sourceUrl: sourceUrl ?? node.data.sourceUrl,
+                  summary: artifact.summary ?? summary,
+                  title: artifact.title ?? title,
+                },
+              }
+            : node
+        );
+        commitCanvasMutation({
+          reason: "html-edit",
+          patch: diffCanvasPatch(previous, {
+            edges: edgesRef.current,
+            nodes: nextNodes,
+          }),
+          persist: true,
+        });
+      } catch (nextError: unknown) {
+        setStorageStatus("error");
+        setStorageError(`HTML 保存失败：${getClientError(nextError)}`);
+        throw nextError;
+      }
+    },
+    [commitCanvasMutation, isReplayMode]
+  );
+
   const handleStickyTextChange = useCallback(
     (nodeId: string, text: string) => {
       if (isReplayMode) {
@@ -3133,61 +3306,68 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
           onChange: handleMarkdownNodeChange,
         }}
       >
-        <ManualNodeEditingContext.Provider
+        <HtmlNodeEditingContext.Provider
           value={{
-            onPromptTextChange: handlePromptTextChange,
+            onSave: handleHtmlNodeSave,
             readOnly: isReplayMode,
-            onShapeLabelChange: handleShapeLabelChange,
-            onStickyTextChange: handleStickyTextChange,
           }}
         >
-          <ImageNodeActionContext.Provider value={imageNodeActions}>
-            <Canvas<AgentCanvasNode, AgentCanvasEdge>
-              className={`agent-canvas h-full w-full overflow-hidden rounded-canvas border border-canvas-border bg-canvas canvas-tool-${canvasTool}${
-                isCreateTool ? " canvas-tool-create" : ""
-              }`}
-              colorMode="light"
-              edgeTypes={edgeTypes}
-              fitViewOptions={{ maxZoom: 1, padding: 0.32 }}
-              maxZoom={5}
-              minZoom={0.05}
-              nodeTypes={nodeTypes}
-              nodes={canvasNodes}
-              edges={canvasEdges}
-              onInit={handleCanvasInit}
-              onEdgesChange={isReplayMode ? undefined : handleEdgesChange}
-              onNodeClick={handleNodeClick}
-              onNodesChange={isReplayMode ? undefined : handleNodesChange}
-              onMouseDown={handleCreationMouseDown}
-              onPaneClick={() => {
-                if (!isReplayMode && !isHandTool && !isCreateTool) {
-                  setNodes((current) => applySelectedNodeIds(current, []));
+          <ManualNodeEditingContext.Provider
+            value={{
+              onPromptTextChange: handlePromptTextChange,
+              readOnly: isReplayMode,
+              onShapeLabelChange: handleShapeLabelChange,
+              onStickyTextChange: handleStickyTextChange,
+            }}
+          >
+            <ImageNodeActionContext.Provider value={imageNodeActions}>
+              <Canvas<AgentCanvasNode, AgentCanvasEdge>
+                className={`agent-canvas h-full w-full overflow-hidden rounded-canvas border border-canvas-border bg-canvas canvas-tool-${canvasTool}${
+                  isCreateTool ? " canvas-tool-create" : ""
+                }`}
+                colorMode="light"
+                edgeTypes={edgeTypes}
+                fitViewOptions={{ maxZoom: 1, padding: 0.32 }}
+                maxZoom={5}
+                minZoom={0.05}
+                nodeTypes={nodeTypes}
+                nodes={canvasNodes}
+                edges={canvasEdges}
+                onInit={handleCanvasInit}
+                onEdgesChange={isReplayMode ? undefined : handleEdgesChange}
+                onNodeClick={handleNodeClick}
+                onNodesChange={isReplayMode ? undefined : handleNodesChange}
+                onMouseDown={handleCreationMouseDown}
+                onPaneClick={() => {
+                  if (!isReplayMode && !isHandTool && !isCreateTool) {
+                    setNodes((current) => applySelectedNodeIds(current, []));
+                  }
+                }}
+                selectionMode={SelectionMode.Partial}
+                nodesDraggable={!isReplayMode && !isHandTool && !isCreateTool}
+                nodesConnectable={false}
+                panOnDrag={
+                  isHandTool ? HAND_TOOL_PAN_ON_DRAG_BUTTONS : PAN_ON_DRAG_BUTTONS
                 }
-              }}
-              selectionMode={SelectionMode.Partial}
-              nodesDraggable={!isReplayMode && !isHandTool && !isCreateTool}
-              nodesConnectable={false}
-              panOnDrag={
-                isHandTool ? HAND_TOOL_PAN_ON_DRAG_BUTTONS : PAN_ON_DRAG_BUTTONS
-              }
-              selectionKeyCode={null}
-              multiSelectionKeyCode={SHIFT_MULTI_SELECTION_KEYS}
-              selectionOnDrag={!isHandTool && !isCreateTool}
-              proOptions={{ hideAttribution: true }}
-            >
-              <CanvasAutoFit
-                fitRequest={layoutFitRequest}
-                nodeCount={canvasNodes.length}
-              />
-              <MiniMap
-                pannable
-                zoomable
-                position="top-right"
-                className="hidden"
-              />
-            </Canvas>
-          </ImageNodeActionContext.Provider>
-        </ManualNodeEditingContext.Provider>
+                selectionKeyCode={null}
+                multiSelectionKeyCode={SHIFT_MULTI_SELECTION_KEYS}
+                selectionOnDrag={!isHandTool && !isCreateTool}
+                proOptions={{ hideAttribution: true }}
+              >
+                <CanvasAutoFit
+                  fitRequest={layoutFitRequest}
+                  nodeCount={canvasNodes.length}
+                />
+                <MiniMap
+                  pannable
+                  zoomable
+                  position="top-right"
+                  className="hidden"
+                />
+              </Canvas>
+            </ImageNodeActionContext.Provider>
+          </ManualNodeEditingContext.Provider>
+        </HtmlNodeEditingContext.Provider>
       </MarkdownNodeEditingContext.Provider>
       <CanvasCreationPreview preview={creationPreview} />
 
@@ -3232,7 +3412,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       <EmptyState visible={!nodes.length && !isReplayMode} />
 
       <Composer
-        busy={isBusy}
+        busy={false}
         canEdit={canEditComposer}
         canSubmit={canSubmit}
         composerMode={composerMode}
@@ -3279,12 +3459,24 @@ function CanvasAutoFit({
 }) {
   const { fitView } = useReactFlow<AgentCanvasNode, AgentCanvasEdge>();
   const { nodeIds, token } = fitRequest;
+  const didFitInitialContentRef = useRef(false);
+  const handledTokenRef = useRef(token);
 
   useEffect(() => {
     if (!nodeCount) {
+      didFitInitialContentRef.current = false;
+      handledTokenRef.current = token;
       return;
     }
 
+    const hasExplicitFitRequest = handledTokenRef.current !== token;
+    const shouldFitInitialContent = !didFitInitialContentRef.current;
+    if (!hasExplicitFitRequest && !shouldFitInitialContent) {
+      return;
+    }
+
+    didFitInitialContentRef.current = true;
+    handledTokenRef.current = token;
     const frame = window.requestAnimationFrame(() => {
       fitView({
         duration: 180,
@@ -3737,7 +3929,8 @@ function screenRectFromPoints(start: CanvasPoint, end: CanvasPoint) {
 function createManualCanvasNodeFromDrag(
   draft: CreationDraft,
   endScreen: CanvasPoint,
-  instance: ReactFlowInstance<AgentCanvasNode, AgentCanvasEdge>
+  instance: ReactFlowInstance<AgentCanvasNode, AgentCanvasEdge>,
+  existingNodes: readonly AgentCanvasNode[]
 ) {
   const endFlow = instance.screenToFlowPosition(endScreen);
   const defaultDimensions = getDefaultManualNodeDimensions(draft.template);
@@ -3752,7 +3945,10 @@ function createManualCanvasNodeFromDrag(
         height: Math.max(draggedHeight, minimumDimensions.height),
       };
   const position = usedDefaultSize
-    ? draft.startFlow
+    ? resolveNonOverlappingCanvasPosition(
+        { ...draft.startFlow, ...dimensions },
+        existingNodes
+      )
     : {
         x: Math.min(draft.startFlow.x, endFlow.x),
         y: Math.min(draft.startFlow.y, endFlow.y),
@@ -4327,6 +4523,7 @@ type ArtifactFrameProps = {
   data: ArtifactLikeNodeData;
   downloadText?: string;
   downloadUrl?: string;
+  extraActions?: ReactNode;
 };
 
 function ArtifactFrame({
@@ -4336,6 +4533,7 @@ function ArtifactFrame({
   data,
   downloadText,
   downloadUrl,
+  extraActions,
 }: ArtifactFrameProps) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
   const copyResetTimer = useRef<number | undefined>(undefined);
@@ -4395,6 +4593,7 @@ function ArtifactFrame({
           {displayName}
         </span>
         <div className={cn(ARTIFACT_FRAME_ACTIONS_CLASS, "nodrag nopan")}>
+          {extraActions}
           <button
             aria-label="复制产物内容"
             className={ARTIFACT_FRAME_ACTION_BUTTON_CLASS}
@@ -4846,6 +5045,7 @@ function HtmlPageNode({
   width,
   height,
 }: NodeProps<FlowNode<WebpageNodeData, "webpageNode">>) {
+  const { onSave, readOnly } = useContext(HtmlNodeEditingContext);
   const contentUrl = getArtifactContentUrl(data.artifact);
   const inlineHtml = data.html?.trim()
     ? data.html
@@ -4877,44 +5077,139 @@ function HtmlPageNode({
       : htmlLoadState === "error"
         ? "无法读取 HTML"
         : "暂无预览";
+  const [isEditorOpen, setEditorOpen] = useState(false);
+  const [editorLoading, setEditorLoading] = useState(false);
+  const [editorHtml, setEditorHtml] = useState("");
+  const [editorCraftState, setEditorCraftState] = useState<string | undefined>();
+
+  const openEditor = useCallback(() => {
+    setEditorHtml(htmlText);
+    setEditorCraftState(undefined);
+    setEditorLoading(Boolean(contentUrl));
+    setEditorOpen(true);
+  }, [contentUrl, htmlText]);
+
+  useEffect(() => {
+    if (!isEditorOpen || !contentUrl) {
+      return;
+    }
+
+    let ignore = false;
+
+    void fetchHtmlArtifactEditorContent(contentUrl)
+      .then((content) => {
+        if (ignore) {
+          return;
+        }
+        setEditorHtml(content.html ?? htmlText);
+        setEditorCraftState(content.craftState);
+      })
+      .catch(() => {
+        if (!ignore) {
+          setEditorHtml(htmlText);
+          setEditorCraftState(undefined);
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setEditorLoading(false);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [contentUrl, htmlText, isEditorOpen]);
+
+  const handleEditorSave = useCallback(
+    async (payload: HtmlCraftEditorSavePayload) => {
+      await onSave({
+        ...payload,
+        artifactId: data.artifact.id,
+        expectedVersion: data.artifact.version,
+        nodeId: id,
+        sourceUrl: htmlBaseUrl,
+        title: data.title,
+      });
+      setEditorHtml(payload.html);
+      setEditorCraftState(payload.craftState);
+    },
+    [data.artifact.id, data.artifact.version, data.title, htmlBaseUrl, id, onSave]
+  );
+
+  const editAction = (
+    <button
+      aria-label="编辑 HTML"
+      className={ARTIFACT_FRAME_ACTION_BUTTON_CLASS}
+      disabled={readOnly}
+      onClick={(event) => {
+        if (event.detail === 0) {
+          openEditor();
+        }
+        event.stopPropagation();
+      }}
+      onMouseDown={(event) => event.stopPropagation()}
+      onPointerDown={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openEditor();
+      }}
+      title="编辑"
+      type="button"
+    >
+      <Pencil size={13} />
+    </button>
+  );
 
   return (
-    <Node
-      className={cn(HTML_PAGE_CARD_CLASS, selected && "selected")}
-      handles={{ source: true, target: true }}
-      minHeight={180}
-      minWidth={180}
-      nodeId={id}
-      selected={selected}
-      style={getResizableNodeStyle(width, height)}
-    >
-      <ArtifactFrame
-        className={HTML_PAGE_CONTENT_CLASS}
-        copyText={htmlText}
-        data={data}
-        downloadText={htmlText ? previewHtml : undefined}
+    <>
+      <Node
+        className={cn(HTML_PAGE_CARD_CLASS, selected && "selected")}
+        handles={{ source: true, target: true }}
+        minHeight={180}
+        minWidth={180}
+        nodeId={id}
+        selected={selected}
+        style={getResizableNodeStyle(width, height)}
       >
-        <div className="html-page-frame nodrag nopan nowheel">
-          {htmlText ? (
-            <iframe
-              referrerPolicy="no-referrer"
-              sandbox="allow-forms allow-modals allow-scripts"
-              srcDoc={previewHtml}
-              title={`${data.title} 预览`}
-            />
-          ) : (
-            <div className="html-page-empty">{previewDisabledText}</div>
-          )}
-        </div>
-        {selected && (
-          <div className="html-page-footer">
-            <span className="copyable-text nodrag nopan">
-              {data.summary ?? "页面预览"}
-            </span>
+        <ArtifactFrame
+          className={HTML_PAGE_CONTENT_CLASS}
+          copyText={htmlText}
+          data={data}
+          downloadText={htmlText ? previewHtml : undefined}
+          extraActions={editAction}
+        >
+          <div className="html-page-frame nodrag nopan nowheel">
+            {htmlText ? (
+              <iframe
+                referrerPolicy="no-referrer"
+                sandbox="allow-forms allow-modals allow-scripts"
+                srcDoc={previewHtml}
+                title={`${data.title} 预览`}
+              />
+            ) : (
+              <div className="html-page-empty">{previewDisabledText}</div>
+            )}
           </div>
-        )}
-      </ArtifactFrame>
-    </Node>
+          {selected && (
+            <div className="html-page-footer">
+              <span className="copyable-text nodrag nopan">
+                {data.summary ?? "页面预览"}
+              </span>
+            </div>
+          )}
+        </ArtifactFrame>
+      </Node>
+      <HtmlCraftEditor
+        fallbackHtml={editorHtml || htmlText}
+        initialCraftState={editorCraftState}
+        loading={editorLoading}
+        onOpenChange={setEditorOpen}
+        onSave={handleEditorSave}
+        open={isEditorOpen}
+        title={data.title}
+      />
+    </>
   );
 }
 
@@ -5169,6 +5464,32 @@ function useTextArtifactContent(
   }, [contentUrl, enabled, maxLength]);
 
   return loadedPreview;
+}
+
+async function fetchHtmlArtifactEditorContent(contentUrl: string) {
+  const response = await fetch(contentUrl, {
+    credentials: "include",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const contentType = response.headers.get("Content-Type") ?? "";
+  if (contentType.includes("application/json")) {
+    const payload = await response.json();
+    return {
+      craftState: readCraftHtmlStateFromArtifactPayload(payload),
+      html: readArtifactContentTextPayload(payload),
+    };
+  }
+
+  return {
+    craftState: undefined,
+    html: isTextContentType(contentType) ? await response.text() : undefined,
+  };
 }
 
 const CODE_LANGUAGE_ALIASES: Record<string, BundledLanguage> = {

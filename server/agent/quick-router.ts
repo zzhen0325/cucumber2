@@ -9,7 +9,6 @@ import {
   type TaskDomain,
 } from "./input-normalizer.ts";
 import {
-  isImageTask,
   selectAgentRoute,
 } from "./task-router.ts";
 
@@ -65,7 +64,7 @@ export function skippedStepsForNormalizedRoute(route: AgentRunRoute) {
 export function routeAgentRunQuick(input: AgentRunInput): QuickAgentRunRoute {
   const prompt = normalizeText(input.message);
 
-  if (input.normalizedInput && isImageTask(input.normalizedInput)) {
+  if (input.normalizedInput && input.normalizedInput.task.domain === "image") {
     return {
       normalizedInput: input.normalizedInput,
       requiresModelNormalization: false,
