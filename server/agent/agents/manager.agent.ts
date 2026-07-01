@@ -1,6 +1,7 @@
 import { Agent } from "@openai/agents";
 
 import type { CucumberAgentContext } from "../context.ts";
+import type { AgentModelProviderName } from "../model-config.ts";
 import { proposeCanvasOperationsTool } from "../tools/canvas/propose-canvas-operations.tool.ts";
 import { searchKnowledgeTool } from "../tools/knowledge/search-knowledge.tool.ts";
 import { activateSkillTool } from "../tools/skills/activate-skill.tool.ts";
@@ -12,10 +13,15 @@ import {
   createSpecialistHandoffs,
 } from "./registry.ts";
 
-let managerAgent: Agent<CucumberAgentContext> | undefined;
+const managerAgents = new Map<string, Agent<CucumberAgentContext>>();
 
-export function createManagerAgent() {
-  managerAgent ??= new Agent<CucumberAgentContext>({
+export function createManagerAgent(agentProvider?: AgentModelProviderName) {
+  const cacheKey = agentProvider ?? "auto";
+  const cachedAgent = managerAgents.get(cacheKey);
+  if (cachedAgent) {
+    return cachedAgent;
+  }
+  const managerAgent = new Agent<CucumberAgentContext>({
     name: "Cucumber Manager",
     instructions: (runContext) => managerInstructions(runContext.context),
     tools: [
@@ -25,7 +31,8 @@ export function createManagerAgent() {
       searchKnowledgeTool,
       proposeCanvasOperationsTool,
     ],
-    handoffs: createSpecialistHandoffs(createSpecialistAgentRegistry()),
+    handoffs: createSpecialistHandoffs(createSpecialistAgentRegistry(agentProvider)),
   });
+  managerAgents.set(cacheKey, managerAgent);
   return managerAgent;
 }

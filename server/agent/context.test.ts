@@ -114,6 +114,24 @@ describe("agent context", () => {
     expect(buildCucumberAgentContext(input).imageProvider).toBe("seed5_duotu_zz");
   });
 
+  it("carries the requested agent provider into the agent context", () => {
+    const input = buildAgentRunInput({
+      userId: "user-1",
+      projectId: "project-1",
+      runNodeId: "run-2",
+      canvasContext: {
+        agentProvider: "super-relay",
+        prompt: "使用 GLM 5.2 回答",
+        promptNodeId: "prompt-2",
+        selectedNodeId: null,
+      },
+      projectSnapshot: snapshot(),
+    });
+
+    expect(input.agentProvider).toBe("super-relay");
+    expect(buildCucumberAgentContext(input).agentProvider).toBe("super-relay");
+  });
+
   it("carries a forced skill selection into the agent context", () => {
     const input = buildAgentRunInput({
       userId: "user-1",

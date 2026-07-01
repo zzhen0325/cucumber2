@@ -97,14 +97,17 @@ import { Node, NodeContent } from "@/components/ai-elements/node";
 import { Composer } from "@/components/canvas/Composer";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import {
+  AGENT_PROVIDER_STORAGE_KEY,
   COMPOSER_MODE_STORAGE_KEY,
   IMAGE_ASPECT_RATIO_STORAGE_KEY,
   IMAGE_PROVIDER_STORAGE_KEY,
   IMAGE_RESULT_COUNT_STORAGE_KEY,
+  readStoredAgentProvider,
   readStoredComposerMode,
   readStoredImageAspectRatio,
   readStoredImageProvider,
   readStoredImageResultCount,
+  type AgentProviderSelection,
   type ComposerMode,
   type ImageAspectRatioSelection,
   type ImageProviderSelection,
@@ -337,6 +340,7 @@ type AgentRunRequestBody = {
   runNodeId: string;
   canvasPatch?: Omit<SaveProjectCanvasPatchInput, "projectId">;
   canvasContext: {
+    agentProvider?: Exclude<AgentProviderSelection, "auto">;
     forcedSkillId?: string;
     forcedSkillName?: string;
     imageAspectRatio?: ImageAspectRatioSelection;
@@ -650,6 +654,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const [creationPreview, setCreationPreview] = useState<CreationPreview | null>(null);
   const [composerMode, setComposerModeState] = useState<ComposerMode>(
     () => readStoredComposerMode()
+  );
+  const [agentProvider, setAgentProviderState] = useState<AgentProviderSelection>(
+    () => readStoredAgentProvider()
   );
   const [imageAspectRatio, setImageAspectRatioState] =
     useState<ImageAspectRatioSelection>(() => readStoredImageAspectRatio());
@@ -2076,6 +2083,11 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
     window.localStorage.setItem(COMPOSER_MODE_STORAGE_KEY, mode);
   }, []);
 
+  const setAgentProvider = useCallback((provider: AgentProviderSelection) => {
+    setAgentProviderState(provider);
+    window.localStorage.setItem(AGENT_PROVIDER_STORAGE_KEY, provider);
+  }, []);
+
   const setImageAspectRatio = useCallback((ratio: ImageAspectRatioSelection) => {
     setImageAspectRatioState(ratio);
     window.localStorage.setItem(IMAGE_ASPECT_RATIO_STORAGE_KEY, ratio);
@@ -2132,6 +2144,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
   const startAgentRun = useCallback(
     async ({
       clearComposer = false,
+      agentProvider: requestedAgentProvider = agentProvider,
       forcedSkill: requestedForcedSkill = null,
       inputMode = composerMode,
       imageAspectRatio: requestedImageAspectRatio = imageAspectRatio,
@@ -2142,6 +2155,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       selectedNodeIds = selectedNodeId ? [selectedNodeId] : [],
     }: {
       clearComposer?: boolean;
+      agentProvider?: AgentProviderSelection;
       forcedSkill?: AgentSkillDefinitionSummary | null;
       promptText: string;
       retryFrom?: AgentRunRequestBody["canvasContext"]["retryFrom"];
@@ -2187,6 +2201,9 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         projectId,
         runNodeId: draft.runNode.id,
         canvasContext: {
+          ...(requestedAgentProvider !== "auto"
+            ? { agentProvider: requestedAgentProvider }
+            : {}),
           ...(requestedForcedSkill
             ? {
                 forcedSkillId: requestedForcedSkill.id,
@@ -2269,6 +2286,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
       composerMode,
       flushPendingArtifactContentSaves,
       hasLocalUploadNodes,
+      agentProvider,
       imageAspectRatio,
       imageProvider,
       imageResultCount,
@@ -3611,6 +3629,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         busy={false}
         canEdit={canEditComposer}
         canSubmit={canSubmit}
+        agentProvider={agentProvider}
         composerMode={composerMode}
         contextCount={contextCount}
         forcedSkill={forcedSkill}
@@ -3627,6 +3646,7 @@ export function CanvasWorkspace({ projectId, onBack }: CanvasWorkspaceProps) {
         replayActive={isReplayMode}
         selectionCount={selectedNodeIds.length}
         selectedNodes={selectedNodes}
+        setAgentProvider={setAgentProvider}
         setComposerMode={setComposerMode}
         setImageAspectRatio={setImageAspectRatio}
         setImageProvider={setImageProvider}

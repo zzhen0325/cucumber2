@@ -153,6 +153,9 @@ const imageResultCountSchema = z.union([
 ]);
 
 const canvasContextSchema = z.object({
+  agentProvider: z
+    .enum(["super-relay", "ark", "deepseek", "openai"])
+    .optional(),
   forcedSkillId: z.string().uuid().optional(),
   forcedSkillName: z.string().trim().min(1).max(120).optional(),
   imageAspectRatio: imageAspectRatioSchema.optional(),

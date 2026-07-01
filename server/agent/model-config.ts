@@ -19,29 +19,47 @@ import {
  */
 export type AgentModelConfiguration = {
   configured: boolean;
-  provider: "ark" | "deepseek" | "openai" | null;
+  provider: AgentModelProviderName | null;
   model: string | null;
 };
 
+export type AgentModelProviderName =
+  | "super-relay"
+  | "ark"
+  | "deepseek"
+  | "openai";
+
 type AgentModelProviderProfile = {
-  provider: Exclude<AgentModelConfiguration["provider"], null>;
+  provider: AgentModelProviderName;
   model: string;
   modelProvider: ModelProvider;
   tracingDisabled: boolean;
 };
 
-let cachedProfile: AgentModelProviderProfile | undefined;
+export type AgentRunnerModelConfig = {
+  provider: AgentModelProviderName;
+  model: string;
+  modelProvider: ModelProvider;
+  tracingDisabled: boolean;
+};
+
+const cachedProfiles = new Map<string, AgentModelProviderProfile>();
 let cachedInputNormalizerProfile: AgentModelProviderProfile | undefined;
 
-export function configureAgentModelProvider() {
-  getAgentModelProviderProfile();
+export function configureAgentModelProvider(
+  providerOverride?: AgentModelProviderName
+) {
+  getAgentModelProviderProfile(providerOverride);
 }
 
-export function getAgentRunnerConfig() {
-  const profile = getAgentModelProviderProfile();
+export function getAgentRunnerConfig(
+  providerOverride?: AgentModelProviderName
+): AgentRunnerModelConfig {
+  const profile = getAgentModelProviderProfile(providerOverride);
   return {
     model: profile.model,
     modelProvider: profile.modelProvider,
+    provider: profile.provider,
     tracingDisabled: profile.tracingDisabled,
   };
 }
@@ -55,8 +73,10 @@ export function getInputNormalizerRunnerConfig() {
   };
 }
 
-export function getAgentModelConfiguration(): AgentModelConfiguration {
-  const profile = readAgentModelProviderProfile();
+export function getAgentModelConfiguration(
+  providerOverride?: AgentModelProviderName
+): AgentModelConfiguration {
+  const profile = readAgentModelProviderProfile(providerOverride);
   if (!profile) {
     return { configured: false, provider: null, model: null };
   }
@@ -67,23 +87,45 @@ export function getAgentModelConfiguration(): AgentModelConfiguration {
   };
 }
 
-export function supportsHostedWebSearchTool() {
-  return getAgentModelConfiguration().provider === "openai";
+export function supportsHostedWebSearchTool(
+  providerOverride?: AgentModelProviderName
+) {
+  return getAgentModelConfiguration(providerOverride).provider === "openai";
 }
 
-function getAgentModelProviderProfile(): AgentModelProviderProfile {
+export function isAgentModelProviderName(
+  value: unknown
+): value is AgentModelProviderName {
+  return (
+    value === "super-relay" ||
+    value === "ark" ||
+    value === "deepseek" ||
+    value === "openai"
+  );
+}
+
+function getAgentModelProviderProfile(
+  providerOverride?: AgentModelProviderName
+): AgentModelProviderProfile {
+  const cacheKey = providerOverride ?? "auto";
+  const cachedProfile = cachedProfiles.get(cacheKey);
   if (cachedProfile !== undefined) {
     return cachedProfile;
   }
 
-  const profile = readAgentModelProviderProfile();
+  const profile = readAgentModelProviderProfile(providerOverride);
   if (!profile) {
+    if (providerOverride) {
+      throw new Error(
+        `Agent model provider "${providerOverride}" is not configured. ${getAgentProviderSetupHint(providerOverride)}`
+      );
+    }
     throw new Error(
-      "Agent model is not configured. Set ARK_API_KEY, DEEPSEEK_API_KEY, or OPENAI_API_KEY."
+      "Agent model is not configured. Set SUPER_RELAY_API_KEY, ARK_API_KEY, DEEPSEEK_API_KEY, or OPENAI_API_KEY."
     );
   }
 
-  cachedProfile = profile;
+  cachedProfiles.set(cacheKey, profile);
   return profile;
 }
 
@@ -112,54 +154,106 @@ function getInputNormalizerModelProviderProfile(): AgentModelProviderProfile {
   return cachedInputNormalizerProfile;
 }
 
-function readAgentModelProviderProfile(): AgentModelProviderProfile | null {
+function readAgentModelProviderProfile(
+  providerOverride?: AgentModelProviderName
+): AgentModelProviderProfile | null {
+  if (providerOverride) {
+    return readSpecificAgentModelProviderProfile(providerOverride);
+  }
+
+  return (
+    readSpecificAgentModelProviderProfile("super-relay") ??
+    readSpecificAgentModelProviderProfile("ark") ??
+    readSpecificAgentModelProviderProfile("deepseek") ??
+    readSpecificAgentModelProviderProfile("openai")
+  );
+}
+
+function readSpecificAgentModelProviderProfile(
+  provider: AgentModelProviderName
+): AgentModelProviderProfile | null {
+  if (provider === "super-relay") {
+    return readSuperRelayModelProviderProfile();
+  }
+  if (provider === "ark") {
+    return readArkModelProviderProfile();
+  }
+  if (provider === "deepseek") {
+    return readDeepSeekModelProviderProfile();
+  }
+  return readOpenAIModelProviderProfile();
+}
+
+function readSuperRelayModelProviderProfile(): AgentModelProviderProfile | null {
+  const superRelayKey = process.env.SUPER_RELAY_API_KEY?.trim();
+  if (!superRelayKey) {
+    return null;
+  }
+  const model = process.env.SUPER_RELAY_MODEL?.trim() || "opensource/glm5.2";
+  const client = new OpenAI({
+    apiKey: superRelayKey,
+    baseURL: readSuperRelayOpenAICompatibleBaseUrl(),
+  });
+  setTracingDisabled(true);
+  return {
+    provider: "super-relay",
+    model,
+    modelProvider: new StaticModelProvider(new OpenAIResponsesModel(client, model)),
+    tracingDisabled: true,
+  };
+}
+
+function readArkModelProviderProfile(): AgentModelProviderProfile | null {
   const arkKey = process.env.ARK_API_KEY?.trim();
-  if (arkKey) {
-    const model = process.env.ARK_MODEL?.trim() || "doubao-seed-2-0-lite-260428";
-    const client = new OpenAI({
-      apiKey: arkKey,
-      baseURL: readArkOpenAICompatibleBaseUrl(),
-    });
-    setTracingDisabled(true);
-    return {
-      provider: "ark",
-      model,
-      modelProvider: new StaticModelProvider(
-        new OpenAIResponsesModel(client, model)
-      ),
-      tracingDisabled: true,
-    };
+  if (!arkKey) {
+    return null;
   }
+  const model = process.env.ARK_MODEL?.trim() || "doubao-seed-2-0-lite-260428";
+  const client = new OpenAI({
+    apiKey: arkKey,
+    baseURL: readArkOpenAICompatibleBaseUrl(),
+  });
+  setTracingDisabled(true);
+  return {
+    provider: "ark",
+    model,
+    modelProvider: new StaticModelProvider(new OpenAIResponsesModel(client, model)),
+    tracingDisabled: true,
+  };
+}
 
+function readDeepSeekModelProviderProfile(): AgentModelProviderProfile | null {
   const deepseekKey = process.env.DEEPSEEK_API_KEY?.trim();
-  if (deepseekKey) {
-    const model = process.env.DEEPSEEK_MODEL?.trim() || "deepseek-v4-flash";
-    const client = new OpenAI({
-      apiKey: deepseekKey,
-      baseURL: process.env.DEEPSEEK_BASE_URL?.trim() || "https://api.deepseek.com",
-    });
-    setTracingDisabled(true);
-    return {
-      provider: "deepseek",
-      model,
-      modelProvider: new StaticModelProvider(
-        new OpenAIChatCompletionsModel(client, model)
-      ),
-      tracingDisabled: true,
-    };
+  if (!deepseekKey) {
+    return null;
   }
+  const model = process.env.DEEPSEEK_MODEL?.trim() || "deepseek-v4-flash";
+  const client = new OpenAI({
+    apiKey: deepseekKey,
+    baseURL: process.env.DEEPSEEK_BASE_URL?.trim() || "https://api.deepseek.com",
+  });
+  setTracingDisabled(true);
+  return {
+    provider: "deepseek",
+    model,
+    modelProvider: new StaticModelProvider(
+      new OpenAIChatCompletionsModel(client, model)
+    ),
+    tracingDisabled: true,
+  };
+}
 
-  if (process.env.OPENAI_API_KEY?.trim()) {
-    const model = process.env.OPENAI_MODEL?.trim() || "gpt-5.4-mini";
-    return {
-      provider: "openai",
-      model,
-      modelProvider: new OpenAIModelProvider(model),
-      tracingDisabled: false,
-    };
+function readOpenAIModelProviderProfile(): AgentModelProviderProfile | null {
+  if (!process.env.OPENAI_API_KEY?.trim()) {
+    return null;
   }
-
-  return null;
+  const model = process.env.OPENAI_MODEL?.trim() || "gpt-5.4-mini";
+  return {
+    provider: "openai",
+    model,
+    modelProvider: new OpenAIModelProvider(model),
+    tracingDisabled: false,
+  };
 }
 
 class StaticModelProvider implements ModelProvider {
@@ -188,7 +282,32 @@ class OpenAIModelProvider implements ModelProvider {
 }
 
 function readArkOpenAICompatibleBaseUrl() {
-  return (process.env.ARK_BASE_URL?.trim() || "https://ark.cn-beijing.volces.com/api/v3")
-    .replace(/\/responses\/?$/, "")
-    .replace(/\/+$/, "");
+  return normalizeResponsesBaseUrl(
+    process.env.ARK_BASE_URL?.trim() ||
+      "https://ark.cn-beijing.volces.com/api/v3"
+  );
+}
+
+function readSuperRelayOpenAICompatibleBaseUrl() {
+  return normalizeResponsesBaseUrl(
+    process.env.SUPER_RELAY_BASE_URL?.trim() ||
+      "https://super-relay.byted.org/v1"
+  );
+}
+
+function normalizeResponsesBaseUrl(baseUrl: string) {
+  return baseUrl.replace(/\/responses\/?$/, "").replace(/\/+$/, "");
+}
+
+function getAgentProviderSetupHint(provider: AgentModelProviderName) {
+  if (provider === "super-relay") {
+    return "Set SUPER_RELAY_API_KEY.";
+  }
+  if (provider === "ark") {
+    return "Set ARK_API_KEY.";
+  }
+  if (provider === "deepseek") {
+    return "Set DEEPSEEK_API_KEY.";
+  }
+  return "Set OPENAI_API_KEY.";
 }

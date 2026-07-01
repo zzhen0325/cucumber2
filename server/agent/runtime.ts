@@ -37,7 +37,11 @@ import {
   shouldBlockRunForMaterialization,
   shouldMaterializeRunEvent,
 } from "./materialize-run.ts";
-import { getAgentRunnerConfig } from "./model-config.ts";
+import {
+  getAgentRunnerConfig,
+  type AgentModelProviderName,
+  type AgentRunnerModelConfig,
+} from "./model-config.ts";
 import { retrieveRelevantAgentSkills } from "./skills/skill-retrieval.ts";
 import { getAgentSkillRegistryCacheState } from "./skills/skill-registry.ts";
 import type { ActivatedAgentSkill } from "./skills/types.ts";
@@ -55,8 +59,8 @@ import {
 } from "./quick-router.ts";
 import { validateCanvasOperations } from "./policy/canvas-operation-policy.ts";
 
-let runner: Runner | undefined;
-let chatRunner: Runner | undefined;
+const runners = new Map<string, Runner>();
+const chatRunners = new Map<string, Runner>();
 let chatAgent: Agent<CucumberAgentContext> | undefined;
 
 const MAX_RUN_INPUT_IMAGES = 4;
@@ -116,7 +120,10 @@ export class OpenAIAgentsRuntime implements AgentRuntime {
         },
       };
     }
-    const startAgent = createStartingAgentForRun(normalizedInput);
+    const startAgent = createStartingAgentForRun(
+      normalizedInput,
+      context.agentProvider
+    );
 
     const agentStartPhase = startRunPhase(
       "agent.start",
@@ -126,12 +133,15 @@ export class OpenAIAgentsRuntime implements AgentRuntime {
     const maxTurns = 8;
     yield runPhaseStarted(agentStartPhase, {
       agentName: startAgent.name,
+      agentProvider: context.agentProvider ?? "auto",
     });
     let stream;
+    let runnerConfig: AgentRunnerModelConfig | undefined;
     try {
+      runnerConfig = getAgentRunnerConfig(context.agentProvider);
       const prompt = buildManagerRunPrompt(normalizedRunInput);
       const runnerInput = await buildAgentRunnerInput(normalizedRunInput, prompt);
-      stream = await getAgentRunner().run(startAgent, runnerInput, {
+      stream = await getAgentRunner(runnerConfig).run(startAgent, runnerInput, {
         context,
         maxTurns,
         signal: input.signal,
@@ -139,11 +149,16 @@ export class OpenAIAgentsRuntime implements AgentRuntime {
       });
       yield runPhaseCompleted(agentStartPhase, {
         agentName: startAgent.name,
+        model: runnerConfig.model,
+        modelProvider: runnerConfig.provider,
         maxTurns,
       });
     } catch (error) {
       yield runPhaseFailed(agentStartPhase, error, {
         agentName: startAgent.name,
+        agentProvider: context.agentProvider ?? "auto",
+        model: runnerConfig?.model,
+        modelProvider: runnerConfig?.provider,
         maxTurns,
       });
       throw error;
@@ -154,11 +169,17 @@ export class OpenAIAgentsRuntime implements AgentRuntime {
 
 export const agentRuntime = new OpenAIAgentsRuntime();
 
-function getAgentRunner() {
-  runner ??= new Runner({
+function getAgentRunner(config: AgentRunnerModelConfig = getAgentRunnerConfig()) {
+  const key = getRunnerConfigCacheKey(config);
+  const cachedRunner = runners.get(key);
+  if (cachedRunner) {
+    return cachedRunner;
+  }
+  const runner = new Runner({
     workflowName: "Cucumber Agent",
-    ...getAgentRunnerConfig(),
+    ...toRunnerOptions(config),
   });
+  runners.set(key, runner);
   return runner;
 }
 
@@ -168,11 +189,14 @@ export async function* runChatAgent(
   const context = buildCucumberAgentContext(input);
   const chatPhase = startRunPhase("chat.start", "启动 Chat Agent", "execute");
   yield runPhaseStarted(chatPhase, {
+    agentProvider: context.agentProvider ?? "auto",
     route: "chat_agent_task",
   });
   let stream;
+  let runnerConfig: AgentRunnerModelConfig | undefined;
   try {
-    stream = await getChatRunner().run(
+    runnerConfig = getAgentRunnerConfig(context.agentProvider);
+    stream = await getChatRunner(runnerConfig).run(
       getChatAgent(),
       buildChatPrompt(input),
       {
@@ -183,10 +207,15 @@ export async function* runChatAgent(
       }
     );
     yield runPhaseCompleted(chatPhase, {
+      model: runnerConfig.model,
+      modelProvider: runnerConfig.provider,
       route: "chat_agent_task",
     });
   } catch (error) {
     yield runPhaseFailed(chatPhase, error, {
+      agentProvider: context.agentProvider ?? "auto",
+      model: runnerConfig?.model,
+      modelProvider: runnerConfig?.provider,
       route: "chat_agent_task",
     });
     throw error;
@@ -206,12 +235,30 @@ export function prewarmAgentRuntimeWorld() {
   createWebAgent();
 }
 
-function getChatRunner() {
-  chatRunner ??= new Runner({
+function getChatRunner(config: AgentRunnerModelConfig = getAgentRunnerConfig()) {
+  const key = getRunnerConfigCacheKey(config);
+  const cachedRunner = chatRunners.get(key);
+  if (cachedRunner) {
+    return cachedRunner;
+  }
+  const runner = new Runner({
     workflowName: "Cucumber Chat",
-    ...getAgentRunnerConfig(),
+    ...toRunnerOptions(config),
   });
-  return chatRunner;
+  chatRunners.set(key, runner);
+  return runner;
+}
+
+function getRunnerConfigCacheKey(config: AgentRunnerModelConfig) {
+  return `${config.provider}:${config.model}`;
+}
+
+function toRunnerOptions(config: AgentRunnerModelConfig) {
+  return {
+    model: config.model,
+    modelProvider: config.modelProvider,
+    tracingDisabled: config.tracingDisabled,
+  };
 }
 
 function getChatAgent() {
@@ -289,7 +336,8 @@ function elapsedRunPhaseMs(timer: RunPhaseTimer) {
 }
 
 function createStartingAgentForRun(
-  normalizedInput: NonNullable<AgentRunInput["normalizedInput"]>
+  normalizedInput: NonNullable<AgentRunInput["normalizedInput"]>,
+  agentProvider?: AgentModelProviderName
 ) {
   switch (selectAgentRoute(normalizedInput)) {
     case "document":
@@ -297,12 +345,12 @@ function createStartingAgentForRun(
     case "image":
       return createImageAgent();
     case "research":
-      return createResearchAgent();
+      return createResearchAgent(agentProvider);
     case "web":
       return createWebAgent();
     case "manager":
     default:
-      return createManagerAgent();
+      return createManagerAgent(agentProvider);
   }
 }
 
@@ -607,6 +655,7 @@ export async function executeAgentRun({
       stepId: "run",
       type: "run.created",
       payload: buildRedactedPayload({
+        agentProvider: agentInput.agentProvider ?? "auto",
         canvasPatchApplied: agentInput.canvasPatchApplied || undefined,
         imageAspectRatio: agentInput.imageAspectRatio,
         imageResultCount: agentInput.imageResultCount,
@@ -730,6 +779,7 @@ export async function executeAgentRun({
       stepId: "input",
       type: "input.normalized",
       payload: buildRedactedPayload({
+        agentProvider: agentInput.agentProvider ?? "auto",
         normalizedInput: agentInput.normalizedInput,
         imageAspectRatio: agentInput.imageAspectRatio,
         imageResultCount: agentInput.imageResultCount,
@@ -819,6 +869,7 @@ export async function executeAgentRun({
         errorCode: failure.errorCode,
         errorSource: failure.errorSource,
         errorText: message,
+        agentProvider: agentInput?.agentProvider ?? input.canvasContext.agentProvider ?? "auto",
         imageAspectRatio: agentInput?.imageAspectRatio ?? input.canvasContext.imageAspectRatio,
         imageResultCount: agentInput?.imageResultCount ?? input.canvasContext.imageResultCount,
         imageProvider: agentInput?.imageProvider ?? input.canvasContext.imageProvider,

@@ -265,7 +265,7 @@
 - 本地上传中/失败的节点不会进入项目持久化或 Agent upstream context；上传失败会留在画布上展示错误状态。
 - `generate_image` 和 `upscale_image` 收到 provider URL 后由服务端下载并上传到 `agent-assets`，随后才发 `artifact.created`；转存失败会走 `tool.error`/`run.failed`，不会生成假成功结果节点。toolbar 高清放大和抠图同样先转存再把真实节点写回项目。
 - 上游图片引用对 Manager prompt 仍隐藏真实 URL；调用 Seedream/Coze/ByteArtist 前，服务端仅根据 `r2://agent-assets/...` 临时签发 provider 可读 URL。
-- Agent 模型 provider 改为 Agents SDK 官方 `ModelProvider` + `Runner({ model, modelProvider })` 写法；Manager、specialist、input normalizer 和 prompt expansion 共用同一 Runner provider 配置。
+- Agent 模型 provider 使用 Agents SDK 官方 `ModelProvider` + `Runner({ model, modelProvider })` 写法；默认优先级为 Super Relay、Ark、DeepSeek、OpenAI。前端输入器可为本轮 Run 选择 `agentProvider`，`auto` 沿用服务端优先级；Manager、specialist 和 prompt expansion 使用同一本轮 provider，input normalizer 仍固定 Ark。
 - 媒体 provider 独立暴露：图片生成 provider 和图片抠图 provider 已接入配置检查；视频 provider 仅进入 `/api/health` 配置面，尚未启用 `generate_video`、video artifact 或画布投影。
 - 私有预览统一走 `/api/projects/:projectId/artifacts/:artifactId/content`，服务端校验项目权限后从 R2 读取对象内容。
 - P1 typed artifact shell：非图片 artifact 节点统一展示标题、摘要、来源工具/Run、创建时间、大小、预览/打开/下载入口；短文本最终回复保留在 Run 节点，只有 Document/Web/Research 等工具真实创建 artifact 时才物化为 Markdown/document/webpage 节点。

@@ -2,7 +2,10 @@ import { Agent, Runner, tool } from "@openai/agents";
 import { z } from "zod";
 
 import type { CucumberAgentContext } from "../../context.ts";
-import { getAgentRunnerConfig } from "../../model-config.ts";
+import {
+  getAgentRunnerConfig,
+  type AgentRunnerModelConfig,
+} from "../../model-config.ts";
 import { assertImageToolAllowed } from "../../policy/task-artifact-policy.ts";
 import type { ActivatedAgentSkill } from "../../skills/types.ts";
 
@@ -17,7 +20,7 @@ const expandImagePromptInputSchema = z.object({
     .optional(),
 });
 
-let promptExpansionRunner: Runner | undefined;
+const promptExpansionRunners = new Map<string, Runner>();
 
 export const expandImagePromptTool = tool({
   name: "expand_image_prompt",
@@ -47,7 +50,7 @@ export const expandImagePromptTool = tool({
       instructions: buildPromptExpansionInstructions(skill.body),
       tools: [],
     });
-    const result = await getPromptExpansionRunner().run(
+    const result = await getPromptExpansionRunner(context).run(
       agent,
       buildPromptExpansionInput({
         prompt: args.prompt,
@@ -72,12 +75,31 @@ export const expandImagePromptTool = tool({
   },
 });
 
-function getPromptExpansionRunner() {
-  promptExpansionRunner ??= new Runner({
+function getPromptExpansionRunner(context: CucumberAgentContext) {
+  const config = getAgentRunnerConfig(context.agentProvider);
+  const key = getRunnerConfigCacheKey(config);
+  const cachedRunner = promptExpansionRunners.get(key);
+  if (cachedRunner) {
+    return cachedRunner;
+  }
+  const runner = new Runner({
     workflowName: "Cucumber Image Prompt Skill",
-    ...getAgentRunnerConfig(),
+    ...toRunnerOptions(config),
   });
-  return promptExpansionRunner;
+  promptExpansionRunners.set(key, runner);
+  return runner;
+}
+
+function getRunnerConfigCacheKey(config: AgentRunnerModelConfig) {
+  return `${config.provider}:${config.model}`;
+}
+
+function toRunnerOptions(config: AgentRunnerModelConfig) {
+  return {
+    model: config.model,
+    modelProvider: config.modelProvider,
+    tracingDisabled: config.tracingDisabled,
+  };
 }
 
 function buildPromptExpansionInstructions(skillBody: string) {

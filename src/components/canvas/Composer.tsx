@@ -21,9 +21,11 @@ import {
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import {
+  readAgentProviderSelection,
   readImageAspectRatioSelection,
   readImageProviderSelection,
   readImageResultCountSelection,
+  type AgentProviderSelection,
   type ComposerMode,
   type ImageAspectRatioSelection,
   type ImageProviderSelection,
@@ -61,6 +63,7 @@ type ComposerProps = {
   busy: boolean;
   canEdit: boolean;
   canSubmit: boolean;
+  agentProvider: AgentProviderSelection;
   composerMode: ComposerMode;
   contextCount: number;
   forcedSkill: AgentSkillDefinitionSummary | null;
@@ -78,6 +81,7 @@ type ComposerProps = {
   selectionCount: number;
   selectedNodes: AgentCanvasNode[];
   setComposerMode: (value: ComposerMode) => void;
+  setAgentProvider: (value: AgentProviderSelection) => void;
   setImageAspectRatio: (value: ImageAspectRatioSelection) => void;
   setImageProvider: (value: ImageProviderSelection) => void;
   setImageResultCount: (value: ImageResultCountSelection) => void;
@@ -100,6 +104,7 @@ export function Composer({
   busy,
   canEdit,
   canSubmit,
+  agentProvider,
   composerMode,
   contextCount,
   forcedSkill,
@@ -117,6 +122,7 @@ export function Composer({
   selectionCount,
   selectedNodes,
   setComposerMode,
+  setAgentProvider,
   setImageAspectRatio,
   setImageProvider,
   setImageResultCount,
@@ -200,6 +206,11 @@ export function Composer({
               disabled={busy || replayActive}
               value={composerMode}
               onChange={setComposerMode}
+            />
+            <AgentProviderSelect
+              disabled={busy || replayActive}
+              value={agentProvider}
+              onChange={setAgentProvider}
             />
             <ComposerInlineTokens
               forcedSkill={forcedSkill}
@@ -450,6 +461,44 @@ function ComposerFooterStatus({ label }: { label: string }) {
       <Sparkles size={14} />
       <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
     </span>
+  );
+}
+
+function AgentProviderSelect({
+  disabled,
+  value,
+  onChange,
+}: {
+  disabled: boolean;
+  value: AgentProviderSelection;
+  onChange: (value: AgentProviderSelection) => void;
+}) {
+  return (
+    <PromptInputSelect
+      disabled={disabled}
+      value={value}
+      onValueChange={(nextValue) =>
+        onChange(readAgentProviderSelection(nextValue))
+      }
+    >
+      <PromptInputSelectTrigger
+        aria-label="选择 Agent 模型"
+        className={cn(
+          COMPOSER_SELECT_TRIGGER_CLASS,
+          "w-[116px] min-w-[116px] max-[560px]:w-[96px] max-[560px]:min-w-[96px] max-[560px]:px-2"
+        )}
+        title="选择 Agent 模型"
+      >
+        <PromptInputSelectValue />
+      </PromptInputSelectTrigger>
+      <PromptInputSelectContent align="start" className={COMPOSER_SELECT_CONTENT_CLASS}>
+        <PromptInputSelectItem value="auto">自动</PromptInputSelectItem>
+        <PromptInputSelectItem value="super-relay">GLM 5.2</PromptInputSelectItem>
+        <PromptInputSelectItem value="ark">Doubao</PromptInputSelectItem>
+        <PromptInputSelectItem value="deepseek">DeepSeek</PromptInputSelectItem>
+        <PromptInputSelectItem value="openai">OpenAI</PromptInputSelectItem>
+      </PromptInputSelectContent>
+    </PromptInputSelect>
   );
 }
 

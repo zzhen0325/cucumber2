@@ -14,6 +14,7 @@ import type {
 import type { CanvasOperation } from "../../src/types/runtime.ts";
 import type { CanvasProject } from "../canvas-store.ts";
 import type { ImageProviderSelection } from "../provider-config.ts";
+import type { AgentModelProviderName } from "./model-config.ts";
 import {
   finalizeNormalizedAgentInput,
   type NormalizedAgentInput,
@@ -27,6 +28,7 @@ export type CanvasSnapshot = {
 };
 
 export type AgentRunRequestContext = {
+  agentProvider?: AgentModelProviderName;
   forcedSkillId?: string;
   forcedSkillName?: string;
   imageAspectRatio?: ImageAspectRatioSelection;
@@ -41,6 +43,7 @@ export type AgentRunRequestContext = {
 };
 
 export type AgentRunInput = {
+  agentProvider?: AgentModelProviderName;
   userId: string;
   workspaceId?: string;
   projectId: string;
@@ -210,6 +213,7 @@ export type PendingCucumberEvent = Exclude<
 >;
 
 export type CucumberAgentContext = {
+  agentProvider?: AgentModelProviderName;
   userId: string;
   workspaceId?: string;
   projectId: string;
@@ -346,6 +350,7 @@ export function buildAgentRunInput({
 
   return {
     canvasId: projectId,
+    agentProvider: canvasContext.agentProvider,
     canvasPatchApplied,
     canvasSnapshot: {
       nodes: projectSnapshot.nodes,
@@ -535,16 +540,19 @@ function sanitizeArtifactRefForRuntime(
     return undefined;
   }
 
-  const { contentRef: _contentRef, metadata, ...rest } = artifact;
+  const { contentRef, metadata, ...rest } = artifact;
+  void contentRef;
   if (!metadata) {
     return rest;
   }
 
   const {
-    storageBucket: _storageBucket,
-    storagePath: _storagePath,
+    storageBucket,
+    storagePath,
     ...safeMetadata
   } = metadata;
+  void storageBucket;
+  void storagePath;
   return {
     ...rest,
     metadata: Object.keys(safeMetadata).length ? safeMetadata : undefined,
@@ -597,6 +605,7 @@ export function buildCucumberAgentContext(input: AgentRunInput): CucumberAgentCo
 
   return {
     canvasId: input.canvasId,
+    agentProvider: input.agentProvider,
     canvasSnapshot: input.canvasSnapshot,
     knownNodeIds: [...knownNodeIds],
     activatedSkills: [],

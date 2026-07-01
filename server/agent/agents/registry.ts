@@ -7,6 +7,7 @@ import {
   type SpecialistRoute,
 } from "../task-router.ts";
 import type { CucumberAgentContext } from "../context.ts";
+import type { AgentModelProviderName } from "../model-config.ts";
 import { createDocumentAgent } from "./document.agent.ts";
 import { createImageAgent } from "./image.agent.ts";
 import { createResearchAgent } from "./research.agent.ts";
@@ -21,15 +22,22 @@ type SpecialistAgentDefinition = {
   requiredTools: string[];
 };
 
-let specialistAgentRegistry: SpecialistAgentDefinition[] | undefined;
+const specialistAgentRegistries = new Map<string, SpecialistAgentDefinition[]>();
 
-export function createSpecialistAgentRegistry(): SpecialistAgentDefinition[] {
+export function createSpecialistAgentRegistry(
+  agentProvider?: AgentModelProviderName
+): SpecialistAgentDefinition[] {
+  const cacheKey = agentProvider ?? "auto";
+  const cachedRegistry = specialistAgentRegistries.get(cacheKey);
+  if (cachedRegistry) {
+    return cachedRegistry;
+  }
   const documentCapability = requireCapabilityRoute("document");
   const webCapability = requireCapabilityRoute("web");
   const researchCapability = requireCapabilityRoute("research");
   const imageCapability = requireCapabilityRoute("image");
 
-  specialistAgentRegistry ??= [
+  const specialistAgentRegistry: SpecialistAgentDefinition[] = [
     {
       agent: createDocumentAgent(),
       enabledRoutes: ["document"],
@@ -47,7 +55,7 @@ export function createSpecialistAgentRegistry(): SpecialistAgentDefinition[] {
       requiredTools: webCapability.requiredTools,
     },
     {
-      agent: createResearchAgent(),
+      agent: createResearchAgent(agentProvider),
       enabledRoutes: ["research"],
       handoffPolicy: shouldEnableResearchHandoff,
       name: researchCapability.agentName,
@@ -63,6 +71,7 @@ export function createSpecialistAgentRegistry(): SpecialistAgentDefinition[] {
       requiredTools: imageCapability.requiredTools,
     },
   ];
+  specialistAgentRegistries.set(cacheKey, specialistAgentRegistry);
   return specialistAgentRegistry;
 }
 
